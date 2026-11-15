@@ -14,12 +14,14 @@ import {
   readJson,
 } from "./http.ts";
 import type { Logger } from "./plugins.ts";
+import { handleSign } from "./sign.ts";
 import { handleUpload } from "./upload.ts";
 
 type EndpointHandler = (input: EndpointInput) => Promise<Result<unknown>>;
 
 const ENDPOINTS = {
   upload: handleUpload,
+  sign: handleSign,
 } satisfies Partial<Record<Endpoint, EndpointHandler>>;
 
 const serverError = (): CloudropError =>
