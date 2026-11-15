@@ -74,7 +74,8 @@ valid outcome. Prefer extending the owning test over adding a near-duplicate.
 ## Doubles
 
 Only for true boundaries. Inject `fetch` and `now` (the driver takes both as options) and use the in-process fake R2
-(`src/testing/fake-r2.ts`), which verifies real SigV4 signatures. Never `vi.mock` our own modules. Details: vitest.md.
+(`src/testing/fake-r2.ts`), which verifies signatures with our own signer: it proves R2's rules and request shape, never
+the signer (Task 3's AWS vectors do that). Never `vi.mock` our own modules. Details: vitest.md.
 
 ## Fast and in the right place
 

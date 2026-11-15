@@ -65,6 +65,12 @@ function errorResponse(status: number, code: string, message: string): Response 
 
 const noSuchUpload = (): Response =>
   errorResponse(404, "NoSuchUpload", "The specified multipart upload does not exist.");
+const clockSkewed = (): Response =>
+  errorResponse(
+    403,
+    "RequestTimeTooSkewed",
+    "The difference between the request time and the server time is too large.",
+  );
 const preconditionFailed = (): Response =>
   errorResponse(412, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold.");
 
@@ -74,7 +80,7 @@ function parseAmzDate(value: string): Date {
   );
 }
 
-async function etagOf(body: Uint8Array<ArrayBuffer>): Promise<string> {
+async function etagOf(body: Bytes): Promise<string> {
   return (await sha256Hex(body)).slice(0, 32);
 }
 
@@ -96,6 +102,24 @@ function compareKeys(a: string, b: string): number {
     if (left[index] !== right[index]) return (left[index] as number) - (right[index] as number);
   }
   return left.length - right.length;
+}
+
+// The signer canonicalises from URLSearchParams, which reads "+" as a space. S3 reads the query as written, where "+"
+// is a literal plus, so a request whose query differs from the signed one only in encoding must fail the signature.
+// Rebuilding the pairs with decodeURIComponent alone makes the signer see the query the way S3 does.
+function queryAsWritten(url: URL): URL {
+  const params = new URLSearchParams();
+  for (const pair of url.search.slice(1).split("&")) {
+    if (pair === "") continue;
+    const at = pair.indexOf("=");
+    params.append(
+      decodeURIComponent(at < 0 ? pair : pair.slice(0, at)),
+      at < 0 ? "" : decodeURIComponent(pair.slice(at + 1)),
+    );
+  }
+  const rebuilt = new URL(url);
+  rebuilt.search = params.toString();
+  return rebuilt;
 }
 
 function readHeaders(headers: Headers): StoredHeaders {
@@ -120,6 +144,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
   const now = options.now ?? (() => new Date());
   const objects = new Map<string, StoredObject>();
   const uploads = new Map<string, PendingUpload>();
+  const listTokens = new Map<string, string>();
   let uploadCounter = 0;
 
   // A signed content-length is the body's real length: fetch derives the header from the body, so the fake does too.
@@ -137,9 +162,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (!Number.isInteger(expires) || expires < 1 || expires > R2_RULES.maxPresignSeconds) {
       return errorResponse(400, "InvalidArgument", "X-Amz-Expires must be between 1 and 604800 seconds.");
     }
-    if (signedAt.getTime() - now().getTime() > MAX_CLOCK_SKEW_MS) {
-      return errorResponse(403, "RequestTimeTooSkewed", "The request time is too far in the future.");
-    }
+    if (signedAt.getTime() - now().getTime() > MAX_CLOCK_SKEW_MS) return clockSkewed();
     if (now().getTime() > signedAt.getTime() + expires * 1000) {
       return errorResponse(403, "ExpiredRequest", "Request has expired.");
     }
@@ -174,6 +197,8 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (Number.isNaN(signedAt.getTime())) {
       return errorResponse(403, "SignatureDoesNotMatch", "X-Amz-Date is missing or malformed.");
     }
+    // A header-signed request has no expiry, so both a stale and a future date are skew.
+    if (Math.abs(signedAt.getTime() - now().getTime()) > MAX_CLOCK_SKEW_MS) return clockSkewed();
     const payloadHash = request.headers.get("x-amz-content-sha256") ?? "";
     if (payloadHash !== UNSIGNED_PAYLOAD && payloadHash !== (await sha256Hex(body))) {
       return errorResponse(400, "XAmzContentSHA256Mismatch", "The payload hash does not match the body.");
@@ -227,10 +252,12 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     }
     if (object.partCount) responseHeaders.set("x-amz-mp-parts-count", String(object.partCount));
     if (method === "HEAD") return new Response(null, { status: 200, headers: responseHeaders });
+    // Only closed ranges (bytes=a-b) are served. Open-ended and suffix forms are ignored and answer the whole object,
+    // which RFC 9110 allows; the driver validates and sends closed ranges only.
     const range = /^bytes=(\d+)-(\d+)$/.exec(headers.get("range") ?? "");
     if (!range) return new Response(object.body, { status: 200, headers: responseHeaders });
     const start = Number(range[1]);
-    if (start >= object.body.length) {
+    if (start >= object.body.length || Number(range[2]) < start) {
       return errorResponse(416, "InvalidRange", "The requested range is not satisfiable.");
     }
     const end = Math.min(Number(range[2]), object.body.length - 1);
@@ -255,15 +282,19 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     return upload && upload.key === key ? upload : undefined;
   }
 
+  function readPartNumber(query: URLSearchParams): number | Response {
+    const partNumber = Number(query.get("partNumber"));
+    if (Number.isInteger(partNumber) && partNumber >= 1 && partNumber <= R2_RULES.maxParts) return partNumber;
+    return errorResponse(400, "InvalidArgument", "Part number must be an integer between 1 and 10000.");
+  }
+
   async function uploadPart(key: string, query: URLSearchParams, headers: Headers, body: Bytes): Promise<Response> {
     const upload = findUpload(key, query);
     if (!upload) return noSuchUpload();
     const badChecksum = checksumMismatch(headers, body);
     if (badChecksum) return badChecksum;
-    const partNumber = Number(query.get("partNumber"));
-    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > R2_RULES.maxParts) {
-      return errorResponse(400, "InvalidArgument", "Part number must be an integer between 1 and 10000.");
-    }
+    const partNumber = readPartNumber(query);
+    if (partNumber instanceof Response) return partNumber;
     const etag = await etagOf(body);
     upload.parts.set(partNumber, {
       body,
@@ -286,10 +317,8 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
           "Your proposed upload is smaller than the minimum allowed object size.",
         );
       }
-      if (!isLast && part.body.length !== firstSize) {
-        return errorResponse(400, "InvalidPart", "All non-trailing parts must have the same length.");
-      }
-      if (isLast && parts.length > 1 && part.body.length > firstSize) {
+      // Every part but the last must equal the first; the last may be smaller, never larger (spike Q4).
+      if (isLast ? part.body.length > firstSize : part.body.length !== firstSize) {
         return errorResponse(400, "InvalidPart", "All non-trailing parts must have the same length.");
       }
     }
@@ -371,10 +400,24 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (query.has("uploadId")) {
       const upload = findUpload(key, query);
       if (!upload) return noSuchUpload();
-      const range = /^bytes=(\d+)-(\d+)$/.exec(headers.get("x-amz-copy-source-range") ?? "");
-      const body = range ? source.body.subarray(Number(range[1]), Number(range[2]) + 1) : source.body;
+      const partNumber = readPartNumber(query);
+      if (partNumber instanceof Response) return partNumber;
+      let body = source.body;
+      const rangeHeader = headers.get("x-amz-copy-source-range");
+      if (rangeHeader !== null) {
+        const range = /^bytes=(\d+)-(\d+)$/.exec(rangeHeader);
+        const [start, end] = [Number(range?.[1]), Number(range?.[2])];
+        if (!range || start > end || end >= source.body.length) {
+          return errorResponse(
+            400,
+            "InvalidArgument",
+            "The copy source range is malformed or outside the source object.",
+          );
+        }
+        body = source.body.subarray(start, end + 1);
+      }
       const etag = await etagOf(body);
-      upload.parts.set(Number(query.get("partNumber")), { body, etag, checksumCrc32c: undefined, uploadedAt: now() });
+      upload.parts.set(partNumber, { body, etag, checksumCrc32c: undefined, uploadedAt: now() });
       return xmlResponse(`<CopyPartResult><ETag>"${etag}"</ETag></CopyPartResult>`);
     }
     // R2 keeps type, disposition and metadata by default and drops what a REPLACE does not resend (spike Q14).
@@ -392,7 +435,9 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
 
   function listObjects(query: URLSearchParams): Response {
     const prefix = query.get("prefix") ?? "";
-    const after = query.get("continuation-token") ?? "";
+    const token = query.get("continuation-token");
+    const after = token === null ? "" : listTokens.get(token);
+    if (after === undefined) return errorResponse(400, "InvalidArgument", "The continuation token is not valid.");
     const max = Math.min(Number(query.get("max-keys") ?? MAX_LIST_PAGE), MAX_LIST_PAGE);
     const matching = Array.from(objects)
       .filter(([key]) => key.startsWith(prefix) && (after === "" || compareKeys(key, after) > 0))
@@ -405,7 +450,9 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
           `<Contents><Key>${escapeXml(key)}</Key><Size>${object.body.length}</Size><ETag>"${object.etag}"</ETag><LastModified>${object.uploadedAt.toISOString()}</LastModified></Contents>`,
       )
       .join("");
-    const next = truncated ? `<NextContinuationToken>${escapeXml(page.at(-1)?.[0] ?? "")}</NextContinuationToken>` : "";
+    const nextToken = `fake-token-${listTokens.size + 1}`;
+    if (truncated) listTokens.set(nextToken, page.at(-1)?.[0] ?? "");
+    const next = truncated ? `<NextContinuationToken>${nextToken}</NextContinuationToken>` : "";
     return xmlResponse(
       `<ListBucketResult><IsTruncated>${truncated}</IsTruncated>${next}${contents}</ListBucketResult>`,
     );
@@ -419,9 +466,15 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     }
     const key = keySegments.map(decodeURIComponent).join("/");
     const body: Bytes = new Uint8Array(await request.arrayBuffer());
+    let writtenUrl: URL;
+    try {
+      writtenUrl = queryAsWritten(url);
+    } catch {
+      return errorResponse(400, "InvalidURI", "The query string is not valid percent-encoding.");
+    }
     const denied = url.searchParams.has("X-Amz-Signature")
-      ? await verifyPresigned(request, url, body)
-      : await verifyHeaderSigned(request, url, body);
+      ? await verifyPresigned(request, writtenUrl, body)
+      : await verifyHeaderSigned(request, writtenUrl, body);
     if (denied) return denied;
 
     const query = url.searchParams;
@@ -434,7 +487,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (method === "GET" && query.has("uploadId")) return listParts(key, query);
     if (method === "DELETE" && query.has("uploadId")) {
       // Real R2 answers 204 even after the upload completed (spike Q11), where AWS S3 answers 404.
-      uploads.delete(query.get("uploadId") ?? "");
+      if (findUpload(key, query)) uploads.delete(query.get("uploadId") ?? "");
       return new Response(null, { status: 204 });
     }
     if (method === "PUT") return putObject(key, headers, body);

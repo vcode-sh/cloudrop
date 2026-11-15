@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { crc32cBase64 } from "../checksum.ts";
 import { MiB, R2_RULES } from "../rules.ts";
-import { presignUrl, signRequest, UNSIGNED_PAYLOAD } from "../storage/sigv4.ts";
+import { presignUrl, sha256Hex, signRequest, UNSIGNED_PAYLOAD } from "../storage/sigv4.ts";
 import { createFakeR2, type FakeR2 } from "./fake-r2.ts";
 
 const credentials = { accessKeyId: "fake-access-key", secretAccessKey: "fake-secret-key" };
@@ -33,23 +33,31 @@ function fakeAt(secondsAfterSigning = 0): FakeR2 {
   });
 }
 
-// A header-signed server-side call, the way the storage driver talks to the bucket.
-async function call(
-  fake: FakeR2,
-  method: string,
-  pathAndQuery: string,
-  options: { body?: Uint8Array<ArrayBuffer>; headers?: Record<string, string> } = {},
-): Promise<Response> {
+interface SignedOptions {
+  body?: Uint8Array<ArrayBuffer>;
+  headers?: Record<string, string>;
+  secret?: string;
+  date?: Date;
+  payloadHash?: string;
+}
+
+// A header-signed server-side request, the way the storage driver talks to the bucket.
+async function signed(method: string, pathAndQuery: string, options: SignedOptions = {}) {
   const url = new URL(`https://account.r2.cloudflarestorage.com/test${pathAndQuery}`);
   const headers = await signRequest({
     method,
     url,
     headers: options.headers,
-    credentials,
+    credentials: { ...credentials, secretAccessKey: options.secret ?? credentials.secretAccessKey },
     region: "auto",
-    date: signedAt,
-    payloadHash: UNSIGNED_PAYLOAD,
+    date: options.date ?? signedAt,
+    payloadHash: options.payloadHash ?? UNSIGNED_PAYLOAD,
   });
+  return { url, headers };
+}
+
+async function call(fake: FakeR2, method: string, pathAndQuery: string, options: SignedOptions = {}) {
+  const { url, headers } = await signed(method, pathAndQuery, options);
   return fake.fetch(url, { method, headers, body: options.body });
 }
 
@@ -63,6 +71,7 @@ async function createUpload(fake: FakeR2, key: string, headers: Record<string, s
 async function uploadPart(fake: FakeR2, key: string, uploadId: string, number: number, body: Uint8Array<ArrayBuffer>) {
   const query = new URLSearchParams({ partNumber: String(number), uploadId });
   const response = await call(fake, "PUT", `/${key}?${query}`, { body });
+  expect(response.status, `UploadPart ${number} of ${key}`).toBe(200);
   return response.headers.get("etag") as string;
 }
 
@@ -119,6 +128,61 @@ describe("fake R2 signature checks", () => {
     const response = await fakeAt().fetch(objectUrl("d.txt"), { method: "PUT", body: text("hi") });
     expect(response.status).toBe(403);
     expect(await code(response)).toBe("AccessDenied");
+  });
+});
+
+describe("fake R2 header-signed requests", () => {
+  it("rejects a signature made with another secret", async () => {
+    const response = await call(fakeAt(), "PUT", "/hs.txt", { body: text("hi"), secret: "another-secret" });
+    expect(response.status).toBe(403);
+    expect(await code(response)).toBe("SignatureDoesNotMatch");
+  });
+
+  it("rejects a request whose query differs from the signed one", async () => {
+    const { headers } = await signed("PUT", "/hs.txt?x=1", { body: text("hi") });
+    const response = await fakeAt().fetch(objectUrl("hs.txt?x=2"), { method: "PUT", headers, body: text("hi") });
+    expect(response.status).toBe(403);
+    expect(await code(response)).toBe("SignatureDoesNotMatch");
+  });
+
+  it("rejects a signed header that the request does not send", async () => {
+    const { url, headers } = await signed("PUT", "/hs.txt", { body: text("hi"), headers: { "x-amz-meta-id": "a" } });
+    const { "x-amz-meta-id": _dropped, ...sent } = headers;
+    const response = await fakeAt().fetch(url, { method: "PUT", headers: sent, body: text("hi") });
+    expect(response.status).toBe(403);
+    expect(await code(response)).toBe("SignatureDoesNotMatch");
+  });
+
+  it("checks a signed payload hash against the body", async () => {
+    const fake = fakeAt();
+    const other = await call(fake, "PUT", "/hs.txt", { body: text("hi"), payloadHash: await sha256Hex(text("other")) });
+    expect(other.status).toBe(400);
+    expect(await code(other)).toBe("XAmzContentSHA256Mismatch");
+    const right = await call(fake, "PUT", "/hs.txt", { body: text("hi"), payloadHash: await sha256Hex(text("hi")) });
+    expect(right.status).toBe(200);
+  });
+
+  it("rejects a request dated more than 15 minutes from the clock, in either direction", async () => {
+    const stale = await call(fakeAt(2 * 3600), "PUT", "/hs.txt", { body: text("hi") });
+    expect(stale.status).toBe(403);
+    expect(await code(stale)).toBe("RequestTimeTooSkewed");
+    const early = await call(fakeAt(-2 * 3600), "PUT", "/hs.txt", { body: text("hi") });
+    expect(early.status).toBe(403);
+    expect(await code(early)).toBe("RequestTimeTooSkewed");
+    expect((await call(fakeAt(14 * 60), "PUT", "/hs.txt", { body: text("hi") })).status).toBe(200);
+  });
+
+  it("verifies the query as written, so an encoding-only difference fails", async () => {
+    const fake = fakeAt();
+    const url = await presignedPut("q.txt?x=a%20b", {});
+    expect((await fake.fetch(url, { method: "PUT", body: text("hi") })).status).toBe(200);
+    const plus = new URL(url.href.replace("x=a%20b", "x=a+b"));
+    const response = await fake.fetch(plus, { method: "PUT", body: text("hi") });
+    expect(response.status).toBe(403);
+    expect(await code(response)).toBe("SignatureDoesNotMatch");
+    const { headers } = await signed("PUT", "/q.txt?x=a%20b", { body: text("hi") });
+    const plusHeader = await fake.fetch(objectUrl("q.txt?x=a+b"), { method: "PUT", headers, body: text("hi") });
+    expect(await code(plusHeader)).toBe("SignatureDoesNotMatch");
   });
 });
 
@@ -191,6 +255,7 @@ describe("fake R2 single-object rules", () => {
     const beyond = await call(fake, "GET", "/r.txt", { headers: { range: "bytes=10-20" } });
     expect(beyond.status).toBe(416);
     expect(await code(beyond)).toBe("InvalidRange");
+    expect((await call(fake, "GET", "/r.txt", { headers: { range: "bytes=5-2" } })).status).toBe(416);
   });
 });
 
@@ -246,7 +311,21 @@ describe("fake R2 multipart rules", () => {
       [2, b],
       [3, c],
     ]);
+    expect(refused.status).toBe(400);
+    const body = await refused.text();
+    expect(body).toContain("<Code>InvalidPart</Code>");
+    expect(body).toContain("All non-trailing parts must have the same length.");
+    expect(fake.pendingUploads()).toBe(1);
+  });
+
+  it("refuses a completion whose ETag does not match the uploaded part, and keeps the upload", async () => {
+    const fake = fakeAt();
+    const uploadId = await createUpload(fake, "w.bin");
+    await uploadPart(fake, "w.bin", uploadId, 1, text("part"));
+    const refused = await complete(fake, "w.bin", uploadId, [[1, '"00000000000000000000000000000000"']]);
+    expect(refused.status).toBe(400);
     expect(await code(refused)).toBe("InvalidPart");
+    expect(fake.pendingUploads()).toBe(1);
   });
 
   it("discards the upload on a 412 at completion, then answers NoSuchUpload to a retry", async () => {
@@ -298,6 +377,17 @@ describe("fake R2 multipart rules", () => {
     const abort = await call(fake, "DELETE", `/z.bin?${new URLSearchParams({ uploadId })}`);
     expect(abort.status).toBe(204);
   });
+
+  it("removes a pending upload on abort, but only through its own key", async () => {
+    const fake = fakeAt();
+    const uploadId = await createUpload(fake, "a.bin");
+    const query = new URLSearchParams({ uploadId });
+    const wrongKey = await call(fake, "DELETE", `/other.bin?${query}`);
+    expect(wrongKey.status).toBe(204);
+    expect(fake.pendingUploads()).toBe(1);
+    expect((await call(fake, "DELETE", `/a.bin?${query}`)).status).toBe(204);
+    expect(fake.pendingUploads()).toBe(0);
+  });
 });
 
 describe("fake R2 copy", () => {
@@ -343,6 +433,39 @@ describe("fake R2 copy", () => {
     expect(response.status).toBe(404);
     expect(await code(response)).toBe("NoSuchKey");
   });
+
+  it("copies a byte range into a part and completes with it", async () => {
+    const fake = fakeAt();
+    await fake.fetch(await presignedPut("big.txt", {}), { method: "PUT", body: text("0123456789") });
+    const uploadId = await createUpload(fake, "joined.txt");
+    const query = new URLSearchParams({ partNumber: "1", uploadId });
+    const copied = await call(fake, "PUT", `/joined.txt?${query}`, {
+      headers: { "x-amz-copy-source": "/test/big.txt", "x-amz-copy-source-range": "bytes=2-5" },
+    });
+    expect(copied.status).toBe(200);
+    const etag = /<ETag>(.*?)<\/ETag>/.exec(await copied.text())?.[1] as string;
+    await complete(fake, "joined.txt", uploadId, [[1, etag]]);
+    expect(await (await call(fake, "GET", "/joined.txt")).text()).toBe("2345");
+  });
+
+  it("validates the part number and the byte range of a part copy", async () => {
+    const fake = fakeAt();
+    await fake.fetch(await presignedPut("src.txt", {}), { method: "PUT", body: text("0123456789") });
+    const uploadId = await createUpload(fake, "d.txt");
+    const copyPart = (partNumber: string, range: string) =>
+      call(fake, "PUT", `/d.txt?${new URLSearchParams({ partNumber, uploadId })}`, {
+        headers: { "x-amz-copy-source": "/test/src.txt", "x-amz-copy-source-range": range },
+      });
+    for (const [partNumber, range] of [
+      ["0", "bytes=0-3"],
+      ["1", "bytes=0-10"],
+      ["1", "bytes=5-2"],
+    ] as const) {
+      const response = await copyPart(partNumber, range);
+      expect(response.status, `${partNumber} ${range}`).toBe(400);
+      expect(await code(response)).toBe("InvalidArgument");
+    }
+  });
 });
 
 describe("fake R2 ListObjectsV2", () => {
@@ -352,11 +475,16 @@ describe("fake R2 ListObjectsV2", () => {
     const keys = ["b", "\u{1F600}", "～", "a/1"];
     for (const key of keys)
       await fake.fetch(await presignedPut(encodeURI(key), {}), { method: "PUT", body: text("x") });
-    const list = async (extra: Record<string, string>) =>
-      (await call(fake, "GET", `?${new URLSearchParams({ "list-type": "2", "max-keys": "3", ...extra })}`)).text();
+    const listPage = (extra: Record<string, string>) =>
+      call(fake, "GET", `?${new URLSearchParams({ "list-type": "2", "max-keys": "3", ...extra })}`);
+    const list = async (extra: Record<string, string>) => (await listPage(extra)).text();
     const first = await list({});
     expect(Array.from(first.matchAll(/<Key>(.*?)<\/Key>/g), (match) => match[1])).toEqual(["a/1", "b", "～"]);
     const token = /<NextContinuationToken>(.*?)<\/NextContinuationToken>/.exec(first)?.[1] as string;
+    expect(token).not.toBe("～");
+    const forged = await listPage({ "continuation-token": "～" });
+    expect(forged.status).toBe(400);
+    expect(await code(forged)).toBe("InvalidArgument");
     const second = await list({ "continuation-token": token });
     expect(Array.from(second.matchAll(/<Key>(.*?)<\/Key>/g), (match) => match[1])).toEqual(["\u{1F600}"]);
     expect(second).toContain("<IsTruncated>false</IsTruncated>");
