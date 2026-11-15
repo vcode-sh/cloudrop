@@ -284,6 +284,14 @@ describe("createS3Driver", () => {
   const sizeMessage = "Size must be a whole number of bytes, zero or more.";
   const partsMessage =
     "Pass at least one part, each with a part number between 1 and 10000 and the ETag the storage returned for it.";
+  const metadataMessage = 'Metadata must be an object of names and text values, such as { "cloudrop-id": "f1" }.';
+  const bufferMessage =
+    "The body's buffer is detached or shared (a SharedArrayBuffer). Copy the bytes into a new Uint8Array first.";
+  const detachedBuffer = () => {
+    const buffer = new ArrayBuffer(4);
+    buffer.transfer();
+    return buffer;
+  };
   it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, string]>([
     ["a '..' key segment", (driver) => driver.head("a/../b"), keyMessage],
     [
@@ -297,6 +305,21 @@ describe("createS3Driver", () => {
       "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.",
     ],
     ["a numeric content type on put", (driver) => driver.put("a.txt", "x", { type: 5 as never }), typeMessage],
+    // Object.entries would read a string or an array as metadata named "0", "1"...
+    ["metadata given as a string", (driver) => driver.put("a.txt", "x", { metadata: "ab" as never }), metadataMessage],
+    ["metadata given as an array", (driver) => driver.put("a.txt", "x", { metadata: ["x"] as never }), metadataMessage],
+    // Hashing either one would throw a TypeError out of put.
+    [
+      "a body over a SharedArrayBuffer",
+      (driver) => driver.put("a.txt", new Uint8Array(new SharedArrayBuffer(4)) as never),
+      bufferMessage,
+    ],
+    ["a detached ArrayBuffer body", (driver) => driver.put("a.txt", detachedBuffer()), bufferMessage],
+    [
+      "a part over the part size limit",
+      (driver) => driver.presignPart("a.txt", "u", 1, { size: R2_RULES.maxPartSize + 1, expiresIn: 60 }),
+      "The part is over the part size limit of 4.995 GiB. Use smaller parts.",
+    ],
     [
       "a numeric content type on presignPut",
       (driver) => driver.presignPut("a.txt", { ...presignOptions, type: 5 as never }),
@@ -483,6 +506,15 @@ describe("createS3Driver", () => {
     expect(result.error).toMatchObject({ code: "STORAGE_UNREACHABLE", retryable: true });
   });
 
+  it("reports a HEAD answer without a size as a retryable storage error, never as an empty object", async () => {
+    const sizeless = stubbed(async () => new Response(null, { headers: { etag: '"e"' } }));
+    expect((await driverWith(sizeless).head("a.txt")).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no content length. Retry the request.",
+    });
+  });
+
   it("reports a refused HEAD as an error, never as a missing object", async () => {
     const result = await driverWith(stubbed(async () => new Response(null, { status: 403 }))).head("a.txt");
     expect(result.data).toBeNull();
@@ -571,12 +603,12 @@ describe("createS3Driver", () => {
     expect((await driverWith(throttled).put("a.txt", "x")).error?.code).toBe("RATE_LIMITED");
   });
 
-  it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>]>([
-    ["completeMultipart", (driver) => driver.completeMultipart("a", "u", [{ partNumber: 1, etag: "e" }])],
-    ["copy", (driver) => driver.copy("a", "b")],
-  ])("treats a 200 response with an Error body from %s as a retryable failure", async (_name, call) => {
-    const hidden = stubbed(async () => new Response("<Error><Code>InternalError</Code></Error>", { status: 200 }));
-    expect((await call(driverWith(hidden))).error).toMatchObject({
+  const hidden = stubbed(async () => new Response("<Error><Code>InternalError</Code></Error>", { status: 200 }));
+  it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, FetchLike]>([
+    ["completeMultipart", (driver) => driver.completeMultipart("a", "u", [{ partNumber: 1, etag: "e" }]), hidden],
+    ["copy", (driver) => driver.copy("a", "b"), copyStub(5, hidden)],
+  ])("treats a 200 response with an Error body from %s as a retryable failure", async (_name, call, fetch) => {
+    expect((await call(driverWith(fetch))).error).toMatchObject({
       code: "STORAGE_ERROR",
       retryable: true,
       storageCode: "InternalError",

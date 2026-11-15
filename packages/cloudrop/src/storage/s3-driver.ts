@@ -119,7 +119,7 @@ function readObjectInfo(key: string, headers: Headers): ObjectInfo {
   });
   return {
     key,
-    size: Number(headers.get("content-length") ?? "0"),
+    size: Number(headers.get("content-length")),
     type: headers.get("content-type") ?? undefined,
     disposition: headers.get("content-disposition") ?? undefined,
     etag: stripQuotes(headers.get("etag") ?? ""),
@@ -372,7 +372,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         uploadIdProblem(uploadId) ??
         partNumberProblem(partNumber, rules.maxParts) ??
         checksumProblem(options.checksumCrc32c) ??
-        sizeProblem(options.size, rules.maxPartSize) ??
+        sizeProblem(options.size, rules.maxPartSize, "part") ??
         expiryProblem(options.expiresIn, rules.maxPresignSeconds);
       if (problem) return fail(invalidInput(problem));
       const headers: Record<string, string> = options.checksumCrc32c
@@ -446,6 +446,8 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (problem) return fail(invalidInput(problem));
       const result = await send("HEAD", objectUrl(key), { headers: { "x-amz-checksum-mode": "ENABLED" } });
       if (result.error) return result.error.code === "NOT_FOUND" ? ok(null) : result;
+      // A missing size would read as an empty object, and a copy would then copy nothing.
+      if (!result.data.headers.has("content-length")) return fail(incompleteResponse("content length"));
       return ok(readObjectInfo(key, result.data.headers));
     },
 

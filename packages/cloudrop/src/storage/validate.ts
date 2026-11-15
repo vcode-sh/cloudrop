@@ -1,4 +1,5 @@
 import { CloudropError } from "../errors.ts";
+import { GiB, MiB } from "../rules.ts";
 import type { CompletedPart, ObjectOptions } from "./driver.ts";
 
 const encoder = new TextEncoder();
@@ -35,15 +36,23 @@ export function keyProblem(key: string): string | null {
   return null;
 }
 
+const isPrintableAscii = (value: unknown): boolean => typeof value === "string" && /^[\x20-\x7e]*$/.test(value);
+
 function metadataProblem(metadata: Record<string, string> | undefined): string | null {
+  if (metadata === undefined) return null;
+  // Object.entries would read a string or an array as names "0", "1"…, and a Map as no metadata at all.
+  const prototype = typeof metadata === "object" && metadata !== null ? Object.getPrototypeOf(metadata) : undefined;
+  if (prototype !== Object.prototype && prototype !== null) {
+    return 'Metadata must be an object of names and text values, such as { "cloudrop-id": "f1" }.';
+  }
   let bytes = 0;
-  for (const [name, value] of Object.entries(metadata ?? {})) {
+  for (const [name, value] of Object.entries(metadata)) {
     // The offending name is not echoed: it is caller-controlled and unbounded (newlines would forge log lines).
     if (!/^[a-z0-9-]+$/.test(name))
       return "A metadata name may contain only lowercase letters, digits and hyphens. Rename it.";
     if (typeof value !== "string") return `Metadata value for "${name}" must be a string. Convert it first.`;
     // Printable ASCII only: Headers would send "é" as one Latin-1 byte while S3 reads UTF-8.
-    if (!/^[\x20-\x7e]*$/.test(value))
+    if (!isPrintableAscii(value))
       return `Metadata value for "${name}" must be printable ASCII. Encode other text first.`;
     // Headers trims surrounding spaces, so the stored value would differ from the one passed.
     if (value.startsWith(" ") || value.endsWith(" "))
@@ -52,8 +61,6 @@ function metadataProblem(metadata: Record<string, string> | undefined): string |
   }
   return bytes > MAX_METADATA_BYTES ? "Metadata exceeds 2 KiB. Store large values in your database instead." : null;
 }
-
-const isPrintableAscii = (value: unknown): boolean => typeof value === "string" && /^[\x20-\x7e]*$/.test(value);
 
 /**
  * Header values must be printable ASCII strings: fetch rejects characters above U+00FF before a request is sent, and
@@ -70,9 +77,15 @@ export function objectOptionsProblem(options: ObjectOptions): string | null {
 }
 
 export function bodyProblem(body: unknown): string | null {
-  const supported =
-    typeof body === "string" || body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
-  return supported ? null : "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.";
+  if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+    const buffer = body instanceof Uint8Array ? body.buffer : body;
+    // Hashing a view over shared memory, or over a buffer that was transferred, throws a TypeError. The check never
+    // names SharedArrayBuffer: browsers without cross-origin isolation do not define it.
+    if (buffer instanceof ArrayBuffer && !buffer.detached) return null;
+    return "The body's buffer is detached or shared (a SharedArrayBuffer). Copy the bytes into a new Uint8Array first.";
+  }
+  if (typeof body === "string" || body instanceof Blob) return null;
+  return "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.";
 }
 
 /** Base64 of 4 bytes: five free characters, a sixth that carries only 2 data bits (A, Q, g or w), then "==". */
@@ -127,8 +140,8 @@ export function keyListProblem(keys: readonly string[]): string | null {
 }
 
 const BYTE_UNITS: readonly [string, number][] = [
-  ["GiB", 1024 ** 3],
-  ["MiB", 1024 ** 2],
+  ["GiB", GiB],
+  ["MiB", MiB],
   ["KiB", 1024],
 ];
 
@@ -137,10 +150,12 @@ function formatBytes(bytes: number): string {
   return unit ? `${Number((bytes / unit[1]).toFixed(3))} ${unit[0]}` : `${bytes} bytes`;
 }
 
-export function sizeProblem(size: number, max: number): string | null {
+export function sizeProblem(size: number, max: number, of: "file" | "part" = "file"): string | null {
   if (!Number.isSafeInteger(size) || size < 0) return "Size must be a whole number of bytes, zero or more.";
-  if (size > max) return `Size is over the limit of ${formatBytes(max)}. Upload a smaller file or split it.`;
-  return null;
+  if (size <= max) return null;
+  return of === "part"
+    ? `The part is over the part size limit of ${formatBytes(max)}. Use smaller parts.`
+    : `Size is over the limit of ${formatBytes(max)}. Upload a smaller file or split it.`;
 }
 
 /** `Number.isInteger` is false for NaN and Infinity, and the cap rules out `1e+21`, so only sane digits reach the signer. */
