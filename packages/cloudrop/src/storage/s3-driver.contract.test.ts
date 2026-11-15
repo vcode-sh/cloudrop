@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ok } from "../errors.ts";
+import { CloudropError, fail, ok } from "../errors.ts";
 import { R2_RULES } from "../rules.ts";
 import { createFakeR2 } from "../testing/fake-r2.ts";
-import { clearRunPrefix, describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
+import { clearRunPrefix, describeStorageContract, randomPrefix, tearDownRun } from "../testing/storage-contract.ts";
 import type { StorageDriver } from "./driver.ts";
 import { r2 } from "./presets.ts";
 import { createS3Driver } from "./s3-driver.ts";
@@ -78,5 +78,32 @@ describe("contract teardown", () => {
     // Reports success without deleting, as a DELETE that encodes the key wrongly would.
     const ghostly: StorageDriver = { ...driver, deleteMany: async (keys) => ok({ deleted: [...keys], failed: [] }) };
     await expect(clearRunPrefix(ghostly, prefix)).rejects.toThrow(`These keys survived deletion: ${prefix}ghost.txt`);
+  });
+
+  it("still deletes the run's objects when aborting an upload fails", async () => {
+    const { driver, exists } = setup();
+    const prefix = randomPrefix("contract/");
+    expect((await driver.put(`${prefix}left.txt`, "x")).error).toBeNull();
+    const denied = new CloudropError("STORAGE_DENIED", "Abort denied by the test.");
+    const failingAbort: StorageDriver = { ...driver, abortMultipart: async () => fail(denied) };
+    const openUploads = [{ key: `${prefix}upload.bin`, uploadId: "upload-1" }];
+    await expect(tearDownRun({ driver: failingAbort, prefix, openUploads }, [])).rejects.toThrow(
+      `Could not abort: ${prefix}upload.bin (STORAGE_DENIED)`,
+    );
+    expect(await exists(`${prefix}left.txt`)).toBe(false);
+  });
+
+  it("runs the remaining cleanups when one throws synchronously, and reports it", async () => {
+    const ran: string[] = [];
+    const cleanups = [
+      async () => {
+        ran.push("registered first");
+      },
+      (): Promise<void> => {
+        throw new Error("Cleanup threw before returning a promise.");
+      },
+    ];
+    await expect(tearDownRun(undefined, cleanups)).rejects.toThrow("Cleanup threw before returning a promise.");
+    expect(ran).toEqual(["registered first"]);
   });
 });

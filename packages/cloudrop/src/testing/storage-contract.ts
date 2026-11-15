@@ -87,6 +87,48 @@ export async function clearRunPrefix(driver: StorageDriver, prefix: string): Pro
   }
 }
 
+interface OpenUpload {
+  key: string;
+  uploadId: string;
+}
+
+/**
+ * The suite's teardown: aborts the uploads the suite opened, deletes the run prefix, then runs the lane's cleanups,
+ * last registered first. `run` is undefined when connecting failed. Uploads the driver starts itself (a multipart
+ * copy) are not tracked: if the process dies mid-copy, teardown cannot find them; R2's default lifecycle rule aborts
+ * incomplete multipart uploads after 7 days.
+ * Every step runs even when an earlier one fails, and every failure is reported: a throwing cleanup must neither hide
+ * why teardown failed nor skip the cleanups registered before it.
+ */
+export async function tearDownRun(
+  run: { driver: StorageDriver; prefix: string; openUploads: OpenUpload[] } | undefined,
+  cleanups: (() => Promise<void>)[],
+): Promise<void> {
+  const errors: unknown[] = [];
+  // Inside the promise chain, so a step that throws before returning a promise is caught too.
+  const attempt = (step: () => Promise<void>) =>
+    Promise.resolve()
+      .then(step)
+      .catch((error: unknown) => errors.push(error));
+  if (run) {
+    const { driver, prefix, openUploads } = run;
+    await attempt(async () => {
+      const outcomes = await Promise.all(
+        openUploads.map(async ({ key, uploadId }) => {
+          const { error } = await driver.abortMultipart(key, uploadId);
+          return error ? `${key} (${error.code})` : "";
+        }),
+      );
+      const failed = outcomes.filter(Boolean);
+      if (failed.length > 0) throw new Error(`Could not abort: ${failed.join(", ")}`);
+    });
+    await attempt(() => clearRunPrefix(driver, prefix));
+  }
+  for (const cleanup of cleanups.toReversed()) await attempt(cleanup);
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, `Teardown failed in ${errors.length} steps.`);
+}
+
 const etagOf = (response: Response): string => (response.headers.get("etag") ?? "").replaceAll('"', "");
 
 /** Status and S3 error code of a raw response; reading the body also releases the connection. */
@@ -102,7 +144,7 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     let target: ContractTarget;
     let driver: StorageDriver;
     const cleanups: (() => Promise<void>)[] = [];
-    const openUploads: { key: string; uploadId: string }[] = [];
+    const openUploads: OpenUpload[] = [];
     const key = (suffix: string): string => `${target.prefix}${suffix}`;
     // Every size derives from the backend's own minimum part size: the smallest multipart upload it accepts.
     const partSize = (): number => driver.rules.minPartSize;
@@ -153,26 +195,7 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       driver = target.driver;
     });
 
-    // Uploads the driver starts itself (a multipart copy) are not tracked: if the process dies mid-copy, teardown
-    // cannot find them. R2's default lifecycle rule aborts incomplete multipart uploads after 7 days.
-    // Every step runs even when an earlier one fails, and every failure is reported: a throwing cleanup must neither
-    // hide why teardown failed nor skip the cleanups registered before it.
-    afterAll(async () => {
-      const errors: unknown[] = [];
-      const attempt = (step: () => Promise<void>) => step().catch((error: unknown) => errors.push(error));
-      if (target) {
-        await attempt(async () => {
-          const aborted = await Promise.all(
-            openUploads.map((upload) => driver.abortMultipart(upload.key, upload.uploadId)),
-          );
-          expect(aborted.filter((result) => result.error)).toEqual([]);
-          await clearRunPrefix(driver, target.prefix);
-        });
-      }
-      for (const cleanup of cleanups.reverse()) await attempt(cleanup);
-      if (errors.length === 1) throw errors[0];
-      if (errors.length > 1) throw new AggregateError(errors, `Teardown failed in ${errors.length} steps.`);
-    });
+    afterAll(() => tearDownRun(target && { driver, prefix: target.prefix, openUploads }, cleanups));
 
     it("stores an object with type, disposition and metadata and reads byte ranges", async () => {
       const k = key("plain.txt");
