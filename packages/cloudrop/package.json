@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run --project unit --passWithNoTests"
+    "test": "vitest run --project unit"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
