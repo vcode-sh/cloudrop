@@ -1,6 +1,6 @@
 # cloudrop: design
 
-Date: 2026-11-15. Status: approved design, pending real-R2 spike results (§12).
+Date: 2026-11-15. Status: approved design, updated with real-R2 spike results (§12).
 
 cloudrop is an MIT TypeScript library for fast, resumable, direct-to-bucket file uploads to Cloudflare R2 and
 S3-compatible storage. Background research: [`docs/research`](../../research).
@@ -202,7 +202,8 @@ abort-incomplete multipart lifecycle rule; `api.checkBucket()` verifies it exist
 | Condition | Response |
 |---|---|
 | Network error, 408, 429, 5xx, `SlowDown` | Retry with exponential backoff and full jitter (0.5 s to 20 s), up to 6 attempts, honouring `Retry-After` |
-| 403, or an unreadable CORS failure (an expired R2 URL returns no CORS headers) | Renew the signature once through `/sign`, then retry |
+| Readable `403 ExpiredRequest`, or an unreadable CORS failure (an expired R2 URL may return no CORS headers) | Renew the signature once through `/sign`, then retry |
+| Readable `403 SignatureDoesNotMatch` (bytes do not match the signed size, type or checksum) | Fail the file with `UPLOAD_REJECTED`; never retried |
 | No progress for 30 s | Abort that request and retry the part |
 | `offline` event | Pause; resume on `online` |
 | Other 4xx, expired token | Fail the file with a code, for example `UPLOAD_EXPIRED` |
@@ -253,8 +254,9 @@ only the missing parts.
      must match. Completion uses the server's part list and ETags, never the client's.
    - Single PUT: `HEAD`; size, type and `cloudrop-id` must match.
    - On mismatch the object is deleted or the upload aborted, and the client gets `VERIFICATION_FAILED`.
-   - This does not depend on R2 enforcing a signed `content-length`; the spike decides only whether rejection also
-     happens earlier.
+   - On R2 a mismatched size or type is already rejected at upload time (§12). Completion verification stays for
+     defence in depth, for S3-compatible backends that behave differently, and because R2 rejects bad part sizes only
+     at completion.
 7. **Secrets and errors.** Credentials stay on the server; tokens carry no secrets; presigned URLs cover one object,
    one method and 15 minutes; errors never include storage responses, other users' keys or stack traces.
 8. **Private routes.** `visibility: 'private'` requires a bucket without a public domain; startup warns when the
@@ -268,8 +270,9 @@ A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpl
 - **`contentChecks()`**: ranged GET of the first 4 KiB at completion, magic bytes checked against `accept`; rejects
   executables and HTML disguised as other types by default; optional quarantine (upload under `_pending/`, promote
   with a server-side copy after checks); `scan(file)` hook for a virus scanner.
-- **`checksums()`**: CRC32C per part computed in a Web Worker and signed into the part URL so the bucket rejects
-  corrupted bytes. Enabled only if the spike confirms R2 honours signed checksum headers on presigned uploads.
+- **`checksums()`**: CRC32C per part computed in a Web Worker and signed into the part URL as a header (R2 ignores it
+  as a query parameter), so the bucket rejects corrupted bytes with `400 BadDigest`. End to end, the client compares
+  its CRC64NVME of the whole file with the value R2 stores on every write (§12).
 - **`limits()`**: `rateLimit` per owner; quota through `reserve` at `/upload`, `commit` at `/complete` and `release`
   at `/abort` or expiry, so quota cannot be overshot between signing and completion. A failing limiter rejects
   (fail-closed). In 1.0 the app supplies the callbacks; in 1.1 the database adapter does.
@@ -321,22 +324,30 @@ Audits of two private production codebases informed these rules (findings kept o
 
 CI runs on GitHub-hosted runners: npm trusted publishing requires them.
 
-## 12. Open questions for the real-R2 spike
+## 12. Real-R2 spike results (2026-11-15)
 
-Results go to `docs/research/r2-spike-findings.md`; this spec is updated where they change a decision.
+Evidence: [`docs/research/r2-spike-findings.md`](../../research/r2-spike-findings.md). Decisions they settle:
 
-1. Is a signed `content-length` enforced on presigned PUT and presigned `UploadPart`? (Earlier rejection; §7.6 holds
-   either way.)
-2. Is a signed `content-type` mismatch rejected?
-3. Does signed `If-None-Match: *` return `412` on a second PUT and on `CompleteMultipartUpload`?
-4. Where does R2 reject unequal parts or a larger last part, and with which error code?
-5. Are signed `x-amz-checksum-*` headers honoured on presigned uploads? (Gates `checksums()`.)
-6. Does the AWS presigner's default checksum mode produce URLs a browser can use? (Informs our signer only.)
-7. Expired URL status and CORS headers; maximum expiry.
-8. Concurrent `UploadPart` on one key and rapid PUTs to one key: any `429`?
-9. `ListParts` fields and behaviour after completion; retried `CompleteMultipartUpload` error code; custom metadata
-   on multipart objects.
-10. Signed `content-disposition` stored and served; ranged GET; `CopyObject` keeps metadata.
+| Finding on real R2 | Decision |
+|---|---|
+| A signed `content-length` or `content-type` mismatch on presigned PUT and presigned `UploadPart` gets `403 SignatureDoesNotMatch` and stores nothing. Unsigned length is not enforced. | Size and type are rejected at upload time. §7.6 verification stays as defence in depth and for non-R2 backends. |
+| Signed `If-None-Match: *` gives `412` on an existing key; omitting a signed one gives `403`. On `CompleteMultipartUpload` an existing key gives `412` and discards the upload. | Create-only single PUTs as designed. Multipart completion also sends `If-None-Match: *`; keys are unique, so a `412` there means a key collision and fails the file. |
+| Larger last part, unequal middle part and a non-last part under 5 MiB are accepted by `UploadPart` and rejected only at completion (`InvalidPart`, `EntityTooSmall`); the upload survives and can be repaired. | The server's pre-completion `ListParts` check is required, not optional. It returns `PARTS_MISSING` (with part numbers) for absent or wrong-sized parts and the client re-sends them. |
+| A signed `x-amz-checksum-crc32c` or `-crc64nvme` header is validated (`400 BadDigest`); the same value as a query parameter is silently ignored. Completion does not validate composite checksums. R2 stores a full-object CRC64NVME on every write. `GetObjectAttributes` returns 501. | `checksums()` ships: per-part CRC32C signed as a header, never as a query parameter. The server compares `ListParts` CRC32C values with the client's, and the client compares its own CRC64NVME of the whole file with the one R2 reports, for end-to-end integrity. |
+| The AWS SDK presigner adds an empty-body checksum to URLs by default and does not sign `content-type`. | Confirms our own signer, which signs exactly the headers the client sends. |
+| Expired URL: `403 ExpiredRequest`. Maximum expiry 604800 s; 604801 gives `400`. | `r2` preset caps expiry at 7 days. A readable `ExpiredRequest` re-signs; a readable `SignatureDoesNotMatch` fails the file with `UPLOAD_REJECTED` (never retried). |
+| 8 parallel parts on one key: no throttling. 5 concurrent PUTs to one key: one `429` with S3 code `ServiceUnavailable`, not `TooManyRequests`. | The retry classifier keys on HTTP status (429, 503), never on the S3 code. Part concurrency per file stays at 4. |
+| `ListParts` returns ETag, Size, LastModified and CRC32C when sent; `max-parts` pagination works; after completion it returns `NoSuchUpload`. A retried completion returns `404 NoSuchUpload`. HEAD shows custom metadata, type, part count and a `-N` ETag. | Confirms the idempotent `/complete` design in §5.4. |
+| Signed `content-disposition` is stored and served by both the S3 endpoint and the public domain. Ranged GET returns 206 with a correct `Content-Range`. | Confirms the XSS defence in §7.5 and the 4 KiB sniff in `contentChecks()`. |
+| `CopyObject` keeps type, disposition and metadata; copying a multipart object replaces its ETag with a plain MD5; a copy is one Class A operation. | Quarantine promotion works. Nothing may treat an ETag as stable across promotion; `cloudrop-id` is the stable identity. |
+
+Still unverified, and required before 1.0 in the browser lane:
+
+1. Browser uploads end to end (presigned PUT and parts, reading `ETag`), and whether an expired URL's `403` carries CORS
+   headers. Blocked until the test bucket has an upload CORS rule.
+2. More than 8 parallel parts on one key.
+3. AWS chunked uploads with trailing checksums (not used by cloudrop's browser path).
+4. The bucket's lifecycle rules (the test token cannot read them); `checkBucket()` must use an account-level token.
 
 ## 13. Release
 
