@@ -85,16 +85,24 @@ export interface StorageDriver {
   head(key: string): Promise<Result<ObjectInfo | null>>;
   /** Inclusive byte range. */
   getRange(key: string, start: number, end: number): Promise<Result<Uint8Array>>;
+  /**
+   * Single PUT, up to `rules.maxSinglePutSize`. A Blob is streamed to the storage, never read into memory, so its
+   * payload is signed as UNSIGNED-PAYLOAD; other bodies are signed with their SHA-256.
+   */
   put(
     key: string,
-    body: Uint8Array<ArrayBuffer> | string | Blob,
+    body: Uint8Array<ArrayBuffer> | ArrayBuffer | string | Blob,
     options?: WriteOptions,
   ): Promise<Result<{ etag: string }>>;
   /** Server-side copy that keeps type, disposition and metadata; multipart copy above the single-PUT limit. */
   copy(from: string, to: string): Promise<Result<{ etag: string }>>;
   /** Idempotent: deleting a missing key succeeds. */
   delete(key: string): Promise<Result<void>>;
-  /** Per-key results; order is not guaranteed. */
+  /**
+   * Deletes any number of keys, one DeleteObject request per key, 16 at a time. Every key ends up in `deleted` (a
+   * missing key counts as deleted) or in `failed` with its own error; an invalid key fails without a request. Order is
+   * not guaranteed.
+   */
   deleteMany(
     keys: readonly string[],
   ): Promise<Result<{ deleted: string[]; failed: { key: string; error: CloudropError }[] }>>;

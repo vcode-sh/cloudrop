@@ -79,7 +79,17 @@ describe("objectOptionsProblem", () => {
     [
       "a non-ASCII content type",
       { type: "text/plain; name=é" },
-      "The content type must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
+      'The content type must be printable ASCII, such as "text/plain; charset=utf-8".',
+    ],
+    [
+      "a numeric content type, which RegExp.test would stringify",
+      { type: 5 as unknown as string },
+      'The content type must be printable ASCII, such as "text/plain; charset=utf-8".',
+    ],
+    [
+      "a numeric content disposition",
+      { disposition: 1 as unknown as string },
+      "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
     ],
     [
       "a line feed in the disposition",
@@ -223,7 +233,7 @@ describe("request token checks", () => {
   const limitMessage = "The page size must be between 1 and 1000.";
   const partsMessage =
     "Pass at least one part, each with a part number between 1 and 10000 and the ETag the storage returned for it.";
-  const keysMessage = "deleteMany takes an array of at most 1000 keys. Split longer lists into batches.";
+  const keysMessage = "deleteMany takes an array of keys. Wrap a single key in an array.";
   const parts = (...items: unknown[]) => items as { partNumber: number; etag: string }[];
 
   it.each([
@@ -256,7 +266,11 @@ describe("request token checks", () => {
     { name: "an empty prefix", problem: prefixProblem(""), expected: null },
     { name: "a prefix with a space and a plus", problem: prefixProblem("a b+c/"), expected: null },
     { name: "a prefix with a lone surrogate", problem: prefixProblem("a\uDC00"), expected: prefixMessage },
-    { name: "a numeric prefix", problem: prefixProblem(5 as unknown as string), expected: prefixMessage },
+    {
+      name: "a numeric prefix",
+      problem: prefixProblem(5 as unknown as string),
+      expected: 'The list prefix must be a string. Pass "" to list every object.',
+    },
     { name: "a page of 1", problem: limitProblem(1), expected: null },
     { name: "a page of 1000", problem: limitProblem(1000), expected: null },
     { name: "a page of 0", problem: limitProblem(0), expected: limitMessage },
@@ -271,9 +285,8 @@ describe("request token checks", () => {
       expected: partsMessage,
     },
     { name: "a null part", problem: partsProblem(parts(null), 10_000), expected: partsMessage },
-    { name: "parts that are not a list", problem: partsProblem(parts as never, 10_000), expected: partsMessage },
-    { name: "1000 keys", problem: keyListProblem(Array.from({ length: 1000 }, () => "k")), expected: null },
-    { name: "1001 keys", problem: keyListProblem(Array.from({ length: 1001 }, () => "k")), expected: keysMessage },
+    { name: "parts that are not a list", problem: partsProblem("a" as never, 10_000), expected: partsMessage },
+    { name: "1001 keys", problem: keyListProblem(Array.from({ length: 1001 }, () => "k")), expected: null },
     { name: "one key as a string", problem: keyListProblem("a.txt" as unknown as string[]), expected: keysMessage },
   ])("checks $name", ({ problem, expected }) => {
     expect(problem).toBe(expected);

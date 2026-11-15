@@ -53,17 +53,26 @@ function metadataProblem(metadata: Record<string, string> | undefined): string |
   return bytes > MAX_METADATA_BYTES ? "Metadata exceeds 2 KiB. Store large values in your database instead." : null;
 }
 
-/** Header values must be printable ASCII: fetch rejects characters above U+00FF before a request is sent. */
+const isPrintableAscii = (value: unknown): boolean => typeof value === "string" && /^[\x20-\x7e]*$/.test(value);
+
+/**
+ * Header values must be printable ASCII strings: fetch rejects characters above U+00FF before a request is sent, and
+ * the signer cannot trim a number.
+ */
 export function objectOptionsProblem(options: ObjectOptions): string | null {
-  for (const [label, value] of [
-    ["content type", options.type],
-    ["content disposition", options.disposition],
-  ] as const) {
-    if (value !== undefined && !/^[\x20-\x7e]*$/.test(value)) {
-      return `The ${label} must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.`;
-    }
+  if (options.type !== undefined && !isPrintableAscii(options.type)) {
+    return 'The content type must be printable ASCII, such as "text/plain; charset=utf-8".';
+  }
+  if (options.disposition !== undefined && !isPrintableAscii(options.disposition)) {
+    return "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.";
   }
   return metadataProblem(options.metadata);
+}
+
+export function bodyProblem(body: unknown): string | null {
+  const supported =
+    typeof body === "string" || body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
+  return supported ? null : "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.";
 }
 
 /** Base64 of 4 bytes: five free characters, a sixth that carries only 2 data bits (A, Q, g or w), then "==". */
@@ -86,12 +95,17 @@ export function cursorProblem(cursor: string): string | null {
 }
 
 export function prefixProblem(prefix: string): string | null {
-  if (typeof prefix === "string" && prefix.isWellFormed()) return null;
+  if (typeof prefix !== "string") return 'The list prefix must be a string. Pass "" to list every object.';
+  if (prefix.isWellFormed()) return null;
   return "The list prefix is not valid Unicode (it has a lone surrogate). Remove or replace that character.";
 }
 
+/** The most keys or parts S3 returns in one list page. */
+export const MAX_LIST_PAGE: number = 1000;
+
 export function limitProblem(limit: number): string | null {
-  return Number.isInteger(limit) && limit >= 1 && limit <= 1000 ? null : "The page size must be between 1 and 1000.";
+  if (Number.isInteger(limit) && limit >= 1 && limit <= MAX_LIST_PAGE) return null;
+  return `The page size must be between 1 and ${MAX_LIST_PAGE}.`;
 }
 
 export function partsProblem(parts: readonly CompletedPart[], maxParts: number): string | null {
@@ -107,12 +121,9 @@ export function partsProblem(parts: readonly CompletedPart[], maxParts: number):
     : `Pass at least one part, each with a part number between 1 and ${maxParts} and the ETag the storage returned for it.`;
 }
 
-// S3's DeleteObjects takes at most 1000 keys, so batches sized for it stay valid whichever call deletes them.
-const MAX_DELETE_KEYS = 1000;
-
+/** Only the list's shape: each key is checked on its own and reported per key. */
 export function keyListProblem(keys: readonly string[]): string | null {
-  if (Array.isArray(keys) && keys.length <= MAX_DELETE_KEYS) return null;
-  return "deleteMany takes an array of at most 1000 keys. Split longer lists into batches.";
+  return Array.isArray(keys) ? null : "deleteMany takes an array of keys. Wrap a single key in an array.";
 }
 
 const BYTE_UNITS: readonly [string, number][] = [

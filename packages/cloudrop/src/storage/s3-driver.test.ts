@@ -5,6 +5,7 @@ import { createFakeR2 } from "../testing/fake-r2.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import type { FetchLike, StorageDriver } from "./driver.ts";
 import { createS3Driver } from "./s3-driver.ts";
+import { sha256Hex, signRequest } from "./sigv4.ts";
 
 const credentials = { accessKeyId: "fake-access-key", secretAccessKey: "fake-secret-key" };
 const endpoint = "https://account.r2.cloudflarestorage.com";
@@ -34,6 +35,60 @@ const stubbed =
   () =>
     respond();
 const neverCalled = stubbed(() => Promise.reject(new Error("must not be called")));
+
+// fetch streams a Blob body; loading it whole (arrayBuffer, text) is what put must never do.
+class StreamOnlyBlob extends Blob {
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return Promise.reject(new Error("put loaded the Blob into memory"));
+  }
+  override text(): Promise<string> {
+    return Promise.reject(new Error("put loaded the Blob into memory"));
+  }
+}
+
+class UnreadableBlob extends StreamOnlyBlob {
+  override stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+    return new ReadableStream({
+      pull: (controller) => controller.error(new DOMException("The file could not be read.", "NotReadableError")),
+    });
+  }
+}
+
+/** Stores an object the way another tool would, with headers the driver itself refuses to send. */
+async function putWithForeignTool(
+  fetch: FetchLike,
+  key: string,
+  body: Uint8Array<ArrayBuffer>,
+  headers: Record<string, string>,
+) {
+  const url = new URL(`${endpoint}/test/${key}`);
+  const payloadHash = await sha256Hex(body);
+  const signed = await signRequest({
+    method: "PUT",
+    url,
+    headers,
+    credentials,
+    region: "auto",
+    date: signedAt,
+    payloadHash,
+  });
+  expect((await fetch(url, { method: "PUT", headers: signed, body })).status).toBe(200);
+}
+
+/** Answers a copy: HEAD with the given source size, create and abort as R2 does, and the copy itself with `onCopy`. */
+function copyStub(size: number, onCopy: FetchLike, aborted: string[] = []): FetchLike {
+  return async (input, init) => {
+    if (init?.method === "HEAD") return new Response(null, { headers: { "content-length": String(size) } });
+    if (init?.method === "POST") {
+      return new Response("<InitiateMultipartUploadResult><UploadId>u1</UploadId></InitiateMultipartUploadResult>");
+    }
+    if (init?.method === "DELETE") {
+      aborted.push(new URL(String(input)).searchParams.get("uploadId") ?? "");
+      return new Response(null, { status: 204 });
+    }
+    return onCopy(input, init);
+  };
+}
 
 describe("createS3Driver", () => {
   it("round-trips a Unicode key with type, disposition and metadata", async () => {
@@ -81,11 +136,12 @@ describe("createS3Driver", () => {
     expect(fake.pendingUploads()).toBe(0);
   });
 
-  it("copies objects above the single-PUT limit in parts and keeps their headers", async () => {
+  it("copies objects above the single-PUT limit in parts and keeps headers the driver would not accept as input", async () => {
     const { fake, driver } = setup();
-    await driver.put("source.bin", offsetBytes(12 * MiB), {
-      type: "application/x-test",
-      metadata: { "cloudrop-id": "s1" },
+    // An underscore in a metadata name fails cloudrop's input rules, but the copy must keep what is stored.
+    await putWithForeignTool(fake.fetch, "source.bin", offsetBytes(12 * MiB), {
+      "content-type": "application/x-test",
+      "x-amz-meta-legacy_id": "s1",
     });
     // Same bucket, lower single-PUT limit, so a 12 MiB copy takes the multipart path without a 5 GiB fixture.
     const small = createS3Driver({
@@ -101,7 +157,7 @@ describe("createS3Driver", () => {
     expect((await driver.head("copy.bin")).data).toMatchObject({
       size: 12 * MiB,
       type: "application/x-test",
-      metadata: { "cloudrop-id": "s1" },
+      metadata: { legacy_id: "s1" },
     });
     // The two 6 MiB parts meet at 0x00600000; the word before it holds 0x005ffffc.
     expect((await driver.getRange("copy.bin", 6 * MiB - 2, 6 * MiB + 1)).data).toEqual(
@@ -129,6 +185,67 @@ describe("createS3Driver", () => {
     });
   });
 
+  it("puts a Blob without loading it into memory", async () => {
+    const { driver } = setup();
+    expect((await driver.put("blob.bin", new StreamOnlyBlob([offsetBytes(1024)]))).error).toBeNull();
+    // 1020 = 0x000003fc.
+    expect((await driver.getRange("blob.bin", 1020, 1023)).data).toEqual(new Uint8Array([0x00, 0x00, 0x03, 0xfc]));
+  });
+
+  it("puts an ArrayBuffer", async () => {
+    const { driver } = setup();
+    expect((await driver.put("buffer.bin", offsetBytes(8).buffer)).error).toBeNull();
+    expect((await driver.getRange("buffer.bin", 4, 7)).data).toEqual(new Uint8Array([0x00, 0x00, 0x00, 0x04]));
+  });
+
+  it("rejects an oversized Blob without reading it", async () => {
+    const tiny = createS3Driver({
+      endpoint,
+      region: "auto",
+      bucket: "test",
+      credentials,
+      rules: { ...R2_RULES, maxSinglePutSize: 4 },
+      fetch: neverCalled,
+      now,
+    });
+    expect((await tiny.put("a.bin", new UnreadableBlob([new Uint8Array(5)]))).error).toMatchObject({
+      code: "INVALID_INPUT",
+      message: "Size is over the limit of 4 bytes. Upload a smaller file or split it.",
+    });
+  });
+
+  it("reports a Blob that cannot be read as a failed request, without throwing", async () => {
+    const { driver } = setup();
+    const result = await driver.put("a.bin", new UnreadableBlob([new Uint8Array(5)]));
+    expect(result.error).toMatchObject({ code: "STORAGE_UNREACHABLE", retryable: true });
+  });
+
+  it("accepts missing or null options from plain JavaScript", async () => {
+    const { fake, driver } = setup();
+    expect((await driver.put("a.txt", "x", null as never)).error).toBeNull();
+    const created = await driver.createMultipart("b.bin", undefined as never);
+    if (created.error) throw created.error;
+    const { uploadId } = created.data;
+    const signed = await driver.presignPart("b.bin", uploadId, 1, { size: 1, expiresIn: 60 });
+    if (signed.error) throw signed.error;
+    await fake.fetch(signed.data.url, { method: "PUT", headers: signed.data.headers, body: new Uint8Array(1) });
+    const parts = await driver.listParts("b.bin", uploadId);
+    if (parts.error) throw parts.error;
+    expect((await driver.completeMultipart("b.bin", uploadId, parts.data, null as never)).error).toBeNull();
+    expect((await driver.list("", null as never)).data?.items.map((item) => item.key)).toEqual(["a.txt", "b.bin"]);
+  });
+
+  it("deletes more keys than one S3 batch holds", async () => {
+    let deletes = 0;
+    const counting = stubbed(async () => {
+      deletes += 1;
+      return new Response(null, { status: 204 });
+    });
+    const keys = Array.from({ length: 1001 }, (_, index) => `k${index}`);
+    const result = await driverWith(counting).deleteMany(keys);
+    expect([result.data?.deleted.length, result.data?.failed, deletes]).toEqual([1001, [], 1001]);
+  });
+
   it("deletes many keys and reports each one", async () => {
     const { driver } = setup();
     await driver.put("a.txt", "a");
@@ -146,8 +263,9 @@ describe("createS3Driver", () => {
     const driver = driverWith(neverCalled);
     const options = { type: "video/mp4", expiresIn: 60 };
     const atLimit = await driver.presignPut("movie.mp4", { ...options, size: R2_RULES.maxSinglePutSize });
-    expect(atLimit.data).toMatchObject({
+    expect(atLimit.data).toEqual({
       method: "PUT",
+      url: expect.any(String),
       // Content-Length is signed but not returned: browsers refuse to set it.
       headers: { "content-type": "video/mp4" },
       expiresAt: new Date("2026-11-15T12:01:00Z"),
@@ -162,6 +280,10 @@ describe("createS3Driver", () => {
   const uploadIdMessage = "The upload ID is empty or malformed. Pass the uploadId that createMultipart returned.";
   const expiryMessage = "Expiry must be a whole number of seconds between 1 and 604800.";
   const presignOptions = { size: 1, expiresIn: 60 };
+  const typeMessage = 'The content type must be printable ASCII, such as "text/plain; charset=utf-8".';
+  const sizeMessage = "Size must be a whole number of bytes, zero or more.";
+  const partsMessage =
+    "Pass at least one part, each with a part number between 1 and 10000 and the ETag the storage returned for it.";
   it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, string]>([
     ["a '..' key segment", (driver) => driver.head("a/../b"), keyMessage],
     [
@@ -169,6 +291,20 @@ describe("createS3Driver", () => {
       (driver) => driver.put("a.txt", "x", { disposition: 'attachment; filename="łódź.txt"' }),
       "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
     ],
+    [
+      "a missing body",
+      (driver) => driver.put("a.txt", undefined as never),
+      "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.",
+    ],
+    ["a numeric content type on put", (driver) => driver.put("a.txt", "x", { type: 5 as never }), typeMessage],
+    [
+      "a numeric content type on presignPut",
+      (driver) => driver.presignPut("a.txt", { ...presignOptions, type: 5 as never }),
+      typeMessage,
+    ],
+    ["missing presignPut options", (driver) => driver.presignPut("a.txt", undefined as never), sizeMessage],
+    ["missing presignPart options", (driver) => driver.presignPart("a.txt", "u", 1, undefined as never), sizeMessage],
+    ["parts that are not a list", (driver) => driver.completeMultipart("a.txt", "u", null as never), partsMessage],
     ["a NaN expiry", (driver) => driver.presignPut("a.txt", { size: 1, expiresIn: Number.NaN }), expiryMessage],
     [
       "an expiry that prints as 1e+21",
@@ -202,11 +338,7 @@ describe("createS3Driver", () => {
       uploadIdMessage,
     ],
     ["an empty upload ID on abortMultipart", (driver) => driver.abortMultipart("a.txt", ""), uploadIdMessage],
-    [
-      "an empty part list",
-      (driver) => driver.completeMultipart("a.txt", "u", []),
-      "Pass at least one part, each with a part number between 1 and 10000 and the ETag the storage returned for it.",
-    ],
+    ["an empty part list", (driver) => driver.completeMultipart("a.txt", "u", []), partsMessage],
     ["a page size of 0", (driver) => driver.list("", { limit: 0 }), "The page size must be between 1 and 1000."],
     [
       "an empty cursor",
@@ -219,9 +351,9 @@ describe("createS3Driver", () => {
       "The list prefix is not valid Unicode (it has a lone surrogate). Remove or replace that character.",
     ],
     [
-      "1001 keys to delete",
-      (driver) => driver.deleteMany(Array.from({ length: 1001 }, (_, index) => `k${index}`)),
-      "deleteMany takes an array of at most 1000 keys. Split longer lists into batches.",
+      "keys that are not a list",
+      (driver) => driver.deleteMany("a.txt" as never),
+      "deleteMany takes an array of keys. Wrap a single key in an array.",
     ],
   ])("rejects %s before any request", async (_name, call, message) => {
     const result = await call(driverWith(neverCalled));
@@ -297,13 +429,35 @@ describe("createS3Driver", () => {
     });
   });
 
-  it("gives a server-side copy five minutes", async () => {
-    const copyTimesOut: FetchLike = async (input, init) =>
-      init?.method === "HEAD"
-        ? new Response(null, { status: 200, headers: { "content-length": "5" } })
-        : timesOut(input, init);
-    const result = await driverWith(copyTimesOut).copy("a.txt", "b.txt");
+  it.each([
+    ["a single", 5],
+    ["a multipart", R2_RULES.maxSinglePutSize + 1],
+  ])("gives %s server-side copy five minutes per request", async (_name, size) => {
+    const result = await driverWith(copyStub(size, timesOut)).copy("a.txt", "b.txt");
     expect(result.error?.message).toBe("The storage service did not answer within 300 seconds. Retry the request.");
+  });
+
+  it("aborts a multipart copy whose part result has no ETag", async () => {
+    const aborted: string[] = [];
+    const noEtag = stubbed(async () => new Response("<CopyPartResult></CopyPartResult>"));
+    const result = await driverWith(copyStub(R2_RULES.maxSinglePutSize + 1, noEtag, aborted)).copy("a.txt", "b.txt");
+    expect(result.error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no ETag. Retry the request.",
+    });
+    expect(aborted).toEqual(["u1"]);
+  });
+
+  it("reports a truncated object list without a continuation token instead of ending early", async () => {
+    const truncated = stubbed(
+      async () => new Response("<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>"),
+    );
+    expect((await driverWith(truncated).list("")).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no continuation token. Retry the request.",
+    });
   });
 
   it("maps throttling to RATE_LIMITED", async () => {

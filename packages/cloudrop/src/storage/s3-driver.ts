@@ -19,9 +19,11 @@ import {
   presignUrl,
   sha256Hex,
   signRequest,
+  UNSIGNED_PAYLOAD,
 } from "./sigv4.ts";
 import { storageError } from "./storage-error.ts";
 import {
+  bodyProblem,
   checksumProblem,
   cursorProblem,
   expiryProblem,
@@ -29,6 +31,7 @@ import {
   keyListProblem,
   keyProblem,
   limitProblem,
+  MAX_LIST_PAGE,
   objectOptionsProblem,
   partNumberProblem,
   partsProblem,
@@ -56,7 +59,7 @@ type Bytes = Uint8Array<ArrayBuffer>;
 
 interface SendOptions {
   headers?: Record<string, string>;
-  body?: Bytes;
+  body?: Bytes | Blob;
   timeoutMs?: number;
 }
 
@@ -64,7 +67,6 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const META_PREFIX = "x-amz-meta-";
 const DELETE_CONCURRENCY = 16;
-const MAX_LIST_PAGE = 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
 // A server-side copy of up to 5 GiB runs inside one request, and S3 documents that completing a multipart upload
 // "could take several minutes".
@@ -83,6 +85,21 @@ function writeHeaders(options: WriteOptions): Record<string, string> {
   if (options.ifNoneMatch) headers["if-none-match"] = "*";
   if (options.checksumCrc32c) headers["x-amz-checksum-crc32c"] = options.checksumCrc32c;
   return headers;
+}
+
+// Plain-JavaScript callers can pass null or nothing. An empty object lets the field checks answer with a clear
+// INVALID_INPUT (for example a missing size) instead of a TypeError; for optional options it is the right default.
+function orEmpty<T extends object>(options: T | null | undefined): T {
+  return options ?? ({} as T);
+}
+
+const etagIn = (xml: string): string => stripQuotes(xmlText(xml, "ETag") ?? "");
+
+/** A 2xx response without a field cloudrop needs: a fault on the storage side, worth a retry. */
+function incompleteResponse(missing: string): CloudropError {
+  return new CloudropError("STORAGE_ERROR", `The storage service's response had no ${missing}. Retry the request.`, {
+    retryable: true,
+  });
 }
 
 function readObjectInfo(key: string, headers: Headers): ObjectInfo {
@@ -170,7 +187,8 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       credentials,
       region,
       date: now(),
-      payloadHash: body ? await sha256Hex(body) : EMPTY_SHA256,
+      // A Blob is streamed unread, so its hash is unknown; UNSIGNED-PAYLOAD is SigV4's documented value for that.
+      payloadHash: body instanceof Blob ? UNSIGNED_PAYLOAD : body ? await sha256Hex(body) : EMPTY_SHA256,
     });
     try {
       const response = await http(url, { method, headers: signed, body, signal: AbortSignal.timeout(timeoutMs) });
@@ -188,7 +206,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       }
       return ok({ headers: response.headers, body: new Uint8Array(await response.arrayBuffer()) });
     } catch (cause) {
-      // Also covers a connection dropped or timed out while the body was being read.
+      // Also covers a connection dropped or timed out while a body was read, and a Blob that could not be read.
       return fail(unreachable(cause, timeoutMs));
     }
   }
@@ -222,14 +240,26 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
     return { method: "PUT", url: signed.toString(), headers, expiresAt: new Date(date.getTime() + expiresIn * 1000) };
   }
 
+  /** Not validated: createMultipart checks caller input first; a copy passes headers the storage itself returned. */
+  async function startMultipart(key: string, options: ObjectOptions): Promise<Result<{ uploadId: string }>> {
+    const result = await sendForXml("POST", objectUrl(key, { uploads: "" }), { headers: objectHeaders(options) });
+    if (result.error) return result;
+    const uploadId = xmlText(result.data, "UploadId");
+    return uploadId ? ok({ uploadId }) : fail(incompleteResponse("upload ID"));
+  }
+
   async function copyInParts(source: ObjectInfo, copySource: string, to: string): Promise<Result<{ etag: string }>> {
     // The largest part one request may carry: a server-side copy streams nothing through us, so fewer requests win.
     // Equal parts with a smaller last one also satisfy R2's equal-part rule by construction.
     const partSize = rules.maxSinglePutSize;
     const partCount = Math.ceil(source.size / partSize);
-    const created = await driver.createMultipart(to, source);
+    const created = await startMultipart(to, source);
     if (created.error) return created;
     const { uploadId } = created.data;
+    const abortWith = async (error: CloudropError): Promise<Result<never>> => {
+      await driver.abortMultipart(to, uploadId);
+      return fail(error);
+    };
     const parts: CompletedPart[] = [];
     for (let partNumber = 1; partNumber <= partCount; partNumber++) {
       const start = (partNumber - 1) * partSize;
@@ -238,22 +268,21 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         headers: { "x-amz-copy-source": copySource, "x-amz-copy-source-range": `bytes=${start}-${end}` },
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
-      if (result.error) {
-        await driver.abortMultipart(to, uploadId);
-        return result;
-      }
-      parts.push({ partNumber, etag: stripQuotes(xmlText(result.data, "ETag") ?? "") });
+      if (result.error) return abortWith(result.error);
+      const etag = etagIn(result.data);
+      if (!etag) return abortWith(incompleteResponse("ETag"));
+      parts.push({ partNumber, etag });
     }
     const completed = await driver.completeMultipart(to, uploadId, parts);
-    if (completed.error) await driver.abortMultipart(to, uploadId);
-    return completed;
+    return completed.error ? abortWith(completed.error) : completed;
   }
 
   const driver: StorageDriver = {
     rules,
     publicUrl: config.publicUrl,
 
-    async presignPut(key, options) {
+    async presignPut(key, given) {
+      const options = orEmpty(given);
       const problem =
         keyProblem(key) ??
         objectOptionsProblem(options) ??
@@ -264,23 +293,15 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       return ok(await presign(objectUrl(key), writeHeaders(options), options.size, options.expiresIn));
     },
 
-    async createMultipart(key, options) {
+    async createMultipart(key, given) {
+      const options = orEmpty(given);
       const problem = keyProblem(key) ?? objectOptionsProblem(options);
       if (problem) return fail(invalidInput(problem));
-      const result = await sendForXml("POST", objectUrl(key, { uploads: "" }), { headers: objectHeaders(options) });
-      if (result.error) return result;
-      const uploadId = xmlText(result.data, "UploadId");
-      if (!uploadId) {
-        return fail(
-          new CloudropError("STORAGE_ERROR", "The storage service did not return an upload ID. Retry the upload.", {
-            retryable: true,
-          }),
-        );
-      }
-      return ok({ uploadId });
+      return startMultipart(key, options);
     },
 
-    async presignPart(key, uploadId, partNumber, options) {
+    async presignPart(key, uploadId, partNumber, given) {
+      const options = orEmpty(given);
       const problem =
         keyProblem(key) ??
         uploadIdProblem(uploadId) ??
@@ -312,28 +333,21 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
           parts.push({
             partNumber: Number(xmlText(block, "PartNumber")),
             size: Number(xmlText(block, "Size")),
-            etag: stripQuotes(xmlText(block, "ETag") ?? ""),
+            etag: etagIn(block),
             checksumCrc32c: xmlText(block, "ChecksumCRC32C"),
           });
         }
         truncated = xmlText(result.data, "IsTruncated") === "true";
         const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
         // A missing or non-advancing marker would loop forever.
-        if (truncated && !(Number(next) > Number(marker))) {
-          return fail(
-            new CloudropError(
-              "STORAGE_ERROR",
-              "The storage service returned an incomplete part list. Retry the request.",
-              { retryable: true },
-            ),
-          );
-        }
+        if (truncated && !(Number(next) > Number(marker))) return fail(incompleteResponse("valid next part marker"));
         marker = next;
       }
       return ok(parts);
     },
 
-    async completeMultipart(key, uploadId, parts, options = {}) {
+    async completeMultipart(key, uploadId, parts, given) {
+      const options = orEmpty(given);
       const problem = keyProblem(key) ?? uploadIdProblem(uploadId) ?? partsProblem(parts, rules.maxParts);
       if (problem) return fail(invalidInput(problem));
       const xml = parts
@@ -346,7 +360,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
       if (result.error) return result;
-      return ok({ etag: stripQuotes(xmlText(result.data, "ETag") ?? "") });
+      return ok({ etag: etagIn(result.data) });
     },
 
     async abortMultipart(key, uploadId) {
@@ -373,19 +387,22 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       return ok(result.data.body);
     },
 
-    async put(key, body, options = {}) {
-      const bytes = typeof body === "string" ? encoder.encode(body) : body;
-      // Checked before a Blob is read, so an oversized file is never loaded into memory.
-      const size = bytes instanceof Uint8Array ? bytes.length : bytes.size;
+    async put(key, body, given) {
+      const options = orEmpty(given);
       const problem =
         keyProblem(key) ??
+        bodyProblem(body) ??
         objectOptionsProblem(options) ??
-        checksumProblem(options.checksumCrc32c) ??
-        sizeProblem(size, rules.maxSinglePutSize);
+        checksumProblem(options.checksumCrc32c);
       if (problem) return fail(invalidInput(problem));
+      const payload =
+        typeof body === "string" ? encoder.encode(body) : body instanceof ArrayBuffer ? new Uint8Array(body) : body;
+      const size = payload instanceof Blob ? payload.size : payload.length;
+      const tooLarge = sizeProblem(size, rules.maxSinglePutSize);
+      if (tooLarge) return fail(invalidInput(tooLarge));
       const result = await send("PUT", objectUrl(key), {
         headers: writeHeaders(options),
-        body: bytes instanceof Uint8Array ? bytes : new Uint8Array(await bytes.arrayBuffer()),
+        body: payload,
         // Assumes the link to the storage moves at least 1 MiB/s.
         timeoutMs: REQUEST_TIMEOUT_MS + Math.ceil(size / MiB) * 1000,
       });
@@ -401,14 +418,14 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (!source.data) {
         return fail(new CloudropError("NOT_FOUND", "The object to copy does not exist. Check the source key."));
       }
-      const copySource = `/${encodeRfc3986(config.bucket)}/${encodeKeyPath(from)}`;
+      const copySource = objectUrl(from).pathname;
       if (source.data.size > rules.maxSinglePutSize) return copyInParts(source.data, copySource, to);
       const result = await sendForXml("PUT", objectUrl(to), {
         headers: { "x-amz-copy-source": copySource },
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
       if (result.error) return result;
-      return ok({ etag: stripQuotes(xmlText(result.data, "ETag") ?? "") });
+      return ok({ etag: etagIn(result.data) });
     },
 
     async delete(key) {
@@ -432,8 +449,8 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       return ok({ deleted, failed });
     },
 
-    async list(prefix, options = {}) {
-      const { cursor, limit = MAX_LIST_PAGE } = options;
+    async list(prefix, given) {
+      const { cursor, limit = MAX_LIST_PAGE } = orEmpty(given);
       const problem =
         prefixProblem(prefix) ?? limitProblem(limit) ?? (cursor === undefined ? null : cursorProblem(cursor));
       if (problem) return fail(invalidInput(problem));
@@ -447,11 +464,13 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       const items = xmlBlocks(result.data, "Contents").map((block) => ({
         key: xmlText(block, "Key") ?? "",
         size: Number(xmlText(block, "Size")),
-        etag: stripQuotes(xmlText(block, "ETag") ?? ""),
+        etag: etagIn(block),
         uploadedAt: new Date(xmlText(block, "LastModified") ?? 0),
       }));
-      const truncated = xmlText(result.data, "IsTruncated") === "true";
-      return ok({ items, nextCursor: truncated ? (xmlText(result.data, "NextContinuationToken") ?? null) : null });
+      if (xmlText(result.data, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
+      // Ending the listing here would silently skip the rest of the prefix.
+      const nextCursor = xmlText(result.data, "NextContinuationToken");
+      return nextCursor ? ok({ items, nextCursor }) : fail(incompleteResponse("continuation token"));
     },
   };
 
