@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError } from "../errors.ts";
 import type { CompleteResponse, SignedPart } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
-import { PUBLIC_URL, serverFixture } from "../testing/server-fixture.ts";
+import { PUBLIC_URL, serverFixture, tokenPayload } from "../testing/server-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { allowAnyone, route } from "./route.ts";
 
@@ -116,6 +116,24 @@ describe("POST /complete: single PUT", () => {
     expect([(await fixture.storage.head(ticket.key)).data, aborted]).toEqual([null, ["rejected"]]);
   });
 
+  it("keeps a rejected object and its reservation, and asks for a retry, when the delete fails", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { plugins: [plugin] });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.storage.put(ticket.key, "<svg>", { type: "text/html", metadata: { "cloudrop-id": ticket.fileId } });
+    // The network drops every DELETE the server sends; every other request reaches the bucket.
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = (input, init) =>
+      init?.method === "DELETE" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
+    expect((await complete(fixture, ticket.token)).body.error).toEqual({
+      code: "STORAGE_ERROR",
+      message: "The storage service did not respond. Try again in a moment.",
+      retryable: true,
+    });
+    expect([(await fixture.storage.head(ticket.key)).data?.type, aborted]).toEqual(["text/html", []]);
+  });
+
   it("never deletes an object another writer stored under the key, but releases this upload's reservation", async () => {
     const aborted: string[] = [];
     const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
@@ -159,7 +177,8 @@ describe("POST /complete: multipart", () => {
   it("asks again for a part stored at the wrong size instead of letting completion fail", async () => {
     const fixture = serverFixture({ files }, { multipartThreshold: 0 });
     const ticket = await fixture.multipart("files", BIG);
-    const uploadId = "fake/upload+1==";
+    // The token carries the storage's upload id, readable by any client.
+    const uploadId = String(tokenPayload(ticket.token).uploadId);
     await fixture.send(ticket.parts[0] as SignedPart, partOne);
     // Signed for 4 bytes by someone holding the storage credentials: the plan says 5.
     const wrong = await fixture.storage.presignPart(ticket.key, uploadId, 2, { size: 4, expiresIn: 60 });
@@ -201,6 +220,38 @@ describe("POST /complete: multipart", () => {
     // Same key and size as the plan: only the cloudrop-id tells the objects apart.
     await fixture.storage.put(ticket.key, "hello", { metadata: { "cloudrop-id": "someone-else" } });
     expect((await complete(fixture, ticket.token)).body.error?.code).toBe("NO_SUCH_UPLOAD");
+  });
+
+  // Two /complete calls racing: when the second completion is refused with 412 rather than NoSuchUpload (R2's order
+  // here is unmeasured; the fake answers 412 while the upload still exists), the object is this upload's own.
+  it("completes when the object that refused completion is this upload's own", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
+    const ticket = await fixture.multipart("files", { name: "a.bin", size: 5, type: "application/octet-stream" });
+    await fixture.send(ticket.parts[0] as SignedPart, new Uint8Array(5));
+    await fixture.storage.put(ticket.key, "hello", { metadata: { "cloudrop-id": ticket.fileId } });
+    const completed = await complete(fixture, ticket.token);
+    expect([completed.status, completed.body.file?.id, aborted]).toEqual([200, ticket.fileId, []]);
+  });
+
+  it("keeps the upload and its reservation when the object that refused completion cannot be read", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
+    const ticket = await fixture.multipart("files", { name: "a.bin", size: 5, type: "application/octet-stream" });
+    await fixture.send(ticket.parts[0] as SignedPart, new Uint8Array(5));
+    await fixture.storage.put(ticket.key, "first");
+    // The network drops every HEAD the server sends, so it cannot tell whose object refused the completion.
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = (input, init) =>
+      init?.method === "HEAD" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
+    expect((await complete(fixture, ticket.token)).body.error).toEqual({
+      code: "STORAGE_ERROR",
+      message: "The storage service did not respond. Try again in a moment.",
+      retryable: true,
+    });
+    expect(aborted).toEqual([]);
   });
 
   it("refuses to complete over an object that appeared at the key, and keeps that object", async () => {

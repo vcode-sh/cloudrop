@@ -26,9 +26,13 @@ const unfinished = (): CloudropError =>
 const release = (config: ServerConfig, token: UploadTokenPayload): Promise<void> =>
   runOnAbort(config.plugins, [abortContext(token, "rejected")], config.logger);
 
+/**
+ * Deletes a rejected object, then releases its reservation. When the delete fails, the object is kept with its
+ * reservation and the client retries: the retry checks the object again and discards it then.
+ */
 async function discard(config: ServerConfig, token: UploadTokenPayload, error: CloudropError): Promise<Result<never>> {
   const removed = await config.storage.delete(token.key);
-  if (removed.error) config.logger.error(`cloudrop: could not delete the rejected object ${token.key}.`, removed.error);
+  if (removed.error) return fail(storageFailure(removed.error, config.logger));
   await release(config, token);
   return fail(error);
 }
@@ -88,11 +92,15 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     );
   }
   const parts = numbers.map((partNumber) => ({ partNumber, etag: byNumber.get(partNumber)?.etag ?? "" }));
-  // Keys are unique, so a 412 here is a collision with an object some other writer created.
+  // Keys are unique, so a 412 here is this upload completed by a concurrent call, or another writer's object.
   const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
   if (!completed.error) return ok(undefined);
   if (completed.error.code === "NO_SUCH_UPLOAD") return completedBefore(config, token);
   if (completed.error.code === "ALREADY_EXISTS") {
+    // A concurrent /complete of this same upload may have won the race: its object carries this upload's id. Only an
+    // object shown not to be this upload's is a collision; an unanswered HEAD keeps the reservation for a retry.
+    const own = await completedBefore(config, token);
+    if (own.error?.code !== "NO_SUCH_UPLOAD") return own;
     const aborted = await storage.abortMultipart(token.key, token.uploadId);
     if (aborted.error) logger.error(`cloudrop: could not abort the collided upload of ${token.key}.`, aborted.error);
     await release(config, token);
