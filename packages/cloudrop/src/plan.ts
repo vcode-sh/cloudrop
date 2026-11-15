@@ -27,9 +27,11 @@ function assertStorable(size: number, rules: StorageRules): void {
  */
 export function planParts(size: number, rules: StorageRules): MultipartPlan {
   assertStorable(size, rules);
+  if (size === 0) throw new RangeError("An empty file has no parts. Upload it with a single PUT.");
   let partSize = Math.max(FIRST_PART_SIZE, rules.minPartSize);
-  while (Math.ceil(size / partSize) > rules.maxParts) partSize *= 2;
-  const partCount = Math.max(1, Math.ceil(size / partSize));
+  // The cap is safe: maxObjectSize <= maxParts * maxPartSize, so maxPartSize parts always fit the count limit.
+  while (Math.ceil(size / partSize) > rules.maxParts) partSize = Math.min(partSize * 2, rules.maxPartSize);
+  const partCount = Math.ceil(size / partSize);
   return { kind: "multipart", size, partSize, partCount, lastPartSize: size - (partCount - 1) * partSize };
 }
 

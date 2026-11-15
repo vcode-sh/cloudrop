@@ -1,7 +1,9 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { planUpload } from "./plan.ts";
+import { planParts, planUpload } from "./plan.ts";
 import { GiB, MiB, R2_RULES, S3_RULES } from "./rules.ts";
+
+const TiB = 1024 * GiB;
 
 describe("planUpload", () => {
   it("uses one PUT up to the multipart threshold", () => {
@@ -68,6 +70,60 @@ describe("planUpload", () => {
     }
   });
 
+  it("plans the S3 maximum object as 10,000 parts of exactly 5 GiB", () => {
+    expect(S3_RULES.maxObjectSize).toBe(10_000 * 5 * GiB);
+    expect(planUpload(S3_RULES.maxObjectSize, S3_RULES)).toEqual({
+      kind: "multipart",
+      size: S3_RULES.maxObjectSize,
+      partSize: 5 * GiB,
+      partCount: 10_000,
+      lastPartSize: 5 * GiB,
+    });
+    expect(() => planUpload(S3_RULES.maxObjectSize + 1, S3_RULES)).toThrow(
+      expect.objectContaining({ name: "RangeError", message: expect.stringContaining("exceeds the storage limit") }),
+    );
+  });
+
+  it("caps S3 parts at 5 GiB once doubling would pass it (above 4 GiB x 10,000 = 40,000 GiB)", () => {
+    // 40 TiB = 40,960 GiB = exactly 8,192 parts of 5 GiB; one byte more adds a 1-byte part.
+    expect(planUpload(40 * TiB + 1, S3_RULES)).toEqual({
+      kind: "multipart",
+      size: 40 * TiB + 1,
+      partSize: 5 * GiB,
+      partCount: 8193,
+      lastPartSize: 1,
+    });
+    // 4 GiB parts still fit 40,000 GiB exactly: no cap yet.
+    expect(planUpload(40_000 * GiB, S3_RULES)).toMatchObject({ partSize: 4 * GiB, partCount: 10_000 });
+    expect(planUpload(40_000 * GiB + 1, S3_RULES)).toMatchObject({ partSize: 5 * GiB, partCount: 8001 });
+  });
+
+  it("refuses to plan parts for an empty file", () => {
+    expect(() => planParts(0, R2_RULES)).toThrow(
+      expect.objectContaining({ name: "RangeError", message: expect.stringContaining("empty") }),
+    );
+  });
+
+  it("keeps S3 plans within the part size and part count limits", () => {
+    const s3Size = fc.oneof(
+      fc.bigInt({ min: BigInt(64 * MiB + 1), max: BigInt(S3_RULES.maxObjectSize) }).map(Number),
+      fc.integer({ min: 0, max: 100 }).map((n) => S3_RULES.maxObjectSize - n),
+    );
+    fc.assert(
+      fc.property(s3Size, (size) => {
+        const plan = planUpload(size, S3_RULES);
+        return (
+          plan.kind === "multipart" &&
+          plan.partSize <= S3_RULES.maxPartSize &&
+          plan.partCount <= S3_RULES.maxParts &&
+          plan.lastPartSize > 0 &&
+          plan.lastPartSize <= plan.partSize &&
+          (plan.partCount - 1) * plan.partSize + plan.lastPartSize === size
+        );
+      }),
+    );
+  });
+
   it.each([
     {
       name: "one byte over the R2 object limit",
@@ -76,6 +132,8 @@ describe("planUpload", () => {
     },
     { name: "a negative size", size: -1, message: "whole number of bytes" },
     { name: "a fractional size", size: 1.5, message: "whole number of bytes" },
+    { name: "NaN", size: Number.NaN, message: "whole number of bytes" },
+    { name: "Infinity", size: Number.POSITIVE_INFINITY, message: "whole number of bytes" },
   ])("rejects $name", ({ size, message }) => {
     expect(() => planUpload(size, R2_RULES)).toThrow(
       expect.objectContaining({ name: "RangeError", message: expect.stringContaining(message) }),

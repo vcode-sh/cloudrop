@@ -35,7 +35,8 @@ export const S3_RULES: StorageRules = {
   maxParts: 10_000,
   // Largest single PUT.
   maxSinglePutSize: 5 * GiB,
-  maxObjectSize: 5 * TiB,
+  // "Maximum object size: 48.8 TiB" = 10,000 parts x 5 GiB (https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html).
+  maxObjectSize: 10_000 * 5 * GiB,
   // SigV4 presigned URLs live at most 7 days.
   maxPresignSeconds: 604_800,
 };
