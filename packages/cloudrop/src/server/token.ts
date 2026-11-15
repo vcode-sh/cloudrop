@@ -33,6 +33,7 @@ export const isMultipart = (token: UploadTokenPayload): token is MultipartToken 
 // refused before any HMAC; the 64 KiB body cap still bounds the request.
 const MAX_TOKEN_LENGTH = 16_384;
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 export function base64url(bytes: Uint8Array): string {
   let binary = "";
@@ -45,8 +46,8 @@ export function base64url(bytes: Uint8Array): string {
 function readPayload(body: string): UploadTokenPayload | null {
   try {
     const bytes = Uint8Array.from(atob(body.replaceAll("-", "+").replaceAll("_", "/")), (char) => char.charCodeAt(0));
-    const payload = JSON.parse(new TextDecoder().decode(bytes)) as { v?: unknown } | null;
-    return payload?.v === 1 ? (payload as UploadTokenPayload) : null;
+    const payload = JSON.parse(decoder.decode(bytes)) as { v?: unknown; exp?: unknown } | null;
+    return payload?.v === 1 && Number.isSafeInteger(payload.exp) ? (payload as UploadTokenPayload) : null;
   } catch {
     // atob refuses a length no base64 string can have; JSON.parse refuses text that is not JSON.
     return null;

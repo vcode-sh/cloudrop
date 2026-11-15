@@ -72,8 +72,8 @@ describe("verifyToken", () => {
     );
   });
 
-  // The largest payload /upload can sign: 2 KiB of JSON each for owner and metadata, a 1,024-byte key, and a name of
-  // 255 control characters (6 bytes each in JSON). Its token is 9,111 characters long.
+  // A large payload with both 2 KiB JSON caps, a 1,024-byte key and a name of 255 control characters. Python's json
+  // and base64 give 9,111 characters; quoted keys and a multipart upload ID can make a longer token.
   const largest: UploadTokenPayload = {
     ...payload,
     key: `${"k".repeat(1020)}.bin`,
@@ -82,8 +82,9 @@ describe("verifyToken", () => {
     metadata: { albumId: "a".repeat(2034) },
   };
 
-  it("verifies the longest token /upload can issue", async () => {
+  it("verifies a token beyond the former 8 KiB cap", async () => {
     const token = await signToken(largest, current);
+    expect(token).toHaveLength(9111);
     expect((await verifyToken(token, [current], EXP - 1)).data).toEqual(largest);
   });
 
@@ -114,6 +115,10 @@ describe("verifyToken", () => {
     { name: "characters outside base64url", token: `${BODY}.TjnJ9/yOS+wl8JbH2hG3eJ-cxKbCr3bxboTvaDByGh0` },
     // Correctly signed with CURRENT (Python's hmac), but not a JSON object: only a holder of the secret can make these.
     { name: "a correctly signed JSON null", token: "bnVsbA.UPMTeJK6Jo-ME4iVa1icIIfVPvbx_cyV5yNnU0CariQ" },
+    {
+      name: "a correctly signed v1 payload without an expiry",
+      token: "eyJ2IjoxfQ.cKv7b5CE1Y-Qy2s8-pafLvehefd6qaybw3MnrqNLJr4",
+    },
     {
       name: "a correctly signed body that is not JSON",
       token: "bm90IGpzb24._HmPZd73CUF6zDYT36PMR2Xilwj_15I9y0cb3M21ydM",

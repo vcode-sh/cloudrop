@@ -31,6 +31,7 @@ export function newFileId(): string {
   return ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10)));
 }
 
+/** The result is not validated; pass it through `normalizeKey` before storing it. */
 export function generatedKey(prefix: string, fileId: string, ext: string): string {
   const folder = prefix.replace(/\/+$/, "");
   return folder === "" ? `${fileId}${ext}` : `${folder}/${fileId}${ext}`;
@@ -53,7 +54,7 @@ export function normalizeKey(key: unknown): { key: string } | { problem: string 
 
 // Raster images, video and audio display inline. Everything else downloads, including SVG, HTML and XML, which a
 // browser would run as a page on the bucket's public domain: that closes stored XSS by default (spec §7.5).
-const INLINE = /^(image\/(?!svg\+xml$)|video\/|audio\/)/;
+const INLINE = /^(?:image\/(?!svg\+xml$)|video\/|audio\/)[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 
 /** `type` is a normalized MIME type and `name` well-formed Unicode. RFC 6266 with an RFC 5987 `filename*`. */
 export function contentDisposition(type: string, name: string): string {

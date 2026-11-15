@@ -61,10 +61,11 @@ export function isAcceptEntry(entry: string): boolean {
 }
 
 function extensionOf(name: string): string | null {
-  const dot = name.lastIndexOf(".");
+  // Downloads may lose trailing dots, so they cannot hide a contradictory extension.
+  const trimmed = name.replace(/\.+$/, "");
+  const dot = trimmed.lastIndexOf(".");
   // ".env" is a name without an extension, not an extension without a name.
-  // "photo." has an empty extension, which is no extension at all.
-  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : null;
+  return dot > 0 ? trimmed.slice(dot + 1).toLowerCase() : null;
 }
 
 /**
@@ -87,6 +88,9 @@ export function matchAccept(
   if (ext === null) return { ext: `.${known[0]}` };
   if (known.includes(ext)) return { ext: `.${ext}` };
   // The extension is the client's text: it is echoed only when it is plain, never as sent.
-  const shown = plain ? ` ends in .${ext}, which` : "'s extension";
-  return { problem: `The file name${shown} does not match its type ${type}. Rename the file or pick another.` };
+  return {
+    problem: plain
+      ? `The file name ends in .${ext}, which does not match its type ${type}. Rename the file or pick another.`
+      : `The file name's extension does not match its type ${type}. Rename the file or pick another.`,
+  };
 }

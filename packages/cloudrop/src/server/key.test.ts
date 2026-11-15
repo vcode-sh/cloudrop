@@ -104,8 +104,8 @@ describe("contentDisposition", () => {
     // Each of these runs script when a browser opens it from the bucket's domain.
     { type: "image/svg+xml", disposition: "attachment" },
     { type: "text/html", disposition: "attachment" },
-    { type: "application/xml", disposition: "attachment" },
-    { type: "application/pdf", disposition: "attachment" },
+    { type: "image/SVG+xml", disposition: "attachment" },
+    { type: "image/svg+xml;charset=utf-8", disposition: "attachment" },
   ])("serves $type as $disposition", ({ type, disposition }) => {
     expect(contentDisposition(type, "f.bin")).toBe(`${disposition}; filename="f.bin"; filename*=UTF-8''f.bin`);
   });

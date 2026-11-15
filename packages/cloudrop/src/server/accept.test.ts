@@ -60,6 +60,12 @@ describe("matchAccept", () => {
     expect(matchAccept(["image/png"], "image/png", "photo.")).toEqual({ ext: ".png" });
   });
 
+  it("refuses a contradictory extension hidden by trailing dots", () => {
+    expect(matchAccept(["image/png"], "image/png", "payload.html..")).toEqual({
+      problem: "The file name ends in .html, which does not match its type image/png. Rename the file or pick another.",
+    });
+  });
+
   it("refuses a type outside the list, naming it", () => {
     expect(matchAccept(["image/png", "image/jpeg"], "image/gif", "a.gif")).toEqual({
       problem: "This upload does not accept image/gif files.",
