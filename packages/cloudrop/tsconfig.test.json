@@ -2,7 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["node"],
-    "isolatedDeclarations": false
+    "isolatedDeclarations": false,
+    "paths": { "vitest": ["./node_modules/vitest"] }
   },
   "include": ["src", "fixtures", "vitest.config.ts", "tsdown.config.ts", "../../scripts"],
   "exclude": []

@@ -1,0 +1,76 @@
+import { describe, expect, it } from "vitest";
+import { createRedactor, explainMissing, parseSettingsFile } from "./live-r2-settings.ts";
+
+// Fake values only: they merely have to look different from each other.
+const FAKE_SECRET = "FakeSecretValueAbc123";
+
+describe("parseSettingsFile", () => {
+  it("reads cloudrop and BB names from literal NAME=value lines and strips matching quotes", () => {
+    const text = [
+      "CLOUDROP_R2_ACCOUNT_ID=acct-1",
+      "BB_R2_BUCKET='bucket-1'",
+      'CLOUDROP_R2_ACCESS_KEY_ID="key-1"',
+      "  BB_R2_SECRET_ACCESS_KEY=secret-1  ",
+      "UNRELATED=ignored",
+    ].join("\n");
+    expect(parseSettingsFile(text)).toEqual({
+      CLOUDROP_R2_ACCOUNT_ID: "acct-1",
+      CLOUDROP_R2_BUCKET: "bucket-1",
+      CLOUDROP_R2_ACCESS_KEY_ID: "key-1",
+      CLOUDROP_R2_SECRET_ACCESS_KEY: "secret-1",
+    });
+  });
+
+  it("does not read lines that start with export or have spaces around the equals sign", () => {
+    const text = "export CLOUDROP_R2_BUCKET=b\nCLOUDROP_R2_ACCOUNT_ID = a\n";
+    expect(parseSettingsFile(text)).toEqual({});
+  });
+});
+
+describe("explainMissing", () => {
+  it("names the missing variables and the literal format when the file was read", () => {
+    const message = explainMissing(["CLOUDROP_R2_BUCKET"], "/some/r2.env", "read");
+    expect(message).toContain("CLOUDROP_R2_BUCKET");
+    expect(message).toContain("/some/r2.env");
+    expect(message).toContain("NAME=value");
+    expect(message).toContain("no `export`");
+    expect(message).toContain("no inline comments");
+  });
+
+  it("says the file was not found, without an error stack, when it does not exist", () => {
+    const message = explainMissing(["CLOUDROP_R2_BUCKET"], "/missing/r2.env", "not-found");
+    expect(message).toContain("/missing/r2.env (from CLOUDROP_R2_ENV_FILE) does not exist");
+    expect(message).not.toContain("ENOENT");
+    expect(message).not.toContain("NAME=value");
+  });
+
+  it("points at the environment when no file was given", () => {
+    expect(explainMissing(["CLOUDROP_R2_BUCKET"], undefined, "none")).toContain("CLOUDROP_R2_ENV_FILE");
+  });
+});
+
+describe("createRedactor", () => {
+  it("replaces every occurrence, longest value first, and counts them", () => {
+    const redactor = createRedactor(["abc", "abcdef"]);
+    expect(redactor.redact("x abcdef y abc")).toBe("x <redacted> y <redacted>");
+    expect(redactor.count()).toBe(2);
+  });
+
+  it("also redacts the lowercase form of a value", () => {
+    const redactor = createRedactor([FAKE_SECRET]);
+    expect(redactor.redact(`bucket ${FAKE_SECRET.toLowerCase()} and ${FAKE_SECRET}`)).toBe(
+      "bucket <redacted> and <redacted>",
+    );
+  });
+
+  it("replaces a presigned URL whole", () => {
+    const redactor = createRedactor([FAKE_SECRET]);
+    const line = "PUT https://h.example/k?X-Amz-Credential=zzz&X-Amz-Signature=yyy failed";
+    expect(redactor.redact(line)).toBe("PUT <presigned URL> failed");
+    expect(redactor.count()).toBe(1);
+  });
+
+  it("ignores empty values instead of splitting every character", () => {
+    expect(createRedactor([""]).redact("plain")).toBe("plain");
+  });
+});

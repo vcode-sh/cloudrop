@@ -37,7 +37,7 @@ describeStorageContract("live R2", async () => {
     http: fetch,
     // Real R2 passed every contract case on 2026-11-15, so it declares no gap.
     gaps: {},
-    // Measured by this lane on 2026-11-15: 403 SignatureDoesNotMatch, nothing stored (r2-spike-findings.md, Q18).
+    // Measured by this lane on 2026-11-15: 403 SignatureDoesNotMatch, nothing stored (r2-spike-findings.md, row 18).
     unsignedMetaOnPresignedPut: "rejected",
   };
 });

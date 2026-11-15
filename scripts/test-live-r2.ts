@@ -6,14 +6,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-
-// The file may use cloudrop's names or BB_R2_* ones; both map to the variables the lane and r2() read.
-const VARIABLES = new Map([
-  ["ACCOUNT_ID", "CLOUDROP_R2_ACCOUNT_ID"],
-  ["BUCKET", "CLOUDROP_R2_BUCKET"],
-  ["ACCESS_KEY_ID", "CLOUDROP_R2_ACCESS_KEY_ID"],
-  ["SECRET_ACCESS_KEY", "CLOUDROP_R2_SECRET_ACCESS_KEY"],
-]);
+import { createRedactor, explainMissing, type FileState, parseSettingsFile, VARIABLES } from "./live-r2-settings.ts";
 
 const settings: Record<string, string> = {};
 for (const name of VARIABLES.values()) {
@@ -21,37 +14,33 @@ for (const name of VARIABLES.values()) {
   if (value) settings[name] = value;
 }
 const file = process.env.CLOUDROP_R2_ENV_FILE;
+let fileState: FileState = "none";
 if (file) {
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    const match = /^(?:CLOUDROP|BB)_R2_([A-Z_]+)=(.*)$/.exec(line.trim());
-    const name = match && VARIABLES.get(match[1] ?? "");
-    if (match && name) settings[name] = (match[2] ?? "").replace(/^(['"])(.*)\1$/, "$2");
+  try {
+    Object.assign(settings, parseSettingsFile(readFileSync(file, "utf8")));
+    fileState = "read";
+  } catch (error) {
+    // Only the error code is reported: a message could quote file content.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(
+        `Cannot read ${file} (${(error as NodeJS.ErrnoException).code ?? "unknown error"}). Check its permissions.`,
+      );
+      process.exit(2);
+    }
+    fileState = "not-found";
   }
 }
 const missing = [...VARIABLES.values()].filter((name) => !settings[name]);
 if (missing.length > 0) {
-  console.error(
-    `Missing R2 settings: ${missing.join(", ")}. Set CLOUDROP_R2_ENV_FILE to a file that defines them (CLOUDROP_R2_* or BB_R2_* names), or export them.`,
-  );
+  console.error(explainMissing(missing, file, fileState));
   process.exit(2);
 }
 
-// Longest first, so a value that contains another is replaced whole.
-const secrets = Object.values(settings).toSorted((a, b) => b.length - a.length);
-const PRESIGNED_URL = /https?:\/\/\S*X-Amz-\S*/g;
-let redactions = 0;
-function redact(line: string): string {
-  let out = line.replace(PRESIGNED_URL, () => {
-    redactions++;
-    return "<presigned URL>";
-  });
-  for (const secret of secrets) {
-    const parts = out.split(secret);
-    redactions += parts.length - 1;
-    out = parts.join("<redacted>");
-  }
-  return out;
-}
+const redactor = createRedactor(Object.values(settings));
+
+// Ctrl-C reaches the child from the terminal as well. The parent must outlive it, relaying output until the child
+// closes, so Vitest's teardown (which deletes the run prefix) can finish and its output stays redacted.
+process.on("SIGINT", () => {});
 
 const child = spawn(
   "bunx",
@@ -66,7 +55,8 @@ const child = spawn(
   ],
   {
     cwd: fileURLToPath(new URL("../packages/cloudrop/", import.meta.url)),
-    env: { ...process.env, ...settings },
+    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it.
+    env: { ...process.env, ...settings, NO_COLOR: "1", FORCE_COLOR: "0" },
     stdio: ["inherit", "pipe", "pipe"],
   },
 );
@@ -76,10 +66,17 @@ const relays = [
 ] as const;
 const relayed = relays.map(async ([from, to]) => {
   for await (const line of createInterface({ input: from, crlfDelay: Number.POSITIVE_INFINITY })) {
-    to.write(`${redact(line)}\n`);
+    to.write(`${redactor.redact(line)}\n`);
   }
+});
+// A child that never started has no output to wait for, so the error handler exits at once.
+child.on("error", (error: NodeJS.ErrnoException) => {
+  console.error(
+    `Could not start the live lane (${error.code ?? "unknown error"}). Is Bun installed and is bunx on your PATH?`,
+  );
+  process.exit(1);
 });
 const code = await new Promise<number>((resolve) => child.on("close", (exitCode) => resolve(exitCode ?? 1)));
 await Promise.all(relayed);
-console.log(`Live R2 lane: ${redactions} secret or presigned-URL occurrences redacted from the output.`);
+console.log(`Live R2 lane: ${redactor.count()} secret or presigned-URL occurrences redacted from the output.`);
 process.exit(code);

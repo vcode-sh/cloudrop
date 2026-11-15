@@ -93,6 +93,25 @@ describe("contract teardown", () => {
     expect(await exists(`${prefix}left.txt`)).toBe(false);
   });
 
+  it("reports both a failed abort and a throwing cleanup in one AggregateError", async () => {
+    const { driver } = setup();
+    const denied = new CloudropError("STORAGE_DENIED", "Abort denied by the test.");
+    const failingAbort: StorageDriver = { ...driver, abortMultipart: async () => fail(denied) };
+    const prefix = randomPrefix("contract/");
+    const openUploads = [{ key: `${prefix}upload.bin`, uploadId: "upload-1" }];
+    const cleanups = [
+      async () => {
+        throw new Error("Cleanup failed in the test.");
+      },
+    ];
+    const error = await tearDownRun({ driver: failingAbort, prefix, openUploads }, cleanups).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors.map((e: Error) => e.message)).toEqual([
+      `Could not abort: ${prefix}upload.bin (STORAGE_DENIED)`,
+      "Cleanup failed in the test.",
+    ]);
+  });
+
   it("runs the remaining cleanups when one throws synchronously, and reports it", async () => {
     const ran: string[] = [];
     const cleanups = [
