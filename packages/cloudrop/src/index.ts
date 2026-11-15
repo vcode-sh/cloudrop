@@ -1,4 +1,4 @@
-export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
+export { CloudropError, type CloudropErrorCode, type CloudropErrorOptions, type Result } from "./errors.ts";
 export type { StorageRules } from "./rules.ts";
 export type {
   CompletedPart,

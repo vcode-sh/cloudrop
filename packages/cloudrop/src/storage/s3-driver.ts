@@ -43,7 +43,10 @@ import {
 import { escapeXml, stripQuotes, xmlBlocks, xmlText } from "./xml.ts";
 
 export interface S3DriverConfig {
-  /** An http or https origin, no path, query or fragment: "https://<account>.r2.cloudflarestorage.com". */
+  /**
+   * An http or https URL with no query or fragment, such as "https://<account>.r2.cloudflarestorage.com". A path is
+   * kept as a prefix of every request.
+   */
   endpoint: string;
   region: string;
   bucket: string;

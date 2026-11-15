@@ -365,6 +365,11 @@ Every successful write also returned `x-amz-version-id`, a header that R2's docs
 | multipart (`-3`, no metadata) | default | 200; ETag became a plain 32-hex value, `x-amz-mp-parts-count` gone |
 | single-part multipart with `video/mp4`, `attachment`, `x-amz-meta-cloudrop-id` (Q15) | default | type, disposition and metadata kept. ETag `"3bff2cc4…"` = **MD5 of the content** (source was `"9e4b6fd4…-1"`) |
 
+Later, the contract's live lane (2026-11-15, after the driver added a copy guard) measured
+`x-amz-copy-source-if-match: "<HEAD's ETag>"`: R2 honours it on both CopyObject and UploadPartCopy. A matching ETag
+copies normally; a source overwritten after the HEAD answers `412`, so a multipart copy can no longer mix two source
+versions ([test-backends.md](test-backends.md)).
+
 Cost: CopyObject and UploadPartCopy are Class A. DeleteObject and AbortMultipartUpload are free ([pricing]). A
 promote is therefore one Class A + one free delete. Copy never re-transfers bytes from the client. Checksums on the
 copied object were not inspected.

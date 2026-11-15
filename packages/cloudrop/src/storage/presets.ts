@@ -11,13 +11,21 @@ export interface R2Options {
   accessKeyId?: string;
   /** Default: env CLOUDROP_R2_SECRET_ACCESS_KEY. */
   secretAccessKey?: string;
+  /** The bucket's jurisdiction, which selects its endpoint. Omit it for a bucket in the default location. */
   jurisdiction?: "eu" | "fedramp";
+  /**
+   * Where the bucket is served publicly (a custom domain or r2.dev URL, a path allowed), such as
+   * "https://cdn.example.com/files"; no query or fragment. Trailing slashes are dropped.
+   */
   publicUrl?: string;
   fetch?: FetchLike;
 }
 
 export interface S3Options {
-  /** An http or https origin without a path, such as "https://s3.us-east-1.amazonaws.com". */
+  /**
+   * An http or https URL with no query or fragment, such as "https://s3.us-east-1.amazonaws.com". A path is kept as a
+   * prefix of every request, for a service behind a proxy path.
+   */
   endpoint: string;
   region: string;
   bucket: string;

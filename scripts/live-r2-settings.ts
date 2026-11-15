@@ -1,7 +1,8 @@
 // Pure helpers of the live R2 lane script (scripts/test-live-r2.ts): reading the settings file and redacting output.
 // Nothing here prints or returns a value that was read from the file except through the redactor's counterpart.
 
-// The file may use cloudrop's names or BB_R2_* ones; both map to the variables the lane and r2() read.
+// The file may use cloudrop's names or BB_R2_* ones; both map to the variables the lane and r2() read. BB_R2_* is
+// accepted so an existing BB_R2_* credentials file can be pointed at by CLOUDROP_R2_ENV_FILE.
 export const VARIABLES: ReadonlyMap<string, string> = new Map([
   ["ACCOUNT_ID", "CLOUDROP_R2_ACCOUNT_ID"],
   ["BUCKET", "CLOUDROP_R2_BUCKET"],

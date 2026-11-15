@@ -9,9 +9,11 @@ is changed to match. One section per backend: behaviour, evidence, date.
 Lane: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts`, run by `bun run test:live`. Driver: the public
 `r2()` preset, configured from the environment. Bucket: the owner's R2 test bucket, under `live-test/cloudrop-<hex>/`.
 
-**Date:** 2026-11-15, two runs (about 30 MiB uploaded and 15 s each).
+**Date:** 2026-11-15, two runs (about 30 MiB uploaded and 15 s each), then a third run after the copy guard was added
+(16 s).
 
-**Result:** all 22 contract cases pass, none skipped. R2 declares no gap.
+**Result:** all 24 contract cases pass, none skipped (22 in the first two runs; the third added the two copy-guard
+cases). R2 declares no gap.
 
 | Behaviour | Evidence (contract case) |
 |---|---|
@@ -23,8 +25,9 @@ Lane: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts`, run by `
 | `HEAD` with `x-amz-checksum-mode: ENABLED` returns the server-computed CRC64NVME (`rosUhgp5mIg=` for `123456789`) | "reports the CRC64NVME the storage computed" |
 | A list prefix with a space, `+` and `%` lists exactly the matching key | "handles keys and prefixes with spaces, plus signs, percent signs and Unicode" |
 | **An `x-amz-meta-*` header the presigned PUT did not sign: `403 SignatureDoesNotMatch`, nothing stored** | "answers a presigned PUT carrying an unsigned metadata header…" |
+| `x-amz-copy-source-if-match` with HEAD's quoted ETag is honoured on `CopyObject` and on `UploadPartCopy`: a matching ETag copies, and a source overwritten after HEAD answers `412`, which the driver reports as a retryable `STORAGE_ERROR` (third run) | "fails a single copy cleanly…", "fails a copy in ranged parts cleanly…"; the two ordinary copy cases send the same header and pass |
 
-The last row is the only difference from the fake found so far (below). Teardown deleted everything: a separate
+The unsigned-metadata row is the only difference from the fake found so far (below). Teardown deleted everything: a separate
 read-only listing of `live-test/` after both runs returned 0 objects and 0 multipart uploads.
 
 ## RustFS (container lane)
@@ -33,7 +36,8 @@ Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run 
 (`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label `cloudrop.test`, removed by a
 `trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
 
-**Date:** 2026-11-15. **Result:** 19 of 22 contract cases pass, 3 skip on declared gaps. The suite takes about 1 s.
+**Date:** 2026-11-15. **Result:** 21 of 24 contract cases pass, 3 skip on declared gaps (19 of 22 before the copy-guard
+cases were added). The suite takes about 1 s.
 
 | Behaviour | Measured answer |
 |---|---|
@@ -46,6 +50,7 @@ Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run 
 | `If-None-Match: *` on completion, key exists | `412 PreconditionFailed`, the existing object survives. The upload is **kept** (ListParts still lists the part) and a second completion without the condition overwrites the key |
 | Completing a finished upload again | Succeeds. Gap `finishedUploadsLinger` (R2 answers `NoSuchUpload`) |
 | `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
+| `x-amz-copy-source-if-match` on `CopyObject` and `UploadPartCopy` | Honoured as R2: a changed source answers `412`. No gap |
 
 The contract's `NoSuchUpload` expectations after completion are R2 behaviour; AWS-style backends keep the ID, which is
 why they are a declared gap, not a driver bug: the driver maps whatever the backend answers.
@@ -58,11 +63,12 @@ Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, ru
 `http://127.0.0.1:<port>/cdn-cgi/local/r2/s3` (experimental, `local_dev.experimental_s3_credentials`). Driver:
 `createS3Driver` with `R2_RULES`, region `auto`, path-style bucket `contract`.
 
-**Date:** 2026-11-15. **Result:** 16 of 22 contract cases pass, 6 skip on declared gaps. The suite takes under 1 s.
+**Date:** 2026-11-15. **Result:** 16 of 24 contract cases pass, 8 skip on declared gaps (16 of 22 and 6 skips before the
+copy guard). The suite takes under 1 s.
 
 | Behaviour | Measured answer |
 |---|---|
-| Endpoint with a path prefix | The signature covers the prefix, so the driver keeps it in every URL. `x-amz-copy-source` stays `/bucket/key` without it (driver change in this task, unit-tested) |
+| Endpoint with a path prefix | The signature covers the prefix, so the driver keeps it in every URL. `x-amz-copy-source` stays `/bucket/key` without it; `s3-driver.test.ts` pins both |
 | Expired presigned URL | `403 ExpiredRequest`, as R2. No gap |
 | Unsigned `x-amz-meta-*` on a presigned PUT | `200`, the header is **stored** as object metadata (R2: `403 SignatureDoesNotMatch`). Lane field `unsignedMetaOnPresignedPut: "stored"` |
 | Last part larger than the first | Refused, but as `404 NoSuchUpload`, not `InvalidPart`; the upload survives and completes once the part is replaced. Lane field `unequalPartsCode: "NO_SUCH_UPLOAD"`. Real R2 and the fake enforce the same rule; Wrangler's `NoSuchUpload` makes it a weaker oracle for the error code, though the repair-and-complete half of the case still holds |
@@ -72,9 +78,10 @@ Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, ru
 | `If-None-Match: *` on completion, key exists | Ignored: the completion succeeds and overwrites the key (R2 and RustFS: `412`). Gap `conditionalCompletion` |
 | `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
 | Completing a finished upload again | `404 NoSuchUpload` as R2. No gap |
+| `x-amz-copy-source-if-match` | Honoured on `CopyObject` (a changed source answers `412`). An `UploadPartCopy` carrying it answers `501 NotImplemented`; the same request without the header succeeds (measured by sending the parts without it). Gap `copyPartPrecondition`: both multipart-copy cases skip |
 
-Wrangler is therefore a check of the equal-part rule and presigned SigV4 only; resume by ListParts and checksums are
-covered by RustFS and real R2.
+Wrangler is therefore a check of the equal-part rule and presigned SigV4 only; resume by ListParts, checksums and
+multipart copy are covered by RustFS and real R2.
 
 ## In-process fake R2
 
@@ -83,3 +90,13 @@ covered by RustFS and real R2.
 - **Unsigned `x-amz-meta-*` on a presigned PUT** (2026-11-15): the fake used to store it like a signed header. It now
   answers `403 SignatureDoesNotMatch`, as real R2 does.
 - It does not compute CRC64NVME, so that case skips on the fake with that reason.
+- `x-amz-copy-source-if-match` on `CopyObject` and `UploadPartCopy`: a value that does not match the source's ETag
+  (quotes ignored) answers `412 PreconditionFailed`. Modelled on S3's documentation, then confirmed on real R2 by the
+  live lane.
+
+Rules the fake models on S3's documented behaviour that were **not measured on R2**, so a lane that disagrees wins:
+
+- Aborting with an upload ID that belongs to another key answers `204` and leaves the upload open.
+- An `x-amz-copy-source-range` that is malformed, reversed or past the source's end answers `400 InvalidArgument`.
+- A reversed range on GET (`bytes=5-2`) answers `416 InvalidRange`.
+- A query sent with `+` where `%20` was signed (or the reverse) fails the signature: S3 reads `+` as a literal plus.

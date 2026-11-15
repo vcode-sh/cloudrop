@@ -58,6 +58,7 @@ export interface ListedObject {
   uploadedAt: Date;
 }
 
+/** Implemented by cloudrop's presets, r2() and s3(); its methods may change before 1.0. */
 export interface StorageDriver {
   readonly rules: StorageRules;
   readonly publicUrl?: string;
@@ -87,14 +88,19 @@ export interface StorageDriver {
   getRange(key: string, start: number, end: number): Promise<Result<Uint8Array>>;
   /**
    * Single PUT, up to `rules.maxSinglePutSize`. A Blob is streamed to the storage, never read into memory, so its
-   * payload is signed as UNSIGNED-PAYLOAD; other bodies are signed with their SHA-256.
+   * payload is signed as UNSIGNED-PAYLOAD; other bodies are signed with their SHA-256. Without `options.type`, a Blob's
+   * own `type` becomes the stored content type.
    */
   put(
     key: string,
     body: Uint8Array<ArrayBuffer> | ArrayBuffer | string | Blob,
     options?: WriteOptions,
   ): Promise<Result<{ etag: string }>>;
-  /** Server-side copy that keeps type, disposition and metadata; multipart copy above the single-PUT limit. */
+  /**
+   * Server-side copy that keeps type, disposition and metadata; multipart copy above the single-PUT limit. Every copy
+   * request is conditional on the source's ETag, so a source overwritten during the copy fails it with a retryable
+   * STORAGE_ERROR instead of mixing two versions.
+   */
   copy(from: string, to: string): Promise<Result<{ etag: string }>>;
   /** Idempotent: deleting a missing key succeeds. */
   delete(key: string): Promise<Result<void>>;

@@ -90,7 +90,9 @@ Internal modules, each testable on its own and reachable only through its interf
 Metadata schemas use Standard Schema, so users bring zod, valibot or arktype and cloudrop depends on none.
 
 Repository: Bun workspaces with `packages/cloudrop`, `packages/registry` (shadcn components), `apps/docs`,
-`examples/{next,hono,workers,vite-react}` and `test/contract`.
+`examples/{next,hono,workers,vite-react}`. Tests sit next to the source they test; the storage contract suite is
+`packages/cloudrop/src/testing/storage-contract.ts`, run by one colocated lane file per backend
+(`src/storage/s3-driver.*.test.ts`).
 
 ## 4. Server API
 
@@ -288,9 +290,9 @@ A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpl
 | `getUrl(key, { expiresIn, download })` | Public domain: plain URL. Private: presigned GET whose expiry is rounded to a time window, so every viewer in that window gets an identical, cacheable URL. `download` sets the filename. |
 | `head(key)` | `{ size, type, etag, uploadedAt, metadata }`; `null` only on 404. Network errors are errors, never "not found". |
 | `put(key, body, { type })` | Small server-side upload (Blob, ArrayBuffer, string) up to the single-PUT limit. |
-| `delete(key)`, `deleteMany(keys)` | Batches of 1,000 with per-key results `{ deleted, failed[] }`. |
+| `delete(key)`, `deleteMany(keys)` | Any number of keys, one DeleteObject request per key, 16 at a time, with per-key results `{ deleted, failed[] }`. |
 | `copy(from, to)` | Server-side; `UploadPartCopy` above 5 GiB. |
-| `deletePrefix(prefix)` | Deletes page by page, re-lists to prove nothing remains, returns the proof. For erasure requests. |
+| `deletePrefix(prefix)` | Deletes page by page (one request per key, through `deleteMany`), re-lists to prove nothing remains, returns the proof. For erasure requests. |
 | `checkBucket()` | Report on CORS (`ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. |
 
 ## 10. Lessons carried over from earlier implementations
@@ -301,8 +303,8 @@ Audits of two private production codebases informed these rules (findings kept o
 - Sign `content-type`; an unsigned type lets a valid URL upload HTML to a public domain.
 - Make single PUTs create-only (`If-None-Match: *`); otherwise a URL can overwrite the object until it expires.
 - Reserve quota at signing time; checking it only at signing allows overshoot until completion.
-- `exists`/`head` must not map network errors to "not found"; `deleteMany` must report per-key errors and batch over
-  1,000.
+- `exists`/`head` must not map network errors to "not found"; `deleteMany` must report per-key errors and accept any
+  number of keys (cloudrop sends one request per key, so there is no 1,000-key batch limit).
 - Do not sign every part URL up front; sign lazily in batches with short expiry.
 - Parallelize parts within a file; one-at-a-time parts leave most of the bandwidth unused.
 - Retries need jitter and `Retry-After`; an expired R2 URL surfaces as a CORS error, not a readable 403.
@@ -313,7 +315,7 @@ Audits of two private production codebases informed these rules (findings kept o
 
 1. **Unit (Vitest):** state machine and scheduler under a fake clock; part planner with property tests; SigV4 signer
    against AWS's published test vectors; token encode, verify and rotation.
-2. **Contract:** one suite in `test/contract` run against an in-process fake encoding R2's rules (every commit), the
+2. **Contract:** one suite (`src/testing/storage-contract.ts`, colocated lane files) run against an in-process fake encoding R2's rules (every commit), the
    Wrangler local S3 endpoint and RustFS (every pull request), and a real R2 bucket (nightly and before every release,
    with a dedicated bucket and CI-only credentials).
 3. **Chaos:** a fault-injecting proxy (dropped connections, 429, 503, latency, truncated responses, expired URLs). A

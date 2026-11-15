@@ -47,9 +47,10 @@ async function deriveSigningKey(secretAccessKey: string, day: string, region: st
 }
 
 // The signing key only changes with the UTC day, region or secret, so a multipart upload derives it once instead of
-// once per part (bun, 5000 presigns: 25.8 us each reusing one credentials object, 53.2 us with a new one each call; first measured 23.6 vs 54.9). The cache hangs
-// off the caller's credentials object, so it dies with it and no module-wide map ever holds a secret; the secret it
-// was derived from is kept beside the keys only to notice a secret changed in place.
+// once per part. Measured on Bun, 5000 presigns: 25.8 us each reusing one credentials object, 53.2 us with a new one
+// per call (an earlier run: 23.6 vs 54.9). The cache hangs off the caller's credentials object, so it dies with it and
+// no module-wide map ever holds a secret; the secret it was derived from is kept beside the keys only to notice a
+// secret changed in place.
 interface CachedKeys {
   secretAccessKey: string;
   byScope: Map<string, Promise<CryptoKey>>;
