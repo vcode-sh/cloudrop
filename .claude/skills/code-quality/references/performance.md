@@ -14,7 +14,7 @@ Hot paths: SigV4 signing and presigning, checksums, part planning, the upload sc
 | MUST | No per-byte allocation: process buffers as `Uint8Array` views (`subarray`), never one object or string per byte or per chunk when a view works. |
 | MUST | Derive the SigV4 signing key once per credential, date, region and service, not per request. |
 | MUST | Independent awaits run together (`Promise.all`); sequential `await` only when the second needs the first. Part uploads are bounded by the scheduler's concurrency, never an unbounded `Promise.all` over every part. |
-| MUST | Every outbound call can be aborted: accept an `AbortSignal`, and give storage calls a default timeout. |
+| MUST | Every outbound call has a timeout. Whether a public call also accepts a caller `AbortSignal` is decided per public API, not by default. |
 | MUST | Stream or slice large bodies; never read a whole multi-GiB `File` or response into memory. |
 | SHOULD | Prefer `crypto.subtle` for hashes it provides (SHA-256). CRC32C runs in JavaScript; it was measured at about 916 MiB/s (spec section 11.1), so do not rewrite it without a new measurement. |
 | SHOULD | A table or cache earns its place with a measurement and a comment naming the case it speeds up. |

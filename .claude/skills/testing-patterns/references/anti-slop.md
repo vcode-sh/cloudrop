@@ -18,7 +18,7 @@ least the minimum), not the number.
 // before
 expect(MIN_PART_SIZE).toBe(5 * 1024 * 1024);
 // after: the behaviour on an input is the oracle
-expect(planParts({ size: 11 * MiB, partSize: 5 * MiB }).map((p) => p.size)).toEqual([5 * MiB, 5 * MiB, 1 * MiB]);
+expect(planParts(11 * MiB, R2_RULES)).toMatchObject({ partCount: 2, lastPartSize: 3 * MiB });
 ```
 
 **A3 Mocking your own module.** The test proves the mock, not the signer.
@@ -26,9 +26,9 @@ expect(planParts({ size: 11 * MiB, partSize: 5 * MiB }).map((p) => p.size)).toEq
 ```ts
 // before
 vi.mock("./sigv4", () => ({ signRequest: () => ({ authorization: "x" }) }));
-// after: the real signer, an injected clock, an AWS published vector as the oracle
-const signed = await signRequest(vectorRequest, { credentials, now: () => VECTOR_TIME });
-expect(signed.headers.authorization).toBe(VECTOR_AUTHORIZATION);
+// after: the real signer, a fixed `date`, an AWS published vector as the oracle
+const headers = await signRequest({ ...vectorInput, payloadHash: VECTOR_PAYLOAD_HASH });
+expect(headers.authorization).toBe(VECTOR_AUTHORIZATION);
 ```
 
 **A5 Execution only.** "Does not throw" and "is defined" pass for a driver that does nothing.
@@ -38,8 +38,12 @@ expect(signed.headers.authorization).toBe(VECTOR_AUTHORIZATION);
 expect(await driver.put("a/b", bytes)).toBeDefined();
 // after: observe the effect through the same contract
 await driver.put("a/b", bytes);
-expect(await driver.head("a/b")).toMatchObject({ size: bytes.byteLength });
+expect((await driver.head("a/b")).data).toMatchObject({ size: bytes.byteLength });
 ```
+
+**A6 Snapshots.** `toMatchSnapshot()` writes files nobody reviews. `toMatchInlineSnapshot()` is the same smell unless
+the value is a small literal a reviewer reads in the diff (a short error object, not a presigned URL); re-recording
+either one to turn a test green is A12.
 
 **Bare `toThrow()`: any error passes, including a `TypeError` from a bug.**
 

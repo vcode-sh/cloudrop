@@ -6,11 +6,11 @@ checked here. Re-check [V] and [T] lines after a Vitest upgrade. Tests run on No
 
 ## Lanes by config
 
-- Default `include` is `**/*.{test,spec}.?(c|m)[jt]s?(x)` [T]. The unit config excludes `**/*.integration.test.ts`;
-  each backend lane uses its own config (or `--config`) whose `include` is only `*.integration.test.ts` [V: a config
-  with that include ran the integration file and not the unit file].
-- A lane that selects no files exits 1 (`passWithNoTests` is off) [V]. Keep it that way: an empty lane must not look
-  green.
+- Lanes are Vitest `projects` with their own `include`/`exclude` (see repository.md); `--project <name>` picks one.
+  [V: a config whose `include` matched only the integration file ran it and not the unit file; the `projects` form
+  and `--project` are unverified here, they come from the repo's config.]
+- With no matching files Vitest exits 1 unless `passWithNoTests` is set [V]. The unit script sets it so the lane is
+  green before the first test exists; backend lane scripts must not, so an empty lane never looks green.
 - A throwing `beforeAll` fails the file and the run exits 1 [V]; its tests are counted as skipped in the summary,
   but the run is red. This is how a backend lane fails with "set X to run this lane".
 - Do not set `retry` (default 0) [T]. `allowOnly` defaults to `!process.env.CI` [T], so a stray `.only` is

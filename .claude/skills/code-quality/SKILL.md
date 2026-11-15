@@ -10,12 +10,14 @@ is a promise under semver, and every byte and dependency lands in someone else's
 
 ## The owner's rules (binding)
 
-> 1. Everything created here must be human friendly — code, APIs (function names, inputs, outputs, errors), docs, CLI
+> 1. Everything created here must be human friendly — code, APIs (endpoint/procedure names, inputs, outputs, errors), docs, CLI
 >    output, error messages.
 > 2. Agents reviewing code must simplify when the same result is achievable with less code: if 200 lines can be done
 >    in fewer while keeping full functionality, performance and the newest standards, agents always optimize
 >    (simplify) their code.
 > 3. Code quality and performance per 2026 best practice.
+
+In cloudrop, "APIs" means function names, options, results and `CloudropError`.
 
 ## What the tools already own
 
@@ -87,4 +89,5 @@ TypeScript idioms: [references/typescript.md](references/typescript.md). Tests: 
 | "The extra check is defensive." | A check for a state the types exclude is noise that hides the real checks. |
 | "We might need this option later." | Then add it later. An exported option cannot be taken back. |
 | "Fewer lines is always simpler." | Fewer concepts is simpler. Golf fails review. |
+| "The helper avoids duplication." | Two callers do not justify an abstraction; the wrong one costs more than the copy. |
 | "The message is for developers." | People read `message`. Developers get `code`, `retryable` and logs. |

@@ -50,8 +50,9 @@ valid outcome. Prefer extending the owning test over adding a near-duplicate.
   examples. Keep a shrunk counterexample as a literal case.
 - When it is not obvious that an assertion can go red, **prove it**: break the code with a one-line fault probe, watch
   the test fail, restore. Procedure in anti-slop.md.
-- Failure messages must say what broke: descriptive test names, `test.each` rows with `$name` titles, and
-  `expect(list.filter(isWrong)).toEqual([])` instead of `expect` inside a loop.
+- Tests never depend on another test's state or order.
+- Failure messages must say what broke: descriptive names, `test.each` `$name` titles, and
+  `expect(list.filter(isWrong)).toEqual([])` instead of `expect` in a loop.
 
 ## Never write
 

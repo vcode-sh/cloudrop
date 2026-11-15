@@ -42,7 +42,7 @@ Applies to every message a person reads: `CloudropError.message`, thrown configu
 
 | Level | Rule |
 | --- | --- |
-| MUST | One or two plain sentences: what went wrong **and what to do next**. No jargon, no implementation detail. Good: `"The upload expired. Start the upload again."` Bad: `"InvalidPart"`, `"Something went wrong"`. |
+| MUST | One or two plain sentences: what went wrong **and what to do next**. No jargon, no implementation detail. Good: `"The R2 accountId is missing. Pass it to r2() or set CLOUDROP_R2_ACCOUNT_ID."` (the plan's config error) Bad: `"InvalidPart"`, `"Something went wrong"`. |
 | MUST | Programs branch on the stable `code`, `retryable` and typed fields, never on message text, so a message can be reworded freely. |
 | MUST | No credentials, signed URLs, raw storage response bodies or server file paths in a message. The storage service's own code goes into `storageCode` for logs only. |
 | SHOULD | A configuration error names the option and the fix (`"bucket is empty. Pass the bucket name: r2({ bucket })."`) and is thrown at construction as `INVALID_CONFIG`, not on the first request. |

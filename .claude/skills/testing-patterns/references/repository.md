@@ -15,15 +15,17 @@ never use Bun's built-in runner. Import `describe`, `test`, `expect`, `vi`, `bef
 | `scripts/test-rustfs.sh` | Contract lane against RustFS in Docker, with guaranteed teardown. |
 | `scripts/test-wrangler.sh` | Contract lane against Wrangler's local R2 endpoint, with guaranteed teardown. |
 | `bun run test:live` | Contract lane against a real R2 bucket; reads credentials from the file named by `CLOUDROP_R2_ENV_FILE`. |
-| `bun run check`, `bun run typecheck` | Gates. Test files are type-checked with `src`; Vitest does not type-check. |
+| `bun run check`, `bun run typecheck` | Gates. `typecheck` runs `tsc` twice: `tsconfig.json` (library source, no Node types) and `packages/cloudrop/tsconfig.test.json` (tests, configs and Node types). Vitest does not type-check. |
 
 The lane script names come from the M1 plan; if one differs in the tree, the tree wins. Argument forwarding to
 `vitest run` is expected from `bun run` but unverified until the scripts exist.
 
 ## Lanes
 
-- **The lane is chosen by filename.** The unit config includes `*.test.ts` and excludes `*.integration.test.ts`; each
-  backend lane runs only `*.integration.test.ts` through its own script. See vitest.md for how the selection works.
+- **The lane is chosen by filename.** `packages/cloudrop/vitest.config.ts` defines two Vitest projects: `unit`
+  (`src/**/*.test.ts` minus `*.integration.test.ts`) and `integration` (only `*.integration.test.ts`, longer timeouts
+  for live services). `bun run test` runs `vitest run --project unit --passWithNoTests`; backend lane scripts select
+  `--project integration`. See vitest.md.
 - **A lane whose service or credentials are missing fails, never skips.** Check the prerequisite in `beforeAll` and
   throw a message that names what to set (`CLOUDROP_R2_ENV_FILE`, "start Docker", …). A throwing `beforeAll` fails the
   file and the run.
