@@ -49,7 +49,7 @@ export type CompleteContext<TAuth, TMetadata> = Omit<Jsonified<TAuth>, ReservedN
   request: Request;
   file: UploadedFile;
   /** undefined on a route without a schema, and possibly undefined when the schema's output can be. */
-  metadata: undefined extends TMetadata ? Jsonified<Exclude<TMetadata, undefined>> | undefined : Jsonified<TMetadata>;
+  metadata: Jsonified<TMetadata> | (undefined extends TMetadata ? undefined : never);
 };
 
 /** What `/complete` sends as `data`: the JSON form of the result, and null where `onComplete` gave undefined or nothing. */

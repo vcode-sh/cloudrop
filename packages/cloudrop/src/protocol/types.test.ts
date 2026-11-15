@@ -4,11 +4,10 @@
 import { describe, expectTypeOf, it } from "vitest";
 import type { InferableCloudrop, Jsonified, RouteMetadata, RouteName, RouteResult } from "./types.ts";
 
-interface Server
-  extends InferableCloudrop<{
-    avatar: { metadata: { albumId: string }; result: { url: string } };
-    notes: { metadata: undefined; result: null };
-  }> {}
+type Server = InferableCloudrop<{
+  avatar: { metadata: { albumId: string }; result: { url: string } };
+  notes: { metadata: undefined; result: null };
+}>;
 
 describe("Jsonified", () => {
   it("is what JSON.stringify and JSON.parse make of a value", () => {

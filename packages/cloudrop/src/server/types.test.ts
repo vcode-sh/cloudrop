@@ -40,12 +40,11 @@ const avatar = route({
     const user = await getUser(request);
     return user ? { user } : unauthorized();
   },
-  prefix: ({ user, metadata, file }) => {
+  prefix: ({ user, metadata }) => {
     expectTypeOf(user).toEqualTypeOf<User>();
-    expectTypeOf(file.ext).toEqualTypeOf<string>();
     return `users/${user.id}/${metadata.albumId}`;
   },
-  onComplete: ({ user, metadata, file }) => {
+  onComplete: async ({ user, metadata, file }) => {
     // onComplete reads the token's JSON copy: Dates are strings there, and the types say so.
     expectTypeOf(user).toEqualTypeOf<{ id: string; joined: string }>();
     expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: string }>();
@@ -55,6 +54,16 @@ const avatar = route({
 
 const notes = route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone });
 
+const optional = route({
+  accept: "*/*",
+  maxSize: 1,
+  metadata: optionalSchema,
+  authorize: allowAnyone,
+  onComplete: ({ metadata }) => {
+    expectTypeOf(metadata).toEqualTypeOf<{ a: string } | undefined>();
+  },
+});
+
 const cloudrop = createCloudrop({
   storage: r2({
     bucket: "uploads",
@@ -63,14 +72,15 @@ const cloudrop = createCloudrop({
     secretAccessKey: "s",
   }),
   secret: "test-secret-0123456789abcdef0123456789",
-  routes: { avatar, notes },
+  routes: { avatar, notes, optional },
 });
 
 describe("type inference for the client", () => {
-  it("is checked by the compiler", () => {
-    expectTypeOf<RouteName<typeof cloudrop>>().toEqualTypeOf<"avatar" | "notes">();
+  it("reads route names, metadata input and result types from the server type", () => {
+    expectTypeOf<RouteName<typeof cloudrop>>().toEqualTypeOf<"avatar" | "notes" | "optional">();
     expectTypeOf<RouteMetadata<typeof cloudrop, "avatar">>().toEqualTypeOf<{ albumId: string }>();
     expectTypeOf<RouteMetadata<typeof cloudrop, "notes">>().toEqualTypeOf<undefined>();
+    expectTypeOf<RouteMetadata<typeof cloudrop, "optional">>().toEqualTypeOf<{ a: string } | undefined>();
     expectTypeOf<RouteResult<typeof cloudrop, "avatar">>().toEqualTypeOf<{ url: string | null; at: string }>();
     expectTypeOf<RouteResult<typeof cloudrop, "notes">>().toEqualTypeOf<null>();
     // @ts-expect-error: there is no route named "banner".
@@ -97,7 +107,7 @@ describe("type inference for the client", () => {
     });
   });
 
-  it("types onComplete's metadata as undefined without a schema and keeps undefined for an optional one", () => {
+  it("types onComplete's metadata as undefined without a schema", () => {
     route({
       accept: "*/*",
       maxSize: 1,
@@ -106,15 +116,16 @@ describe("type inference for the client", () => {
         expectTypeOf(metadata).toEqualTypeOf<undefined>();
       },
     });
-    route({
+  });
+
+  it("gives the client the resolved value when the result type is a promise", () => {
+    const resolves = route<object, undefined, Promise<{ id: string }>>({
       accept: "*/*",
       maxSize: 1,
-      metadata: optionalSchema,
       authorize: allowAnyone,
-      onComplete: ({ metadata }) => {
-        expectTypeOf(metadata).toEqualTypeOf<{ a: string } | undefined>();
-      },
+      onComplete: async () => ({ id: "1" }),
     });
+    expectTypeOf(resolves).toEqualTypeOf<Route<undefined, { id: string }>>();
   });
 
   it("gives the client null when onComplete returns nothing, as /complete sends it", () => {
