@@ -1,0 +1,19 @@
+{
+  "name": "cloudrop-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "typecheck": "bun run --filter cloudrop typecheck",
+    "test": "bun run --filter cloudrop test",
+    "build": "bun run --filter cloudrop build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.7"
+  }
+}

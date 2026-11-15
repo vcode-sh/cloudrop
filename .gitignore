@@ -7,3 +7,6 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+
+.wrangler/
+packages/cloudrop/fixtures/wrangler/.state/
