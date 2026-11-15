@@ -24,13 +24,14 @@ describeStorageContract("live R2", async () => {
     // The public preset, built the way an application builds it: everything but the bucket comes from the environment.
     driver: r2({ bucket }),
     // Presets expose neither the clock nor the rules, so variants use the driver r2() wraps, on the same endpoint.
-    driverWith: ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize }) =>
+    driverWith: ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize, fetch }) =>
       createS3Driver({
         endpoint: `https://${env.CLOUDROP_R2_ACCOUNT_ID.toLowerCase()}.r2.cloudflarestorage.com`,
         region: "auto",
         bucket,
         credentials: { accessKeyId: env.CLOUDROP_R2_ACCESS_KEY_ID, secretAccessKey: env.CLOUDROP_R2_SECRET_ACCESS_KEY },
         rules: { ...R2_RULES, maxSinglePutSize },
+        fetch,
         now: () => new Date(Date.now() - secondsAgo * 1000),
       }),
     prefix: randomPrefix("live-test/"),

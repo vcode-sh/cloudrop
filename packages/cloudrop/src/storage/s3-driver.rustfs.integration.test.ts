@@ -1,7 +1,7 @@
 // The storage contract against a disposable RustFS container (S3-compatible, Apache-2.0). Run it with
 // `scripts/test-rustfs.sh`, which starts the container, sets CLOUDROP_RUSTFS_ENDPOINT and removes the container.
 import { S3_RULES } from "../rules.ts";
-import { describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
+import { type ContractTarget, describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
 import { createS3Driver } from "./s3-driver.ts";
 import { EMPTY_SHA256, signRequest } from "./sigv4.ts";
 
@@ -34,13 +34,18 @@ describeStorageContract("RustFS", async () => {
     );
   }
   await ensureBucket(endpoint);
-  const driverWith = ({ secondsAgo = 0, maxSinglePutSize = S3_RULES.maxSinglePutSize }) =>
+  const driverWith: ContractTarget["driverWith"] = ({
+    secondsAgo = 0,
+    maxSinglePutSize = S3_RULES.maxSinglePutSize,
+    fetch,
+  }) =>
     createS3Driver({
       endpoint,
       region,
       bucket,
       credentials,
       rules: { ...S3_RULES, maxSinglePutSize },
+      fetch,
       now: () => new Date(Date.now() - secondsAgo * 1000),
     });
   return {

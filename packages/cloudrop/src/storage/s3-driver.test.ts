@@ -531,6 +531,28 @@ describe("createS3Driver", () => {
     expect(aborted).toEqual(["u1"]);
   });
 
+  it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, FetchLike]>([
+    [
+      "completion",
+      (driver) => driver.completeMultipart("a.txt", "u", [{ partNumber: 1, etag: "e" }]),
+      stubbed(async () => new Response("<CompleteMultipartUploadResult></CompleteMultipartUploadResult>")),
+    ],
+    [
+      "single copy",
+      (driver) => driver.copy("a.txt", "b.txt"),
+      copyStub(
+        5,
+        stubbed(async () => new Response("<CopyObjectResult></CopyObjectResult>")),
+      ),
+    ],
+  ])("reports a successful %s without an ETag as a retryable storage error", async (_name, call, fetch) => {
+    expect((await call(driverWith(fetch))).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no ETag. Retry the request.",
+    });
+  });
+
   it("reports a truncated object list without a continuation token instead of ending early", async () => {
     const truncated = stubbed(
       async () => new Response("<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>"),
@@ -618,7 +640,7 @@ describe("createS3Driver", () => {
     expect(markers).toEqual(["0", "1000"]);
   });
 
-  it("completes with the parts in ascending order and their ETags escaped", async () => {
+  it("completes with the parts in ascending order and their ETags escaped and quoted once", async () => {
     let sent = "";
     const capture: FetchLike = async (_input, init) => {
       sent = new TextDecoder().decode(init?.body as Uint8Array);
@@ -626,7 +648,8 @@ describe("createS3Driver", () => {
     };
     const parts = [
       { partNumber: 2, etag: "b&" },
-      { partNumber: 1, etag: "a<" },
+      // As a browser reads it from the part's ETag response header, quotes included.
+      { partNumber: 1, etag: '"a<"' },
     ];
     expect((await driverWith(capture).completeMultipart("a", "u", parts)).data).toEqual({ etag: "x-2" });
     expect(sent).toBe(

@@ -404,6 +404,9 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
         ? objects.get(sourceSegments.map(decodeURIComponent).join("/"))
         : undefined;
     if (!source) return errorResponse(404, "NoSuchKey", "The copy source does not exist.");
+    // Modelled on S3's documented CopyObject and UploadPartCopy precondition.
+    const ifMatch = headers.get("x-amz-copy-source-if-match");
+    if (ifMatch !== null && stripQuotes(ifMatch) !== source.etag) return preconditionFailed();
     if (query.has("uploadId")) {
       const upload = findUpload(key, query);
       if (!upload) return noSuchUpload();

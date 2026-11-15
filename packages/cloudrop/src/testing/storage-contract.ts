@@ -29,8 +29,11 @@ type Gap =
 export interface ContractTarget {
   /** The driver every case uses, built the way an application builds it (the public preset where there is one). */
   driver: StorageDriver;
-  /** A variant driver: `secondsAgo` moves its signing clock back, `maxSinglePutSize` lowers that rule. */
-  driverWith(options: { secondsAgo?: number; maxSinglePutSize?: number }): StorageDriver;
+  /**
+   * A variant driver: `secondsAgo` moves its signing clock back, `maxSinglePutSize` lowers that rule, `fetch` replaces
+   * its transport (default: the lane's own).
+   */
+  driverWith(options: { secondsAgo?: number; maxSinglePutSize?: number; fetch?: FetchLike }): StorageDriver;
   /** Made by randomPrefix, which the suite checks: teardown deletes everything under it and nothing else. */
   prefix: string;
   /** Sends presigned requests the way a browser would. */
@@ -460,6 +463,32 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       expect((await driver.getRange(key("big-copy.bin"), size - 2, size + 1)).data).toEqual(
         body.slice(size - 2, size + 2),
       );
+    });
+
+    it.each([
+      { name: "a single copy", inParts: false },
+      { name: "a copy in ranged parts", inParts: true },
+    ])("fails $name cleanly when the source is overwritten after it was read", async ({ inParts }) => {
+      const from = key(`changing-${inParts ? "parts" : "single"}.bin`);
+      const to = key(`changing-${inParts ? "parts" : "single"}-copy.bin`);
+      const size = inParts ? partSize() + 1024 : 16;
+      expect((await driver.put(from, offsetBytes(size))).error).toBeNull();
+      // Same size, other bytes: only the ETag tells the two versions apart.
+      const overwriteAfterHead: FetchLike = async (input, init) => {
+        const response = await target.http(input, init);
+        if (init?.method === "HEAD") expect((await driver.put(from, new Uint8Array(size))).error).toBeNull();
+        return response;
+      };
+      const copier = target.driverWith({
+        fetch: overwriteAfterHead,
+        maxSinglePutSize: inParts ? partSize() : undefined,
+      });
+      expect((await copier.copy(from, to)).error).toMatchObject({
+        code: "STORAGE_ERROR",
+        retryable: true,
+        message: "The object to copy changed during the copy. Retry the copy.",
+      });
+      expect((await driver.head(to)).data).toBeNull();
     });
 
     it("lists by prefix in pages and deletes many keys with per-key results", async () => {

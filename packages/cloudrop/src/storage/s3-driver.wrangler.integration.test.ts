@@ -1,7 +1,7 @@
 // The storage contract against Wrangler's local R2 S3 endpoint (experimental). Run it with `scripts/test-wrangler.sh`,
 // which starts Wrangler, sets CLOUDROP_WRANGLER_ENDPOINT and stops Wrangler.
 import { R2_RULES } from "../rules.ts";
-import { describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
+import { type ContractTarget, describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
 import { createS3Driver } from "./s3-driver.ts";
 
 const credentials = { accessKeyId: "cloudrop-local", secretAccessKey: "cloudrop-local-secret" };
@@ -13,13 +13,18 @@ describeStorageContract("Wrangler local R2", async () => {
       "CLOUDROP_WRANGLER_ENDPOINT is not set. Run scripts/test-wrangler.sh, which starts Wrangler and sets it.",
     );
   }
-  const driverWith = ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize }) =>
+  const driverWith: ContractTarget["driverWith"] = ({
+    secondsAgo = 0,
+    maxSinglePutSize = R2_RULES.maxSinglePutSize,
+    fetch,
+  }) =>
     createS3Driver({
       endpoint,
       region: "auto",
       bucket: "contract",
       credentials,
       rules: { ...R2_RULES, maxSinglePutSize },
+      fetch,
       now: () => new Date(Date.now() - secondsAgo * 1000),
     });
   return {

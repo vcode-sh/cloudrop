@@ -20,14 +20,14 @@ describeStorageContract("in-process fake R2", async (onCleanup) => {
   return {
     // The public preset, as the live R2 lane uses it.
     driver: r2({ bucket, accountId, ...credentials, fetch: fake.fetch }),
-    driverWith: ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize }) =>
+    driverWith: ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize, fetch = fake.fetch }) =>
       createS3Driver({
         endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
         region: "auto",
         bucket,
         credentials,
         rules: { ...R2_RULES, maxSinglePutSize },
-        fetch: fake.fetch,
+        fetch,
         now: () => new Date(Date.now() - secondsAgo * 1000),
       }),
     prefix: randomPrefix("contract/"),

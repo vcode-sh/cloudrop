@@ -102,6 +102,16 @@ function incompleteResponse(missing: string): CloudropError {
   });
 }
 
+/** Every copy request names the ETag HEAD read, so a 412 means the source was overwritten after that. */
+function copyError(error: CloudropError): CloudropError {
+  if (error.status !== 412) return error;
+  return new CloudropError("STORAGE_ERROR", "The object to copy changed during the copy. Retry the copy.", {
+    status: 412,
+    storageCode: error.storageCode,
+    retryable: true,
+  });
+}
+
 function readObjectInfo(key: string, headers: Headers): ObjectInfo {
   const metadata: Record<string, string> = {};
   headers.forEach((value, name) => {
@@ -299,7 +309,11 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
     return uploadId ? ok({ uploadId }) : fail(incompleteResponse("upload ID"));
   }
 
-  async function copyInParts(source: ObjectInfo, copySource: string, to: string): Promise<Result<{ etag: string }>> {
+  async function copyInParts(
+    source: ObjectInfo,
+    copyHeaders: Record<string, string>,
+    to: string,
+  ): Promise<Result<{ etag: string }>> {
     // The largest part one request may carry: a server-side copy streams nothing through us, so fewer requests win.
     // Equal parts with a smaller last one also satisfy R2's equal-part rule by construction.
     const partSize = rules.maxSinglePutSize;
@@ -316,10 +330,10 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       const start = (partNumber - 1) * partSize;
       const end = Math.min(start + partSize, source.size) - 1;
       const result = await sendForXml("PUT", objectUrl(to, { partNumber: String(partNumber), uploadId }), {
-        headers: { "x-amz-copy-source": copySource, "x-amz-copy-source-range": `bytes=${start}-${end}` },
+        headers: { ...copyHeaders, "x-amz-copy-source-range": `bytes=${start}-${end}` },
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
-      if (result.error) return abortWith(result.error);
+      if (result.error) return abortWith(copyError(result.error));
       const etag = etagIn(result.data);
       if (!etag) return abortWith(incompleteResponse("ETag"));
       parts.push({ partNumber, etag });
@@ -403,7 +417,11 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (problem) return fail(invalidInput(problem));
       const xml = parts
         .toSorted((a, b) => a.partNumber - b.partNumber)
-        .map((part) => `<Part><PartNumber>${part.partNumber}</PartNumber><ETag>"${escapeXml(part.etag)}"</ETag></Part>`)
+        // A browser reads the part's ETag header with its quotes; quoting it again would name another ETag.
+        .map(
+          (part) =>
+            `<Part><PartNumber>${part.partNumber}</PartNumber><ETag>"${escapeXml(stripQuotes(part.etag))}"</ETag></Part>`,
+        )
         .join("");
       const result = await sendForXml("POST", objectUrl(key, { uploadId }), {
         headers: options.ifNoneMatch ? { "if-none-match": "*" } : {},
@@ -411,7 +429,8 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
       if (result.error) return result;
-      return ok({ etag: etagIn(result.data) });
+      const etag = etagIn(result.data);
+      return etag ? ok({ etag }) : fail(incompleteResponse("ETag"));
     },
 
     async abortMultipart(key, uploadId) {
@@ -470,14 +489,19 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         return fail(new CloudropError("NOT_FOUND", "The object to copy does not exist. Check the source key."));
       }
       // `/bucket/key` without the endpoint's path prefix: the source is named inside the storage service.
-      const copySource = `/${encodeRfc3986(config.bucket)}/${encodeKeyPath(from)}`;
-      if (source.data.size > rules.maxSinglePutSize) return copyInParts(source.data, copySource, to);
+      const copyHeaders = {
+        "x-amz-copy-source": `/${encodeRfc3986(config.bucket)}/${encodeKeyPath(from)}`,
+        // Without it, a source overwritten during a multipart copy would leave parts of both versions in the copy.
+        "x-amz-copy-source-if-match": `"${source.data.etag}"`,
+      };
+      if (source.data.size > rules.maxSinglePutSize) return copyInParts(source.data, copyHeaders, to);
       const result = await sendForXml("PUT", objectUrl(to), {
-        headers: { "x-amz-copy-source": copySource },
+        headers: copyHeaders,
         timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
       });
-      if (result.error) return result;
-      return ok({ etag: etagIn(result.data) });
+      if (result.error) return fail(copyError(result.error));
+      const etag = etagIn(result.data);
+      return etag ? ok({ etag }) : fail(incompleteResponse("ETag"));
     },
 
     async delete(key) {
