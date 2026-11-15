@@ -37,11 +37,14 @@ function configError(message: string): CloudropError {
   return new CloudropError("INVALID_CONFIG", message);
 }
 
-function required(value: string | undefined, what: string, hint: string): string {
-  if (value) return value;
-  throw configError(`The ${what} is missing. ${hint}`);
+/** One message for everything missing, so a first-time setup is not a series of throw-fix-retry rounds. */
+function throwIfMissing(service: "R2" | "S3", missing: string[], hint: string): void {
+  if (missing.length > 0) throw configError(`Missing ${service} settings: ${missing.join(", ")}. ${hint}`);
 }
 
+// Deliberately lax: names with a reserved prefix or suffix (xn--, sthree-, -s3alias, --ol-s3) pass here and fail at the
+// service, which owns that list. Deliberately strict: legacy us-east-1 buckets with upper case or underscores are rejected,
+// because no other region accepts them and R2 never did.
 // R2: 3 to 63 characters, lowercase letters, digits and hyphens, not starting or ending with a hyphen.
 // https://developers.cloudflare.com/r2/buckets/create-buckets/#bucket-naming-rules
 const R2_BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
@@ -50,71 +53,97 @@ const R2_BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const S3_BUCKET_NAME = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
 const IPV4_ADDRESS = /^\d{1,3}(\.\d{1,3}){3}$/;
 
-function checkBucket(bucket: unknown, service: "R2" | "S3"): string {
+function checkBucket(bucket: string, service: "R2" | "S3"): string {
   const valid =
     typeof bucket === "string" &&
     (service === "R2"
       ? R2_BUCKET_NAME.test(bucket)
       : S3_BUCKET_NAME.test(bucket) && !bucket.includes("..") && !IPV4_ADDRESS.test(bucket));
   if (!valid) {
-    const allowed =
-      service === "R2" ? "lowercase letters, digits and hyphens" : "lowercase letters, digits, hyphens and dots";
+    const rules =
+      service === "R2"
+        ? "lowercase letters, digits and hyphens, starting and ending with a letter or digit"
+        : "lowercase letters, digits, hyphens and dots, starting and ending with a letter or digit, with no two dots in a row, and not formatted like an IP address";
     throw configError(
-      `The ${service} bucket name must be 3 to 63 characters of ${allowed}, starting and ending with a letter or digit. Copy the exact name from your ${service} bucket list.`,
+      `The ${service} bucket name must be 3 to 63 characters: ${rules}. Copy the exact name from your ${service} bucket list.`,
     );
   }
   return bucket;
 }
 
-export function r2(options: R2Options): StorageDriver {
-  const bucket = checkBucket(options.bucket, "R2");
-  const accountId = required(
-    options.accountId ?? fromEnv("CLOUDROP_R2_ACCOUNT_ID"),
-    "R2 account ID",
-    "Pass it to r2() or set CLOUDROP_R2_ACCOUNT_ID.",
-  );
-  if (!/^[0-9a-f]{32}$/.test(accountId)) {
+/** Absolute http(s) URL, trailing slashes dropped so callers can append "/<key>". A path is allowed: a CDN prefix. */
+function checkPublicUrl(publicUrl: string | undefined): string | undefined {
+  if (publicUrl === undefined) return undefined;
+  const url = URL.canParse(publicUrl) ? new URL(publicUrl) : null;
+  if (!url || !/^https?:$/.test(url.protocol) || url.username || url.password) {
     throw configError(
-      "The R2 account ID must be 32 hexadecimal characters. Copy it from the R2 overview page in the Cloudflare dashboard.",
+      "The publicUrl must be an absolute http or https URL without credentials, such as https://cdn.example.com/files.",
     );
   }
-  const accessKeyId = required(
-    options.accessKeyId ?? fromEnv("CLOUDROP_R2_ACCESS_KEY_ID"),
-    "R2 access key ID",
-    "Pass it to r2() or set CLOUDROP_R2_ACCESS_KEY_ID.",
+  return publicUrl.replace(/\/+$/, "");
+}
+
+export function r2(given: R2Options): StorageDriver {
+  // Plain-JavaScript callers can pass nothing; the environment may still hold everything but the bucket.
+  const options: Partial<R2Options> = given ?? {};
+  const accountId = options.accountId || fromEnv("CLOUDROP_R2_ACCOUNT_ID");
+  const accessKeyId = options.accessKeyId || fromEnv("CLOUDROP_R2_ACCESS_KEY_ID");
+  const secretAccessKey = options.secretAccessKey || fromEnv("CLOUDROP_R2_SECRET_ACCESS_KEY");
+  throwIfMissing(
+    "R2",
+    [
+      options.bucket ? "" : "bucket",
+      accountId ? "" : "accountId (CLOUDROP_R2_ACCOUNT_ID)",
+      accessKeyId ? "" : "accessKeyId (CLOUDROP_R2_ACCESS_KEY_ID)",
+      secretAccessKey ? "" : "secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY)",
+    ].filter(Boolean),
+    "Pass them to r2(); a setting with a variable name in parentheses can also come from the environment.",
   );
-  const secretAccessKey = required(
-    options.secretAccessKey ?? fromEnv("CLOUDROP_R2_SECRET_ACCESS_KEY"),
-    "R2 secret access key",
-    "Pass it to r2() or set CLOUDROP_R2_SECRET_ACCESS_KEY.",
-  );
-  const host = options.jurisdiction
-    ? `${accountId}.${options.jurisdiction}.r2.cloudflarestorage.com`
-    : `${accountId}.r2.cloudflarestorage.com`;
+  const bucket = checkBucket(options.bucket as string, "R2");
+  // Cloudflare shows the ID in lower case; pasted values may not be.
+  const account = (accountId as string).toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(account)) {
+    throw configError(
+      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given has ${account.length} characters. Copy it from the R2 overview page in the Cloudflare dashboard.`,
+    );
+  }
+  const { jurisdiction } = options;
+  if (jurisdiction !== undefined && jurisdiction !== "eu" && jurisdiction !== "fedramp") {
+    throw configError('The R2 jurisdiction must be "eu" or "fedramp". Omit it for the default location.');
+  }
   return createS3Driver({
-    endpoint: `https://${host}`,
+    endpoint: `https://${jurisdiction ? `${account}.${jurisdiction}` : account}.r2.cloudflarestorage.com`,
     region: "auto",
     bucket,
-    credentials: { accessKeyId, secretAccessKey },
+    credentials: { accessKeyId: accessKeyId as string, secretAccessKey: secretAccessKey as string },
     rules: R2_RULES,
-    publicUrl: options.publicUrl,
+    publicUrl: checkPublicUrl(options.publicUrl),
     fetch: options.fetch,
   });
 }
 
-// The endpoint is validated by createS3Driver, which rejects a relative URL, a path, a query and bad escapes.
-export function s3(options: S3Options): StorageDriver {
-  const bucket = checkBucket(options.bucket, "S3");
-  const region = required(options.region, "S3 region", "Pass the bucket's region, such as us-east-1.");
-  const accessKeyId = required(options.accessKeyId, "S3 access key ID", "Pass it to s3().");
-  const secretAccessKey = required(options.secretAccessKey, "S3 secret access key", "Pass it to s3().");
+// The endpoint's shape is validated by createS3Driver, which rejects a relative URL, a path, a query and bad escapes.
+export function s3(given: S3Options): StorageDriver {
+  const options: Partial<S3Options> = given ?? {};
+  throwIfMissing(
+    "S3",
+    (["endpoint", "region", "bucket", "accessKeyId", "secretAccessKey"] as const).filter((name) => !options[name]),
+    "Pass them to s3().",
+  );
+  const { endpoint, region, accessKeyId, secretAccessKey } = options as S3Options;
+  // The driver's own endpoint error would be accurate but would not say why a perfectly good URL was refused.
+  if (URL.canParse(endpoint) && (new URL(endpoint).username || new URL(endpoint).password)) {
+    throw configError(
+      "The S3 endpoint contains a user name or password. Do not put credentials in the endpoint; pass accessKeyId and secretAccessKey instead.",
+    );
+  }
   return createS3Driver({
-    endpoint: options.endpoint,
+    endpoint,
     region,
-    bucket,
+    bucket: checkBucket(options.bucket as string, "S3"),
     credentials: { accessKeyId, secretAccessKey },
     rules: S3_RULES,
-    publicUrl: options.publicUrl,
+    publicUrl: checkPublicUrl(options.publicUrl),
     fetch: options.fetch,
   });
 }

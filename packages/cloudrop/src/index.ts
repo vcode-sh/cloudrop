@@ -1,4 +1,5 @@
 export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
+export type { StorageRules } from "./rules.ts";
 export type {
   CompletedPart,
   FetchLike,
