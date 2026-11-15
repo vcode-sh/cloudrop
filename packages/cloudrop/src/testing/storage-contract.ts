@@ -18,29 +18,73 @@ export function offsetBytes(length: number): Uint8Array<ArrayBuffer> {
 type Gap = "signedHeaders" | "unequalParts" | "checksums" | "listParts" | "crc64nvme";
 
 export interface ContractTarget {
-  /** A driver for the backend; `secondsAgo` moves its signing clock back, `maxSinglePutSize` lowers that rule. */
+  /** The driver every case uses, built the way an application builds it (the public preset where there is one). */
+  driver: StorageDriver;
+  /** A variant driver: `secondsAgo` moves its signing clock back, `maxSinglePutSize` lowers that rule. */
   driverWith(options: { secondsAgo?: number; maxSinglePutSize?: number }): StorageDriver;
-  /** Unique to this run (see randomPrefix); everything under it is deleted afterwards. */
+  /** Made by randomPrefix, which the suite checks: teardown deletes everything under it and nothing else. */
   prefix: string;
   /** Sends presigned requests the way a browser would. */
   http: FetchLike;
   /** Backend gaps: each present entry names what the backend does instead, and skips the cases that need it. */
   gaps: Partial<Record<Gap, string>>;
   /**
-   * Whether a presigned PUT succeeds with an extra `x-amz-meta-*` header the URL did not sign. AWS S3 rejects it; real
-   * R2 is unmeasured, so each lane records what its backend does and the contract checks it.
+   * What the backend does with an extra `x-amz-meta-*` header that a presigned PUT did not sign. AWS S3 rejects the
+   * request; real R2 is unmeasured, so each lane records its backend's answer and the contract checks it.
    */
-  acceptsUnsignedMetaOnPresignedPut: boolean;
+  unsignedMetaOnPresignedPut: "stored" | "ignored" | "rejected";
 }
 
 /**
  * Connects to a backend. Register each cleanup with `onCleanup` the moment its resource exists: cleanups run after
- * the suite (last registered first), also when `connect` itself throws halfway.
+ * the suite (last registered first), also when `connect` itself throws halfway. A lane whose service is started and
+ * removed by its shell script's trap (RustFS, Wrangler) has nothing to register.
  */
 export type ConnectTarget = (onCleanup: (cleanup: () => Promise<void>) => void) => Promise<ContractTarget>;
 
 export function randomPrefix(root: string): string {
   return `${root}cloudrop-${toHex(crypto.getRandomValues(new Uint8Array(16)))}/`;
+}
+
+// Exactly what randomPrefix appends, so a lane cannot point teardown at "" or a shared root such as "live-test/".
+const RUN_PREFIX = /(^|\/)cloudrop-[0-9a-f]{32}\/$/;
+
+function checkRunPrefix(prefix: string): void {
+  if (!RUN_PREFIX.test(prefix)) {
+    throw new Error(
+      `The contract prefix "${prefix}" was not made by randomPrefix(); refusing to delete anything under it.`,
+    );
+  }
+}
+
+/**
+ * Deletes every object under a run prefix. It refuses a prefix randomPrefix did not make, deletes nothing when the
+ * listing returns a key outside the prefix, and fails instead of looping when a deleted key is listed again.
+ */
+export async function clearRunPrefix(driver: StorageDriver, prefix: string): Promise<void> {
+  checkRunPrefix(prefix);
+  const sent = new Set<string>();
+  for (;;) {
+    const page = await driver.list(prefix);
+    if (page.error) throw page.error;
+    const keys = page.data.items.map((item) => item.key);
+    if (keys.length === 0) return;
+    const outside = keys.filter((key) => !key.startsWith(prefix));
+    if (outside.length > 0) {
+      throw new Error(
+        `The listing for ${prefix} returned keys outside it; refusing to delete anything: ${outside.join(", ")}`,
+      );
+    }
+    const survived = keys.filter((key) => sent.has(key));
+    if (survived.length > 0) throw new Error(`These keys survived deletion: ${survived.join(", ")}`);
+    const removed = await driver.deleteMany(keys);
+    if (removed.error) throw removed.error;
+    if (removed.data.failed.length > 0) {
+      const failed = removed.data.failed.map(({ key, error }) => `${key} (${error.code})`);
+      throw new Error(`Could not delete: ${failed.join(", ")}`);
+    }
+    for (const key of keys) sent.add(key);
+  }
 }
 
 const etagOf = (response: Response): string => (response.headers.get("etag") ?? "").replaceAll('"', "");
@@ -103,27 +147,31 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     }
 
     beforeAll(async () => {
-      target = await connect((cleanup) => cleanups.push(cleanup));
-      driver = target.driverWith({});
+      const connected = await connect((cleanup) => cleanups.push(cleanup));
+      checkRunPrefix(connected.prefix);
+      target = connected;
+      driver = target.driver;
     });
 
+    // Uploads the driver starts itself (a multipart copy) are not tracked: if the process dies mid-copy, teardown
+    // cannot find them. R2's default lifecycle rule aborts incomplete multipart uploads after 7 days.
+    // Every step runs even when an earlier one fails, and every failure is reported: a throwing cleanup must neither
+    // hide why teardown failed nor skip the cleanups registered before it.
     afterAll(async () => {
-      try {
-        if (!target) return;
-        const aborted = await Promise.all(
-          openUploads.map((upload) => driver.abortMultipart(upload.key, upload.uploadId)),
-        );
-        expect(aborted.filter((result) => result.error)).toEqual([]);
-        let page = await driver.list(target.prefix);
-        while (page.data?.items.length) {
-          const removed = await driver.deleteMany(page.data.items.map((item) => item.key));
-          expect(removed.data?.failed).toEqual([]);
-          page = await driver.list(target.prefix);
-        }
-        expect(page.data?.items).toEqual([]);
-      } finally {
-        for (const cleanup of cleanups.reverse()) await cleanup();
+      const errors: unknown[] = [];
+      const attempt = (step: () => Promise<void>) => step().catch((error: unknown) => errors.push(error));
+      if (target) {
+        await attempt(async () => {
+          const aborted = await Promise.all(
+            openUploads.map((upload) => driver.abortMultipart(upload.key, upload.uploadId)),
+          );
+          expect(aborted.filter((result) => result.error)).toEqual([]);
+          await clearRunPrefix(driver, target.prefix);
+        });
       }
+      for (const cleanup of cleanups.reverse()) await attempt(cleanup);
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, `Teardown failed in ${errors.length} steps.`);
     });
 
     it("stores an object with type, disposition and metadata and reads byte ranges", async () => {
@@ -201,9 +249,17 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     });
 
     it("answers a presigned PUT carrying an unsigned metadata header as recorded for the backend", async () => {
-      const send = await signedPut(key("unsigned-meta.bin"), { size: 16, expiresIn: 300 });
+      const k = key("unsigned-meta.bin");
+      const send = await signedPut(k, { size: 16, expiresIn: 300, metadata: { "cloudrop-id": "f6" } });
       const response = await send(offsetBytes(16), { "x-amz-meta-injected": "yes" });
-      expect(response.status).toBe(target.acceptsUnsignedMetaOnPresignedPut ? 200 : 403);
+      const expected = {
+        stored: { status: 200, code: "", metadata: { "cloudrop-id": "f6", injected: "yes" } },
+        ignored: { status: 200, code: "", metadata: { "cloudrop-id": "f6" } },
+        // AWS S3's known answer, not measured in this repository: AccessDenied, "There were headers present in the
+        // request which were not signed". Nothing is stored.
+        rejected: { status: 403, code: "AccessDenied", metadata: undefined },
+      }[target.unsignedMetaOnPresignedPut];
+      expect({ ...(await outcome(response)), metadata: (await driver.head(k)).data?.metadata }).toEqual(expected);
     });
 
     it("refuses to overwrite through a create-only URL", async () => {
@@ -361,7 +417,8 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
 
     it("lists by prefix in pages and deletes many keys with per-key results", async () => {
       const keys = ["list/a", "list/b", "list/c"].map(key);
-      for (const k of keys) expect((await driver.put(k, "x")).error).toBeNull();
+      const stored = await Promise.all(keys.map((k) => driver.put(k, "x")));
+      expect(stored.map((result) => result.error)).toEqual([null, null, null]);
       const first = await driver.list(key("list/"), { limit: 2 });
       expect(first.data?.items.map((item) => item.key)).toEqual(keys.slice(0, 2));
       // Passing the backend's continuation token back also proves it passes the driver's cursor validation.
