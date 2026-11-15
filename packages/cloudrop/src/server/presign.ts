@@ -5,7 +5,7 @@ import { fail, ok, type Result } from "../errors.ts";
 import type { SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { PresignedRequest, StorageDriver } from "../storage/driver.ts";
 import { contentDisposition } from "./key.ts";
-import type { MultipartToken, UploadTokenPayload } from "./token.ts";
+import { type MultipartToken, type UploadTokenPayload, uploadExpired } from "./token.ts";
 
 /** How long a client may resume an upload (spec §5.2). */
 export const TOKEN_LIFETIME_SECONDS = 86_400;
@@ -14,8 +14,15 @@ export const URL_LIFETIME_SECONDS = 900;
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 
-/** A URL never outlives the token it was signed for. The caller has checked that the token has not expired. */
-const urlLifetime = (token: UploadTokenPayload): number => Math.min(URL_LIFETIME_SECONDS, token.exp - nowSeconds());
+/**
+ * How long a URL signed now may live, or null once the token's deadline has passed. The caller checked the deadline
+ * before an await, so it may have passed since. Counting from the next whole second keeps the URL within the token
+ * even when the driver reads the clock a moment later, in the next second.
+ */
+function urlLifetime(token: UploadTokenPayload): number | null {
+  const seconds = Math.min(URL_LIFETIME_SECONDS, token.exp - Math.ceil(Date.now() / 1000));
+  return seconds > 0 ? seconds : null;
+}
 
 function toWire(signed: PresignedRequest): SignedRequest {
   return { url: signed.url, headers: signed.headers, expiresAt: signed.expiresAt.toISOString() };
@@ -34,13 +41,16 @@ export function objectOptions(token: UploadTokenPayload): {
   };
 }
 
+/** UPLOAD_EXPIRED when the token's deadline has passed; any other error is the storage's. */
 export async function presignSingle(storage: StorageDriver, token: UploadTokenPayload): Promise<Result<SignedRequest>> {
+  const expiresIn = urlLifetime(token);
+  if (expiresIn === null) return fail(uploadExpired());
   const signed = await storage.presignPut(token.key, {
     ...objectOptions(token),
     size: token.size,
     // Create-only: a URL can never overwrite, and a retried PUT that gets 412 means the first one landed (spec §5.4).
     ifNoneMatch: true,
-    expiresIn: urlLifetime(token),
+    expiresIn,
   });
   return signed.error ? signed : ok(toWire(signed.data));
 }
@@ -56,7 +66,7 @@ export function partSizeOf(token: MultipartToken, partNumber: number): number {
 }
 
 /**
- * Signs the parts in parallel. Measured 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch
+ * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch
  * with Promise.all against 0.38 ms one after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
  */
 export async function presignParts(
@@ -65,6 +75,7 @@ export async function presignParts(
   partNumbers: readonly number[],
 ): Promise<Result<SignedPart[]>> {
   const expiresIn = urlLifetime(token);
+  if (expiresIn === null) return fail(uploadExpired());
   const signed = await Promise.all(
     partNumbers.map(async (partNumber): Promise<Result<SignedPart>> => {
       const result = await storage.presignPart(token.key, token.uploadId, partNumber, {

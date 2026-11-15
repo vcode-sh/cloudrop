@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CloudropError, fail } from "../errors.ts";
+import { CloudropError } from "../errors.ts";
 import type { FileTicket, MultipartTicket, SingleTicket, UploadResponse } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
+import type { FetchLike } from "../storage/driver.ts";
 import { r2 } from "../storage/presets.ts";
 import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
@@ -244,6 +245,12 @@ describe("POST /upload: authorization comes first", () => {
       auth: Object.assign(new (class Denied {})(), { [Symbol.for("cloudrop.unauthorized")]: true, message: "No." }),
       log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
     },
+    // Its JSON is the text "x": the token would carry an owner that is not an object.
+    {
+      name: "a plain object whose JSON is not an object",
+      auth: { toJSON: () => "x" },
+      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+    },
     {
       name: "more than 2 KiB of JSON",
       auth: { record: "x".repeat(2048) },
@@ -256,6 +263,43 @@ describe("POST /upload: authorization comes first", () => {
       status: 500,
       code: "SERVER_ERROR",
       logged: log,
+    });
+  });
+
+  // A plain-JS or foreign refusal without a usable message is still a refusal, with unauthorized()'s default text.
+  it.for([
+    { name: "no message", refusal: { [Symbol.for("cloudrop.unauthorized")]: true } },
+    { name: "a numeric message", refusal: { [Symbol.for("cloudrop.unauthorized")]: true, message: 5 } },
+  ])("refuses a branded refusal with $name with the default message", async ({ refusal }) => {
+    const fixture = serverFixture({
+      files: route({ accept: "*/*", maxSize: "1GB", authorize: () => refusal as object }),
+    });
+    const { status, body } = await upload(fixture, { route: "files", files: [png()] });
+    expect({ status, error: body.error }).toEqual({
+      status: 401,
+      error: { code: "UNAUTHORIZED", message: "Sign in to upload files here.", retryable: false },
+    });
+  });
+
+  // The cap and the token must read one serialization: a toJSON may answer differently for each key it is asked.
+  it("signs the same owner JSON it measured, while prefix sees the live authorize result", async () => {
+    const live = {
+      userId: "42",
+      toJSON: (key: string) => (key === "" ? { userId: "42" } : "x".repeat(5000)),
+    };
+    const fixture = serverFixture({
+      files: route({
+        accept: "*/*",
+        maxSize: "1GB",
+        authorize: () => live,
+        prefix: (context) => (typeof context.toJSON === "function" ? `users/${context.userId}` : "lost"),
+      }),
+    });
+    const { body } = await upload(fixture, { route: "files", files: [png()] });
+    const ticket = body.files[0] as SingleTicket;
+    expect({ key: ticket.key, owner: tokenPayload(ticket.token).owner }).toEqual({
+      key: `users/42/${ticket.fileId}.png`,
+      owner: { userId: "42" },
     });
   });
 
@@ -293,6 +337,27 @@ describe("POST /upload: metadata", () => {
     expect({ status, error: body.error }).toEqual({
       status: 400,
       error: { code: "INVALID_METADATA", message: "This upload takes no metadata. Remove it.", retryable: false },
+    });
+  });
+
+  it("signs the same metadata JSON it measured, while authorize sees the schema's output", async () => {
+    const output = { albumId: "a1", toJSON: (key: string) => (key === "" ? { albumId: "a1" } : "x".repeat(5000)) };
+    const schema = {
+      "~standard": { version: 1, vendor: "test", validate: () => ({ value: output }) },
+    } as StandardSchema;
+    const fixture = serverFixture({
+      files: route({
+        accept: "*/*",
+        maxSize: "1GB",
+        metadata: schema,
+        authorize: ({ metadata }) => ({ live: metadata === output }),
+      }),
+    });
+    const { body } = await upload(fixture, { route: "files", files: [png()], metadata: {} });
+    const payload = tokenPayload((body.files[0] as SingleTicket).token);
+    expect({ owner: payload.owner, metadata: payload.metadata }).toEqual({
+      owner: { live: true },
+      metadata: { albumId: "a1" },
     });
   });
 
@@ -551,21 +616,28 @@ describe("POST /upload: keys", () => {
 });
 
 describe("POST /upload: storage failures and plugins", () => {
-  it("rejects only the file whose upload could not start, without the storage's own message", async () => {
+  it("rejects only the file whose upload could not start, without the storage's own message, and releases it", async () => {
     const fake = serverFixture({ files }).fake;
+    // The bucket refuses to start a multipart upload, as R2 does for a token without write access.
+    const refusing: FetchLike = (input, init) =>
+      new URL(String(input)).searchParams.has("uploads")
+        ? Promise.resolve(
+            new Response("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", { status: 403 }),
+          )
+        : fake.fetch(input, init);
     const storage = r2({
       bucket: "uploads",
       accountId: "0123456789abcdef0123456789abcdef",
       accessKeyId: "k",
       secretAccessKey: "s",
-      fetch: fake.fetch,
+      fetch: refusing,
     });
-    const denied = new CloudropError(
-      "STORAGE_DENIED",
-      "The storage service refused the request. Check the access key.",
-    );
-    const failing = { ...storage, createMultipart: async () => fail(denied) };
-    const fixture = serverFixture({ files }, { storage: failing, multipartThreshold: MiB });
+    const events: string[] = [];
+    const quota: CloudropPlugin = {
+      id: "quota",
+      server: { onAbort: ({ reason, file }) => void events.push(`release ${reason} ${file.name}`) },
+    };
+    const fixture = serverFixture({ files }, { storage, multipartThreshold: MiB, plugins: [quota] });
     const { body } = await upload(fixture, { route: "files", files: [png(2 * MiB, "big.png"), png(10, "small.png")] });
     expect(body.files.map((ticket: FileTicket) => (ticket.kind === "rejected" ? ticket.error : ticket.kind))).toEqual([
       {
@@ -575,9 +647,13 @@ describe("POST /upload: storage failures and plugins", () => {
       },
       "single",
     ]);
-    expect(fixture.logger.errors).toEqual([
-      { message: "cloudrop: the storage service refused a request.", error: denied },
-    ]);
+    expect({
+      logged: fixture.logger.errors.map(({ message, error }) => [message, (error as CloudropError).code]),
+      events,
+    }).toEqual({
+      logged: [["cloudrop: the storage service refused a request.", "STORAGE_DENIED"]],
+      events: ["release failed big.png"],
+    });
   });
 
   it("lets a plugin refuse the request and releases what earlier plugins reserved", async () => {

@@ -13,6 +13,7 @@ import {
   originNotAllowed,
   preflight,
   readJson,
+  serverError,
 } from "./http.ts";
 import type { Logger } from "./plugins.ts";
 import { handleSign } from "./sign.ts";
@@ -25,9 +26,6 @@ const ENDPOINTS = {
   sign: handleSign,
   abort: handleAbort,
 } satisfies Partial<Record<Endpoint, EndpointHandler>>;
-
-const serverError = (): CloudropError =>
-  new CloudropError("SERVER_ERROR", "The server could not handle the upload. Try again later.");
 
 function endpointOf(request: Request, basePath: string): keyof typeof ENDPOINTS | null {
   const { pathname } = new URL(request.url);
@@ -45,7 +43,10 @@ function contained(logger: Logger): Logger {
   const call = (log: () => unknown) => {
     try {
       const result = log();
-      if (result instanceof Promise) result.catch(() => {});
+      // Promise.resolve adopts any thenable, so a rejection it forwards is handled too.
+      if (typeof (result as PromiseLike<unknown> | undefined)?.then === "function") {
+        Promise.resolve(result).catch(() => {});
+      }
     } catch {
       // There is nowhere left to report a failing logger.
     }

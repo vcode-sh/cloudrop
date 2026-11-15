@@ -17,7 +17,7 @@ import { errorBody, storageFailure } from "./http.ts";
 import { generatedKey, newFileId, normalizeKey } from "./key.ts";
 import { type AbortContext, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
-import { isUnauthorized } from "./route.ts";
+import { isUnauthorized, unauthorized } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 
@@ -162,26 +162,35 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const parsed = readRequest(body, config);
   if (parsed.error) return parsed;
   const { route, files } = parsed.data;
-  const metadata = await validateMetadata(route.definition.metadata, parsed.data.metadata);
-  if (metadata.error) return metadata;
-  const auth = await route.definition.authorize({ request, metadata: metadata.data });
-  if (isUnauthorized(auth)) return fail(new CloudropError("UNAUTHORIZED", auth.message));
-  // Only a plain object authorizes: a Response or an Error is an object too, and reading one as the user would sign
-  // uploads for a refused request.
-  if (!isPlainObject(auth)) {
+  const validated = await validateMetadata(route.definition.metadata, parsed.data.metadata);
+  if (validated.error) return validated;
+  const { value: metadata, json: metadataJson } = validated.data;
+  const auth = await route.definition.authorize({ request, metadata });
+  if (isUnauthorized(auth)) {
+    // A refusal built by plain JavaScript or another copy of cloudrop may lack a message; it still refuses.
+    const message = typeof auth.message === "string" && auth.message !== "" ? auth.message : unauthorized().message;
+    return fail(new CloudropError("UNAUTHORIZED", message));
+  }
+  // Only a plain object whose JSON is an object authorizes: a Response or an Error is an object too, and reading one
+  // as the user would sign uploads for a refused request. The token carries this one JSON snapshot, measured and
+  // signed as the same text, because a toJSON may answer differently each time it runs. JSON.stringify throws for a
+  // BigInt or a cycle, which the handler reports.
+  const ownerJson = isPlainObject(auth) ? JSON.stringify(auth) : undefined;
+  if (!isPlainObject(auth) || ownerJson?.[0] !== "{") {
     throw new TypeError(`Route "${route.name}": authorize must return a plain object or unauthorized().`);
   }
-  // The result rides in every token; JSON.stringify throws for a BigInt or a cycle, which the handler reports.
-  if (new TextEncoder().encode(JSON.stringify(auth)).length > MAX_METADATA_JSON_BYTES) {
+  if (new TextEncoder().encode(ownerJson).length > MAX_METADATA_JSON_BYTES) {
     throw new TypeError(`Route "${route.name}": authorize returned more than 2 KiB of JSON. Return ids, not records.`);
   }
-  const prepared = files.map((file) => prepareFile(route, file, { request, metadata: metadata.data, auth }));
+  const owner: unknown = JSON.parse(ownerJson);
+  const signedMetadata: unknown = metadataJson === undefined ? undefined : JSON.parse(metadataJson);
+  const prepared = files.map((file) => prepareFile(route, file, { request, metadata, auth }));
   const accepted = prepared.filter((file): file is PluginFile => !(file instanceof CloudropError));
   const { plugins } = config;
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,
-      { request, route: route.name, files: accepted, metadata: metadata.data, auth },
+      { request, route: route.name, files: accepted, metadata, auth },
       config.logger,
     );
     if (refused) return fail(refused);
@@ -199,8 +208,8 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
             name: file.name,
             size: file.size,
             type: file.type,
-            owner: auth,
-            metadata: metadata.data,
+            owner,
+            metadata: signedMetadata,
             exp,
           }),
     ),
@@ -209,7 +218,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const failed = prepared.flatMap((file, index): AbortContext[] =>
     file instanceof CloudropError || tickets[index]?.kind !== "rejected"
       ? []
-      : [{ route: route.name, file, metadata: metadata.data, auth, reason: "failed" }],
+      : [{ route: route.name, file, metadata, auth, reason: "failed" }],
   );
   await runOnAbort(plugins, failed, config.logger);
   return ok({ files: tickets });

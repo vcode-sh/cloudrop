@@ -53,7 +53,12 @@ export function jsonResponse(body: unknown, status: number, headers: ResponseHea
   });
 }
 
+export const serverError = (): CloudropError =>
+  new CloudropError("SERVER_ERROR", "The server could not handle the upload. Try again later.");
+
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
+  // CloudropError does not check its code: one from plain JavaScript may have none of ours, which would answer 200.
+  if (!Object.hasOwn(STATUS, error.code)) return errorResponse(serverError(), headers);
   return jsonResponse({ error: errorBody(error) }, STATUS[error.code], headers);
 }
 
@@ -122,6 +127,7 @@ export function preflight(request: Request, trustedOrigins: ReadonlySet<string>)
       "access-control-allow-methods": "POST",
       "access-control-allow-headers": HEADER_LIST.test(requested) ? requested : "content-type",
       "access-control-max-age": "600",
+      "cache-control": "no-store",
       vary: "Origin, Access-Control-Request-Headers",
     },
   });

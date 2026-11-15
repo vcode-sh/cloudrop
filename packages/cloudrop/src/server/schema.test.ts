@@ -20,7 +20,7 @@ function albumSchema(): StandardSchema<{ albumId: string }, { albumId: string; t
 describe("validateMetadata", () => {
   it("returns the schema's output, not the input", async () => {
     expect(await validateMetadata(albumSchema(), { albumId: "a1", extra: "dropped" })).toEqual({
-      data: { albumId: "a1", tags: [] },
+      data: { value: { albumId: "a1", tags: [] }, json: '{"albumId":"a1","tags":[]}' },
       error: null,
     });
   });
@@ -42,7 +42,10 @@ describe("validateMetadata", () => {
   });
 
   it("accepts no metadata on a route without a schema", async () => {
-    expect(await validateMetadata(undefined, undefined)).toEqual({ data: undefined, error: null });
+    expect(await validateMetadata(undefined, undefined)).toEqual({
+      data: { value: undefined, json: undefined },
+      error: null,
+    });
   });
 
   it.for([
@@ -108,6 +111,9 @@ describe("validateMetadata", () => {
     const optional: StandardSchema = {
       "~standard": { version: 1, vendor: "test", validate: () => ({ value: undefined }) },
     };
-    expect(await validateMetadata(optional, undefined)).toEqual({ data: undefined, error: null });
+    expect(await validateMetadata(optional, undefined)).toEqual({
+      data: { value: undefined, json: undefined },
+      error: null,
+    });
   });
 });

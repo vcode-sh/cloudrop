@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { CloudropError, type CloudropErrorCode } from "../errors.ts";
 import { APP_ORIGIN, serverFixture } from "../testing/server-fixture.ts";
 import { createCloudrop } from "./cloudrop.ts";
+import type { CloudropPlugin } from "./plugins.ts";
 import { allowAnyone, route } from "./route.ts";
 
 const TRUSTED = "https://admin.example.com";
@@ -242,12 +244,14 @@ describe("cloudrop.handler origins and CORS", () => {
       methods: response.headers.get("access-control-allow-methods"),
       headers: response.headers.get("access-control-allow-headers"),
       credentials: response.headers.get("access-control-allow-credentials"),
+      cache: response.headers.get("cache-control"),
     }).toEqual({
       status: 204,
       origin: TRUSTED,
       methods: "POST",
       headers: "content-type, authorization",
       credentials: "true",
+      cache: "no-store",
     });
   });
 
@@ -305,6 +309,15 @@ describe("cloudrop.handler failures", () => {
       },
     },
     { name: "returns a rejected promise", log: () => Promise.reject(new Error("log sink down")) },
+    // Not a native Promise, so only a then() call marks the rejection it forwards as handled.
+    {
+      name: "returns a rejecting thenable",
+      log: () => {
+        const rejected = Promise.reject(new Error("log sink down"));
+        // biome-ignore lint/suspicious/noThenProperty: a custom thenable is exactly what this row sends.
+        return { then: (resolve: () => void, reject: (error: unknown) => void) => rejected.then(resolve, reject) };
+      },
+    },
   ])("still answers a generic 500 when the logger $name", async ({ log }) => {
     const failing = route({
       accept: "image/png",
@@ -328,6 +341,26 @@ describe("cloudrop.handler failures", () => {
       status: 500,
       code: "SERVER_ERROR",
       logged: ["cloudrop: the handler failed before any endpoint ran. Pass it a Fetch API Request."],
+    });
+  });
+
+  // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status.
+  it("answers a plugin refusal with an unknown code as a generic 500, never 200", async () => {
+    const plugin: CloudropPlugin = {
+      id: "quota",
+      server: { beforeUpload: () => new CloudropError("QUOTA_EXCEEDED" as CloudropErrorCode, "No quota left.") },
+    };
+    const fixture = serverFixture({ avatar }, { plugins: [plugin] });
+    const response = await fixture.post("upload", uploadBody);
+    expect({ status: response.status, body: await response.json() }).toEqual({
+      status: 500,
+      body: {
+        error: {
+          code: "SERVER_ERROR",
+          message: "The server could not handle the upload. Try again later.",
+          retryable: false,
+        },
+      },
     });
   });
 

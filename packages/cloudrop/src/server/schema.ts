@@ -44,13 +44,19 @@ function describeIssue(issue: StandardIssue): string {
 }
 
 /**
- * The schema's output for `value`, checked to fit in a token as JSON. A route without a schema takes no metadata.
- * A schema that throws, or whose output has no JSON form, is a server bug: the error escapes to the handler, which
- * answers SERVER_ERROR.
+ * The schema's output for `value` (what the route's callbacks see) and its JSON (what the token carries), checked to
+ * fit in a token. The JSON is measured once and returned, because a `toJSON` may answer differently the next time it
+ * runs. A route without a schema takes no metadata. A schema that throws, or whose output has no JSON form, is a server
+ * bug: the error escapes to the handler, which answers SERVER_ERROR.
  */
-export async function validateMetadata(schema: StandardSchema | undefined, value: unknown): Promise<Result<unknown>> {
+export async function validateMetadata(
+  schema: StandardSchema | undefined,
+  value: unknown,
+): Promise<Result<{ value: unknown; json: string | undefined }>> {
   if (schema === undefined) {
-    return value === undefined ? ok(undefined) : fail(invalidMetadata("This upload takes no metadata. Remove it."));
+    return value === undefined
+      ? ok({ value: undefined, json: undefined })
+      : fail(invalidMetadata("This upload takes no metadata. Remove it."));
   }
   const result = await schema["~standard"].validate(value);
   if (result.issues) {
@@ -70,5 +76,5 @@ export async function validateMetadata(schema: StandardSchema | undefined, value
       invalidMetadata("The metadata is larger than 2 KiB. Send less, and keep large values in your database."),
     );
   }
-  return ok(result.value);
+  return ok({ value: result.value, json });
 }

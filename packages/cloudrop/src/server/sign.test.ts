@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 async function sign(fixture: ReturnType<typeof serverFixture>, body: unknown) {
@@ -25,7 +26,7 @@ async function sign(fixture: ReturnType<typeof serverFixture>, body: unknown) {
     body: (await response.json()) as {
       parts?: SignedPart[];
       put?: SignedRequest;
-      error?: { code: string; message: string };
+      error?: { code: string; message: string; retryable: boolean };
     },
   };
 }
@@ -137,6 +138,30 @@ describe("POST /sign: tokens", () => {
     });
   });
 
+  // Verifying the token awaits the HMAC; a renewal sent in the token's last second can cross its deadline there.
+  it.for([
+    { name: "a single PUT", file: SMALL, parts: undefined },
+    { name: "a multipart upload", file: BIG, parts: [1] },
+  ])("answers 410 UPLOAD_EXPIRED when $name's deadline passes while the token is verified", async ({ file, parts }) => {
+    const fixture = serverFixture({ files }, { multipartThreshold: 16 * MiB });
+    const { token } = await fixture.post("upload", { route: "files", files: [file] }).then(async (response) => {
+      const [ticket] = ((await response.json()) as { files: { token: string }[] }).files;
+      return ticket as { token: string };
+    });
+    vi.setSystemTime(new Date("2026-11-16T11:59:59Z"));
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "sign").mockImplementation((...args) => {
+      vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+      return sign(...args);
+    });
+    const response = await fixture.post("sign", { token, parts });
+    expect({
+      status: response.status,
+      code: ((await response.json()) as { error?: { code: string } }).error?.code,
+      logged: fixture.logger.errors,
+    }).toEqual({ status: 410, code: "UPLOAD_EXPIRED", logged: [] });
+  });
+
   it("refuses a token signed with a secret this server does not hold", async () => {
     const ticket = await serverFixture({ files }, { secret: "another-secret-0123456789abcdef0123456" }).single(
       "files",
@@ -170,12 +195,14 @@ describe("POST /sign: tokens", () => {
   it("refuses a token whose route was removed", async () => {
     const ticket = await serverFixture({ files }).single("files", SMALL);
     const redeployed = serverFixture({ other: files });
-    expect(
-      ((await (await redeployed.post("sign", { token: ticket.token })).json()) as { error: unknown }).error,
-    ).toEqual({
-      code: "UNKNOWN_ROUTE",
-      message: "The upload route of this token no longer exists. Start a new upload.",
-      retryable: false,
+    const { status, body } = await sign(redeployed, { token: ticket.token });
+    expect({ status, error: body.error }).toEqual({
+      status: 404,
+      error: {
+        code: "UNKNOWN_ROUTE",
+        message: "The upload route of this token no longer exists. Start a new upload.",
+        retryable: false,
+      },
     });
   });
 });
