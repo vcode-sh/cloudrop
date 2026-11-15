@@ -1,4 +1,31 @@
 export { CloudropError, type CloudropErrorCode, type CloudropErrorOptions, type Result } from "./errors.ts";
+export type {
+  AbortRequest,
+  AbortResponse,
+  CompleteRequest,
+  CompleteResponse,
+  Endpoint,
+  ErrorBody,
+  ErrorResponse,
+  FileDescriptor,
+  FileTicket,
+  InferableCloudrop,
+  Jsonified,
+  MultipartTicket,
+  RejectedFile,
+  RouteMetadata,
+  RouteName,
+  RouteResult,
+  RouteTypes,
+  SignedPart,
+  SignedRequest,
+  SignRequest,
+  SignResponse,
+  SingleTicket,
+  UploadedFile,
+  UploadRequest,
+  UploadResponse,
+} from "./protocol/types.ts";
 export type { StorageRules } from "./rules.ts";
 export type {
   CompletedPart,

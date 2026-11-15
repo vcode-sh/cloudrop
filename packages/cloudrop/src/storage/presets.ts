@@ -1,4 +1,5 @@
-import { CloudropError } from "../errors.ts";
+import { fromEnv } from "../env.ts";
+import { configError } from "../errors.ts";
 import { R2_RULES, S3_RULES } from "../rules.ts";
 import type { FetchLike, StorageDriver } from "./driver.ts";
 import { createS3Driver } from "./s3-driver.ts";
@@ -33,16 +34,6 @@ export interface S3Options {
   secretAccessKey: string;
   publicUrl?: string;
   fetch?: FetchLike;
-}
-
-// Workers and browsers have no `process`; a guarded read through globalThis keeps the preset portable.
-function fromEnv(name: string): string | undefined {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  return env?.[name] || undefined;
-}
-
-function configError(message: string): CloudropError {
-  return new CloudropError("INVALID_CONFIG", message);
 }
 
 /** One message for everything missing, so a first-time setup is not a series of throw-fix-retry rounds. */

@@ -1,4 +1,4 @@
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { MiB, type StorageRules } from "../rules.ts";
 import type {
   CompletedPart,
@@ -130,10 +130,6 @@ function readObjectInfo(key: string, headers: Headers): ObjectInfo {
     metadata,
     checksumCrc64nvme: headers.get("x-amz-checksum-crc64nvme") ?? undefined,
   };
-}
-
-function configError(message: string): CloudropError {
-  return new CloudropError("INVALID_CONFIG", message);
 }
 
 /**
