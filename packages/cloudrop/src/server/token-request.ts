@@ -1,6 +1,7 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../storage/validate.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
+import type { AbortContext } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import { type UploadTokenPayload, verifyToken } from "./token.ts";
 
@@ -23,4 +24,16 @@ export async function readTokenRequest(
     );
   }
   return ok({ token: verified.data, route });
+}
+
+/** The onAbort context for a token's file. */
+export function abortContext(token: UploadTokenPayload, reason: AbortContext["reason"]): AbortContext {
+  const { fileId: id, key, name, size, type } = token;
+  return {
+    route: token.route,
+    file: { id, key, name, size, type },
+    metadata: token.metadata,
+    auth: token.owner,
+    reason,
+  };
 }

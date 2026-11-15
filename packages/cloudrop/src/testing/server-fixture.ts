@@ -116,3 +116,14 @@ export function tokenPayload(token: string): Record<string, unknown> {
     ),
   );
 }
+
+/** The token with its payload changed and its signature kept: what an attacker can build without the secret. */
+export function forgeToken(token: string, changes: Record<string, unknown>): string {
+  const [, signature = ""] = token.split(".");
+  const json = new TextEncoder().encode(JSON.stringify({ ...tokenPayload(token), ...changes }));
+  const body = btoa(String.fromCharCode(...json))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+  return `${body}.${signature}`;
+}

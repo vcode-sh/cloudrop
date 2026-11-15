@@ -3,6 +3,7 @@
 
 import { CloudropError, type Result } from "../errors.ts";
 import type { Endpoint } from "../protocol/types.ts";
+import { handleAbort } from "./abort.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import {
   checkOrigin,
@@ -22,6 +23,7 @@ type EndpointHandler = (input: EndpointInput) => Promise<Result<unknown>>;
 const ENDPOINTS = {
   upload: handleUpload,
   sign: handleSign,
+  abort: handleAbort,
 } satisfies Partial<Record<Endpoint, EndpointHandler>>;
 
 const serverError = (): CloudropError =>
