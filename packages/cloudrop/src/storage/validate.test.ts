@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CloudropError } from "../errors.ts";
 import {
   checksumProblem,
   cursorProblem,
   expiryProblem,
-  invalidInput,
   keyListProblem,
   keyProblem,
   limitProblem,
@@ -16,16 +14,6 @@ import {
   sizeProblem,
   uploadIdProblem,
 } from "./validate.ts";
-
-describe("invalidInput", () => {
-  it("builds a non-retryable INVALID_INPUT error with the message", () => {
-    const error = invalidInput("Pass a key.");
-    expect(error).toBeInstanceOf(CloudropError);
-    expect(error.code).toBe("INVALID_INPUT");
-    expect(error.message).toBe("Pass a key.");
-    expect(error.retryable).toBe(false);
-  });
-});
 
 describe("keyProblem", () => {
   it.each([

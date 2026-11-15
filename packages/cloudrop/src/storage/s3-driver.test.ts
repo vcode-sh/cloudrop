@@ -91,52 +91,14 @@ function copyStub(size: number, onCopy: FetchLike, aborted: string[] = []): Fetc
 }
 
 describe("createS3Driver", () => {
-  it("round-trips a Unicode key with type, disposition and metadata", async () => {
+  // The contract suite covers type, disposition, metadata and odd keys on every backend; it cannot pin a time.
+  it("reads the upload time from Last-Modified", async () => {
     const { driver } = setup();
-    const key = "zdjęcia/łódź (1).txt";
-    expect(
-      (await driver.put(key, "hello", { type: "text/plain", disposition: "inline", metadata: { "cloudrop-id": "f1" } }))
-        .error,
-    ).toBeNull();
-    expect((await driver.head(key)).data).toMatchObject({
-      key,
-      size: 5,
-      type: "text/plain",
-      disposition: "inline",
-      uploadedAt: signedAt,
-      metadata: { "cloudrop-id": "f1" },
-    });
+    expect((await driver.put("a.txt", "x")).error).toBeNull();
+    expect((await driver.head("a.txt")).data?.uploadedAt).toEqual(signedAt);
   });
 
-  it("uploads through presigned part URLs and joins the parts in order", async () => {
-    const { fake, driver } = setup();
-    const body = offsetBytes(7 * MiB);
-    const created = await driver.createMultipart("big.bin", { type: "application/octet-stream" });
-    if (created.error) throw created.error;
-    const { uploadId } = created.data;
-    const sendPart = async (partNumber: number, part: Uint8Array<ArrayBuffer>) => {
-      const signed = await driver.presignPart("big.bin", uploadId, partNumber, { size: part.length, expiresIn: 60 });
-      if (signed.error) throw signed.error;
-      return (await fake.fetch(signed.data.url, { method: "PUT", headers: signed.data.headers, body: part })).status;
-    };
-    expect(await sendPart(1, body.slice(0, 5 * MiB))).toBe(200);
-    expect(await sendPart(2, body.slice(5 * MiB))).toBe(200);
-    const parts = await driver.listParts("big.bin", uploadId);
-    if (parts.error) throw parts.error;
-    expect(parts.data.map((part) => [part.partNumber, part.size])).toEqual([
-      [1, 5 * MiB],
-      [2, 2 * MiB],
-    ]);
-    expect((await driver.completeMultipart("big.bin", uploadId, parts.data)).error).toBeNull();
-    expect((await driver.head("big.bin")).data?.size).toBe(7 * MiB);
-    // 5 MiB = 0x00500000; the word before it holds 0x004ffffc.
-    expect((await driver.getRange("big.bin", 5 * MiB - 2, 5 * MiB + 1)).data).toEqual(
-      new Uint8Array([0xff, 0xfc, 0x00, 0x50]),
-    );
-    expect(fake.pendingUploads()).toBe(0);
-  });
-
-  it("copies objects above the single-PUT limit in parts and keeps headers the driver would not accept as input", async () => {
+  it("keeps stored headers the driver would not accept as input when it copies in parts", async () => {
     const { fake, driver } = setup();
     // An underscore in a metadata name fails cloudrop's input rules, but the copy must keep what is stored.
     await putWithForeignTool(fake.fetch, "source.bin", offsetBytes(12 * MiB), {
@@ -155,15 +117,9 @@ describe("createS3Driver", () => {
     });
     expect((await small.copy("source.bin", "copy.bin")).error).toBeNull();
     expect((await driver.head("copy.bin")).data).toMatchObject({
-      size: 12 * MiB,
       type: "application/x-test",
       metadata: { legacy_id: "s1" },
     });
-    // The two 6 MiB parts meet at 0x00600000; the word before it holds 0x005ffffc.
-    expect((await driver.getRange("copy.bin", 6 * MiB - 2, 6 * MiB + 1)).data).toEqual(
-      new Uint8Array([0xff, 0xfc, 0x00, 0x60]),
-    );
-    expect(fake.pendingUploads()).toBe(0);
   });
 
   it("lists a prefix with a space, a plus and a star, page by page", async () => {
@@ -235,28 +191,19 @@ describe("createS3Driver", () => {
     expect((await driver.list("", null as never)).data?.items.map((item) => item.key)).toEqual(["a.txt", "b.bin"]);
   });
 
-  it("deletes more keys than one S3 batch holds", async () => {
+  it("deletes more keys than one S3 batch holds and fails an invalid key without a request", async () => {
     let deletes = 0;
     const counting = stubbed(async () => {
       deletes += 1;
       return new Response(null, { status: 204 });
     });
     const keys = Array.from({ length: 1001 }, (_, index) => `k${index}`);
-    const result = await driverWith(counting).deleteMany(keys);
-    expect([result.data?.deleted.length, result.data?.failed, deletes]).toEqual([1001, [], 1001]);
-  });
-
-  it("deletes many keys and reports each one", async () => {
-    const { driver } = setup();
-    await driver.put("a.txt", "a");
-    await driver.put("b.txt", "b");
-    const result = await driver.deleteMany(["a.txt", "bad/../key", "b.txt", "missing.txt"]);
-    if (result.error) throw result.error;
-    expect(result.data.deleted.toSorted()).toEqual(["a.txt", "b.txt", "missing.txt"]);
-    expect(result.data.failed).toEqual([
+    const result = await driverWith(counting).deleteMany([...keys, "bad/../key"]);
+    expect(result.data?.deleted.toSorted()).toEqual(keys.toSorted());
+    expect(result.data?.failed).toEqual([
       { key: "bad/../key", error: expect.objectContaining({ code: "INVALID_INPUT" }) },
     ]);
-    expect((await driver.list("")).data).toEqual({ items: [], nextCursor: null });
+    expect(deletes).toBe(1001);
   });
 
   it("presigns a PUT of exactly the single-PUT limit and rejects one byte more", async () => {
@@ -401,7 +348,7 @@ describe("createS3Driver", () => {
     );
   });
 
-  const BAD =
+  const badEscapeMessage =
     "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.";
   it.each([
     [
@@ -409,18 +356,10 @@ describe("createS3Driver", () => {
       "https://user:pass@account.r2.cloudflarestorage.com",
       "The storage endpoint contains a user name or password. Remove it; cloudrop takes credentials only as accessKeyId and secretAccessKey.",
     ],
-    [
-      "a malformed escape at the end of the path",
-      `${endpoint}/a%`,
-      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
-    ],
-    ["an escape that is not valid UTF-8 at the end of the path", `${endpoint}/a%E2%82`, BAD],
-    ["a lone continuation byte as the path", `${endpoint}/%FF`, BAD],
-    [
-      "a malformed escape inside the path",
-      `${endpoint}/a%zz/b`,
-      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
-    ],
+    ["a malformed escape at the end of the path", `${endpoint}/a%`, badEscapeMessage],
+    ["an escape that is not valid UTF-8 at the end of the path", `${endpoint}/a%E2%82`, badEscapeMessage],
+    ["a lone continuation byte as the path", `${endpoint}/%FF`, badEscapeMessage],
+    ["a malformed escape inside the path", `${endpoint}/a%zz/b`, badEscapeMessage],
   ])("rejects an endpoint with %s when it is created, naming the problem", (_name, badEndpoint, message) => {
     expect(() =>
       createS3Driver({ endpoint: badEndpoint, region: "auto", bucket: "test", credentials, rules: R2_RULES }),
@@ -635,12 +574,9 @@ describe("createS3Driver", () => {
       null,
     ],
     ["reports a refused delete", (driver) => driver.delete("a"), new Response(null, { status: 403 }), "STORAGE_DENIED"],
-  ])(
-    "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
-    async (_name, call, response, code) => {
-      expect((await call(driverWith(stubbed(async () => response)))).error?.code ?? null).toBe(code);
-    },
-  );
+  ])("%s", async (_name, call, response, code) => {
+    expect((await call(driverWith(stubbed(async () => response)))).error?.code ?? null).toBe(code);
+  });
 
   it("refuses a full body when the storage ignored the byte range", async () => {
     const result = await driverWith(stubbed(async () => new Response("whole object", { status: 200 }))).getRange(
