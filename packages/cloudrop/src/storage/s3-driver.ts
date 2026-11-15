@@ -212,13 +212,20 @@ function configurationReadError(error: CloudropError, missingCode: string, setti
 const SIGNABLE_UNTIL_MS = Date.UTC(10000, 0, 1);
 
 function unreachable(cause: unknown, timeoutMs: number): CloudropError {
-  const timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
+  let timedOut = false;
+  let safeCause: unknown;
+  try {
+    timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
+    if (!quotesCredentials(cause)) safeCause = cause;
+  } catch {
+    // An uninspectable cause is unsafe to keep, and must not replace a Result with a thrown error.
+  }
   return new CloudropError(
     "STORAGE_UNREACHABLE",
     timedOut
       ? `The storage service did not answer within ${timeoutMs / 1000} seconds. Retry the request.`
       : "Could not reach the storage service. Check the endpoint and the network connection, then retry.",
-    { retryable: true, cause: quotesCredentials(cause) ? undefined : cause },
+    { retryable: true, cause: safeCause },
   );
 }
 

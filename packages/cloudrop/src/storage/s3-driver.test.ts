@@ -493,6 +493,27 @@ describe("createS3Driver", () => {
     expect(result.error?.cause).toBe(plain);
   });
 
+  const unreadableCause = {
+    get message(): string {
+      throw new Error("The message cannot be read.");
+    },
+  };
+  const opaqueCause = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        throw new Error("The prototype cannot be read.");
+      },
+    },
+  );
+  it.each([
+    ["a getter", unreadableCause],
+    ["a proxy", opaqueCause],
+  ])("drops %s it cannot inspect without throwing", async (_name, cause) => {
+    const result = await driverWith(stubbed(() => Promise.reject(cause))).head("a.txt");
+    expect(result.error).toMatchObject({ code: "STORAGE_UNREACHABLE", retryable: true, cause: undefined });
+  });
+
   it("reports a refused HEAD as an error, never as a missing object", async () => {
     const result = await driverWith(stubbed(async () => new Response(null, { status: 403 }))).head("a.txt");
     expect(result.data).toBeNull();
