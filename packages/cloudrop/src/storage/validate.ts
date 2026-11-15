@@ -14,6 +14,8 @@ export function invalidInput(message: string): CloudropError {
  * implementation signed `/m/id/` for a file named `..`). Reject them instead of rewriting them.
  */
 export function keyProblem(key: string): string | null {
+  // Plain-JavaScript callers can pass anything; a TypeError here would escape the Result contract.
+  if (typeof key !== "string") return "The object key must be a string. Pass the key as text.";
   if (key.length === 0) return "The object key is empty. Pass a non-empty key.";
   // A lone surrogate cannot be percent-encoded (encodeURIComponent throws) and TextEncoder would silently replace it.
   if (!key.isWellFormed()) {
@@ -35,18 +37,36 @@ export function keyProblem(key: string): string | null {
 export function metadataProblem(metadata: Record<string, string> | undefined): string | null {
   let bytes = 0;
   for (const [name, value] of Object.entries(metadata ?? {})) {
+    // The offending name is not echoed: it is caller-controlled and unbounded (newlines would forge log lines).
     if (!/^[a-z0-9-]+$/.test(name))
-      return `Metadata name "${name}" may contain only lowercase letters, digits and hyphens.`;
+      return "A metadata name may contain only lowercase letters, digits and hyphens. Rename it.";
+    if (typeof value !== "string") return `Metadata value for "${name}" must be a string. Convert it first.`;
+    // Printable ASCII only: Headers would send "é" as one Latin-1 byte while S3 reads UTF-8.
     if (!/^[\x20-\x7e]*$/.test(value))
       return `Metadata value for "${name}" must be printable ASCII. Encode other text first.`;
+    // Headers trims surrounding spaces, so the stored value would differ from the one passed.
+    if (value.startsWith(" ") || value.endsWith(" "))
+      return `Metadata value for "${name}" must not start or end with a space. Trim it.`;
     bytes += name.length + value.length;
   }
   return bytes > MAX_METADATA_BYTES ? "Metadata exceeds 2 KiB. Store large values in your database instead." : null;
 }
 
+const BYTE_UNITS: readonly [string, number][] = [
+  ["GiB", 1024 ** 3],
+  ["MiB", 1024 ** 2],
+  ["KiB", 1024],
+];
+
+function formatBytes(bytes: number): string {
+  const unit = BYTE_UNITS.find(([, size]) => bytes >= size);
+  return unit ? `${Number((bytes / unit[1]).toFixed(3))} ${unit[0]}` : `${bytes} bytes`;
+}
+
 export function sizeProblem(size: number, max: number): string | null {
-  if (Number.isSafeInteger(size) && size >= 0 && size <= max) return null;
-  return `Size must be a whole number of bytes between 0 and ${max}.`;
+  if (!Number.isSafeInteger(size) || size < 0) return "Size must be a whole number of bytes, zero or more.";
+  if (size > max) return `Size is over the limit of ${formatBytes(max)}. Upload a smaller file or split it.`;
+  return null;
 }
 
 /** `Number.isInteger` is false for NaN and Infinity, and the cap rules out `1e+21`, so only sane digits reach the signer. */
