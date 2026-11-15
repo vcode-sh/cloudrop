@@ -58,6 +58,24 @@ export interface ListedObject {
   uploadedAt: Date;
 }
 
+/** One rule of the bucket's CORS configuration, as S3's GetBucketCors returns it. */
+export interface BucketCorsRule {
+  allowedOrigins: string[];
+  allowedMethods: string[];
+  allowedHeaders: string[];
+  exposeHeaders: string[];
+}
+
+/** One rule of the bucket's lifecycle configuration; only what cloudrop checks. */
+export interface BucketLifecycleRule {
+  id: string;
+  enabled: boolean;
+  /** "" covers the whole bucket. */
+  prefix: string;
+  /** Days after which an incomplete multipart upload is aborted, when the rule does that. */
+  abortIncompleteMultipartUploadDays?: number;
+}
+
 /** Implemented by cloudrop's presets, r2() and s3(); its methods may change before 1.0. */
 export interface StorageDriver {
   readonly rules: StorageRules;
@@ -82,6 +100,18 @@ export interface StorageDriver {
   ): Promise<Result<{ etag: string }>>;
   /** Idempotent: aborting an unknown or finished upload succeeds. */
   abortMultipart(key: string, uploadId: string): Promise<Result<void>>;
+  /**
+   * A presigned GET. `signedAt` (default now) lets callers round the signing time so that one URL is shared by everyone
+   * in a time window. `disposition` is signed into the URL as `response-content-disposition`.
+   */
+  presignGet(
+    key: string,
+    options: { expiresIn: number; signedAt?: Date; disposition?: string },
+  ): Promise<Result<{ url: string; expiresAt: Date }>>;
+  /** The bucket's CORS rules; [] when it has none. Credentials that may not read them get STORAGE_DENIED. */
+  getBucketCors(): Promise<Result<BucketCorsRule[]>>;
+  /** The bucket's lifecycle rules; [] when it has none. Credentials that may not read them get STORAGE_DENIED. */
+  getBucketLifecycle(): Promise<Result<BucketLifecycleRule[]>>;
   /** `null` only when the object does not exist; every other failure is an error. */
   head(key: string): Promise<Result<ObjectInfo | null>>;
   /** Inclusive byte range. */

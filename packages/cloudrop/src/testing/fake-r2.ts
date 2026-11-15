@@ -12,6 +12,11 @@ export interface FakeR2Options {
   bucket: string;
   credentials: Credentials;
   now?: () => Date;
+  /**
+   * The CORS and lifecycle XML the bucket serves; a missing entry answers 404 as a bucket without that configuration.
+   * Without this option, both reads answer 403 AccessDenied, as they do for an R2 object token (spike Q8).
+   */
+  bucketConfig?: { cors?: string; lifecycle?: string };
 }
 
 export interface FakeR2 {
@@ -240,7 +245,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     return new Response(null, { status: 200, headers: { etag: `"${etag}"` } });
   }
 
-  function getObject(key: string, method: string, headers: Headers): Response {
+  function getObject(key: string, method: string, headers: Headers, query: URLSearchParams): Response {
     const object = objects.get(key);
     if (!object) {
       return method === "HEAD"
@@ -259,6 +264,9 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     }
     if (object.partCount) responseHeaders.set("x-amz-mp-parts-count", String(object.partCount));
     if (method === "HEAD") return new Response(null, { status: 200, headers: responseHeaders });
+    // S3's documented GetObject override; real R2 is checked by the contract suite on every backend.
+    const disposition = query.get("response-content-disposition");
+    if (disposition !== null) responseHeaders.set("content-disposition", disposition);
     // Only closed ranges (bytes=a-b) are served. Open-ended and suffix forms are ignored and answer the whole object,
     // which RFC 9110 allows; the driver validates and sends closed ranges only.
     const range = /^bytes=(\d+)-(\d+)$/.exec(headers.get("range") ?? "");
@@ -443,6 +451,14 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     return xmlResponse(`<CopyObjectResult><ETag>"${etag}"</ETag></CopyObjectResult>`);
   }
 
+  function bucketConfig(name: "cors" | "lifecycle"): Response {
+    if (!options.bucketConfig) return errorResponse(403, "AccessDenied", "Access Denied");
+    const xml = options.bucketConfig[name];
+    if (xml !== undefined) return xmlResponse(xml);
+    const code = name === "cors" ? "NoSuchCORSConfiguration" : "NoSuchLifecycleConfiguration";
+    return errorResponse(404, code, "The bucket has no such configuration.");
+  }
+
   function listObjects(query: URLSearchParams): Response {
     const prefix = query.get("prefix") ?? "";
     const token = query.get("continuation-token");
@@ -490,6 +506,8 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     const query = url.searchParams;
     const { method, headers } = request;
     if (method === "GET" && key === "" && query.get("list-type") === "2") return listObjects(query);
+    if (method === "GET" && key === "" && query.has("cors")) return bucketConfig("cors");
+    if (method === "GET" && key === "" && query.has("lifecycle")) return bucketConfig("lifecycle");
     if (method === "POST" && query.has("uploads")) return createUpload(key, headers);
     if (method === "PUT" && headers.has("x-amz-copy-source")) return copy(key, query, headers);
     if (method === "PUT" && query.has("uploadId")) return uploadPart(key, query, headers, body);
@@ -501,7 +519,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
       return new Response(null, { status: 204 });
     }
     if (method === "PUT") return putObject(key, headers, body);
-    if (method === "GET" || method === "HEAD") return getObject(key, method, headers);
+    if (method === "GET" || method === "HEAD") return getObject(key, method, headers, query);
     if (method === "DELETE") {
       objects.delete(key);
       return new Response(null, { status: 204 });

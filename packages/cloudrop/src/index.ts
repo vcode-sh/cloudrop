@@ -28,6 +28,8 @@ export type {
 } from "./protocol/types.ts";
 export type { StorageRules } from "./rules.ts";
 export type {
+  BucketCorsRule,
+  BucketLifecycleRule,
   CompletedPart,
   FetchLike,
   ListedObject,

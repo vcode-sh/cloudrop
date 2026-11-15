@@ -78,7 +78,8 @@ async function putWithForeignTool(
 /** Answers a copy: HEAD with the given source size, create and abort as R2 does, and the copy itself with `onCopy`. */
 function copyStub(size: number, onCopy: FetchLike, aborted: string[] = []): FetchLike {
   return async (input, init) => {
-    if (init?.method === "HEAD") return new Response(null, { headers: { "content-length": String(size) } });
+    if (init?.method === "HEAD")
+      return new Response(null, { headers: { "content-length": String(size), etag: '"src"' } });
     if (init?.method === "POST") {
       return new Response("<InitiateMultipartUploadResult><UploadId>u1</UploadId></InitiateMultipartUploadResult>");
     }
@@ -454,6 +455,36 @@ describe("createS3Driver", () => {
     });
   });
 
+  it("reports a HEAD answer without an ETag as a retryable storage error", async () => {
+    // copy() sends the ETag as x-amz-copy-source-if-match; an empty one would not guard the copy at all.
+    const etagless = stubbed(async () => new Response(null, { headers: { "content-length": "1" } }));
+    expect((await driverWith(etagless).head("a.txt")).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no ETag. Retry the request.",
+    });
+  });
+
+  it("drops a platform error whose nested cause quotes the Authorization header", async () => {
+    const quoting = stubbed(() =>
+      Promise.reject(
+        new TypeError("fetch failed", {
+          cause: new Error("Invalid header value: AWS4-HMAC-SHA256 Credential=AKID/..."),
+        }),
+      ),
+    );
+    expect((await driverWith(quoting).head("a.txt")).error).toMatchObject({
+      code: "STORAGE_UNREACHABLE",
+      cause: undefined,
+    });
+  });
+
+  it("keeps a platform error's cause when nothing in its chain quotes credentials", async () => {
+    const plain = new TypeError("fetch failed", { cause: new Error("getaddrinfo ENOTFOUND") });
+    const result = await driverWith(stubbed(() => Promise.reject(plain))).head("a.txt");
+    expect(result.error?.cause).toBe(plain);
+  });
+
   it("reports a refused HEAD as an error, never as a missing object", async () => {
     const result = await driverWith(stubbed(async () => new Response(null, { status: 403 }))).head("a.txt");
     expect(result.data).toBeNull();
@@ -644,5 +675,135 @@ describe("createS3Driver", () => {
       code: "STORAGE_ERROR",
       retryable: true,
     });
+  });
+});
+
+describe("presignGet", () => {
+  it("serves the object through the URL, with the signed download name", async () => {
+    const { fake, driver } = setup();
+    expect((await driver.put("docs/report.txt", "hello", { type: "text/plain" })).error).toBeNull();
+    const signed = await driver.presignGet("docs/report.txt", {
+      expiresIn: 300,
+      disposition: 'attachment; filename="report.txt"',
+    });
+    expect(signed.data?.expiresAt).toEqual(new Date("2026-11-15T12:05:00Z"));
+    const response = await fake.fetch(signed.data?.url ?? "");
+    expect({
+      status: response.status,
+      disposition: response.headers.get("content-disposition"),
+      body: await response.text(),
+    }).toEqual({ status: 200, disposition: 'attachment; filename="report.txt"', body: "hello" });
+  });
+
+  it("signs the same URL for the same signing time, so a rounded time gives one cacheable URL", async () => {
+    const { driver } = setup();
+    const signedAt = new Date("2026-11-15T11:00:00Z");
+    const first = await driver.presignGet("a.txt", { expiresIn: 7200, signedAt });
+    const second = await driver.presignGet("a.txt", { expiresIn: 7200, signedAt });
+    expect(first.data?.url).toBe(second.data?.url);
+    expect(first.data?.url).toContain("X-Amz-Date=20261115T110000Z");
+  });
+
+  it.each<[string, unknown, string]>([
+    [
+      "an expiry over seven days",
+      { expiresIn: 604_801 },
+      "Expiry must be a whole number of seconds between 1 and 604800.",
+    ],
+    [
+      "a disposition outside printable ASCII",
+      { expiresIn: 60, disposition: 'attachment; filename="ü.txt"' },
+      "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
+    ],
+    [
+      "an invalid signing time",
+      { expiresIn: 60, signedAt: new Date(Number.NaN) },
+      "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.",
+    ],
+    // Plain-JavaScript callers: none of these may throw a TypeError past the Result.
+    ["null options", null, "Expiry must be a whole number of seconds between 1 and 604800."],
+    [
+      "a signing time given as text",
+      { expiresIn: 60, signedAt: "2026-11-15T11:00:00Z" },
+      "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.",
+    ],
+    [
+      "a disposition that is not text",
+      { expiresIn: 60, disposition: 1 },
+      "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
+    ],
+  ])("refuses %s without signing", async (_name, options, message) => {
+    expect((await driverWith(neverCalled).presignGet("a.txt", options as { expiresIn: number })).error).toMatchObject({
+      code: "INVALID_INPUT",
+      message,
+    });
+  });
+});
+
+describe("bucket configuration", () => {
+  const cors =
+    "<CORSConfiguration><CORSRule><AllowedOrigin>http://localhost:5173</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedHeader>content-type</AllowedHeader><AllowedHeader>x-amz-meta-*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule></CORSConfiguration>";
+  // R2's default multipart rule, plus a prefix-scoped expiry such as the test bucket's.
+  const lifecycle =
+    "<LifecycleConfiguration><Rule><ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule><Rule><ID>live-test</ID><Status>Disabled</Status><Filter><Prefix>live-test/</Prefix></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>";
+
+  function configured(bucketConfig?: { cors?: string; lifecycle?: string }): StorageDriver {
+    return driverWith(createFakeR2({ bucket: "test", credentials, now, bucketConfig }).fetch);
+  }
+
+  it("reads the CORS rules", async () => {
+    expect((await configured({ cors }).getBucketCors()).data).toEqual([
+      {
+        allowedOrigins: ["http://localhost:5173"],
+        allowedMethods: ["PUT", "GET"],
+        allowedHeaders: ["content-type", "x-amz-meta-*"],
+        exposeHeaders: ["ETag"],
+      },
+    ]);
+  });
+
+  it("reads the lifecycle rules with their abort days and prefixes", async () => {
+    expect((await configured({ lifecycle }).getBucketLifecycle()).data).toEqual([
+      { id: "Default Multipart Abort Rule", enabled: true, prefix: "", abortIncompleteMultipartUploadDays: 7 },
+      { id: "live-test", enabled: false, prefix: "live-test/" },
+    ]);
+  });
+
+  it("answers no rules for a bucket without configuration", async () => {
+    const driver = configured({});
+    expect([(await driver.getBucketCors()).data, (await driver.getBucketLifecycle()).data]).toEqual([[], []]);
+  });
+
+  it.each([
+    ["CORS", (driver: StorageDriver) => driver.getBucketCors(), "CORS configuration"],
+    ["lifecycle", (driver: StorageDriver) => driver.getBucketLifecycle(), "lifecycle configuration"],
+  ])(
+    "reports a %s answer without its configuration element as a retryable storage error",
+    async (_name, read, missing) => {
+      // An HTML error page from a proxy is not "no rules": checkBucket would report rules the bucket may have.
+      const html = stubbed(async () => new Response("<html><body>Bad gateway</body></html>"));
+      expect((await read(driverWith(html))).error).toMatchObject({
+        code: "STORAGE_ERROR",
+        retryable: true,
+        message: `The storage service's response had no ${missing}. Retry the request.`,
+      });
+    },
+  );
+
+  it("reports malformed abort days as a retryable storage error, never as NaN", async () => {
+    const malformed = lifecycle.replace("<DaysAfterInitiation>7<", "<DaysAfterInitiation>seven<");
+    expect((await configured({ lifecycle: malformed }).getBucketLifecycle()).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no valid multipart abort days. Retry the request.",
+    });
+  });
+
+  it("reports a refused read as STORAGE_DENIED, never as no rules", async () => {
+    const driver = configured();
+    expect([(await driver.getBucketCors()).error?.code, (await driver.getBucketLifecycle()).error?.code]).toEqual([
+      "STORAGE_DENIED",
+      "STORAGE_DENIED",
+    ]);
   });
 });

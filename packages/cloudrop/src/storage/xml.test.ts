@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeXml, stripQuotes, xmlBlocks, xmlText } from "./xml.ts";
+import { escapeXml, stripQuotes, xmlBlocks, xmlText, xmlTexts } from "./xml.ts";
 
 describe("xml reader", () => {
   const listParts = `<?xml version="1.0"?><ListPartsResult><PartNumberMarker>0</PartNumberMarker>
@@ -50,5 +50,12 @@ describe("xml reader", () => {
 
   it("escapes text for XML", () => {
     expect(escapeXml(`a<b>&"c'`)).toBe("a&lt;b&gt;&amp;&quot;c&apos;");
+  });
+
+  it("decodes the text of every element with the tag, in document order", () => {
+    expect(xmlTexts("<Rule><Header> a&amp;b </Header><Other>x</Other><Header>c</Header></Rule>", "Header")).toEqual([
+      "a&b",
+      "c",
+    ]);
   });
 });

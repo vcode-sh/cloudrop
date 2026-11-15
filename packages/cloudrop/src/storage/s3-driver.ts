@@ -1,6 +1,7 @@
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { MiB, type StorageRules } from "../rules.ts";
 import type {
+  BucketLifecycleRule,
   CompletedPart,
   FetchLike,
   ObjectInfo,
@@ -40,7 +41,7 @@ import {
   sizeProblem,
   uploadIdProblem,
 } from "./validate.ts";
-import { escapeXml, stripQuotes, xmlBlocks, xmlText } from "./xml.ts";
+import { escapeXml, stripQuotes, xmlBlocks, xmlText, xmlTexts } from "./xml.ts";
 
 export interface S3DriverConfig {
   /**
@@ -178,6 +179,14 @@ function checkSigningSettings({ credentials, region }: S3DriverConfig): void {
   }
 }
 
+// A header the platform refused is quoted in its error, and the Authorization header carries the access key ID. The
+// quote can sit in a nested cause (an undici error wraps the socket error), so the whole chain is searched, to a depth
+// that no real error chain reaches.
+function quotesCredentials(error: unknown, depth = 0): boolean {
+  if (!(error instanceof Error) || depth > 8) return false;
+  return error.message.includes("Credential=") || quotesCredentials(error.cause, depth + 1);
+}
+
 function unreachable(cause: unknown, timeoutMs: number): CloudropError {
   const timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
   return new CloudropError(
@@ -185,8 +194,7 @@ function unreachable(cause: unknown, timeoutMs: number): CloudropError {
     timedOut
       ? `The storage service did not answer within ${timeoutMs / 1000} seconds. Retry the request.`
       : "Could not reach the storage service. Check the endpoint and the network connection, then retry.",
-    // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID.
-    { retryable: true, cause: cause instanceof Error && cause.message.includes("Credential=") ? undefined : cause },
+    { retryable: true, cause: quotesCredentials(cause) ? undefined : cause },
   );
 }
 
@@ -381,6 +389,67 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       return ok(await presign(url, headers, options.size, options.expiresIn));
     },
 
+    async presignGet(key, given) {
+      const options = orEmpty(given);
+      const signedAt = options.signedAt ?? now();
+      const problem =
+        keyProblem(key) ??
+        expiryProblem(options.expiresIn, rules.maxPresignSeconds) ??
+        objectOptionsProblem({ disposition: options.disposition }) ??
+        (signedAt instanceof Date && !Number.isNaN(signedAt.getTime())
+          ? null
+          : "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.");
+      if (problem) return fail(invalidInput(problem));
+      const query: Record<string, string> = options.disposition
+        ? { "response-content-disposition": options.disposition }
+        : {};
+      const url = await presignUrl({
+        method: "GET",
+        url: objectUrl(key, query),
+        credentials,
+        region,
+        date: signedAt,
+        expiresIn: options.expiresIn,
+      });
+      return ok({ url: url.toString(), expiresAt: new Date(signedAt.getTime() + options.expiresIn * 1000) });
+    },
+
+    async getBucketCors() {
+      const result = await sendForXml("GET", new URL(`${bucketUrl}?cors=`));
+      if (result.error) return result.error.code === "NOT_FOUND" ? ok([]) : result;
+      // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
+      const configuration = xmlBlocks(result.data, "CORSConfiguration")[0];
+      if (configuration === undefined) return fail(incompleteResponse("CORS configuration"));
+      return ok(
+        xmlBlocks(configuration, "CORSRule").map((rule) => ({
+          allowedOrigins: xmlTexts(rule, "AllowedOrigin"),
+          allowedMethods: xmlTexts(rule, "AllowedMethod"),
+          allowedHeaders: xmlTexts(rule, "AllowedHeader"),
+          exposeHeaders: xmlTexts(rule, "ExposeHeader"),
+        })),
+      );
+    },
+
+    async getBucketLifecycle() {
+      const result = await sendForXml("GET", new URL(`${bucketUrl}?lifecycle=`));
+      if (result.error) return result.error.code === "NOT_FOUND" ? ok([]) : result;
+      const configuration = xmlBlocks(result.data, "LifecycleConfiguration")[0];
+      if (configuration === undefined) return fail(incompleteResponse("lifecycle configuration"));
+      const parsed: BucketLifecycleRule[] = [];
+      for (const rule of xmlBlocks(configuration, "Rule")) {
+        const days = xmlText(xmlBlocks(rule, "AbortIncompleteMultipartUpload")[0] ?? "", "DaysAfterInitiation");
+        if (days !== undefined && !/^\d{1,9}$/.test(days))
+          return fail(incompleteResponse("valid multipart abort days"));
+        parsed.push({
+          id: xmlText(rule, "ID") ?? "",
+          enabled: xmlText(rule, "Status") === "Enabled",
+          prefix: xmlText(rule, "Prefix") ?? "",
+          ...(days === undefined ? {} : { abortIncompleteMultipartUploadDays: Number(days) }),
+        });
+      }
+      return ok(parsed);
+    },
+
     async listParts(key, uploadId) {
       const problem = keyProblem(key) ?? uploadIdProblem(uploadId);
       if (problem) return fail(invalidInput(problem));
@@ -445,8 +514,10 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (problem) return fail(invalidInput(problem));
       const result = await send("HEAD", objectUrl(key), { headers: { "x-amz-checksum-mode": "ENABLED" } });
       if (result.error) return result.error.code === "NOT_FOUND" ? ok(null) : result;
-      // A missing size would read as an empty object, and a copy would then copy nothing.
+      // A missing size would read as an empty object, and a copy would then copy nothing. A missing ETag would make a
+      // copy send an empty x-amz-copy-source-if-match.
       if (!result.data.headers.has("content-length")) return fail(incompleteResponse("content length"));
+      if (!result.data.headers.get("etag")) return fail(incompleteResponse("ETag"));
       return ok(readObjectInfo(key, result.data.headers));
     },
 

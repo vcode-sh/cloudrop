@@ -29,6 +29,11 @@ export function xmlText(xml: string, tag: string): string | undefined {
   return block === undefined ? undefined : decodeXml(block.trim());
 }
 
+/** Decoded text of every `<tag>` element, in document order. */
+export function xmlTexts(xml: string, tag: string): string[] {
+  return xmlBlocks(xml, tag).map((block) => decodeXml(block.trim()));
+}
+
 export function stripQuotes(value: string): string {
   return value.replaceAll('"', "");
 }
