@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
 import {
+  checksumProblem,
+  cursorProblem,
   expiryProblem,
   invalidInput,
+  keyListProblem,
   keyProblem,
-  metadataProblem,
+  limitProblem,
+  objectOptionsProblem,
   partNumberProblem,
+  partsProblem,
+  prefixProblem,
   rangeProblem,
   sizeProblem,
+  uploadIdProblem,
 } from "./validate.ts";
 
 describe("invalidInput", () => {
@@ -65,7 +72,26 @@ describe("keyProblem", () => {
   });
 });
 
-describe("metadataProblem", () => {
+describe("objectOptionsProblem", () => {
+  it.each([
+    ["a printable ASCII type", { type: "text/plain; charset=utf-8" }, null],
+    ["an RFC 8187 encoded filename", { disposition: "attachment; filename*=UTF-8''%C5%82%C3%B3d%C5%BA.txt" }, null],
+    [
+      "a non-ASCII content type",
+      { type: "text/plain; name=é" },
+      "The content type must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
+    ],
+    [
+      "a line feed in the disposition",
+      { disposition: "inline\nx-forged: 1" },
+      "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.",
+    ],
+  ])("checks %s", (_name, options, expected) => {
+    expect(objectOptionsProblem(options)).toBe(expected);
+  });
+});
+
+describe("objectOptionsProblem metadata", () => {
   it.each([
     ["a lowercase name with a hyphen", { "cloudrop-id": "01JD3K" }],
     ["no metadata", undefined],
@@ -73,7 +99,7 @@ describe("metadataProblem", () => {
     ["the lowest printable value, a space inside", { a: "x y" }],
     ["the highest printable value, a tilde", { a: "~" }],
   ])("accepts %s", (_name, metadata) => {
-    expect(metadataProblem(metadata)).toBeNull();
+    expect(objectOptionsProblem({ metadata })).toBeNull();
   });
 
   const ascii = 'Metadata value for "a" must be printable ASCII. Encode other text first.';
@@ -87,7 +113,7 @@ describe("metadataProblem", () => {
     ["U+001F", "a\u001fb"],
     ["DEL", "a\u007fb"],
   ])("rejects a value with %s", (_name, value) => {
-    expect(metadataProblem({ a: value })).toBe(ascii);
+    expect(objectOptionsProblem({ metadata: { a: value } })).toBe(ascii);
   });
 
   it.each([
@@ -95,35 +121,37 @@ describe("metadataProblem", () => {
     ["a trailing space", "x "],
     ["only a space", " "],
   ])("rejects a value with %s, which Headers would trim", (_name, value) => {
-    expect(metadataProblem({ a: value })).toBe('Metadata value for "a" must not start or end with a space. Trim it.');
+    expect(objectOptionsProblem({ metadata: { a: value } })).toBe(
+      'Metadata value for "a" must not start or end with a space. Trim it.',
+    );
   });
 
   it("rejects a value that is not a string", () => {
-    expect(metadataProblem({ a: 5 as unknown as string })).toBe(
+    expect(objectOptionsProblem({ metadata: { a: 5 as unknown as string } })).toBe(
       'Metadata value for "a" must be a string. Convert it first.',
     );
-    expect(metadataProblem({ a: undefined as unknown as string })).toBe(
+    expect(objectOptionsProblem({ metadata: { a: undefined as unknown as string } })).toBe(
       'Metadata value for "a" must be a string. Convert it first.',
     );
   });
 
   it("rejects an invalid name without echoing it", () => {
-    expect(metadataProblem({ "Owner\nforged log line": "x" })).toBe(
+    expect(objectOptionsProblem({ metadata: { "Owner\nforged log line": "x" } })).toBe(
       "A metadata name may contain only lowercase letters, digits and hyphens. Rename it.",
     );
-    expect(metadataProblem({ Owner: "x" })).toBe(
+    expect(objectOptionsProblem({ metadata: { Owner: "x" } })).toBe(
       "A metadata name may contain only lowercase letters, digits and hyphens. Rename it.",
     );
   });
 
   it("counts name plus value bytes against the 2 KiB limit", () => {
     const message = "Metadata exceeds 2 KiB. Store large values in your database instead.";
-    expect(metadataProblem({ a: "x".repeat(2047) })).toBeNull();
-    expect(metadataProblem({ a: "x".repeat(2048) })).toBe(message);
+    expect(objectOptionsProblem({ metadata: { a: "x".repeat(2047) } })).toBeNull();
+    expect(objectOptionsProblem({ metadata: { a: "x".repeat(2048) } })).toBe(message);
   });
 
   it("adds up all entries, not just the largest", () => {
-    expect(metadataProblem({ a: "x".repeat(1500), b: "x".repeat(1500) })).toBe(
+    expect(objectOptionsProblem({ metadata: { a: "x".repeat(1500), b: "x".repeat(1500) } })).toBe(
       "Metadata exceeds 2 KiB. Store large values in your database instead.",
     );
   });
@@ -180,6 +208,73 @@ describe("numeric checks", () => {
     { name: "a reversed range", problem: rangeProblem(5, 4), expected: rangeMessage },
     { name: "a negative start", problem: rangeProblem(-1, 4), expected: rangeMessage },
     { name: "a fractional end", problem: rangeProblem(0, 1.5), expected: rangeMessage },
+  ])("checks $name", ({ problem, expected }) => {
+    expect(problem).toBe(expected);
+  });
+});
+
+describe("request token checks", () => {
+  const checksumMessage =
+    'The CRC32C checksum must be the base64 of 4 bytes, such as "4waSgw==". Compute it from the exact bytes you send.';
+  const uploadIdMessage = "The upload ID is empty or malformed. Pass the uploadId that createMultipart returned.";
+  const cursorMessage = "The list cursor is empty or malformed. Pass the nextCursor of the previous page.";
+  const prefixMessage =
+    "The list prefix is not valid Unicode (it has a lone surrogate). Remove or replace that character.";
+  const limitMessage = "The page size must be between 1 and 1000.";
+  const partsMessage =
+    "Pass at least one part, each with a part number between 1 and 10000 and the ETag the storage returned for it.";
+  const keysMessage = "deleteMany takes an array of at most 1000 keys. Split longer lists into batches.";
+  const parts = (...items: unknown[]) => items as { partNumber: number; etag: string }[];
+
+  it.each([
+    // CRC32C of "123456789" is 0xE3069283 (the published check value).
+    { name: "the CRC32C check value", problem: checksumProblem("4waSgw=="), expected: null },
+    { name: "no checksum", problem: checksumProblem(undefined), expected: null },
+    { name: "a checksum without padding", problem: checksumProblem("4waSgw"), expected: checksumMessage },
+    { name: "base64 of 6 bytes", problem: checksumProblem("4waSgwAA"), expected: checksumMessage },
+    // A sixth character with set low bits encodes data that 4 bytes cannot hold.
+    { name: "a non-canonical sixth character", problem: checksumProblem("4waSgx=="), expected: checksumMessage },
+    { name: "a hex checksum", problem: checksumProblem("e3069283"), expected: checksumMessage },
+    {
+      name: "a numeric checksum",
+      problem: checksumProblem(0xe3069283 as unknown as string),
+      expected: checksumMessage,
+    },
+    { name: "an opaque upload ID", problem: uploadIdProblem("fake/upload+1=="), expected: null },
+    { name: "an empty upload ID", problem: uploadIdProblem(""), expected: uploadIdMessage },
+    { name: "an upload ID with a space", problem: uploadIdProblem("a b"), expected: uploadIdMessage },
+    { name: "an upload ID with a line feed", problem: uploadIdProblem("a\nb"), expected: uploadIdMessage },
+    { name: "a non-ASCII upload ID", problem: uploadIdProblem("é"), expected: uploadIdMessage },
+    {
+      name: "a missing upload ID",
+      problem: uploadIdProblem(undefined as unknown as string),
+      expected: uploadIdMessage,
+    },
+    { name: "an opaque cursor", problem: cursorProblem("1/a+b=="), expected: null },
+    { name: "an empty cursor", problem: cursorProblem(""), expected: cursorMessage },
+    { name: "a cursor with a space", problem: cursorProblem("a b"), expected: cursorMessage },
+    { name: "an empty prefix", problem: prefixProblem(""), expected: null },
+    { name: "a prefix with a space and a plus", problem: prefixProblem("a b+c/"), expected: null },
+    { name: "a prefix with a lone surrogate", problem: prefixProblem("a\uDC00"), expected: prefixMessage },
+    { name: "a numeric prefix", problem: prefixProblem(5 as unknown as string), expected: prefixMessage },
+    { name: "a page of 1", problem: limitProblem(1), expected: null },
+    { name: "a page of 1000", problem: limitProblem(1000), expected: null },
+    { name: "a page of 0", problem: limitProblem(0), expected: limitMessage },
+    { name: "a page of 1001", problem: limitProblem(1001), expected: limitMessage },
+    { name: "a fractional page", problem: limitProblem(1.5), expected: limitMessage },
+    { name: "one part", problem: partsProblem(parts({ partNumber: 1, etag: "a" }), 10_000), expected: null },
+    { name: "no parts", problem: partsProblem([], 10_000), expected: partsMessage },
+    { name: "part 0", problem: partsProblem(parts({ partNumber: 0, etag: "a" }), 10_000), expected: partsMessage },
+    {
+      name: "a part without an ETag",
+      problem: partsProblem(parts({ partNumber: 1, etag: "" }), 10_000),
+      expected: partsMessage,
+    },
+    { name: "a null part", problem: partsProblem(parts(null), 10_000), expected: partsMessage },
+    { name: "parts that are not a list", problem: partsProblem(parts as never, 10_000), expected: partsMessage },
+    { name: "1000 keys", problem: keyListProblem(Array.from({ length: 1000 }, () => "k")), expected: null },
+    { name: "1001 keys", problem: keyListProblem(Array.from({ length: 1001 }, () => "k")), expected: keysMessage },
+    { name: "one key as a string", problem: keyListProblem("a.txt" as unknown as string[]), expected: keysMessage },
   ])("checks $name", ({ problem, expected }) => {
     expect(problem).toBe(expected);
   });

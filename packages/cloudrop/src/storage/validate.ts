@@ -1,4 +1,5 @@
 import { CloudropError } from "../errors.ts";
+import type { CompletedPart, ObjectOptions } from "./driver.ts";
 
 const encoder = new TextEncoder();
 const MAX_KEY_BYTES = 1024;
@@ -34,7 +35,7 @@ export function keyProblem(key: string): string | null {
   return null;
 }
 
-export function metadataProblem(metadata: Record<string, string> | undefined): string | null {
+function metadataProblem(metadata: Record<string, string> | undefined): string | null {
   let bytes = 0;
   for (const [name, value] of Object.entries(metadata ?? {})) {
     // The offending name is not echoed: it is caller-controlled and unbounded (newlines would forge log lines).
@@ -50,6 +51,68 @@ export function metadataProblem(metadata: Record<string, string> | undefined): s
     bytes += name.length + value.length;
   }
   return bytes > MAX_METADATA_BYTES ? "Metadata exceeds 2 KiB. Store large values in your database instead." : null;
+}
+
+/** Header values must be printable ASCII: fetch rejects characters above U+00FF before a request is sent. */
+export function objectOptionsProblem(options: ObjectOptions): string | null {
+  for (const [label, value] of [
+    ["content type", options.type],
+    ["content disposition", options.disposition],
+  ] as const) {
+    if (value !== undefined && !/^[\x20-\x7e]*$/.test(value)) {
+      return `The ${label} must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.`;
+    }
+  }
+  return metadataProblem(options.metadata);
+}
+
+/** Base64 of 4 bytes: five free characters, a sixth that carries only 2 data bits (A, Q, g or w), then "==". */
+export function checksumProblem(checksum: string | undefined): string | null {
+  if (checksum === undefined || /^[A-Za-z0-9+/]{5}[AQgw]==$/.test(checksum)) return null;
+  return 'The CRC32C checksum must be the base64 of 4 bytes, such as "4waSgw==". Compute it from the exact bytes you send.';
+}
+
+// Upload IDs and continuation tokens are opaque, but both travel in a signed query: printable ASCII, no spaces.
+const isToken = (value: unknown): boolean => typeof value === "string" && /^[\x21-\x7e]+$/.test(value);
+
+export function uploadIdProblem(uploadId: string): string | null {
+  return isToken(uploadId)
+    ? null
+    : "The upload ID is empty or malformed. Pass the uploadId that createMultipart returned.";
+}
+
+export function cursorProblem(cursor: string): string | null {
+  return isToken(cursor) ? null : "The list cursor is empty or malformed. Pass the nextCursor of the previous page.";
+}
+
+export function prefixProblem(prefix: string): string | null {
+  if (typeof prefix === "string" && prefix.isWellFormed()) return null;
+  return "The list prefix is not valid Unicode (it has a lone surrogate). Remove or replace that character.";
+}
+
+export function limitProblem(limit: number): string | null {
+  return Number.isInteger(limit) && limit >= 1 && limit <= 1000 ? null : "The page size must be between 1 and 1000.";
+}
+
+export function partsProblem(parts: readonly CompletedPart[], maxParts: number): string | null {
+  const valid =
+    Array.isArray(parts) &&
+    parts.length > 0 &&
+    parts.every(
+      (part) =>
+        partNumberProblem(part?.partNumber, maxParts) === null && typeof part.etag === "string" && part.etag !== "",
+    );
+  return valid
+    ? null
+    : `Pass at least one part, each with a part number between 1 and ${maxParts} and the ETag the storage returned for it.`;
+}
+
+// S3's DeleteObjects takes at most 1000 keys, so batches sized for it stay valid whichever call deletes them.
+const MAX_DELETE_KEYS = 1000;
+
+export function keyListProblem(keys: readonly string[]): string | null {
+  if (Array.isArray(keys) && keys.length <= MAX_DELETE_KEYS) return null;
+  return "deleteMany takes an array of at most 1000 keys. Split longer lists into batches.";
 }
 
 const BYTE_UNITS: readonly [string, number][] = [

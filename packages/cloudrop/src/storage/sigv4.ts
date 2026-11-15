@@ -103,7 +103,7 @@ function canonicalPath(url: URL): string {
 }
 
 // Sorts by encoded name, then encoded value, as SigV4 requires; repeated names are ordered by their encoded values.
-function canonicalQuery(params: URLSearchParams): string {
+export function canonicalQuery(params: URLSearchParams): string {
   return Array.from(params, ([name, value]) => [encodeRfc3986(name), encodeRfc3986(value)] as const)
     .sort(([aName, aValue], [bName, bValue]) => {
       if (aName !== bName) return aName < bName ? -1 : 1;
