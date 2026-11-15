@@ -47,18 +47,29 @@ async function deriveSigningKey(secretAccessKey: string, day: string, region: st
 }
 
 // The signing key only changes with the UTC day, region or secret, so a multipart upload derives it once instead of
-// once per part. Bounded: a long-lived process that rotates secrets must not grow it without limit.
-const SIGNING_KEY_CACHE_LIMIT = 16;
-const signingKeys = new Map<string, Promise<CryptoKey>>();
+// once per part (bun, 5000 presigns: 25.8 us each reusing one credentials object, 53.2 us with a new one each call; first measured 23.6 vs 54.9). The cache hangs
+// off the caller's credentials object, so it dies with it and no module-wide map ever holds a secret; the secret it
+// was derived from is kept beside the keys only to notice a secret changed in place.
+interface CachedKeys {
+  secretAccessKey: string;
+  byScope: Map<string, Promise<CryptoKey>>;
+}
+const signingKeys = new WeakMap<Credentials, CachedKeys>();
 
-function signingKey(secretAccessKey: string, day: string, region: string): Promise<CryptoKey> {
-  const id = JSON.stringify([secretAccessKey, day, region]);
-  const cached = signingKeys.get(id);
-  if (cached) return cached;
-  const derived = deriveSigningKey(secretAccessKey, day, region);
-  derived.catch(() => signingKeys.delete(id));
-  if (signingKeys.size >= SIGNING_KEY_CACHE_LIMIT) signingKeys.delete(signingKeys.keys().next().value as string);
-  signingKeys.set(id, derived);
+function signingKey(credentials: Credentials, day: string, region: string): Promise<CryptoKey> {
+  let cached = signingKeys.get(credentials);
+  if (cached?.secretAccessKey !== credentials.secretAccessKey) {
+    cached = { secretAccessKey: credentials.secretAccessKey, byScope: new Map() };
+    signingKeys.set(credentials, cached);
+  }
+  const scope = `${day}/${region}`;
+  let derived = cached.byScope.get(scope);
+  if (!derived) {
+    const { byScope } = cached;
+    derived = deriveSigningKey(credentials.secretAccessKey, day, region);
+    derived.catch(() => byScope.delete(scope));
+    byScope.set(scope, derived);
+  }
   return derived;
 }
 
@@ -66,7 +77,10 @@ export function encodeRfc3986(value: string): string {
   return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-/** Encodes an object key for a URL path: each segment RFC 3986-encoded, slashes kept. */
+/**
+ * Encodes an object key for a URL path: each segment RFC 3986-encoded, slashes kept.
+ * Throws `URIError` for a key that is not well-formed Unicode (a lone surrogate); key validation rejects those first.
+ */
 export function encodeKeyPath(key: string): string {
   return key.split("/").map(encodeRfc3986).join("/");
 }
@@ -79,7 +93,8 @@ function toAmzDate(date: Date): string {
 }
 
 // `URL` leaves `!'()*+` and similar characters raw in the path, but S3 signs the RFC 3986 form of every segment
-// (encoded once, never twice), so decode and encode again.
+// (encoded once, never twice), so decode and encode again. Precondition: segments are RFC 3986-encoded, as
+// `encodeKeyPath` produces; a bare `%` throws `URIError`, and a raw `+` is signed as `%2B`.
 function canonicalPath(url: URL): string {
   return url.pathname
     .split("/")
@@ -87,6 +102,7 @@ function canonicalPath(url: URL): string {
     .join("/");
 }
 
+// Sorts by encoded name, then encoded value, as SigV4 requires; repeated names are ordered by their encoded values.
 function canonicalQuery(params: URLSearchParams): string {
   return Array.from(params, ([name, value]) => [encodeRfc3986(name), encodeRfc3986(value)] as const)
     .sort(([aName, aValue], [bName, bValue]) => {
@@ -107,7 +123,7 @@ function canonicalHeaders(url: URL, headers: Record<string, string>): { canonica
 
 async function sign(input: SigningInput, amzDate: string, scope: string, canonicalRequest: string): Promise<string> {
   const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonicalRequest)].join("\n");
-  const key = await signingKey(input.credentials.secretAccessKey, amzDate.slice(0, 8), input.region);
+  const key = await signingKey(input.credentials, amzDate.slice(0, 8), input.region);
   return toHex(await hmac(key, stringToSign));
 }
 

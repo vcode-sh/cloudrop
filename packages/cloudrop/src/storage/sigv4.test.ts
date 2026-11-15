@@ -1,6 +1,14 @@
 import { AwsClient } from "aws4fetch";
 import { describe, expect, it } from "vitest";
-import { EMPTY_SHA256, encodeKeyPath, encodeRfc3986, presignUrl, sha256Hex, signRequest } from "./sigv4.ts";
+import {
+  type Credentials,
+  EMPTY_SHA256,
+  encodeKeyPath,
+  encodeRfc3986,
+  presignUrl,
+  sha256Hex,
+  signRequest,
+} from "./sigv4.ts";
 
 const AWS_EXAMPLE = {
   accessKeyId: "AKIAIOSFODNN7EXAMPLE",
@@ -49,7 +57,8 @@ describe("presignUrl", () => {
     expect(ours.searchParams.get("X-Amz-Signature")).toBe(new URL(theirs.url).searchParams.get("X-Amz-Signature"));
   });
 
-  it("keeps the caller's query parameters and adds the signing parameters", async () => {
+  it("sorts the signing parameters with the caller's query and appends one signature", async () => {
+    // The signature was computed independently with Python hashlib/hmac, not with this signer.
     const url = await presignUrl({
       method: "GET",
       url: new URL("https://examplebucket.s3.amazonaws.com/test.txt?partNumber=3"),
@@ -58,11 +67,12 @@ describe("presignUrl", () => {
       date: EXAMPLE_DATE,
       expiresIn: 60,
     });
-    expect(url.searchParams.get("partNumber")).toBe("3");
-    expect(url.searchParams.get("X-Amz-Credential")).toBe("AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request");
-    expect(url.searchParams.get("X-Amz-Date")).toBe("20130524T000000Z");
-    expect(url.searchParams.get("X-Amz-Expires")).toBe("60");
-    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(url.search).toBe(
+      "?X-Amz-Algorithm=AWS4-HMAC-SHA256" +
+        "&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request" +
+        "&X-Amz-Date=20130524T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&partNumber=3" +
+        "&X-Amz-Signature=f4827bb46f5bf962b2e3e6271348731841b5e93ba7d8c9d4e4165d1b3b22ed52",
+    );
   });
 });
 
@@ -78,26 +88,13 @@ describe("signRequest", () => {
       date: EXAMPLE_DATE,
       payloadHash: EMPTY_SHA256,
     });
-    expect(headers.authorization).toBe(
-      `${EXAMPLE_CREDENTIAL}SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, ` +
-        "Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41",
-    );
-  });
-
-  it("returns the input headers plus the content hash and date", async () => {
-    const headers = await signRequest({
-      method: "GET",
-      url: new URL(EXAMPLE_URL),
-      headers: { range: "bytes=0-9" },
-      credentials: AWS_EXAMPLE,
-      region: "us-east-1",
-      date: EXAMPLE_DATE,
-      payloadHash: EMPTY_SHA256,
-    });
-    expect(headers).toMatchObject({
+    expect(headers).toEqual({
       range: "bytes=0-9",
       "x-amz-content-sha256": EMPTY_SHA256,
       "x-amz-date": "20130524T000000Z",
+      authorization:
+        `${EXAMPLE_CREDENTIAL}SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, ` +
+        "Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41",
     });
   });
 
@@ -169,30 +166,68 @@ describe("signRequest", () => {
 });
 
 describe("signing key reuse", () => {
+  const url = "https://account.r2.cloudflarestorage.com/bucket/key.txt";
+  const at = "2026-11-15T12:00:00Z";
+  const signatureOf = (signed: string | URL): string | null => new URL(signed).searchParams.get("X-Amz-Signature");
+
+  async function oursAndTheirs(credentials: Credentials, region: string, when: string) {
+    const ours = await presignUrl({
+      method: "GET",
+      url: new URL(url),
+      credentials,
+      region,
+      date: new Date(when),
+      expiresIn: 60,
+    });
+    const theirs = await new AwsClient({ ...credentials, service: "s3", region }).sign(`${url}?X-Amz-Expires=60`, {
+      aws: { signQuery: true, datetime: when.replace(/[-:]/g, "") },
+    });
+    return { ours: signatureOf(ours), theirs: signatureOf(theirs.url) };
+  }
+
   it("never reuses a key across secrets, regions or days", async () => {
-    const url = "https://account.r2.cloudflarestorage.com/bucket/key.txt";
     const variants = [
-      { secretAccessKey: "secret-one", region: "auto", at: "2026-11-15T12:00:00Z" },
-      { secretAccessKey: "secret-two", region: "auto", at: "2026-11-15T12:00:00Z" },
-      { secretAccessKey: "secret-one", region: "eu", at: "2026-11-15T12:00:00Z" },
-      { secretAccessKey: "secret-one", region: "auto", at: "2026-11-16T12:00:00Z" },
-      { secretAccessKey: "secret-one", region: "auto", at: "2026-11-15T12:00:00Z" },
+      { secretAccessKey: "secret-one", region: "auto", when: at },
+      { secretAccessKey: "secret-two", region: "auto", when: at },
+      { secretAccessKey: "secret-one", region: "eu", when: at },
+      { secretAccessKey: "secret-one", region: "auto", when: "2026-11-16T12:00:00Z" },
+      { secretAccessKey: "secret-one", region: "auto", when: at },
     ];
-    for (const { secretAccessKey, region, at } of variants) {
-      const credentials = { accessKeyId: "test-access-key", secretAccessKey };
-      const ours = await presignUrl({
-        method: "GET",
-        url: new URL(url),
-        credentials,
-        region,
-        date: new Date(at),
-        expiresIn: 60,
-      });
-      const theirs = await new AwsClient({ ...credentials, service: "s3", region }).sign(`${url}?X-Amz-Expires=60`, {
-        aws: { signQuery: true, datetime: at.replace(/[-:]/g, "") },
-      });
-      expect(ours.searchParams.get("X-Amz-Signature")).toBe(new URL(theirs.url).searchParams.get("X-Amz-Signature"));
-    }
+    const results = await Promise.all(
+      variants.map(({ secretAccessKey, region, when }) =>
+        oursAndTheirs({ accessKeyId: "test-access-key", secretAccessKey }, region, when),
+      ),
+    );
+    expect(results.map((result) => result.ours)).toEqual(results.map((result) => result.theirs));
+  });
+
+  it("follows a secret that is changed in place on the same credentials object", async () => {
+    const credentials = { accessKeyId: "test-access-key", secretAccessKey: "secret-one" };
+    const before = await oursAndTheirs(credentials, "auto", at);
+    credentials.secretAccessKey = "secret-two";
+    const after = await oursAndTheirs(credentials, "auto", at);
+    expect([before.ours, after.ours]).toEqual([before.theirs, after.theirs]);
+    expect(after.ours).not.toBe(before.ours);
+  });
+});
+
+describe("canonical query order", () => {
+  it("sorts repeated names by value as text, not as numbers", async () => {
+    // aws4fetch drops repeated names for S3, so this signature was computed independently with Python hashlib/hmac
+    // over the canonical query `a=1&a=10&a=2&b=x`.
+    const headers = await signRequest({
+      method: "GET",
+      url: new URL("https://account.r2.cloudflarestorage.com/bucket/key.txt?a=2&b=x&a=10&a=1"),
+      credentials: { accessKeyId: "test-access-key", secretAccessKey: "test-secret-key" },
+      region: "auto",
+      date: new Date("2026-11-15T12:00:00Z"),
+      payloadHash: EMPTY_SHA256,
+    });
+    expect(headers.authorization).toBe(
+      "AWS4-HMAC-SHA256 Credential=test-access-key/20261115/auto/s3/aws4_request, " +
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, " +
+        "Signature=0e03644d0b7574f1d1677578782a3d19f13aac0b859349bde973ef8292fbd544",
+    );
   });
 });
 
