@@ -44,6 +44,10 @@ export class CloudropError extends Error {
   readonly status: number | undefined;
   /** The storage service's own error code, for logs. Never shown to end users. */
   readonly storageCode: string | undefined;
+  /**
+   * PARTS_MISSING only: the part numbers the client must upload again before it retries `/complete`. The one field
+   * besides `code`, `message` and `retryable` that reaches the client. Undefined for every other code.
+   */
   readonly parts: readonly number[] | undefined;
 
   constructor(code: CloudropErrorCode, message: string, options: CloudropErrorOptions = {}) {

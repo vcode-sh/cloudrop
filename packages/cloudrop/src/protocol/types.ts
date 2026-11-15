@@ -127,7 +127,13 @@ export interface ErrorResponse {
   error: ErrorBody;
 }
 
-/** What a value becomes after JSON.stringify and JSON.parse: Dates turn into strings, functions and undefined vanish. */
+/**
+ * Approximately what a value becomes after JSON.stringify and JSON.parse, for JSON-shaped data such as an authorize
+ * result or schema output: a `toJSON` value (a Date) becomes its JSON form, and function, symbol and undefined
+ * properties vanish. It does not model every JavaScript object: in arrays JSON turns undefined and functions into
+ * null, a `T | undefined` property is typed as present though JSON may drop it, and a Map, a Set or a class instance is
+ * typed by its own fields while JSON keeps only own enumerable properties (a Map becomes `{}`). Return plain data.
+ */
 export type Jsonified<T> = unknown extends T
   ? unknown
   : T extends { toJSON(): infer J }

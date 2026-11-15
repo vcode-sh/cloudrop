@@ -36,6 +36,7 @@ describe("validateMetadata", () => {
   it("refuses metadata on a route without a schema", async () => {
     expect((await validateMetadata(undefined, { albumId: "a1" })).error).toMatchObject({
       code: "INVALID_METADATA",
+      status: 400,
       message: "This upload takes no metadata. Remove it.",
     });
   });
@@ -75,17 +76,38 @@ describe("validateMetadata", () => {
     );
   });
 
-  it("cuts a path built from the client's keys to 200 characters and drops its line breaks", async () => {
+  it("cuts a path built from the client's keys to 200 characters and blanks its line breaks and bidi controls", async () => {
+    // CR, LF, NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR, RIGHT-TO-LEFT OVERRIDE and LEFT-TO-RIGHT ISOLATE: each can forge
+    // a log line or reorder the rest of it.
     const echoing: StandardSchema = {
       "~standard": {
         version: 1,
         vendor: "test",
-        validate: () => ({ issues: [{ message: "Bad", path: [`a\nERROR forged ${"k".repeat(300)}`] }] }),
+        validate: () => ({
+          issues: [{ message: "Bad", path: [`a\r\n\u0085\u2028\u2029\u202e\u2066ERROR forged ${"k".repeat(300)}`] }],
+        }),
       },
     };
-    // "Bad (at a ERROR forged " is 23 characters, so 177 of the 300 k's fit.
+    // "Bad (at a" (9) + 7 spaces + "ERROR forged " (13) is 29 characters, so 171 of the 300 k's fit.
     expect((await validateMetadata(echoing, {})).error?.message).toBe(
-      `The metadata is not valid: Bad (at a ERROR forged ${"k".repeat(177)}. Correct it and try again.`,
+      `The metadata is not valid: Bad (at a       ERROR forged ${"k".repeat(171)}. Correct it and try again.`,
     );
+  });
+
+  // The token would carry no metadata while the server treats it as validated.
+  it("throws when the schema's output has no JSON form", async () => {
+    const broken: StandardSchema = {
+      "~standard": { version: 1, vendor: "test", validate: () => ({ value: () => "albumId" }) },
+    };
+    await expect(validateMetadata(broken, {})).rejects.toThrow(
+      "The metadata schema returned a value with no JSON form, such as a function. Return plain data from the schema.",
+    );
+  });
+
+  it("accepts a schema whose output is undefined", async () => {
+    const optional: StandardSchema = {
+      "~standard": { version: 1, vendor: "test", validate: () => ({ value: undefined }) },
+    };
+    expect(await validateMetadata(optional, undefined)).toEqual({ data: undefined, error: null });
   });
 });

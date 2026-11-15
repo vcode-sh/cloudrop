@@ -145,7 +145,7 @@ const BYTE_UNITS: readonly [string, number][] = [
   ["KiB", 1024],
 ];
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   const unit = BYTE_UNITS.find(([, size]) => bytes >= size);
   return unit ? `${Number((bytes / unit[1]).toFixed(3))} ${unit[0]}` : `${bytes} bytes`;
 }

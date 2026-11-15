@@ -30,24 +30,23 @@ export const MAX_METADATA_JSON_BYTES: number = 2048;
 const invalidMetadata = (message: string): CloudropError =>
   new CloudropError("INVALID_METADATA", message, { status: 400 });
 
+/** Control characters, Unicode line and paragraph separators, and bidi overrides and isolates (Trojan Source). */
+const UNSAFE_IN_LOGS = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/gu;
+
 /**
  * The first issue for the client: the message with its path, cut to 200 characters. Both can echo the client's own
- * input (a record key, a received value), so line breaks and other control characters become spaces.
+ * input (a record key, a received value), so characters that break or reorder a log line become spaces.
  */
 function describeIssue(issue: StandardIssue): string {
   const path = (issue.path ?? []).map((segment) => String(typeof segment === "object" ? segment.key : segment));
   const text = path.length > 0 ? `${String(issue.message)} (at ${path.join(".")})` : String(issue.message);
-  return Array.from(text, (char) => {
-    const code = char.codePointAt(0) ?? 0;
-    return code < 0x20 || (code >= 0x7f && code <= 0x9f) ? " " : char;
-  })
-    .slice(0, 200)
-    .join("");
+  return Array.from(text.replace(UNSAFE_IN_LOGS, " ")).slice(0, 200).join("");
 }
 
 /**
  * The schema's output for `value`, checked to fit in a token as JSON. A route without a schema takes no metadata.
- * A schema that throws is a server bug: the error escapes to the handler, which answers SERVER_ERROR.
+ * A schema that throws, or whose output has no JSON form, is a server bug: the error escapes to the handler, which
+ * answers SERVER_ERROR.
  */
 export async function validateMetadata(schema: StandardSchema | undefined, value: unknown): Promise<Result<unknown>> {
   if (schema === undefined) {
@@ -60,6 +59,12 @@ export async function validateMetadata(schema: StandardSchema | undefined, value
     return fail(invalidMetadata(`The metadata is not valid${detail}. Correct it and try again.`));
   }
   const json = JSON.stringify(result.value);
+  // A function or symbol would vanish from the token while the server treats the metadata as validated.
+  if (json === undefined && result.value !== undefined) {
+    throw new TypeError(
+      "The metadata schema returned a value with no JSON form, such as a function. Return plain data from the schema.",
+    );
+  }
   if (json !== undefined && new TextEncoder().encode(json).length > MAX_METADATA_JSON_BYTES) {
     return fail(
       invalidMetadata("The metadata is larger than 2 KiB. Send less, and keep large values in your database."),
