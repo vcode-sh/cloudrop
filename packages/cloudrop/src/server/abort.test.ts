@@ -62,12 +62,13 @@ describe("POST /abort", () => {
     expect((await fixture.storage.head(ticket.key)).data?.size).toBe(5);
   });
 
-  it("accepts an expired token, so a cancelled upload can always be cleaned up", async () => {
-    const fixture = serverFixture({ files }, { multipartThreshold: 0 });
+  it("accepts an expired token, so a cancelled upload can always be cleaned up and its reservation released", async () => {
+    const calls: AbortContext[] = [];
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [recordingPlugin(calls)] });
     const ticket = await fixture.multipart("files", { name: "big.bin", size: 9 * MiB, type: "" });
     vi.setSystemTime(new Date("2026-11-20T12:00:00Z"));
     expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
-    expect(fixture.fake.pendingUploads()).toBe(0);
+    expect([fixture.fake.pendingUploads(), calls.map((call) => call.reason)]).toEqual([0, ["aborted"]]);
   });
 
   it("keeps a stored file and tells no plugin when the token has expired", async () => {
@@ -79,6 +80,22 @@ describe("POST /abort", () => {
     vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
     expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
     expect([(await fixture.storage.head(ticket.key)).data?.size, calls]).toEqual([5, []]);
+  });
+
+  it("deletes a completed multipart file and releases its reservation while the token is valid", async () => {
+    const calls: AbortContext[] = [];
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [recordingPlugin(calls)] });
+    const ticket = await fixture.multipart("files", { name: "a.bin", size: 5, type: "application/octet-stream" });
+    expect((await fixture.send(ticket.parts[0] as SignedPart, new Uint8Array(5))).status).toBe(200);
+    // /complete arrives in Task 11; the driver completes the upload exactly as /complete will, with the stored parts.
+    const uploadId = String(tokenPayload(ticket.token).uploadId);
+    const parts = (await fixture.storage.listParts(ticket.key, uploadId)).data ?? [];
+    expect((await fixture.storage.completeMultipart(ticket.key, uploadId, parts)).error).toBeNull();
+    expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
+    expect([(await fixture.storage.head(ticket.key)).data, calls.map((call) => call.reason)]).toEqual([
+      null,
+      ["aborted"],
+    ]);
   });
 
   it("keeps a completed multipart file and its reservation when an expired token asks to abort it", async () => {
