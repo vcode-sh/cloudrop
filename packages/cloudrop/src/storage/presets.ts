@@ -71,18 +71,6 @@ function checkBucket(bucket: string, service: "R2" | "S3"): string {
   return bucket;
 }
 
-/** Absolute http(s) URL, trailing slashes dropped so callers can append "/<key>". A path is allowed: a CDN prefix. */
-function checkPublicUrl(publicUrl: string | undefined): string | undefined {
-  if (publicUrl === undefined) return undefined;
-  const url = URL.canParse(publicUrl) ? new URL(publicUrl) : null;
-  if (!url || !/^https?:$/.test(url.protocol) || url.username || url.password) {
-    throw configError(
-      "The publicUrl must be an absolute http or https URL without credentials, such as https://cdn.example.com/files.",
-    );
-  }
-  return publicUrl.replace(/\/+$/, "");
-}
-
 export function r2(given: R2Options): StorageDriver {
   // Plain-JavaScript callers can pass nothing; the environment may still hold everything but the bucket.
   const options: Partial<R2Options> = given ?? {};
@@ -101,10 +89,11 @@ export function r2(given: R2Options): StorageDriver {
   );
   const bucket = checkBucket(options.bucket as string, "R2");
   // Cloudflare shows the ID in lower case; pasted values may not be.
-  const account = (accountId as string).toLowerCase();
-  if (!/^[0-9a-f]{32}$/.test(account)) {
+  const account = typeof accountId === "string" ? accountId.toLowerCase() : undefined;
+  if (account === undefined || !/^[0-9a-f]{32}$/.test(account)) {
+    const given = account === undefined ? "is not text" : `has ${account.length} characters`;
     throw configError(
-      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given has ${account.length} characters. Copy it from the R2 overview page in the Cloudflare dashboard.`,
+      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given ${given}. Copy it from the R2 overview page in the Cloudflare dashboard.`,
     );
   }
   const { jurisdiction } = options;
@@ -117,12 +106,12 @@ export function r2(given: R2Options): StorageDriver {
     bucket,
     credentials: { accessKeyId: accessKeyId as string, secretAccessKey: secretAccessKey as string },
     rules: R2_RULES,
-    publicUrl: checkPublicUrl(options.publicUrl),
+    publicUrl: options.publicUrl,
     fetch: options.fetch,
   });
 }
 
-// The endpoint's shape is validated by createS3Driver, which rejects a relative URL, a query, a fragment and malformed escapes in the path.
+// createS3Driver checks the endpoint, the publicUrl, the credentials, the region and fetch.
 export function s3(given: S3Options): StorageDriver {
   const options: Partial<S3Options> = given ?? {};
   throwIfMissing(
@@ -131,19 +120,13 @@ export function s3(given: S3Options): StorageDriver {
     "Pass them to s3().",
   );
   const { endpoint, region, accessKeyId, secretAccessKey } = options as S3Options;
-  // The driver's own endpoint error would be accurate but would not say why a perfectly good URL was refused.
-  if (URL.canParse(endpoint) && (new URL(endpoint).username || new URL(endpoint).password)) {
-    throw configError(
-      "The S3 endpoint contains a user name or password. Do not put credentials in the endpoint; pass accessKeyId and secretAccessKey instead.",
-    );
-  }
   return createS3Driver({
     endpoint,
     region,
     bucket: checkBucket(options.bucket as string, "S3"),
     credentials: { accessKeyId, secretAccessKey },
     rules: S3_RULES,
-    publicUrl: checkPublicUrl(options.publicUrl),
+    publicUrl: options.publicUrl,
     fetch: options.fetch,
   });
 }

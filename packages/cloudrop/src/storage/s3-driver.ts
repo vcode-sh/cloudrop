@@ -119,34 +119,54 @@ function readObjectInfo(key: string, headers: Headers): ObjectInfo {
   };
 }
 
-function bucketUrlOf(endpoint: string, bucket: string): string {
-  const url = URL.canParse(endpoint) ? new URL(endpoint) : null;
-  // A query or fragment would be signed into every request. A path is a prefix some emulators serve under, such as
-  // Wrangler's /cdn-cgi/local/r2/s3; the signature covers it.
-  if (!url || !/^https?:$/.test(url.protocol) || url.href !== `${url.origin}${url.pathname}`) {
-    // The generic message also covers user info, which is named below without echoing it.
-    if (url?.username || url?.password) {
-      throw new CloudropError(
-        "INVALID_CONFIG",
-        "The storage endpoint contains a user name or password. Pass accessKeyId and secretAccessKey instead.",
-      );
-    }
-    throw new CloudropError(
-      "INVALID_CONFIG",
-      "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
+function configError(message: string): CloudropError {
+  return new CloudropError("INVALID_CONFIG", message);
+}
+
+/**
+ * The endpoint and the publicUrl: keys are appended to the path, so a query or fragment would swallow them (and be
+ * signed into every request). A path is a prefix: a CDN folder, or Wrangler's /cdn-cgi/local/r2/s3.
+ */
+function checkBaseUrl(value: string, setting: string, example: string): URL {
+  const url = typeof value === "string" && URL.canParse(value) ? new URL(value) : null;
+  if (url?.username || url?.password) {
+    throw configError(
+      `The ${setting} contains a user name or password. Remove it; cloudrop takes credentials only as accessKeyId and secretAccessKey.`,
     );
+  }
+  if (!url || !/^https?:$/.test(url.protocol) || url.href !== `${url.origin}${url.pathname}`) {
+    throw configError(`The ${setting} must be an http or https URL with no query or fragment, such as ${example}.`);
   }
   // Check the path the way the signer reads it: the URL parser keeps a bad escape as written, and signing it would
   // later throw URIError from a public call.
   try {
     for (const segment of url.pathname.split("/")) decodeURIComponent(segment);
   } catch {
-    throw new CloudropError(
-      "INVALID_CONFIG",
-      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
+    throw configError(
+      `The ${setting}'s path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.`,
     );
   }
-  return `${url.origin}${url.pathname.replace(/\/$/, "")}/${encodeRfc3986(bucket)}`;
+  return url;
+}
+
+// Checked once, at construction: a header value with a line break makes fetch throw, and Node quotes the whole
+// Authorization header (access key ID and signature) in that error.
+const SIGNABLE = /^[\x21-\x7e]+$/;
+
+function checkSigningSettings({ credentials, region }: S3DriverConfig): void {
+  for (const [setting, value] of Object.entries(credentials)) {
+    if (typeof value !== "string" || !SIGNABLE.test(value)) {
+      throw configError(
+        `The ${setting} setting must be printable ASCII text with no whitespace or line break; secret files often end in a newline. Copy the value again without it.`,
+      );
+    }
+  }
+  // The region is one segment of the signing scope "<date>/<region>/s3/aws4_request".
+  if (typeof region !== "string" || !SIGNABLE.test(region) || region.includes("/")) {
+    throw configError(
+      "The region setting must be printable ASCII text with no whitespace, line break or slash, such as us-east-1 or auto.",
+    );
+  }
 }
 
 function unreachable(cause: unknown, timeoutMs: number): CloudropError {
@@ -156,7 +176,8 @@ function unreachable(cause: unknown, timeoutMs: number): CloudropError {
     timedOut
       ? `The storage service did not answer within ${timeoutMs / 1000} seconds. Retry the request.`
       : "Could not reach the storage service. Check the endpoint and the network connection, then retry.",
-    { retryable: true, cause },
+    // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID.
+    { retryable: true, cause: cause instanceof Error && cause.message.includes("Credential=") ? undefined : cause },
   );
 }
 
@@ -178,10 +199,22 @@ async function forEachConcurrently<T>(
 
 export function createS3Driver(config: S3DriverConfig): StorageDriver {
   const http: FetchLike = config.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  if (typeof http !== "function") {
+    throw configError(
+      "The fetch option must be a function, such as globalThis.fetch. Omit it to use the global fetch.",
+    );
+  }
+  checkSigningSettings(config);
   const now = config.now ?? (() => new Date());
   // One credentials object for the driver's lifetime: sigv4 caches signing keys per object.
   const { credentials, region, rules } = config;
-  const bucketUrl = bucketUrlOf(config.endpoint, config.bucket);
+  const endpoint = checkBaseUrl(config.endpoint, "storage endpoint", "https://<account ID>.r2.cloudflarestorage.com");
+  const bucketUrl = `${endpoint.origin}${endpoint.pathname.replace(/\/$/, "")}/${encodeRfc3986(config.bucket)}`;
+  const publicUrl =
+    config.publicUrl === undefined
+      ? undefined
+      : // Trailing slashes dropped so callers can append "/<key>".
+        checkBaseUrl(config.publicUrl, "publicUrl", "https://cdn.example.com/files").href.replace(/\/+$/, "");
 
   function objectUrl(key: string, query: Record<string, string> = {}): URL {
     const url = new URL(`${bucketUrl}/${encodeKeyPath(key)}`);
@@ -297,7 +330,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
 
   const driver: StorageDriver = {
     rules,
-    publicUrl: config.publicUrl,
+    publicUrl,
 
     async presignPut(key, given) {
       const options = orEmpty(given);

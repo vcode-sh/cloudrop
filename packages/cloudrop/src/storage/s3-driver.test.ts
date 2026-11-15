@@ -384,7 +384,7 @@ describe("createS3Driver", () => {
     [
       "user info",
       "https://user:pass@account.r2.cloudflarestorage.com",
-      "The storage endpoint contains a user name or password. Pass accessKeyId and secretAccessKey instead.",
+      "The storage endpoint contains a user name or password. Remove it; cloudrop takes credentials only as accessKeyId and secretAccessKey.",
     ],
     [
       "a malformed escape at the end of the path",
@@ -466,6 +466,15 @@ describe("createS3Driver", () => {
     });
     expect((await driver.put("a.txt", "x")).error).toBeNull();
     expect((await driver.head("a.txt")).data?.size).toBe(1);
+  });
+
+  it("never passes on a platform error that quotes the Authorization header", async () => {
+    const changing = { ...credentials };
+    const driver = createS3Driver({ endpoint, region: "auto", bucket: "test", credentials: changing, rules: R2_RULES });
+    // Construction refuses a line break, so only a value changed afterwards reaches fetch, which refuses the header and
+    // (on Node) quotes it, access key ID and signature included.
+    changing.accessKeyId = "AKIDEXAMPLE\n";
+    expect((await driver.head("a.txt")).error).toMatchObject({ code: "STORAGE_UNREACHABLE", cause: undefined });
   });
 
   it("reports an unreachable endpoint as retryable, never as a missing object", async () => {

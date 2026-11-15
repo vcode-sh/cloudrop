@@ -219,27 +219,82 @@ describe("publicUrl", () => {
   it.each([
     ["r2", (publicUrl: string) => r2({ ...goodR2, publicUrl })],
     ["s3", (publicUrl: string) => s3({ ...goodS3, publicUrl })],
-  ] as const)("%s() passes it to the driver, keeping a CDN path and dropping trailing slashes", (_name, make) => {
-    expect(make("https://cdn.example.com/files//").publicUrl).toBe("https://cdn.example.com/files");
-    expect(make("https://cdn.example.com/").publicUrl).toBe("https://cdn.example.com");
-  });
+  ] as const)(
+    "%s() passes it to the driver normalised, keeping a CDN path and dropping trailing slashes",
+    (_name, make) => {
+      const given = ["https://cdn.example.com/files//", "https://cdn.example.com/", " https://cdn.example.com/files"];
+      expect(given.map((publicUrl) => make(publicUrl).publicUrl)).toEqual([
+        "https://cdn.example.com/files",
+        "https://cdn.example.com",
+        "https://cdn.example.com/files",
+      ]);
+    },
+  );
 
   it("leaves the driver's publicUrl undefined when none is given", () => {
     expect(r2(goodR2).publicUrl).toBeUndefined();
     expect(s3(goodS3).publicUrl).toBeUndefined();
   });
 
-  it.each(["cdn.example.com", "ftp://cdn.example.com", "", "https://u:p@cdn.example.com"])(
-    "rejects %j without echoing it",
-    (publicUrl) => {
-      for (const make of [() => r2({ ...goodR2, publicUrl }), () => s3({ ...goodS3, publicUrl })]) {
-        const error = thrownBy(make);
-        expect(error.message).toBe(
-          "The publicUrl must be an absolute http or https URL without credentials, such as https://cdn.example.com/files.",
-        );
-      }
-    },
-  );
+  const shapeMessage =
+    "The publicUrl must be an http or https URL with no query or fragment, such as https://cdn.example.com/files.";
+  it.each([
+    ["cdn.example.com", shapeMessage],
+    ["ftp://cdn.example.com", shapeMessage],
+    ["", shapeMessage],
+    // A key appended later would land inside the query or the fragment.
+    ["https://cdn.example.com/?v=1", shapeMessage],
+    ["https://cdn.example.com/#top", shapeMessage],
+    [
+      "https://u:p@cdn.example.com",
+      "The publicUrl contains a user name or password. Remove it; cloudrop takes credentials only as accessKeyId and secretAccessKey.",
+    ],
+  ])("rejects %j without echoing it", (publicUrl, message) => {
+    const messages = [() => r2({ ...goodR2, publicUrl }), () => s3({ ...goodS3, publicUrl })].map(
+      (make) => thrownBy(make).message,
+    );
+    expect(messages).toEqual([message, message]);
+  });
+});
+
+describe("credential, region and fetch settings", () => {
+  // Never echoed: a key ID or a secret must not reach a log through an error message.
+  const unsignable = (setting: string) =>
+    `The ${setting} setting must be printable ASCII text with no whitespace or line break; secret files often end in a newline. Copy the value again without it.`;
+  const regionMessage =
+    "The region setting must be printable ASCII text with no whitespace, line break or slash, such as us-east-1 or auto.";
+  it.each<[string, () => unknown, string]>([
+    [
+      "r2() given a key ID ending in a newline",
+      () => r2({ ...goodR2, accessKeyId: "AKIDEXAMPLE\n" }),
+      unsignable("accessKeyId"),
+    ],
+    [
+      "s3() given a secret ending in a newline",
+      () => s3({ ...goodS3, secretAccessKey: "secret\n" }),
+      unsignable("secretAccessKey"),
+    ],
+    [
+      "s3() given a key ID that is not text",
+      () => s3({ ...goodS3, accessKeyId: 42 as never }),
+      unsignable("accessKeyId"),
+    ],
+    ["s3() given a region with a slash", () => s3({ ...goodS3, region: "us-east-1/s3" }), regionMessage],
+    ["s3() given a region ending in a newline", () => s3({ ...goodS3, region: "us-east-1\n" }), regionMessage],
+    ["s3() given a symbol as the region", () => s3({ ...goodS3, region: Symbol("region") as never }), regionMessage],
+    [
+      "r2() given an account ID that is not text",
+      () => r2({ ...goodR2, accountId: 42 as never }),
+      "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given is not text. Copy it from the R2 overview page in the Cloudflare dashboard.",
+    ],
+    [
+      "s3() given a fetch that is not a function",
+      () => s3({ ...goodS3, fetch: "https://proxy.example.com" as never }),
+      "The fetch option must be a function, such as globalThis.fetch. Omit it to use the global fetch.",
+    ],
+  ])("%s throws INVALID_CONFIG at construction", (_name, make, message) => {
+    expect(thrownBy(make)).toMatchObject({ code: "INVALID_CONFIG", message });
+  });
 });
 
 describe("s3()", () => {
@@ -289,10 +344,11 @@ describe("s3()", () => {
   });
 
   it("rejects credentials embedded in the endpoint without echoing them", () => {
-    const error = thrownBy(() => s3({ ...goodS3, endpoint: "https://AK123:SK456@s3.example.com" }));
-    expect(error.code).toBe("INVALID_CONFIG");
-    expect(error.message).toContain("Do not put credentials in the endpoint");
-    expect(error.message).not.toMatch(/AK123|SK456/);
+    expect(thrownBy(() => s3({ ...goodS3, endpoint: "https://AK123:SK456@s3.example.com" }))).toMatchObject({
+      code: "INVALID_CONFIG",
+      message:
+        "The storage endpoint contains a user name or password. Remove it; cloudrop takes credentials only as accessKeyId and secretAccessKey.",
+    });
   });
 });
 
