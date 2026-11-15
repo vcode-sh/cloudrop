@@ -12,10 +12,10 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the older run. Scheduled, manual and main runs are never cancelled:
-# the live R2 job must not be killed between writing objects and deleting them.
+# A newer push to the same pull request replaces the older run. Every other run has its own group (the run ID), so
+# nothing is cancelled or dropped as "pending", and the live R2 job is never killed between writing and deleting.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every action is pinned to a full commit SHA (a moved tag would run new code with this repository's credentials).
@@ -76,8 +76,14 @@ jobs:
 
   # Nightly and manual only, and only once the owner has created the test bucket's secrets and set the repository
   # variable CLOUDROP_LIVE_R2_ENABLED to "true". Once enabled, a missing secret fails the job loudly.
+  # Only main runs it, so a manual dispatch of another branch never hands that branch's code the live secrets.
+  # Recommended owner setting (not created here): keep the four secrets in a GitHub Environment limited to main and
+  # add `environment: <name>` to this job.
   live-r2:
-    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && vars.CLOUDROP_LIVE_R2_ENABLED == 'true'
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+      && vars.CLOUDROP_LIVE_R2_ENABLED == 'true'
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -4,6 +4,7 @@
 // redactor, so neither the credentials, the account ID, the bucket nor a presigned URL reaches the terminal or a log.
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { constants } from "node:os";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createRedactor, explainMissing, type FileState, parseSettingsFile, VARIABLES } from "./live-r2-settings.ts";
@@ -38,10 +39,6 @@ if (missing.length > 0) {
 
 const redactor = createRedactor(Object.values(settings));
 
-// Ctrl-C reaches the child from the terminal as well. The parent must outlive it, relaying output until the child
-// closes, so Vitest's teardown (which deletes the run prefix) can finish and its output stays redacted.
-process.on("SIGINT", () => {});
-
 const child = spawn(
   "bunx",
   // Extra arguments reach Vitest: `bun run test:live --reporter=verbose`.
@@ -57,16 +54,54 @@ const child = spawn(
     cwd: fileURLToPath(new URL("../packages/cloudrop/", import.meta.url)),
     // No colour: an ANSI code in the middle of a value would stop the redactor from matching it.
     env: { ...process.env, ...settings, NO_COLOR: "1", FORCE_COLOR: "0" },
-    stdio: ["inherit", "pipe", "pipe"],
+    // Its own process group, so one signal reaches bunx, Vitest and every worker, and a force-kill leaves none behind.
+    // No stdin: a background group must not read the terminal, and `vitest run` takes no input.
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
   },
 );
+
+// The signals that stop this run, wherever they come from (Ctrl-C, `timeout`, a CI cancel, a supervisor). The child is
+// in another process group and does not see them from the terminal, so they are forwarded to it, and this script
+// keeps relaying (and redacting) until Vitest's teardown has deleted the run prefix. A second signal, or the end of
+// the grace period, kills the group.
+const GRACE_MS = 30_000;
+let stopSignal: NodeJS.Signals | undefined;
+let runPrefix: string | undefined;
+let forced = false;
+function signalChild(signal: NodeJS.Signals) {
+  try {
+    if (child.pid) process.kill(-child.pid, signal);
+  } catch {
+    // The group is already gone.
+  }
+}
+function forceStop() {
+  if (forced) return;
+  forced = true;
+  signalChild("SIGKILL");
+  console.error(
+    `Live R2 lane stopped before its teardown finished. Objects may remain under ${runPrefix ?? "live-test/cloudrop-<random hex>/"} in the bucket: delete that prefix.`,
+  );
+  process.exit(128 + (constants.signals[stopSignal ?? "SIGTERM"] ?? 15));
+}
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    if (stopSignal) return forceStop();
+    stopSignal = signal;
+    signalChild(signal);
+    setTimeout(forceStop, GRACE_MS).unref();
+  });
+}
 const relays = [
   [child.stdout, process.stdout],
   [child.stderr, process.stderr],
 ] as const;
 const relayed = relays.map(async ([from, to]) => {
   for await (const line of createInterface({ input: from, crlfDelay: Number.POSITIVE_INFINITY })) {
-    to.write(`${redactor.redact(line)}\n`);
+    const safe = redactor.redact(line);
+    runPrefix = /live-test\/cloudrop-[0-9a-f]+\//.exec(safe)?.[0] ?? runPrefix;
+    to.write(`${safe}\n`);
   }
 });
 // A child that never started has no output to wait for, so the error handler exits at once.
@@ -76,7 +111,9 @@ child.on("error", (error: NodeJS.ErrnoException) => {
   );
   process.exit(1);
 });
-const code = await new Promise<number>((resolve) => child.on("close", (exitCode) => resolve(exitCode ?? 1)));
+const code = await new Promise<number>((resolve) =>
+  child.on("close", (exitCode, signal) => resolve(exitCode ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 1))),
+);
 await Promise.all(relayed);
 console.log(`Live R2 lane: ${redactor.count()} secret or presigned-URL occurrences redacted from the output.`);
 process.exit(code);

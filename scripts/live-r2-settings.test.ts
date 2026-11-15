@@ -63,6 +63,12 @@ describe("createRedactor", () => {
     );
   });
 
+  it("redacts a value that an ANSI colour code splits in two", () => {
+    const redactor = createRedactor([FAKE_SECRET]);
+    const split = `${FAKE_SECRET.slice(0, 8)}\u001b[31m${FAKE_SECRET.slice(8)}`;
+    expect(redactor.redact(`secret ${split} end`)).toBe("secret <redacted> end");
+  });
+
   it("replaces a presigned URL whole", () => {
     const redactor = createRedactor([FAKE_SECRET]);
     const line = "PUT https://h.example/k?X-Amz-Credential=zzz&X-Amz-Signature=yyy failed";

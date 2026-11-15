@@ -3,6 +3,7 @@
   "compilerOptions": {
     "types": ["node"],
     "isolatedDeclarations": false,
+    // ../../scripts has no node_modules of its own, so its tests would not find vitest without this mapping.
     "paths": { "vitest": ["./node_modules/vitest"] }
   },
   "include": ["src", "fixtures", "vitest.config.ts", "tsdown.config.ts", "../../scripts"],

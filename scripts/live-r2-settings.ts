@@ -34,6 +34,9 @@ export function explainMissing(missing: string[], file: string | undefined, stat
   return `Missing R2 settings: ${names}. Set CLOUDROP_R2_ENV_FILE to a file that defines them (CLOUDROP_R2_* or BB_R2_* names), or export them.`;
 }
 
+// Colour codes (CSI sequences) are removed first, so one in the middle of a value cannot hide it from the matching.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC character is the point.
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const PRESIGNED_URL = /https?:\/\/\S*X-Amz-\S*/g;
 
 /** Replaces presigned URLs and every secret (also in lowercase) in a line of output, and counts what it replaced. */
@@ -45,7 +48,7 @@ export function createRedactor(values: string[]): { redact: (line: string) => st
   let redactions = 0;
   return {
     redact(line) {
-      let out = line.replace(PRESIGNED_URL, () => {
+      let out = line.replace(ANSI, "").replace(PRESIGNED_URL, () => {
         redactions++;
         return "<presigned URL>";
       });
