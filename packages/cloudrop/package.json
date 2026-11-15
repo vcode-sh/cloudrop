@@ -9,7 +9,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "exports": {
     ".": {
@@ -23,12 +23,12 @@
     "test": "vitest run --project unit"
   },
   "devDependencies": {
-    "@types/node": "22.20.5",
-    "aws4fetch": "1.0.20",
-    "fast-check": "4.10.2",
-    "tsdown": "0.23.7",
-    "typescript": "7.0.2",
-    "vitest": "5.1.0",
-    "wrangler": "4.162.0"
+    "@types/node": "^24",
+    "aws4fetch": "^1.0.20",
+    "fast-check": "^4.10.2",
+    "tsdown": "^0.23.7",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.162.0"
   }
 }
