@@ -271,8 +271,8 @@ describe("s3()", () => {
     },
   );
 
-  it("rejects a malformed escape in the endpoint's path at construction", () => {
-    expect(thrownBy(() => s3({ ...goodS3, endpoint: "https://s3.example.com/a%zz" }))).toMatchObject({
+  it.each(["/a%zz", "/%FF"])("rejects the bad escape in the endpoint path %s at construction", (path) => {
+    expect(thrownBy(() => s3({ ...goodS3, endpoint: `https://s3.example.com${path}` }))).toMatchObject({
       code: "INVALID_CONFIG",
       message: expect.stringContaining("malformed percent escape"),
     });

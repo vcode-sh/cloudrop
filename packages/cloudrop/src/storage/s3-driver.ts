@@ -136,11 +136,14 @@ function bucketUrlOf(endpoint: string, bucket: string): string {
       "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
     );
   }
-  // The URL parser keeps a bad escape as written, and signing the path would later throw from a public call.
-  if (/%(?![0-9A-Fa-f]{2})/.test(url.pathname)) {
+  // Check the path the way the signer reads it: the URL parser keeps a bad escape as written, and signing it would
+  // later throw URIError from a public call.
+  try {
+    for (const segment of url.pathname.split("/")) decodeURIComponent(segment);
+  } catch {
     throw new CloudropError(
       "INVALID_CONFIG",
-      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
+      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
     );
   }
   return `${url.origin}${url.pathname.replace(/\/$/, "")}/${encodeRfc3986(bucket)}`;

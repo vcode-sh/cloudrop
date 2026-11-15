@@ -378,6 +378,8 @@ describe("createS3Driver", () => {
     );
   });
 
+  const BAD =
+    "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.";
   it.each([
     [
       "user info",
@@ -387,12 +389,14 @@ describe("createS3Driver", () => {
     [
       "a malformed escape at the end of the path",
       `${endpoint}/a%`,
-      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
+      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
     ],
+    ["an escape that is not valid UTF-8 at the end of the path", `${endpoint}/a%E2%82`, BAD],
+    ["a lone continuation byte as the path", `${endpoint}/%FF`, BAD],
     [
       "a malformed escape inside the path",
       `${endpoint}/a%zz/b`,
-      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
+      "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
     ],
   ])("rejects an endpoint with %s when it is created, naming the problem", (_name, badEndpoint, message) => {
     expect(() =>
@@ -568,9 +572,12 @@ describe("createS3Driver", () => {
       null,
     ],
     ["reports a refused delete", (driver) => driver.delete("a"), new Response(null, { status: 403 }), "STORAGE_DENIED"],
-  ])("%s", async (_name, call, response, code) => {
-    expect((await call(driverWith(stubbed(async () => response)))).error?.code ?? null).toBe(code);
-  });
+  ])(
+    "The storage endpoint's path contains a malformed percent escape, or one that is not valid UTF-8 (such as %zz or %FF). Write a literal percent sign as %25.",
+    async (_name, call, response, code) => {
+      expect((await call(driverWith(stubbed(async () => response)))).error?.code ?? null).toBe(code);
+    },
+  );
 
   it("refuses a full body when the storage ignored the byte range", async () => {
     const result = await driverWith(stubbed(async () => new Response("whole object", { status: 200 }))).getRange(

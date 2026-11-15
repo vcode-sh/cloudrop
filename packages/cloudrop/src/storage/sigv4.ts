@@ -94,7 +94,7 @@ function toAmzDate(date: Date): string {
 
 // `URL` leaves `!'()*+` and similar characters raw in the path, but S3 signs the RFC 3986 form of every segment
 // (encoded once, never twice), so decode and encode again. Precondition: segments are RFC 3986-encoded, as
-// `encodeKeyPath` produces; a bare `%` throws `URIError`, and a raw `+` is signed as `%2B`.
+// `encodeKeyPath` produces; a bare `%` or an escape that is not valid UTF-8 throws `URIError` (createS3Driver checks the endpoint path for both), and a raw `+` is signed as `%2B`.
 function canonicalPath(url: URL): string {
   return url.pathname
     .split("/")
