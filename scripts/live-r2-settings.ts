@@ -62,3 +62,10 @@ export function createRedactor(values: string[]): { redact: (line: string) => st
     count: () => redactions,
   };
 }
+
+const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+
+/** The script's exit code: the child's, but never 0 once the run was interrupted, so a stopped run cannot look green. */
+export function exitCodeFor(childCode: number, stopSignal: keyof typeof SIGNAL_NUMBERS | undefined): number {
+  return childCode || (stopSignal ? 128 + SIGNAL_NUMBERS[stopSignal] : 0);
+}

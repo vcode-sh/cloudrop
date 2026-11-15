@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRedactor, explainMissing, parseSettingsFile } from "./live-r2-settings.ts";
+import { createRedactor, exitCodeFor, explainMissing, parseSettingsFile } from "./live-r2-settings.ts";
 
 // Fake values only: they merely have to look different from each other.
 const FAKE_SECRET = "FakeSecretValueAbc123";
@@ -78,5 +78,22 @@ describe("createRedactor", () => {
 
   it("ignores empty values instead of splitting every character", () => {
     expect(createRedactor([""]).redact("plain")).toBe("plain");
+  });
+});
+
+describe("exitCodeFor", () => {
+  it("keeps the child's failure code", () => {
+    expect(exitCodeFor(1, undefined)).toBe(1);
+    expect(exitCodeFor(1, "SIGINT")).toBe(1);
+  });
+
+  it("passes a clean child run", () => {
+    expect(exitCodeFor(0, undefined)).toBe(0);
+  });
+
+  it("never reports success for an interrupted run, even when the child exited 0", () => {
+    expect(exitCodeFor(0, "SIGINT")).toBe(130);
+    expect(exitCodeFor(0, "SIGTERM")).toBe(143);
+    expect(exitCodeFor(0, "SIGHUP")).toBe(129);
   });
 });

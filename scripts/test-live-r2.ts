@@ -7,7 +7,14 @@ import { readFileSync } from "node:fs";
 import { constants } from "node:os";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { createRedactor, explainMissing, type FileState, parseSettingsFile, VARIABLES } from "./live-r2-settings.ts";
+import {
+  createRedactor,
+  exitCodeFor,
+  explainMissing,
+  type FileState,
+  parseSettingsFile,
+  VARIABLES,
+} from "./live-r2-settings.ts";
 
 const settings: Record<string, string> = {};
 for (const name of VARIABLES.values()) {
@@ -66,7 +73,7 @@ const child = spawn(
 // keeps relaying (and redacting) until Vitest's teardown has deleted the run prefix. A second signal, or the end of
 // the grace period, kills the group.
 const GRACE_MS = 30_000;
-let stopSignal: NodeJS.Signals | undefined;
+let stopSignal: "SIGHUP" | "SIGINT" | "SIGTERM" | undefined;
 let runPrefix: string | undefined;
 let forced = false;
 function signalChild(signal: NodeJS.Signals) {
@@ -116,4 +123,6 @@ const code = await new Promise<number>((resolve) =>
 );
 await Promise.all(relayed);
 console.log(`Live R2 lane: ${redactor.count()} secret or presigned-URL occurrences redacted from the output.`);
-process.exit(code);
+if (stopSignal)
+  console.error(`Live R2 lane interrupted by ${stopSignal}: this run is not a pass, whatever the child reported.`);
+process.exit(exitCodeFor(code, stopSignal));
