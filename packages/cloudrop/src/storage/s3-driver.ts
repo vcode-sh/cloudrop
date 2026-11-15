@@ -180,12 +180,36 @@ function checkSigningSettings({ credentials, region }: S3DriverConfig): void {
 }
 
 // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID. The
-// quote can sit in a nested cause (an undici error wraps the socket error), so the whole chain is searched, to a depth
-// that no real error chain reaches.
+// quote can sit in a nested cause (an undici error wraps the socket error), which may be a plain object or an error from
+// another realm, so every link with a message is searched. A chain deeper than 8 links is dropped unread.
 function quotesCredentials(error: unknown, depth = 0): boolean {
-  if (!(error instanceof Error) || depth > 8) return false;
-  return error.message.includes("Credential=") || quotesCredentials(error.cause, depth + 1);
+  if (depth > 8) return true;
+  if (typeof error === "string") return error.includes("Credential=");
+  if (typeof error !== "object" || error === null) return false;
+  const { message, cause } = error as { message?: unknown; cause?: unknown };
+  return (typeof message === "string" && message.includes("Credential=")) || quotesCredentials(cause, depth + 1);
 }
+
+/**
+ * A failed bucket-configuration read. Only S3's documented "no such configuration" code means no rules: a proxy or a
+ * wrong endpoint path also answers 404, and reading that as no rules would report a rule nobody read. R2's own code
+ * for a bucket without the setting is unmeasured (the test token gets 403), so this follows S3.
+ */
+function configurationReadError(error: CloudropError, missingCode: string, setting: string): Result<never[]> {
+  if (error.status === 404 && error.storageCode === missingCode) return ok([]);
+  if (error.code !== "NOT_FOUND") return fail(error);
+  return fail(
+    new CloudropError(
+      "STORAGE_ERROR",
+      `The storage service answered 404 without saying that the bucket has no ${setting} configuration. Check the endpoint, then retry.`,
+      { status: 404, storageCode: error.storageCode, retryable: true },
+    ),
+  );
+}
+
+// X-Amz-Date takes toISOString's year, which has four digits only up to 9999. Times before 1970 are refused too: no
+// presigned URL needs one, and they usually mean a seconds value was passed where milliseconds belong.
+const SIGNABLE_UNTIL_MS = Date.UTC(10000, 0, 1);
 
 function unreachable(cause: unknown, timeoutMs: number): CloudropError {
   const timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
@@ -396,9 +420,11 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
         keyProblem(key) ??
         expiryProblem(options.expiresIn, rules.maxPresignSeconds) ??
         objectOptionsProblem({ disposition: options.disposition }) ??
-        (signedAt instanceof Date && !Number.isNaN(signedAt.getTime())
+        (signedAt instanceof Date &&
+        signedAt.getTime() >= 0 &&
+        signedAt.getTime() + options.expiresIn * 1000 < SIGNABLE_UNTIL_MS
           ? null
-          : "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.");
+          : "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.");
       if (problem) return fail(invalidInput(problem));
       const query: Record<string, string> = options.disposition
         ? { "response-content-disposition": options.disposition }
@@ -416,7 +442,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
 
     async getBucketCors() {
       const result = await sendForXml("GET", new URL(`${bucketUrl}?cors=`));
-      if (result.error) return result.error.code === "NOT_FOUND" ? ok([]) : result;
+      if (result.error) return configurationReadError(result.error, "NoSuchCORSConfiguration", "CORS");
       // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
       const configuration = xmlBlocks(result.data, "CORSConfiguration")[0];
       if (configuration === undefined) return fail(incompleteResponse("CORS configuration"));
@@ -432,7 +458,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
 
     async getBucketLifecycle() {
       const result = await sendForXml("GET", new URL(`${bucketUrl}?lifecycle=`));
-      if (result.error) return result.error.code === "NOT_FOUND" ? ok([]) : result;
+      if (result.error) return configurationReadError(result.error, "NoSuchLifecycleConfiguration", "lifecycle");
       const configuration = xmlBlocks(result.data, "LifecycleConfiguration")[0];
       if (configuration === undefined) return fail(incompleteResponse("lifecycle configuration"));
       const parsed: BucketLifecycleRule[] = [];
@@ -517,8 +543,9 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       // A missing size would read as an empty object, and a copy would then copy nothing. A missing ETag would make a
       // copy send an empty x-amz-copy-source-if-match.
       if (!result.data.headers.has("content-length")) return fail(incompleteResponse("content length"));
-      if (!result.data.headers.get("etag")) return fail(incompleteResponse("ETag"));
-      return ok(readObjectInfo(key, result.data.headers));
+      const info = readObjectInfo(key, result.data.headers);
+      if (info.etag === "") return fail(incompleteResponse("ETag"));
+      return ok(info);
     },
 
     async getRange(key, start, end) {

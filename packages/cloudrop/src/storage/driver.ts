@@ -70,7 +70,11 @@ export interface BucketCorsRule {
 export interface BucketLifecycleRule {
   id: string;
   enabled: boolean;
-  /** "" covers the whole bucket. */
+  /**
+   * The rule's first `<Prefix>`, from its filter or the legacy field; "" covers the whole bucket. Tag and size filters
+   * are not read, so a rule scoped only by them also reads as "". S3 allows no tag filter on a rule that aborts
+   * incomplete multipart uploads.
+   */
   prefix: string;
   /** Days after which an incomplete multipart upload is aborted, when the rule does that. */
   abortIncompleteMultipartUploadDays?: number;

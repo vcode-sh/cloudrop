@@ -455,9 +455,12 @@ describe("createS3Driver", () => {
     });
   });
 
-  it("reports a HEAD answer without an ETag as a retryable storage error", async () => {
+  it.each([
+    ["without an ETag", {}],
+    ["with a quoted empty ETag", { etag: '""' }],
+  ])("reports a HEAD answer %s as a retryable storage error", async (_name, etag) => {
     // copy() sends the ETag as x-amz-copy-source-if-match; an empty one would not guard the copy at all.
-    const etagless = stubbed(async () => new Response(null, { headers: { "content-length": "1" } }));
+    const etagless = stubbed(async () => new Response(null, { headers: { "content-length": "1", ...etag } }));
     expect((await driverWith(etagless).head("a.txt")).error).toMatchObject({
       code: "STORAGE_ERROR",
       retryable: true,
@@ -465,14 +468,19 @@ describe("createS3Driver", () => {
     });
   });
 
-  it("drops a platform error whose nested cause quotes the Authorization header", async () => {
-    const quoting = stubbed(() =>
-      Promise.reject(
-        new TypeError("fetch failed", {
-          cause: new Error("Invalid header value: AWS4-HMAC-SHA256 Credential=AKID/..."),
-        }),
-      ),
-    );
+  const quote = "Invalid header value: AWS4-HMAC-SHA256 Credential=AKID/...";
+  // Ten wrappers around a harmless error: past the inspected depth, so its contents are unknown.
+  const deepChain = Array.from({ length: 10 }).reduce<Error>(
+    (cause) => new Error("wrapped", { cause }),
+    new Error("getaddrinfo ENOTFOUND"),
+  );
+  it.each([
+    ["an Error quoting credentials", new Error(quote)],
+    ["a plain object quoting credentials", { message: quote }],
+    ["a string quoting credentials", quote],
+    ["more links than it inspects", deepChain],
+  ])("drops a platform error whose cause chain holds %s", async (_name, cause) => {
+    const quoting = stubbed(() => Promise.reject(new TypeError("fetch failed", { cause })));
     expect((await driverWith(quoting).head("a.txt")).error).toMatchObject({
       code: "STORAGE_UNREACHABLE",
       cause: undefined,
@@ -702,6 +710,7 @@ describe("presignGet", () => {
     const second = await driver.presignGet("a.txt", { expiresIn: 7200, signedAt });
     expect(first.data?.url).toBe(second.data?.url);
     expect(first.data?.url).toContain("X-Amz-Date=20261115T110000Z");
+    expect(first.data?.expiresAt).toEqual(new Date("2026-11-15T13:00:00Z"));
   });
 
   it.each<[string, unknown, string]>([
@@ -718,14 +727,29 @@ describe("presignGet", () => {
     [
       "an invalid signing time",
       { expiresIn: 60, signedAt: new Date(Number.NaN) },
-      "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.",
+      "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.",
+    ],
+    [
+      "a signing time before 1970",
+      { expiresIn: 60, signedAt: new Date("1969-12-31T23:59:59Z") },
+      "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.",
+    ],
+    [
+      "a signing time in the year 10000",
+      { expiresIn: 60, signedAt: new Date("+010000-01-01T00:00:00Z") },
+      "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.",
+    ],
+    [
+      "an expiry that ends in the year 10000",
+      { expiresIn: 3600, signedAt: new Date("9999-12-31T23:30:00Z") },
+      "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.",
     ],
     // Plain-JavaScript callers: none of these may throw a TypeError past the Result.
     ["null options", null, "Expiry must be a whole number of seconds between 1 and 604800."],
     [
       "a signing time given as text",
       { expiresIn: 60, signedAt: "2026-11-15T11:00:00Z" },
-      "signedAt must be a valid Date. Pass a Date, or omit it to sign at the current time.",
+      "signedAt must be a valid Date from 1970 on, and the URL must expire before the year 10000. Pass a Date, or omit it to sign at the current time.",
     ],
     [
       "a disposition that is not text",
@@ -786,6 +810,22 @@ describe("bucket configuration", () => {
         code: "STORAGE_ERROR",
         retryable: true,
         message: `The storage service's response had no ${missing}. Retry the request.`,
+      });
+    },
+  );
+
+  it.each([
+    ["CORS", (driver: StorageDriver) => driver.getBucketCors(), "CORS"],
+    ["lifecycle", (driver: StorageDriver) => driver.getBucketLifecycle(), "lifecycle"],
+  ])(
+    "reports a %s 404 without the missing-configuration code as a retryable storage error",
+    async (_name, read, setting) => {
+      // A proxy or a wrong endpoint path also answers 404; only the storage's own code means "no configuration".
+      const proxy = stubbed(async () => new Response("<html><body>Not found</body></html>", { status: 404 }));
+      expect((await read(driverWith(proxy))).error).toMatchObject({
+        code: "STORAGE_ERROR",
+        retryable: true,
+        message: `The storage service answered 404 without saying that the bucket has no ${setting} configuration. Check the endpoint, then retry.`,
       });
     },
   );
