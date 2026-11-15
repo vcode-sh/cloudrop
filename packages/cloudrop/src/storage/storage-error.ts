@@ -4,17 +4,31 @@ import { xmlText } from "./xml.ts";
 const INVALID_PART_CODES = new Set(["InvalidPart", "InvalidPartOrder", "EntityTooSmall"]);
 
 /**
- * Turns a failed S3 response into a CloudropError. Mapping keys on the HTTP status first: real R2 answered a
- * same-key write burst with HTTP 429 and S3 code "ServiceUnavailable" (docs/research/r2-spike-findings.md, Q9).
+ * Turns a failed S3 response into a CloudropError. 429 and 503 are matched by status, never by S3 code: real R2
+ * answered a same-key write burst with HTTP 429 and S3 code "ServiceUnavailable" (docs/research/r2-spike-findings.md, Q9).
  */
 export function storageError(status: number, body: string): CloudropError {
-  const storageCode = xmlText(body, "Code") || undefined;
+  const rawCode = xmlText(body, "Code");
+  // The code comes from the response body and goes to logs, so accept only what an S3 code looks like.
+  const storageCode = rawCode && /^[A-Za-z0-9]{1,64}$/.test(rawCode) ? rawCode : undefined;
   const options = { status, storageCode };
   if (status === 404 && storageCode === "NoSuchUpload") {
     return new CloudropError("NO_SUCH_UPLOAD", "The multipart upload no longer exists. Start a new upload.", options);
   }
+  if (status === 404 && storageCode === "NoSuchBucket") {
+    return new CloudropError(
+      "STORAGE_ERROR",
+      "The bucket does not exist. Check the bucket name in your configuration.",
+      options,
+    );
+  }
   if (status === 404) return new CloudropError("NOT_FOUND", "The object does not exist. Check the key.", options);
-  if (status === 412) return new CloudropError("ALREADY_EXISTS", "An object with this key already exists.", options);
+  if (status === 412)
+    return new CloudropError(
+      "ALREADY_EXISTS",
+      "An object with this key already exists. Choose a different key.",
+      options,
+    );
   if (storageCode && INVALID_PART_CODES.has(storageCode)) {
     return new CloudropError(
       "INVALID_PART",
@@ -36,6 +50,9 @@ export function storageError(status: number, body: string): CloudropError {
       options,
     );
   }
+  if (storageCode === "ExpiredRequest") {
+    return new CloudropError("STORAGE_DENIED", "The signed request expired. Sign it again and retry.", options);
+  }
   if (status === 403) {
     return new CloudropError(
       "STORAGE_DENIED",
@@ -49,7 +66,7 @@ export function storageError(status: number, body: string): CloudropError {
       retryable: true,
     });
   }
-  if (status >= 500) {
+  if (status >= 500 || status === 408 || storageCode === "OperationAborted") {
     return new CloudropError("STORAGE_ERROR", "The storage service failed. Retry the request.", {
       ...options,
       retryable: true,

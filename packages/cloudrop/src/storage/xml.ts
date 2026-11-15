@@ -5,18 +5,21 @@ const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"'
 const ESCAPES: Record<string, string> = { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" };
 
 function decodeXml(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (match, entity: string) => {
-    if (entity.startsWith("#x") || entity.startsWith("#X")) {
-      return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
-    }
-    if (entity.startsWith("#")) return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
-    return ENTITIES[entity.toLowerCase()] ?? match;
+  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (match, entity: string) => {
+    if (!entity.startsWith("#")) return ENTITIES[entity] ?? "";
+    const codePoint = entity[1] === "x" ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10);
+    // Out-of-range references stay as written: a malformed body must never make a public call throw.
+    return Number.isFinite(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
   });
 }
 
-/** Inner XML of every `<tag>…</tag>` element, in document order. */
+/**
+ * Inner XML of every `<tag>…</tag>` element, in document order. `tag` is an internal constant, never user input, so it
+ * is not escaped into the pattern; response bodies are bounded by the caller. Self-closing `<tag />` has no content and
+ * is skipped.
+ */
 export function xmlBlocks(xml: string, tag: string): string[] {
-  const pattern = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "g");
+  const pattern = new RegExp(`<${tag}(?:\\s[^>]*)?(?<!/)>([\\s\\S]*?)</${tag}>`, "g");
   return Array.from(xml.matchAll(pattern), (match) => match[1] ?? "");
 }
 

@@ -25,6 +25,25 @@ describe("xml reader", () => {
     expect(xmlText("<Key>a&amp;lt;b</Key>", "Key")).toBe("a&lt;b");
   });
 
+  it("leaves out-of-range numeric entities unchanged instead of throwing", () => {
+    expect(xmlText("<Code>&#x110000;</Code>", "Code")).toBe("&#x110000;");
+    expect(xmlText("<Code>&#99999999999;</Code>", "Code")).toBe("&#99999999999;");
+  });
+
+  it("decodes decimal entities and does not decode upper-case named entities", () => {
+    expect(xmlText("<Key>a&#47;b</Key>", "Key")).toBe("a/b");
+    expect(xmlText("<Key>a&AMP;b</Key>", "Key")).toBe("a&AMP;b");
+  });
+
+  it("reads elements that carry attributes", () => {
+    expect(xmlBlocks('<Foo xmlns="http://s3.amazonaws.com/doc/2006-03-01/">x</Foo>', "Foo")).toEqual(["x"]);
+  });
+
+  it("does not let a self-closing element swallow the next block", () => {
+    expect(xmlBlocks("<Part /><Part>2</Part>", "Part")).toEqual(["2"]);
+    expect(xmlBlocks("<Part/><Part>2</Part>", "Part")).toEqual(["2"]);
+  });
+
   it("returns undefined for a tag that is absent", () => {
     expect(xmlText("<Error><Code>X</Code></Error>", "Message")).toBeUndefined();
   });

@@ -1,38 +1,57 @@
 import { describe, expect, it } from "vitest";
 import { storageError } from "./storage-error.ts";
 
-const body = (code: string) => `<?xml version="1.0"?><Error><Code>${code}</Code><Message>raw text</Message></Error>`;
+const xml = (code: string) => `<?xml version="1.0"?><Error><Code>${code}</Code><Message>raw text</Message></Error>`;
 
 describe("storageError", () => {
   it.each([
-    [404, "NoSuchUpload", "NO_SUCH_UPLOAD", false],
-    [404, "NoSuchKey", "NOT_FOUND", false],
-    [404, "", "NOT_FOUND", false],
-    [412, "PreconditionFailed", "ALREADY_EXISTS", false],
-    [400, "InvalidPart", "INVALID_PART", false],
-    [400, "EntityTooSmall", "INVALID_PART", false],
-    [400, "BadDigest", "CHECKSUM_MISMATCH", false],
-    [403, "SignatureDoesNotMatch", "STORAGE_DENIED", false],
-    [403, "RequestTimeTooSkewed", "STORAGE_DENIED", false],
-    [429, "ServiceUnavailable", "RATE_LIMITED", true],
-    [503, "SlowDown", "RATE_LIMITED", true],
-    [500, "InternalError", "STORAGE_ERROR", true],
-    [400, "InvalidArgument", "STORAGE_ERROR", false],
-  ] as const)("maps HTTP %i %s to %s", (status, code, expected, retryable) => {
-    const error = storageError(status, code ? body(code) : "");
+    [404, xml("NoSuchUpload"), "NO_SUCH_UPLOAD", false, "NoSuchUpload"],
+    [404, xml("NoSuchKey"), "NOT_FOUND", false, "NoSuchKey"],
+    [404, "", "NOT_FOUND", false, undefined],
+    [404, xml("NoSuchBucket"), "STORAGE_ERROR", false, "NoSuchBucket"],
+    [412, xml("PreconditionFailed"), "ALREADY_EXISTS", false, "PreconditionFailed"],
+    [400, xml("InvalidPart"), "INVALID_PART", false, "InvalidPart"],
+    [400, xml("EntityTooSmall"), "INVALID_PART", false, "EntityTooSmall"],
+    [400, xml("BadDigest"), "CHECKSUM_MISMATCH", false, "BadDigest"],
+    [403, xml("SignatureDoesNotMatch"), "STORAGE_DENIED", false, "SignatureDoesNotMatch"],
+    [403, xml("RequestTimeTooSkewed"), "STORAGE_DENIED", false, "RequestTimeTooSkewed"],
+    [403, xml("ExpiredRequest"), "STORAGE_DENIED", false, "ExpiredRequest"],
+    [429, xml("ServiceUnavailable"), "RATE_LIMITED", true, "ServiceUnavailable"],
+    [503, xml("SlowDown"), "RATE_LIMITED", true, "SlowDown"],
+    [503, "", "RATE_LIMITED", true, undefined],
+    [500, xml("InternalError"), "STORAGE_ERROR", true, "InternalError"],
+    [502, "", "STORAGE_ERROR", true, undefined],
+    [504, "<html><body>Gateway Timeout</body></html>", "STORAGE_ERROR", true, undefined],
+    [408, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
+    [409, xml("OperationAborted"), "STORAGE_ERROR", true, "OperationAborted"],
+    [400, xml("InvalidArgument"), "STORAGE_ERROR", false, "InvalidArgument"],
+    [400, "<Error><Code></Code></Error>", "STORAGE_ERROR", false, undefined],
+    [400, `<Error><Code>${"A".repeat(65)}</Code></Error>`, "STORAGE_ERROR", false, undefined],
+    [400, "<Error><Code>Bad\nCode</Code></Error>", "STORAGE_ERROR", false, undefined],
+    [500, "<Error><Code>&#x110000;</Code></Error>", "STORAGE_ERROR", true, undefined],
+  ] as const)("maps HTTP %i %s to %s", (status, body, expected, retryable, storageCode) => {
+    const error = storageError(status, body);
     expect(error.code).toBe(expected);
     expect(error.retryable).toBe(retryable);
     expect(error.status).toBe(status);
-    expect(error.storageCode).toBe(code || undefined);
+    expect(error.storageCode).toBe(storageCode);
   });
 
   it("never copies the storage service's message or code into the error message", () => {
-    const { message } = storageError(400, body("InvalidArgument"));
+    const { message } = storageError(400, xml("InvalidArgument"));
     expect(message).not.toContain("raw text");
     expect(message).not.toContain("InvalidArgument");
   });
 
   it("tells the person to fix the clock when the request time is skewed", () => {
-    expect(storageError(403, body("RequestTimeTooSkewed")).message).toContain("clock");
+    expect(storageError(403, xml("RequestTimeTooSkewed")).message).toContain("clock");
+  });
+
+  it("tells the person to sign again when the signed request expired", () => {
+    expect(storageError(403, xml("ExpiredRequest")).message).toContain("expired");
+  });
+
+  it("points a missing bucket at the bucket name, not the object key", () => {
+    expect(storageError(404, xml("NoSuchBucket")).message).toContain("bucket name");
   });
 });
