@@ -11,6 +11,7 @@
     "fix": "biome check --write .",
     "typecheck": "bun run --filter cloudrop typecheck",
     "test": "bun run --filter cloudrop test",
+    "test:live": "bun scripts/test-live-r2.ts",
     "build": "bun run --filter cloudrop build"
   },
   "devDependencies": {

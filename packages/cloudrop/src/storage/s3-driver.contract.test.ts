@@ -33,8 +33,8 @@ describeStorageContract("in-process fake R2", async (onCleanup) => {
     prefix: randomPrefix("contract/"),
     http: fake.fetch,
     gaps: { crc64nvme: "the fake does not compute CRC64NVME" },
-    // The fake checks only the headers a URL signs, so it stores an extra x-amz-meta-* header like a signed one.
-    unsignedMetaOnPresignedPut: "stored",
+    // As real R2 does (live lane, 2026-11-15).
+    unsignedMetaOnPresignedPut: "rejected",
   };
 });
 

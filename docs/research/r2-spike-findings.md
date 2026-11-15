@@ -45,6 +45,7 @@ CRC64NVME `ae8b14860a799888`.
 | 12 | `content-disposition` | Signed into the URL: stored, returned by GET on the S3 endpoint and on the public custom domain (`cf-cache-status: DYNAMIC`), including an RFC 5987 `filename*`. Omitting it with a URL that signed it → 403 | Content-Disposition can be forced at upload time by signing it |
 | 13 | Ranged GET, HEAD | `Range: bytes=0-4095` → 206 with `Content-Range: bytes 0-4095/<total>`, for single and multipart objects. Single ETag = MD5 hex. Multipart ETag `-N` + `x-amz-mp-parts-count`. `HEAD ?partNumber=1` → 206 with that part's range | Magic-byte sniffing with one ranged GET (Class B) is viable |
 | 14 | CopyObject | Default directive keeps Content-Type, Content-Disposition and `x-amz-meta-*` (also from a multipart source). `REPLACE` drops what is not resent. Copying a multipart object **rewrites the ETag to the plain MD5 of the content** and drops `x-amz-mp-parts-count`. CopyObject is Class A ([pricing]) | Quarantine-promote works and keeps metadata, but costs one more Class A op and changes the ETag. Do not use the pre-promotion ETag as an identity after promoting |
+| 18 | Unsigned `x-amz-meta-*` header on a presigned PUT | **Rejected:** `403 SignatureDoesNotMatch`, nothing stored (AWS S3 documents `AccessDenied`). Measured by the storage contract's live lane (`bun run test:live`) on 2026-11-15, twice | A presigned URL fixes the object's metadata: a client cannot add its own. The fake R2 rejects it the same way |
 
 ## Per-question details
 
@@ -400,7 +401,7 @@ copied object were not inspected.
 - What Complete does when a listed part lacks a checksum on a CRC32C upload (part 3 in Q5 was left out of the Complete).
 - Composite checksums with more than 2 parts, SHA-1/SHA-256/CRC32 algorithms, and `Content-MD5` (app-d measured
   Content-MD5 rejection on PUT and UploadPart).
-- Checksums on copied objects, `UploadPartCopy`, `cf-copy-destination-if-*` on copy.
+- Checksums on copied objects and `cf-copy-destination-if-*` on copy. (`UploadPartCopy` with `x-amz-copy-source-range` was verified later by the contract's live lane: [test-backends.md](test-backends.md).)
 - Jurisdiction endpoints, virtual-host addressing with the own presigner (the SDK runs used path style), Infrequent
   Access storage class.
 - A Complete whose request is lost and retried. Inferred from Q11: the retry gets `NoSuchUpload`, which the client

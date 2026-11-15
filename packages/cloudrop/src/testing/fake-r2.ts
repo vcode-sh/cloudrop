@@ -166,13 +166,19 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (now().getTime() > signedAt.getTime() + expires * 1000) {
       return errorResponse(403, "ExpiredRequest", "Request has expired.");
     }
+    const signedNames = (query.get("X-Amz-SignedHeaders") ?? "").split(";");
     const headers: Record<string, string> = {};
-    for (const name of (query.get("X-Amz-SignedHeaders") ?? "").split(";")) {
+    for (const name of signedNames) {
       if (name === "host") continue;
       const value = signedHeaderValue(request, name, body);
       if (value === null) return errorResponse(403, "SignatureDoesNotMatch", `Signed header ${name} is missing.`);
       headers[name] = value;
     }
+    // Measured on real R2 (live lane, 2026-11-15): an x-amz-meta-* header the URL did not sign fails the signature.
+    const unsignedMeta = [...request.headers.keys()].find(
+      (name) => name.startsWith(META_PREFIX) && !signedNames.includes(name),
+    );
+    if (unsignedMeta) return errorResponse(403, "SignatureDoesNotMatch", `Header ${unsignedMeta} is not signed.`);
     const unsigned = new URL(url);
     for (const name of Array.from(unsigned.searchParams.keys())) {
       if (name.startsWith("X-Amz-")) unsigned.searchParams.delete(name);

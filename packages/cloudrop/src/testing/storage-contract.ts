@@ -29,8 +29,8 @@ export interface ContractTarget {
   /** Backend gaps: each present entry names what the backend does instead, and skips the cases that need it. */
   gaps: Partial<Record<Gap, string>>;
   /**
-   * What the backend does with an extra `x-amz-meta-*` header that a presigned PUT did not sign. AWS S3 rejects the
-   * request; real R2 is unmeasured, so each lane records its backend's answer and the contract checks it.
+   * What the backend does with an extra `x-amz-meta-*` header that a presigned PUT did not sign. Each lane records its
+   * backend's measured answer and the contract checks it. Real R2 rejects it (live lane, 2026-11-15).
    */
   unsignedMetaOnPresignedPut: "stored" | "ignored" | "rejected";
 }
@@ -278,9 +278,9 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       const expected = {
         stored: { status: 200, code: "", metadata: { "cloudrop-id": "f6", injected: "yes" } },
         ignored: { status: 200, code: "", metadata: { "cloudrop-id": "f6" } },
-        // AWS S3's known answer, not measured in this repository: AccessDenied, "There were headers present in the
-        // request which were not signed". Nothing is stored.
-        rejected: { status: 403, code: "AccessDenied", metadata: undefined },
+        // Real R2's answer, measured by the live lane on 2026-11-15: nothing is stored. AWS S3 documents AccessDenied
+        // instead ("There were headers present in the request which were not signed"), unmeasured here.
+        rejected: { status: 403, code: "SignatureDoesNotMatch", metadata: undefined },
       }[target.unsignedMetaOnPresignedPut];
       expect({ ...(await outcome(response)), metadata: (await driver.head(k)).data?.metadata }).toEqual(expected);
     });
