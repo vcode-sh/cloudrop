@@ -121,14 +121,15 @@ function readObjectInfo(key: string, headers: Headers): ObjectInfo {
 
 function bucketUrlOf(endpoint: string, bucket: string): string {
   const url = URL.canParse(endpoint) ? new URL(endpoint) : null;
-  // A path, query or fragment would be signed into every request and break the path-style layout.
-  if (!url || !/^https?:$/.test(url.protocol) || url.href !== `${url.origin}/`) {
+  // A query or fragment would be signed into every request. A path is a prefix some emulators serve under, such as
+  // Wrangler's /cdn-cgi/local/r2/s3; the signature covers it.
+  if (!url || !/^https?:$/.test(url.protocol) || url.href !== `${url.origin}${url.pathname}`) {
     throw new CloudropError(
       "INVALID_CONFIG",
-      "The storage endpoint must be an http or https origin with no path, query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
+      "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
     );
   }
-  return `${url.origin}/${encodeRfc3986(bucket)}`;
+  return `${url.origin}${url.pathname.replace(/\/$/, "")}/${encodeRfc3986(bucket)}`;
 }
 
 function unreachable(cause: unknown, timeoutMs: number): CloudropError {
@@ -418,7 +419,8 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (!source.data) {
         return fail(new CloudropError("NOT_FOUND", "The object to copy does not exist. Check the source key."));
       }
-      const copySource = objectUrl(from).pathname;
+      // `/bucket/key` without the endpoint's path prefix: the source is named inside the storage service.
+      const copySource = `/${encodeRfc3986(config.bucket)}/${encodeKeyPath(from)}`;
       if (source.data.size > rules.maxSinglePutSize) return copyInParts(source.data, copySource, to);
       const result = await sendForXml("PUT", objectUrl(to), {
         headers: { "x-amz-copy-source": copySource },

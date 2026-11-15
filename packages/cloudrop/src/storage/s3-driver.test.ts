@@ -361,7 +361,6 @@ describe("createS3Driver", () => {
   });
 
   it.each([
-    ["a path", `${endpoint}/prefix`],
     ["a query", `${endpoint}?x-id=1`],
     ["a fragment", `${endpoint}#bucket`],
     ["user info", "https://user:pass@account.r2.cloudflarestorage.com"],
@@ -375,9 +374,41 @@ describe("createS3Driver", () => {
       expect.objectContaining({
         code: "INVALID_CONFIG",
         message:
-          "The storage endpoint must be an http or https origin with no path, query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
+          "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
       }),
     );
+  });
+
+  it("signs and sends every request under the endpoint's path prefix, but names a copy source without it", async () => {
+    const requests: (string | null)[][] = [];
+    const driver = createS3Driver({
+      endpoint: `${endpoint}/cdn-cgi/s3/`,
+      region: "auto",
+      bucket: "test",
+      credentials,
+      rules: R2_RULES,
+      now,
+      fetch: async (input, init) => {
+        const method = init?.method ?? "GET";
+        requests.push([
+          method,
+          new URL(input.toString()).pathname,
+          new Headers(init?.headers).get("x-amz-copy-source"),
+        ]);
+        const body =
+          method === "PUT" && requests.length === 3
+            ? "<CopyObjectResult><ETag>&quot;e&quot;</ETag></CopyObjectResult>"
+            : null;
+        return new Response(body, { headers: { etag: '"e"', "content-length": "1" } });
+      },
+    });
+    expect((await driver.put("a b.txt", "x")).error).toBeNull();
+    expect((await driver.copy("a b.txt", "c.txt")).error).toBeNull();
+    expect(requests).toEqual([
+      ["PUT", "/cdn-cgi/s3/test/a%20b.txt", null],
+      ["HEAD", "/cdn-cgi/s3/test/a%20b.txt", null],
+      ["PUT", "/cdn-cgi/s3/test/c.txt", "/test/a%20b.txt"],
+    ]);
   });
 
   it("accepts an endpoint with a trailing slash", async () => {

@@ -1,0 +1,14 @@
+{
+  "name": "cloudrop-contract",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "contract",
+      "local_dev": {
+        "experimental_s3_credentials": { "accessKeyId": "cloudrop-local", "secretAccessKey": "cloudrop-local-secret" }
+      }
+    }
+  ]
+}

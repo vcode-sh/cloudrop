@@ -261,12 +261,12 @@ describe("s3()", () => {
     expect(s3(goodS3).rules.maxSinglePutSize).toBe(5 * 1024 ** 3);
   });
 
-  it.each(["storage.example.com", "https://s3.example.com/prefix", "ftp://s3.example.com"])(
+  it.each(["storage.example.com", "https://s3.example.com?x=1", "ftp://s3.example.com"])(
     "rejects the endpoint %s at construction",
     (endpoint) => {
       expect(thrownBy(() => s3({ ...goodS3, endpoint }))).toMatchObject({
         code: "INVALID_CONFIG",
-        message: expect.stringContaining("http or https origin"),
+        message: expect.stringContaining("http or https URL"),
       });
     },
   );

@@ -22,6 +22,7 @@ type Gap =
   | "listParts"
   | "listPartChecksums"
   | "crc64nvme"
+  | "conditionalCompletion"
   | "finishedUploadsLinger";
 
 export interface ContractTarget {
@@ -43,6 +44,8 @@ export interface ContractTarget {
   unsignedMetaOnPresignedPut: "stored" | "ignored" | "rejected";
   /** The S3 error code for an expired presigned URL. Default "ExpiredRequest" (R2); AWS-style backends answer "AccessDenied". */
   expiredUrlCode?: string;
+  /** The error code a completion answers when the last part is larger than the others. Default "INVALID_PART" (R2). */
+  unequalPartsCode?: string;
   /** The S3 error code when `unsignedMetaOnPresignedPut` is "rejected". Default "SignatureDoesNotMatch" (R2). */
   unsignedMetaCode?: string;
 }
@@ -357,7 +360,8 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       ]);
     });
 
-    it("refuses a conditional completion onto an existing key and discards the upload", async () => {
+    it("refuses a conditional completion onto an existing key and discards the upload", async (ctx) => {
+      skipWithout(ctx, "conditionalCompletion");
       const { k, uploadId } = await startUpload("taken.bin");
       // Written after the upload started, so only the completion's If-None-Match can see it.
       expect((await driver.put(k, "first")).error).toBeNull();
@@ -381,7 +385,7 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
         { partNumber: 1, etag: first },
         { partNumber: 2, etag: tooLarge },
       ]);
-      expect(rejected.error?.code).toBe("INVALID_PART");
+      expect(rejected.error?.code).toBe(target.unequalPartsCode ?? "INVALID_PART");
       const repaired = etagOf(await sendPart(k, uploadId, 2, offsetBytes(4)));
       const completed = await driver.completeMultipart(k, uploadId, [
         { partNumber: 1, etag: first },

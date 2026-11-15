@@ -50,6 +50,32 @@ Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run 
 The contract's `NoSuchUpload` expectations after completion are R2 behaviour; AWS-style backends keep the ID, which is
 why they are a declared gap, not a driver bug: the driver maps whatever the backend answers.
 
+## Wrangler local R2 (Miniflare lane)
+
+Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, run by `scripts/test-wrangler.sh`
+(the pinned `wrangler@4.162.0` devDependency, worker fixture in `packages/cloudrop/fixtures/wrangler/`, port 18787 or
+`CLOUDROP_WRANGLER_PORT`, state in `fixtures/wrangler/.state`, stopped and wiped by a `trap`). The endpoint is
+`http://127.0.0.1:<port>/cdn-cgi/local/r2/s3` (experimental, `local_dev.experimental_s3_credentials`). Driver:
+`createS3Driver` with `R2_RULES`, region `auto`, path-style bucket `contract`.
+
+**Date:** 2026-11-15. **Result:** 16 of 22 contract cases pass, 6 skip on declared gaps. The suite takes under 1 s.
+
+| Behaviour | Measured answer |
+|---|---|
+| Endpoint with a path prefix | The signature covers the prefix, so the driver keeps it in every URL. `x-amz-copy-source` stays `/bucket/key` without it (driver change in this task, unit-tested) |
+| Expired presigned URL | `403 ExpiredRequest`, as R2. No gap |
+| Unsigned `x-amz-meta-*` on a presigned PUT | `200`, the header is **stored** as object metadata (R2: `403 SignatureDoesNotMatch`). Lane field `unsignedMetaOnPresignedPut: "stored"` |
+| Last part larger than the first | Refused, but as `404 NoSuchUpload`, not `InvalidPart`; the upload survives and completes once the part is replaced. Lane field `unequalPartsCode: "NO_SUCH_UPLOAD"`. This is the only backend that enforces the equal-part rule |
+| ListParts | `501 NotImplemented`, also after an abort. Gap `listParts` |
+| Part with a wrong CRC32C | Accepted with `200`: `x-amz-checksum-*` is ignored. Gap `checksums` |
+| HEAD checksum | No `x-amz-checksum-crc64nvme`. Gap `crc64nvme` |
+| `If-None-Match: *` on completion, key exists | Ignored: the completion succeeds and overwrites the key (R2 and RustFS: `412`). Gap `conditionalCompletion` |
+| `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
+| Completing a finished upload again | `404 NoSuchUpload` as R2. No gap |
+
+Wrangler is therefore the backend for the equal-part rule and presigned SigV4 only; resume by ListParts and checksums are
+covered by RustFS and real R2.
+
 ## In-process fake R2
 
 `packages/cloudrop/src/testing/fake-r2.ts`, unit lane. Its rules come from `r2-spike-findings.md` and from the live lane.
