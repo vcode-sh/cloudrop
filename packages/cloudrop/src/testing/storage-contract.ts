@@ -24,6 +24,7 @@ type Gap =
   | "listPartChecksums"
   | "crc64nvme"
   | "conditionalCompletion"
+  | "copyPartPrecondition"
   | "finishedUploadsLinger";
 
 export interface ContractTarget {
@@ -451,7 +452,8 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       expect(text((await driver.getRange(key("copy-target.txt"), 0, 6)).data)).toBe("copy me");
     });
 
-    it("copies a larger object in ranged parts with its type and metadata", async () => {
+    it("copies a larger object in ranged parts with its type and metadata", async (ctx) => {
+      skipWithout(ctx, "copyPartPrecondition");
       const size = partSize();
       const body = offsetBytes(size + 1024);
       const options = { type: "application/octet-stream", metadata: { "cloudrop-id": "f5" } };
@@ -465,10 +467,11 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       );
     });
 
-    it.each([
-      { name: "a single copy", inParts: false },
-      { name: "a copy in ranged parts", inParts: true },
-    ])("fails $name cleanly when the source is overwritten after it was read", async ({ inParts }) => {
+    it.for<{ name: string; inParts: boolean; needs: Gap[] }>([
+      { name: "a single copy", inParts: false, needs: [] },
+      { name: "a copy in ranged parts", inParts: true, needs: ["copyPartPrecondition"] },
+    ])("fails $name cleanly when the source is overwritten after it was read", async ({ inParts, needs }, ctx) => {
+      skipWithout(ctx, ...needs);
       const from = key(`changing-${inParts ? "parts" : "single"}.bin`);
       const to = key(`changing-${inParts ? "parts" : "single"}-copy.bin`);
       const size = inParts ? partSize() + 1024 : 16;

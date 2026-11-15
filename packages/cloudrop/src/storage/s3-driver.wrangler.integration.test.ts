@@ -38,6 +38,8 @@ describeStorageContract("Wrangler local R2", async () => {
       checksums:
         "Wrangler local R2 ignores x-amz-checksum-* headers: a part with a wrong CRC32C is accepted with 200, where R2 answers BadDigest.",
       crc64nvme: "Wrangler local R2 does not compute CRC64NVME: HEAD returns no x-amz-checksum-crc64nvme.",
+      copyPartPrecondition:
+        "Wrangler local R2 answers 501 NotImplemented to an UploadPartCopy carrying x-amz-copy-source-if-match (the same copy without it succeeds), so the driver's guarded multipart copy cannot run there; R2 honours the header.",
       conditionalCompletion:
         "Wrangler local R2 ignores If-None-Match on CompleteMultipartUpload: it overwrites the existing key, where R2 answers 412.",
     },
