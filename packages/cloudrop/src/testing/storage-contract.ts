@@ -3,6 +3,7 @@
 
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
 import { crc32cBase64 } from "../checksum.ts";
+import type { CloudropErrorCode } from "../errors.ts";
 import type { FetchLike, StorageDriver } from "../storage/driver.ts";
 import { toHex } from "../storage/sigv4.ts";
 
@@ -44,8 +45,8 @@ export interface ContractTarget {
   unsignedMetaOnPresignedPut: "stored" | "ignored" | "rejected";
   /** The S3 error code for an expired presigned URL. Default "ExpiredRequest" (R2); AWS-style backends answer "AccessDenied". */
   expiredUrlCode?: string;
-  /** The error code a completion answers when the last part is larger than the others. Default "INVALID_PART" (R2). */
-  unequalPartsCode?: string;
+  /** The cloudrop error code a completion answers when the last part is larger than the others. Default "INVALID_PART" (R2). */
+  unequalPartsCode?: CloudropErrorCode;
   /** The S3 error code when `unsignedMetaOnPresignedPut` is "rejected". Default "SignatureDoesNotMatch" (R2). */
   unsignedMetaCode?: string;
 }

@@ -12,6 +12,9 @@ if ss -ltnH "sport = :${PORT}" | grep -q .; then
   exit 1
 fi
 rm -rf "$STATE"
+mkdir -p "$STATE"
+# No telemetry, and the log lives in the state directory, which the trap removes.
+export WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH="$PWD/$STATE/logs"
 WRANGLER_PID=""
 stop_wrangler() {
   if [ -n "$WRANGLER_PID" ]; then
@@ -25,14 +28,15 @@ trap stop_wrangler EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 setsid ./node_modules/.bin/wrangler dev --config fixtures/wrangler/wrangler.jsonc --ip 127.0.0.1 --port "$PORT" \
-  --persist-to "$STATE" --log-level warn &
+  --persist-to "$STATE" --log-level error &
 WRANGLER_PID=$!
 for _ in $(seq 1 60); do
   if curl -s -o /dev/null "http://127.0.0.1:${PORT}/"; then READY=1; break; fi
+  kill -0 "$WRANGLER_PID" 2>/dev/null || break
   sleep 1
 done
 if [ -z "${READY:-}" ]; then
-  echo "Wrangler did not start within 60 seconds. Run it by hand to see why: packages/cloudrop/node_modules/.bin/wrangler dev --config fixtures/wrangler/wrangler.jsonc" >&2
+  echo "Wrangler did not start (it exited or took over 60 seconds). Run it by hand to see why: cd packages/cloudrop && ./node_modules/.bin/wrangler dev --config fixtures/wrangler/wrangler.jsonc" >&2
   exit 1
 fi
 CLOUDROP_WRANGLER_ENDPOINT="http://127.0.0.1:${PORT}/cdn-cgi/local/r2/s3" \

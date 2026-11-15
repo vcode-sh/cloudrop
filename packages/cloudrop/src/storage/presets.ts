@@ -122,7 +122,7 @@ export function r2(given: R2Options): StorageDriver {
   });
 }
 
-// The endpoint's shape is validated by createS3Driver, which rejects a relative URL, a path, a query and bad escapes.
+// The endpoint's shape is validated by createS3Driver, which rejects a relative URL, a query, a fragment and malformed escapes in the path.
 export function s3(given: S3Options): StorageDriver {
   const options: Partial<S3Options> = given ?? {};
   throwIfMissing(

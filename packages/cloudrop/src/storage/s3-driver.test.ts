@@ -363,7 +363,6 @@ describe("createS3Driver", () => {
   it.each([
     ["a query", `${endpoint}?x-id=1`],
     ["a fragment", `${endpoint}#bucket`],
-    ["user info", "https://user:pass@account.r2.cloudflarestorage.com"],
     ["no scheme", "account.r2.cloudflarestorage.com"],
     ["a malformed escape in the host", "https://acc%zzount.r2.cloudflarestorage.com"],
     ["a non-HTTP scheme", "ftp://account.r2.cloudflarestorage.com"],
@@ -377,6 +376,46 @@ describe("createS3Driver", () => {
           "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
       }),
     );
+  });
+
+  it.each([
+    [
+      "user info",
+      "https://user:pass@account.r2.cloudflarestorage.com",
+      "The storage endpoint contains a user name or password. Pass accessKeyId and secretAccessKey instead.",
+    ],
+    [
+      "a malformed escape at the end of the path",
+      `${endpoint}/a%`,
+      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
+    ],
+    [
+      "a malformed escape inside the path",
+      `${endpoint}/a%zz/b`,
+      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
+    ],
+  ])("rejects an endpoint with %s when it is created, naming the problem", (_name, badEndpoint, message) => {
+    expect(() =>
+      createS3Driver({ endpoint: badEndpoint, region: "auto", bucket: "test", credentials, rules: R2_RULES }),
+    ).toThrow(expect.objectContaining({ code: "INVALID_CONFIG", message }));
+  });
+
+  it("accepts an escaped slash in the endpoint's path and signs the path as sent", async () => {
+    const paths: string[] = [];
+    const driver = createS3Driver({
+      endpoint: `${endpoint}/a%2Fb`,
+      region: "auto",
+      bucket: "test",
+      credentials,
+      rules: R2_RULES,
+      now,
+      fetch: async (input) => {
+        paths.push(new URL(input.toString()).pathname);
+        return new Response(null, { status: 404 });
+      },
+    });
+    expect((await driver.head("k")).error).toBeNull();
+    expect(paths).toEqual(["/a%2Fb/test/k"]);
   });
 
   it("signs and sends every request under the endpoint's path prefix, but names a copy source without it", async () => {
@@ -395,10 +434,9 @@ describe("createS3Driver", () => {
           new URL(input.toString()).pathname,
           new Headers(init?.headers).get("x-amz-copy-source"),
         ]);
-        const body =
-          method === "PUT" && requests.length === 3
-            ? "<CopyObjectResult><ETag>&quot;e&quot;</ETag></CopyObjectResult>"
-            : null;
+        const body = new Headers(init?.headers).has("x-amz-copy-source")
+          ? "<CopyObjectResult><ETag>&quot;e&quot;</ETag></CopyObjectResult>"
+          : null;
         return new Response(body, { headers: { etag: '"e"', "content-length": "1" } });
       },
     });

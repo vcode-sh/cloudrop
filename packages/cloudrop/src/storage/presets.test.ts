@@ -271,6 +271,13 @@ describe("s3()", () => {
     },
   );
 
+  it("rejects a malformed escape in the endpoint's path at construction", () => {
+    expect(thrownBy(() => s3({ ...goodS3, endpoint: "https://s3.example.com/a%zz" }))).toMatchObject({
+      code: "INVALID_CONFIG",
+      message: expect.stringContaining("malformed percent escape"),
+    });
+  });
+
   it("reports every missing setting in one message", () => {
     expect(thrownBy(() => s3({} as S3Options)).message).toBe(
       "Missing S3 settings: endpoint, region, bucket, accessKeyId, secretAccessKey. Pass them to s3().",

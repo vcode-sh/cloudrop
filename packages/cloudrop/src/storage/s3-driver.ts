@@ -124,9 +124,23 @@ function bucketUrlOf(endpoint: string, bucket: string): string {
   // A query or fragment would be signed into every request. A path is a prefix some emulators serve under, such as
   // Wrangler's /cdn-cgi/local/r2/s3; the signature covers it.
   if (!url || !/^https?:$/.test(url.protocol) || url.href !== `${url.origin}${url.pathname}`) {
+    // The generic message also covers user info, which is named below without echoing it.
+    if (url?.username || url?.password) {
+      throw new CloudropError(
+        "INVALID_CONFIG",
+        "The storage endpoint contains a user name or password. Pass accessKeyId and secretAccessKey instead.",
+      );
+    }
     throw new CloudropError(
       "INVALID_CONFIG",
       "The storage endpoint must be an http or https URL with no query or fragment, such as https://<account ID>.r2.cloudflarestorage.com.",
+    );
+  }
+  // The URL parser keeps a bad escape as written, and signing the path would later throw from a public call.
+  if (/%(?![0-9A-Fa-f]{2})/.test(url.pathname)) {
+    throw new CloudropError(
+      "INVALID_CONFIG",
+      "The storage endpoint's path contains a malformed percent escape such as %zz. Write a literal percent sign as %25.",
     );
   }
   return `${url.origin}${url.pathname.replace(/\/$/, "")}/${encodeRfc3986(bucket)}`;

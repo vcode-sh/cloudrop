@@ -65,7 +65,7 @@ Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, ru
 | Endpoint with a path prefix | The signature covers the prefix, so the driver keeps it in every URL. `x-amz-copy-source` stays `/bucket/key` without it (driver change in this task, unit-tested) |
 | Expired presigned URL | `403 ExpiredRequest`, as R2. No gap |
 | Unsigned `x-amz-meta-*` on a presigned PUT | `200`, the header is **stored** as object metadata (R2: `403 SignatureDoesNotMatch`). Lane field `unsignedMetaOnPresignedPut: "stored"` |
-| Last part larger than the first | Refused, but as `404 NoSuchUpload`, not `InvalidPart`; the upload survives and completes once the part is replaced. Lane field `unequalPartsCode: "NO_SUCH_UPLOAD"`. This is the only backend that enforces the equal-part rule |
+| Last part larger than the first | Refused, but as `404 NoSuchUpload`, not `InvalidPart`; the upload survives and completes once the part is replaced. Lane field `unequalPartsCode: "NO_SUCH_UPLOAD"`. Real R2 and the fake enforce the same rule; Wrangler's `NoSuchUpload` makes it a weaker oracle for the error code, though the repair-and-complete half of the case still holds |
 | ListParts | `501 NotImplemented`, also after an abort. Gap `listParts` |
 | Part with a wrong CRC32C | Accepted with `200`: `x-amz-checksum-*` is ignored. Gap `checksums` |
 | HEAD checksum | No `x-amz-checksum-crc64nvme`. Gap `crc64nvme` |
@@ -73,7 +73,7 @@ Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, ru
 | `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
 | Completing a finished upload again | `404 NoSuchUpload` as R2. No gap |
 
-Wrangler is therefore the backend for the equal-part rule and presigned SigV4 only; resume by ListParts and checksums are
+Wrangler is therefore a check of the equal-part rule and presigned SigV4 only; resume by ListParts and checksums are
 covered by RustFS and real R2.
 
 ## In-process fake R2
