@@ -324,6 +324,24 @@ Audits of two private production codebases informed these rules (findings kept o
 
 CI runs on GitHub-hosted runners: npm trusted publishing requires them.
 
+### 11.1 Performance and WebAssembly
+
+Uploads are network-bound: bytes go from the browser to the bucket and the server only signs. CPU matters only for
+client-side hashing and image encoding. Measured on 2026-11-15 (Bun, Ryzen 9 9950X3D, 16 MiB parts): CRC32C in plain
+JavaScript ran at 916 MiB/s and WebCrypto SHA-256 at 2,220 MiB/s, about 8 and 18 times a 1 Gbps uplink.
+
+Rules:
+
+- Core, server and client stay TypeScript with zero runtime dependencies. No native Node addons: they would break
+  browsers, Workers and Deno.
+- WebAssembly enters only behind a benchmark that shows the JavaScript path is the bottleneck on real target devices
+  (browser benchmarks in CI, including a throttled mid-range profile). It is always lazy-loaded, optional, and backed
+  by a JavaScript fallback with identical output.
+- Two candidate gates, decided in M5: a CRC32C/CRC64NVME WebAssembly kernel for `checksums()`, and AVIF, WebP and
+  MozJPEG encoders for `images()` (browser-native AVIF encoding is weak, so this one is likely).
+- A Rust `cloudrop-cli` for bulk server and terminal uploads (multi-threaded I/O, folder sync) is a separate product
+  after 1.0, not part of the JavaScript package.
+
 ## 12. Real-R2 spike results (2026-11-15)
 
 Evidence: [`docs/research/r2-spike-findings.md`](../../research/r2-spike-findings.md). Decisions they settle:
@@ -344,10 +362,15 @@ Evidence: [`docs/research/r2-spike-findings.md`](../../research/r2-spike-finding
 Still unverified, and required before 1.0 in the browser lane:
 
 1. Browser uploads end to end (presigned PUT and parts, reading `ETag`), and whether an expired URL's `403` carries CORS
-   headers. Blocked until the test bucket has an upload CORS rule.
+   headers. The test bucket gained an upload CORS rule for `http://localhost:5173` and `http://127.0.0.1:5173` on
+   2026-11-15 (rule id `cloudrop-browser-tests`); the M3 browser lane runs against it.
 2. More than 8 parallel parts on one key.
 3. AWS chunked uploads with trailing checksums (not used by cloudrop's browser path).
-4. The bucket's lifecycle rules (the test token cannot read them); `checkBucket()` must use an account-level token.
+
+The test bucket's lifecycle includes R2's default "abort incomplete multipart uploads after 7 days" rule (read with
+an account OAuth token on 2026-11-15). Bucket-scoped object tokens cannot read CORS or lifecycle (`403`), so
+`checkBucket()` needs an account API token with R2 admin read, and reports "unknown" rather than "missing" without
+one.
 
 ## 13. Release
 
