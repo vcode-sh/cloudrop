@@ -43,6 +43,9 @@ const EXTENSIONS: Record<string, readonly string[]> = {
 /** Extensions of the known types: a file declared as another type never carries one into its key. */
 const KNOWN_EXTENSIONS: ReadonlySet<string> = new Set(Object.values(EXTENSIONS).flat());
 
+// The only extensions that go into a key or a message.
+const PLAIN_EXTENSION = /^[a-z0-9]{1,16}$/;
+
 // RFC 6838 type and subtype names, lower case, no parameters: this value is signed and stored as the object's type.
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/;
 const ACCEPT_ENTRY = /^(\*\/\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}))$/;
@@ -60,7 +63,8 @@ export function isAcceptEntry(entry: string): boolean {
 function extensionOf(name: string): string | null {
   const dot = name.lastIndexOf(".");
   // ".env" is a name without an extension, not an extension without a name.
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : null;
+  // "photo." has an empty extension, which is no extension at all.
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : null;
 }
 
 /**
@@ -78,13 +82,11 @@ export function matchAccept(
   if (!accepted) return { problem: `This upload does not accept ${type} files.` };
   const ext = extensionOf(name);
   const known = EXTENSIONS[type];
-  if (known === undefined) {
-    const plain = ext !== null && /^[a-z0-9]{1,16}$/.test(ext) && !KNOWN_EXTENSIONS.has(ext);
-    return { ext: plain ? `.${ext}` : "" };
-  }
+  const plain = ext !== null && PLAIN_EXTENSION.test(ext);
+  if (known === undefined) return { ext: plain && !KNOWN_EXTENSIONS.has(ext) ? `.${ext}` : "" };
   if (ext === null) return { ext: `.${known[0]}` };
   if (known.includes(ext)) return { ext: `.${ext}` };
-  return {
-    problem: `The file name ends in .${ext.slice(0, 16)}, which does not match its type ${type}. Rename the file or pick another.`,
-  };
+  // The extension is the client's text: it is echoed only when it is plain, never as sent.
+  const shown = plain ? ` ends in .${ext}, which` : "'s extension";
+  return { problem: `The file name${shown} does not match its type ${type}. Rename the file or pick another.` };
 }

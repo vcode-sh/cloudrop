@@ -46,6 +46,20 @@ describe("matchAccept", () => {
     });
   });
 
+  it.for([
+    { name: "a line break", file: "a.png\r\nx-amz-meta-a: b" },
+    { name: "markup", file: "a.<img src=x onerror=1>" },
+    { name: "a slash", file: "dir.x/file" },
+  ])("does not echo an extension with $name back to the client", ({ file }) => {
+    expect(matchAccept(["image/*"], "image/png", file)).toEqual({
+      problem: "The file name's extension does not match its type image/png. Rename the file or pick another.",
+    });
+  });
+
+  it("treats a trailing dot as a name without an extension", () => {
+    expect(matchAccept(["image/png"], "image/png", "photo.")).toEqual({ ext: ".png" });
+  });
+
   it("refuses a type outside the list, naming it", () => {
     expect(matchAccept(["image/png", "image/jpeg"], "image/gif", "a.gif")).toEqual({
       problem: "This upload does not accept image/gif files.",
