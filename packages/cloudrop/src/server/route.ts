@@ -48,9 +48,12 @@ export type KeyContext<TAuth, TMetadata> = Omit<TAuth, ReservedName> & {
 export type CompleteContext<TAuth, TMetadata> = Omit<Jsonified<TAuth>, ReservedName> & {
   request: Request;
   file: UploadedFile;
-  /** undefined on a route without a schema. */
-  metadata: [TMetadata] extends [undefined] ? undefined : Jsonified<TMetadata>;
+  /** undefined on a route without a schema, and possibly undefined when the schema's output can be. */
+  metadata: undefined extends TMetadata ? Jsonified<Exclude<TMetadata, undefined>> | undefined : Jsonified<TMetadata>;
 };
+
+/** What `/complete` sends as `data`: the JSON form of the result, and null where `onComplete` gave undefined or nothing. */
+type CompleteData<TResult> = Jsonified<TResult> | (undefined extends TResult ? null : never);
 
 export interface RouteOptions<TAuth extends object, TSchema extends StandardSchema | undefined, TResult> {
   /** MIME types such as "image/png", "image/*" or "*\/*". The file name's extension must agree with the type. */
@@ -113,8 +116,7 @@ export interface Route<TMetadataInput = unknown, TResult = unknown> {
 
 export function route<TAuth extends object, TSchema extends StandardSchema | undefined = undefined, TResult = null>(
   options: RouteOptions<TAuth, TSchema, TResult>,
-  // biome-ignore lint/suspicious/noConfusingVoidType: an onComplete that returns nothing infers void, not undefined.
-): Route<SchemaInput<TSchema>, [Awaited<TResult>] extends [undefined | void] ? null : Jsonified<Awaited<TResult>>> {
+): Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>> {
   // The checker cannot relate onComplete's context while TAuth is generic (Jsonified<TAuth> stays deferred); the
   // handler builds exactly the contexts typed above.
   return { definition: options as RouteDefinition };

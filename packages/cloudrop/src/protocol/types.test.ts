@@ -8,9 +8,7 @@ interface Server
   extends InferableCloudrop<{
     avatar: { metadata: { albumId: string }; result: { url: string } };
     notes: { metadata: undefined; result: null };
-  }> {
-  handler(request: Request): Promise<Response>;
-}
+  }> {}
 
 describe("Jsonified", () => {
   it("is what JSON.stringify and JSON.parse make of a value", () => {
@@ -33,6 +31,8 @@ describe("route types read from a server type", () => {
   it("names the routes and their metadata and result types", () => {
     expectTypeOf<RouteName<Server>>().toEqualTypeOf<"avatar" | "notes">();
     expectTypeOf<RouteMetadata<Server, "avatar">>().toEqualTypeOf<{ albumId: string }>();
+    expectTypeOf<RouteMetadata<Server, "notes">>().toEqualTypeOf<undefined>();
+    expectTypeOf<RouteResult<Server, "avatar">>().toEqualTypeOf<{ url: string }>();
     expectTypeOf<RouteResult<Server, "notes">>().toEqualTypeOf<null>();
     // @ts-expect-error: there is no route named "banner".
     expectTypeOf<RouteResult<Server, "banner">>();
