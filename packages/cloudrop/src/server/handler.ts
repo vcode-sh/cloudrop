@@ -1,9 +1,11 @@
 // cloudrop.handler: Request in, Response out, never a throw. Routing, method, origin, content type and body cap are
 // checked here once, before any endpoint runs.
 
+import { fromEnv } from "../env.ts";
 import { CloudropError, type Result } from "../errors.ts";
 import type { Endpoint } from "../protocol/types.ts";
 import { handleAbort } from "./abort.ts";
+import { checkBucket } from "./bucket-check.ts";
 import { handleComplete } from "./complete.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import {
@@ -90,10 +92,32 @@ async function answer(request: Request, config: ServerConfig): Promise<Response>
   }
 }
 
+/** In development only, once per handler: report bucket settings that would break browser uploads (spec §4). */
+async function warnAboutBucket(config: ServerConfig, pageOrigin: string): Promise<void> {
+  const report = await checkBucket(config, [...new Set([pageOrigin, ...config.trustedOrigins])]);
+  if (report.error) {
+    config.logger.warn(`cloudrop: could not check the bucket settings: ${report.error.message}`);
+    return;
+  }
+  for (const check of Object.values(report.data)) {
+    if (check.status === "problem") config.logger.warn(`cloudrop: ${check.message}`);
+  }
+}
+
 export function createHandler(given: ServerConfig): (request: Request) => Promise<Response> {
   const config = { ...given, logger: contained(given.logger) };
+  let bucketChecked = false;
   return async (request) => {
     try {
+      if (!bucketChecked && fromEnv("NODE_ENV") === "development") {
+        // A same-origin page uploads from the server's own origin, which needs the bucket's CORS rule too. The URL's
+        // origin, unlike the Origin header, is always an exact origin, and a cross-origin page must be trusted anyway.
+        const pageOrigin = new URL(request.url).origin;
+        bucketChecked = true;
+        warnAboutBucket(config, pageOrigin).catch((error: unknown) => {
+          config.logger.error("cloudrop: the development bucket check failed.", error);
+        });
+      }
       return await answer(request, config);
     } catch (error) {
       // The endpoints catch their own failures: what lands here is an input that is not a Request.

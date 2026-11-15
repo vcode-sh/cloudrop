@@ -27,6 +27,8 @@ export type {
   UploadResponse,
 } from "./protocol/types.ts";
 export type { StorageRules } from "./rules.ts";
+export type { FileApi } from "./server/api.ts";
+export type { BucketCheck, BucketReport } from "./server/bucket-check.ts";
 export { type Cloudrop, createCloudrop } from "./server/cloudrop.ts";
 export type { CloudropOptions } from "./server/config.ts";
 export type {

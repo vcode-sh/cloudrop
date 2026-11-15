@@ -79,11 +79,16 @@ function readSecrets(secret: unknown): [string, ...string[]] {
   return secrets as [string, ...string[]];
 }
 
+/**
+ * Only a scheme and host survive URL's own serialization unchanged: a path, credentials, "*", "null" and the line
+ * breaks the parser strips all fail.
+ */
+export const isExactOrigin = (origin: unknown): boolean =>
+  typeof origin === "string" && URL.canParse(origin) && new URL(origin).origin === origin;
+
 function readOrigins(origins: unknown): Set<string> {
   const list = origins ?? [];
-  const valid =
-    Array.isArray(list) &&
-    list.every((origin) => typeof origin === "string" && URL.canParse(origin) && new URL(origin).origin === origin);
+  const valid = Array.isArray(list) && list.every(isExactOrigin);
   if (!valid) {
     throw configError(
       'trustedOrigins must list exact origins such as "https://app.example.com": scheme and host, no path or trailing slash, and never "*".',
