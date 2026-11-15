@@ -55,7 +55,7 @@ describe("runBeforeUpload", () => {
   it("refuses a hook that returns something other than a CloudropError", async () => {
     const sloppy = { id: "sloppy", server: { beforeUpload: () => "no" } } as unknown as CloudropPlugin;
     await expect(runBeforeUpload([sloppy], context, recordingLogger())).rejects.toThrow(
-      'Plugin "sloppy": beforeUpload must return a CloudropError or nothing.',
+      'Plugin "sloppy": beforeUpload must return nothing or a CloudropError from the same cloudrop the server uses. Install cloudrop once, so the plugin and the server share it.',
     );
   });
 });

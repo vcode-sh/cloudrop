@@ -53,7 +53,8 @@ export interface ServerConfig {
 }
 
 export const ROUTE_NAME: RegExp = /^[A-Za-z0-9_-]{1,64}$/;
-const BASE_PATH = /^(\/[A-Za-z0-9._~-]+)+$/;
+// No "." or ".." segment: the URL parser resolves them away, so the handler would never match a request.
+const BASE_PATH = /^(\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+$/;
 const MIN_SECRET_LENGTH = 32;
 const MAX_FILES_LIMIT = 100;
 const DEFAULT_MAX_FILES = 10;
@@ -184,7 +185,10 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
       "logger needs error(message, error) and warn(message) methods, such as console or a pino logger.",
     );
   }
+  const tokenKeys = importTokenKeys(readSecrets(options.secret));
+  const trustedOrigins = readOrigins(options.trustedOrigins);
   const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
+  // Plugins and the logger hear about a configuration only once every check above has passed.
   for (const route of routes.values()) {
     for (const plugin of plugins) plugin.server?.extendRoute?.({ name: route.name, definition: route.definition });
     if (route.visibility === "private" && storage.publicUrl) {
@@ -196,9 +200,9 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   return {
     storage,
     routes,
-    tokenKeys: importTokenKeys(readSecrets(options.secret)),
+    tokenKeys,
     basePath,
-    trustedOrigins: readOrigins(options.trustedOrigins),
+    trustedOrigins,
     multipartThreshold,
     plugins,
     logger,

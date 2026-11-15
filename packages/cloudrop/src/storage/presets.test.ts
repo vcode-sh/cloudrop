@@ -354,6 +354,14 @@ describe("s3()", () => {
 
 describe("the public entry", () => {
   it("exports exactly the intended runtime names", async () => {
-    expect(Object.keys(await import("../index.ts")).sort()).toEqual(["CloudropError", "r2", "s3"]);
+    expect(Object.keys(await import("../index.ts")).sort()).toEqual([
+      "CloudropError",
+      "allowAnyone",
+      "createCloudrop",
+      "r2",
+      "route",
+      "s3",
+      "unauthorized",
+    ]);
   });
 });

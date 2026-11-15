@@ -27,6 +27,31 @@ export type {
   UploadResponse,
 } from "./protocol/types.ts";
 export type { StorageRules } from "./rules.ts";
+export { type Cloudrop, createCloudrop } from "./server/cloudrop.ts";
+export type { CloudropOptions } from "./server/config.ts";
+export type {
+  AbortContext,
+  AfterVerifyContext,
+  BeforeUploadContext,
+  CloudropPlugin,
+  Logger,
+  PluginFile,
+  ServerHooks,
+} from "./server/plugins.ts";
+export {
+  type AuthorizeContext,
+  allowAnyone,
+  type CompleteContext,
+  type KeyContext,
+  type Route,
+  type RouteDefinition,
+  type RouteOptions,
+  route,
+  type Unauthorized,
+  unauthorized,
+} from "./server/route.ts";
+export type { StandardIssue, StandardResult, StandardSchema } from "./server/schema.ts";
+export type { Size } from "./server/size.ts";
 export type {
   BucketCorsRule,
   BucketLifecycleRule,

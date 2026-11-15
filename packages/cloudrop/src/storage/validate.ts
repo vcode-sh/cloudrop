@@ -11,6 +11,13 @@ export function invalidInput(message: string): CloudropError {
   return new CloudropError("INVALID_INPUT", message);
 }
 
+/** An object literal or Object.create(null): never an array, a Map, a Response, an Error or another class instance. */
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Keys reach the URL path, where `.` and `..` segments would be normalised away and break the signature (an earlier
  * implementation signed `/m/id/` for a file named `..`). Reject them instead of rewriting them.
@@ -41,8 +48,7 @@ const isPrintableAscii = (value: unknown): boolean => typeof value === "string" 
 function metadataProblem(metadata: Record<string, string> | undefined): string | null {
   if (metadata === undefined) return null;
   // Object.entries would read a string or an array as names "0", "1"…, and a Map as no metadata at all.
-  const prototype = typeof metadata === "object" && metadata !== null ? Object.getPrototypeOf(metadata) : undefined;
-  if (prototype !== Object.prototype && prototype !== null) {
+  if (!isPlainObject(metadata)) {
     return 'Metadata must be an object of names and text values, such as { "cloudrop-id": "f1" }.';
   }
   let bytes = 0;

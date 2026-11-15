@@ -64,7 +64,10 @@ export interface Logger {
 
 function refusal(plugin: CloudropPlugin, hook: string, value: unknown): CloudropError | undefined {
   if (value === undefined || value instanceof CloudropError) return value;
-  throw new TypeError(`Plugin "${plugin.id}": ${hook} must return a CloudropError or nothing.`);
+  // A CloudropError from a second installed copy of cloudrop fails this check too, so the message names that cause.
+  throw new TypeError(
+    `Plugin "${plugin.id}": ${hook} must return nothing or a CloudropError from the same cloudrop the server uses. Install cloudrop once, so the plugin and the server share it.`,
+  );
 }
 
 /** onAbort for each file on each plugin, in plugin order. A failing onAbort is logged and never stops the others. */

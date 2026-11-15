@@ -1,4 +1,5 @@
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
+import { isPlainObject } from "../storage/validate.ts";
 import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
 
@@ -20,9 +21,7 @@ export function unauthorized(message = "Sign in to upload files here."): Unautho
 
 /** Only a plain object carrying the brand refuses: a Response or an Error is never read as a refusal or as a user. */
 export function isUnauthorized(value: unknown): value is Unauthorized {
-  if (typeof value !== "object" || value === null) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return (prototype === Object.prototype || prototype === null) && (value as Partial<Unauthorized>)[DENIED] === true;
+  return isPlainObject(value) && (value as Partial<Unauthorized>)[DENIED] === true;
 }
 
 /** `authorize: allowAnyone` makes a route public. It must be written out: public uploads are never a default. */

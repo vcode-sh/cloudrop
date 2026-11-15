@@ -152,6 +152,12 @@ describe("readConfig errors", () => {
       make: create({ basePath: "/api/cloudrop/" }),
       message: 'basePath must be a path such as "/api/cloudrop": a leading slash, no trailing slash, no query.',
     },
+    // The URL parser resolves "/api/.." away, so a handler mounted there would never match a request.
+    {
+      name: "a basePath with a .. segment",
+      make: create({ basePath: "/api/.." }),
+      message: 'basePath must be a path such as "/api/cloudrop": a leading slash, no trailing slash, no query.',
+    },
     // "*" would hand every site a credentialed CORS answer.
     {
       name: 'a trusted origin of "*"',
@@ -229,6 +235,18 @@ describe("readConfig errors", () => {
     };
     expect(create({ plugins: [plugin] })).toThrow("images() cannot serve route files");
   });
+
+  // Plugins and the logger see a configuration only once every check has passed.
+  it("checks the secret before it warns or calls extendRoute", () => {
+    const events: string[] = [];
+    const logger = { error: () => {}, warn: () => void events.push("warn") };
+    const plugin = { id: "spy", server: { extendRoute: () => void events.push("extendRoute") } };
+    const privateFiles = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone, visibility: "private" });
+    const make = () =>
+      readConfig({ storage: publicStorage, secret: "short", routes: { privateFiles }, plugins: [plugin], logger });
+    expect(make).toThrow(expect.objectContaining({ code: "INVALID_CONFIG" }));
+    expect(events).toEqual([]);
+  });
 });
 
 describe("readConfig defaults", () => {
@@ -255,7 +273,11 @@ describe("readConfig defaults", () => {
   it("refuses to start when CLOUDROP_SECRET is empty and no secret is passed", () => {
     vi.stubEnv("CLOUDROP_SECRET", "");
     expect(() => readConfig({ storage, routes: { files } })).toThrow(
-      expect.objectContaining({ code: "INVALID_CONFIG" }),
+      expect.objectContaining({
+        code: "INVALID_CONFIG",
+        message:
+          "Missing the upload token secret. Set CLOUDROP_SECRET or pass secret to createCloudrop(); generate one with `openssl rand -base64 32`.",
+      }),
     );
   });
 
