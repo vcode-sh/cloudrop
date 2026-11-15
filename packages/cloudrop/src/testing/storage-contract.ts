@@ -15,7 +15,14 @@ export function offsetBytes(length: number): Uint8Array<ArrayBuffer> {
 }
 
 /** A feature some backend lacks; the cases that need it skip on that backend with the recorded reason. */
-type Gap = "signedHeaders" | "unequalParts" | "checksums" | "listParts" | "crc64nvme";
+type Gap =
+  | "signedHeaders"
+  | "unequalParts"
+  | "checksums"
+  | "listParts"
+  | "listPartChecksums"
+  | "crc64nvme"
+  | "finishedUploadsLinger";
 
 export interface ContractTarget {
   /** The driver every case uses, built the way an application builds it (the public preset where there is one). */
@@ -26,13 +33,18 @@ export interface ContractTarget {
   prefix: string;
   /** Sends presigned requests the way a browser would. */
   http: FetchLike;
-  /** Backend gaps: each present entry names what the backend does instead, and skips the cases that need it. */
+  /** Backend gaps: each present entry names what the backend does instead. Cases that need the feature skip with that
+   * reason; "finishedUploadsLinger" instead changes what two cases expect after an upload has finished. */
   gaps: Partial<Record<Gap, string>>;
   /**
    * What the backend does with an extra `x-amz-meta-*` header that a presigned PUT did not sign. Each lane records its
    * backend's measured answer and the contract checks it. Real R2 rejects it (live lane, 2026-11-15).
    */
   unsignedMetaOnPresignedPut: "stored" | "ignored" | "rejected";
+  /** The S3 error code for an expired presigned URL. Default "ExpiredRequest" (R2); AWS-style backends answer "AccessDenied". */
+  expiredUrlCode?: string;
+  /** The S3 error code when `unsignedMetaOnPresignedPut` is "rejected". Default "SignatureDoesNotMatch" (R2). */
+  unsignedMetaCode?: string;
 }
 
 /**
@@ -153,6 +165,10 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       const reason = needed.map((gap) => target.gaps[gap]).find((entry) => entry !== undefined);
       ctx.skip(reason !== undefined, reason);
     }
+
+    // The error a finished upload ID answers on a second completion: R2 forgets it at once, a lingering backend completes again.
+    const uploadAfterCompletion = (): string | undefined =>
+      target.gaps.finishedUploadsLinger === undefined ? "NO_SUCH_UPLOAD" : undefined;
 
     async function startUpload(suffix: string, metadata?: Record<string, string>) {
       const k = key(suffix);
@@ -278,9 +294,9 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       const expected = {
         stored: { status: 200, code: "", metadata: { "cloudrop-id": "f6", injected: "yes" } },
         ignored: { status: 200, code: "", metadata: { "cloudrop-id": "f6" } },
-        // Real R2's answer, measured by the live lane on 2026-11-15: nothing is stored. AWS S3 documents AccessDenied
-        // instead ("There were headers present in the request which were not signed"), unmeasured here.
-        rejected: { status: 403, code: "SignatureDoesNotMatch", metadata: undefined },
+        // Real R2's answer, measured by the live lane on 2026-11-15: nothing is stored. RustFS answers AccessDenied
+        // ("There were headers present in the request which were not signed"), as AWS S3 documents.
+        rejected: { status: 403, code: target.unsignedMetaCode ?? "SignatureDoesNotMatch", metadata: undefined },
       }[target.unsignedMetaOnPresignedPut];
       expect({ ...(await outcome(response)), metadata: (await driver.head(k)).data?.metadata }).toEqual(expected);
     });
@@ -297,7 +313,10 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     it("rejects an expired presigned URL", async () => {
       const k = key("expired.bin");
       const send = await signedPut(k, { size: 16, expiresIn: 60 }, target.driverWith({ secondsAgo: 120 }));
-      expect(await outcome(await send(offsetBytes(16)))).toEqual({ status: 403, code: "ExpiredRequest" });
+      expect(await outcome(await send(offsetBytes(16)))).toEqual({
+        status: 403,
+        code: target.expiredUrlCode ?? "ExpiredRequest",
+      });
       expect((await driver.head(k)).data).toBeNull();
     });
 
@@ -321,7 +340,7 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
       expect((await driver.getRange(k, 2 * size - 2, 2 * size + 1)).data).toEqual(
         body.slice(2 * size - 2, 2 * size + 2),
       );
-      expect((await driver.completeMultipart(k, uploadId, parts)).error?.code).toBe("NO_SUCH_UPLOAD");
+      expect((await driver.completeMultipart(k, uploadId, parts)).error?.code).toBe(uploadAfterCompletion());
     });
 
     it("lists uploaded parts with their numbers, sizes and ETags", async (ctx) => {
@@ -348,8 +367,8 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
         "ALREADY_EXISTS",
       );
       expect(text((await driver.getRange(k, 0, 4)).data)).toBe("first");
-      // The upload is gone, proven without ListParts.
-      expect((await driver.completeMultipart(k, uploadId, parts)).error?.code).toBe("NO_SUCH_UPLOAD");
+      // R2 discards the upload, proven without ListParts; a backend that declares the gap keeps it and completes again.
+      expect((await driver.completeMultipart(k, uploadId, parts)).error?.code).toBe(uploadAfterCompletion());
     });
 
     it("rejects a larger last part at completion and accepts the repaired upload", async (ctx) => {
@@ -395,7 +414,7 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     });
 
     it("reports the CRC32C a part was uploaded with in ListParts", async (ctx) => {
-      skipWithout(ctx, "checksums", "listParts");
+      skipWithout(ctx, "checksums", "listParts", "listPartChecksums");
       const { k, uploadId } = await startUpload("checksum-listed.bin");
       const body = offsetBytes(1024);
       expect((await sendPart(k, uploadId, 1, body, crc32cBase64(body))).status).toBe(200);

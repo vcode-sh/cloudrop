@@ -27,6 +27,29 @@ Lane: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts`, run by `
 The last row is the only difference from the fake found so far (below). Teardown deleted everything: a separate
 read-only listing of `live-test/` after both runs returned 0 objects and 0 multipart uploads.
 
+## RustFS (container lane)
+
+Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run by `scripts/test-rustfs.sh`
+(`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label `cloudrop.test`, removed by a
+`trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
+
+**Date:** 2026-11-15. **Result:** 19 of 22 contract cases pass, 3 skip on declared gaps. The suite takes about 1 s.
+
+| Behaviour | Measured answer |
+|---|---|
+| Expired presigned URL | `403 AccessDenied` ("Request has expired"), nothing stored. R2 says `ExpiredRequest` (lane field `expiredUrlCode`) |
+| Unsigned `x-amz-meta-*` on a presigned PUT | `403 AccessDenied` ("There were headers present in the request which were not signed"), nothing stored. R2 says `SignatureDoesNotMatch` (`unsignedMetaCode`) |
+| HEAD with `x-amz-checksum-mode: ENABLED` | Only `ETag`; no CRC64NVME. Gap `crc64nvme` |
+| Last part larger than the first | Completion succeeds and the object is `size + 4` bytes: no equal-part rule. Gap `unequalParts` |
+| ListParts | Returns number, size and ETag per part, and `NoSuchUpload` after an abort; no `ChecksumCRC32C` element even for a part uploaded with one. Gap `listPartChecksums` |
+| CRC32C on a part | A mismatching value answers `400 BadDigest`; a matching one is stored. No gap |
+| `If-None-Match: *` on completion, key exists | `412 PreconditionFailed`, the existing object survives. The upload is **kept** (ListParts still lists the part) and a second completion without the condition overwrites the key |
+| Completing a finished upload again | Succeeds. Gap `finishedUploadsLinger` (R2 answers `NoSuchUpload`) |
+| `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
+
+The contract's `NoSuchUpload` expectations after completion are R2 behaviour; AWS-style backends keep the ID, which is
+why they are a declared gap, not a driver bug: the driver maps whatever the backend answers.
+
 ## In-process fake R2
 
 `packages/cloudrop/src/testing/fake-r2.ts`, unit lane. Its rules come from `r2-spike-findings.md` and from the live lane.
