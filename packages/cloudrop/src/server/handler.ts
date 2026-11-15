@@ -4,6 +4,7 @@
 import { CloudropError, type Result } from "../errors.ts";
 import type { Endpoint } from "../protocol/types.ts";
 import { handleAbort } from "./abort.ts";
+import { handleComplete } from "./complete.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import {
   checkOrigin,
@@ -24,8 +25,9 @@ type EndpointHandler = (input: EndpointInput) => Promise<Result<unknown>>;
 const ENDPOINTS = {
   upload: handleUpload,
   sign: handleSign,
+  complete: handleComplete,
   abort: handleAbort,
-} satisfies Partial<Record<Endpoint, EndpointHandler>>;
+} satisfies Record<Endpoint, EndpointHandler>;
 
 function endpointOf(request: Request, basePath: string): keyof typeof ENDPOINTS | null {
   const { pathname } = new URL(request.url);
