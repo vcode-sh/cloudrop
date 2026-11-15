@@ -15,6 +15,6 @@
     "build": "bun run --filter cloudrop build"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.7"
+    "@biomejs/biome": "2.6.8"
   }
 }
