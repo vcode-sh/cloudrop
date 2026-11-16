@@ -65,10 +65,11 @@ const child = spawn("bunx", ["playwright", "test", ...process.argv.slice(2)], {
 const GRACE_MS = 30_000;
 let stopSignal: "SIGHUP" | "SIGINT" | "SIGTERM" | undefined;
 let killed = false;
-let graceTimer: NodeJS.Timeout | undefined;
+let closed = false;
 function signalChild(signal: NodeJS.Signals) {
+  // Once Playwright has closed, its process group is gone and its id may be reused: send nothing.
+  if (closed || !child.pid) return;
   try {
-    if (!child.pid) return;
     process.kill(-child.pid, signal);
     // Only a kill that reached the group can have left the example server behind.
     killed ||= signal === "SIGKILL";
@@ -81,7 +82,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     if (stopSignal) return signalChild("SIGKILL");
     stopSignal = signal;
     signalChild(signal);
-    graceTimer = setTimeout(() => signalChild("SIGKILL"), GRACE_MS).unref();
+    setTimeout(() => signalChild("SIGKILL"), GRACE_MS).unref();
   });
 }
 const relayed = (
@@ -101,8 +102,7 @@ child.on("error", (error: NodeJS.ErrnoException) => {
 });
 const code = await new Promise<number>((resolve) =>
   child.on("close", (exitCode, signal) => {
-    // Playwright has ended, so a late kill could only reach a reused process group.
-    clearTimeout(graceTimer);
+    closed = true;
     resolve(exitCode ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 1));
   }),
 );
