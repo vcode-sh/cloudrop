@@ -26,13 +26,15 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
-  // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decision 2026-11-16: resume
-  // after reload is on by default, so the ceiling rises to 10 kB; the resume plan's last task sets it from measurement.
+  // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decisions 2026-11-16: resume
+  // after reload is on by default with a raised ceiling, and ceilings get headroom instead of step-by-step raises; the
+  // resume plan measured 9.57 kB before its last feature task, so the ceiling is 10.5 kB and its last task sets the
+  // budget from measurement.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "10 kB",
+    limit: "10.5 kB",
   },
 ];
