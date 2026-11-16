@@ -366,4 +366,23 @@ describe("POST /complete: plugins and onComplete", () => {
       { message: 'cloudrop: onComplete failed for route "failing".', error: failure },
     ]);
   });
+
+  // Only JSON reaches the client: a BigInt or a cycle is the application's bug, reported as an onComplete problem.
+  it("keeps the verified object and asks for a retry when onComplete returns a value JSON cannot encode", async () => {
+    const counting = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, onComplete: () => ({ n: 1n }) });
+    const fixture = serverFixture({ counting });
+    const ticket = await fixture.single("counting", TEXT);
+    await fixture.send(ticket.put, hello);
+    expect([(await complete(fixture, ticket.token)).body.error?.retryable, fixture.logger.errors]).toEqual([
+      true,
+      [
+        {
+          message:
+            'cloudrop: onComplete for route "counting" returned a value JSON cannot encode (a BigInt or a cycle).',
+          error: expect.any(TypeError),
+        },
+      ],
+    ]);
+    expect((await fixture.storage.head(ticket.key)).data?.size).toBe(5);
+  });
 });

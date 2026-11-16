@@ -13,7 +13,7 @@ import {
 import { formatBytes, invalidInput, isPlainObject } from "../storage/validate.ts";
 import { matchAccept, normalizeType } from "./accept.ts";
 import { type EndpointInput, ROUTE_NAME, type RouteConfig, type ServerConfig } from "./config.ts";
-import { errorBody, storageFailure } from "./http.ts";
+import { errorBody, serverError, storageFailure } from "./http.ts";
 import { generatedKey, newFileId, normalizeKey } from "./key.ts";
 import { type AbortContext, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
@@ -158,6 +158,19 @@ async function startFile(
   };
 }
 
+/** A custom StorageDriver may throw: that file is rejected and released like a storage failure, and the others go on. */
+async function startFileSafely(
+  config: ServerConfig,
+  base: Omit<UploadTokenPayload, "uploadId" | "partSize">,
+): Promise<FileTicket> {
+  try {
+    return await startFile(config, base);
+  } catch (error) {
+    config.logger.error(`cloudrop: could not start the upload of file ${base.fileId} on route "${base.route}".`, error);
+    return { kind: "rejected", error: errorBody(serverError()) };
+  }
+}
+
 export async function handleUpload({ request, body, config }: EndpointInput): Promise<Result<UploadResponse>> {
   const parsed = readRequest(body, config);
   if (parsed.error) return parsed;
@@ -205,7 +218,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     prepared.map((file): FileTicket | Promise<FileTicket> =>
       file instanceof CloudropError
         ? { kind: "rejected", error: errorBody(file) }
-        : startFile(config, {
+        : startFileSafely(config, {
             v: 1,
             route: route.name,
             fileId: file.id,
@@ -219,7 +232,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
           }),
     ),
   );
-  // Files that beforeUpload accepted but storage could not start: release what plugins reserved for them.
+  // Files that beforeUpload accepted but could not be started: release what plugins reserved for them.
   const failed = prepared.flatMap((file, index): AbortContext[] =>
     file instanceof CloudropError || tickets[index]?.kind !== "rejected"
       ? []

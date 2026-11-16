@@ -108,7 +108,10 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
   if (completed.error.code === "INVALID_PART") {
     // The parts and ETags were listed a moment ago, so a stale one is a part uploaded again in between. The upload
     // stays open: a retry lists the parts again.
-    logger.error(`cloudrop: a part of ${token.key} changed while its upload was being completed.`, completed.error);
+    logger.error(
+      `cloudrop: a part of file ${token.fileId} on route "${token.route}" changed while its upload was being completed.`,
+      completed.error,
+    );
     return fail(partChanged());
   }
   if (completed.error.code === "ALREADY_EXISTS") {
@@ -117,7 +120,12 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     const own = await completedBefore(config, token);
     if (own.error?.code !== "NO_SUCH_UPLOAD") return own;
     const aborted = await storage.abortMultipart(token.key, token.uploadId);
-    if (aborted.error) logger.error(`cloudrop: could not abort the collided upload of ${token.key}.`, aborted.error);
+    if (aborted.error) {
+      logger.error(
+        `cloudrop: could not abort the collided upload of file ${token.fileId} on route "${token.route}".`,
+        aborted.error,
+      );
+    }
     await release(config, token);
     return fail(new CloudropError("ALREADY_EXISTS", "Another file already has this upload's key. Start a new upload."));
   }
@@ -156,12 +164,23 @@ export async function handleComplete({ request, body, config }: EndpointInput): 
   if (refused) return discard(config, token, refused);
   const { onComplete } = route.definition;
   if (!onComplete) return ok({ file, data: null });
+  let data: unknown;
   try {
     // /upload checked that authorize returned a plain object; the token carries its JSON snapshot.
-    const data = await onComplete({ ...(token.owner as object), request, file, metadata: token.metadata });
-    return ok({ file, data: data === undefined ? null : data });
+    data = await onComplete({ ...(token.owner as object), request, file, metadata: token.metadata });
   } catch (error) {
     logger.error(`cloudrop: onComplete failed for route "${route.name}".`, error);
     return fail(unfinished());
   }
+  try {
+    // Encoded here, not when the answer is sent, so the failure is reported as onComplete's.
+    JSON.stringify(data);
+  } catch (error) {
+    logger.error(
+      `cloudrop: onComplete for route "${route.name}" returned a value JSON cannot encode (a BigInt or a cycle).`,
+      error,
+    );
+    return fail(unfinished());
+  }
+  return ok({ file, data: data === undefined ? null : data });
 }

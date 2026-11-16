@@ -224,16 +224,25 @@ describe("readConfig errors", () => {
     expect(create({ secret: "s".repeat(32) })).not.toThrow();
   });
 
+  // createCloudrop throws only INVALID_CONFIG: a plugin's own error is kept as the cause.
   it("lets a plugin refuse a route it cannot serve", () => {
+    const refusal = new Error("images() cannot serve route files");
     const plugin = {
       id: "images",
       server: {
-        extendRoute: ({ name }: { name: string }) => {
-          throw new Error(`images() cannot serve route ${name}`);
+        extendRoute: () => {
+          throw refusal;
         },
       },
     };
-    expect(create({ plugins: [plugin] })).toThrow("images() cannot serve route files");
+    expect(create({ plugins: [plugin] })).toThrow(
+      expect.objectContaining({
+        code: "INVALID_CONFIG",
+        message:
+          'Plugin "images": extendRoute failed for route "files". Its cause says why; fix the plugin or the route.',
+        cause: refusal,
+      }),
+    );
   });
 
   // Plugins and the logger see a configuration only once every check has passed.

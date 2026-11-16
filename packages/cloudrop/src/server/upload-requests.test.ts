@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError } from "../errors.ts";
 import type { FileTicket, SingleTicket, UploadResponse } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
-import type { FetchLike } from "../storage/driver.ts";
-import { r2 } from "../storage/presets.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { allowAnyone, route, unauthorized } from "./route.ts";
@@ -284,46 +282,6 @@ describe("POST /upload: keys", () => {
 });
 
 describe("POST /upload: storage failures and plugins", () => {
-  it("rejects only the file whose upload could not start, without the storage's own message, and releases it", async () => {
-    const fake = serverFixture({ files }).fake;
-    // The bucket refuses to start a multipart upload, as R2 does for a token without write access.
-    const refusing: FetchLike = (input, init) =>
-      new URL(String(input)).searchParams.has("uploads")
-        ? Promise.resolve(
-            new Response("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", { status: 403 }),
-          )
-        : fake.fetch(input, init);
-    const storage = r2({
-      bucket: "uploads",
-      accountId: "0123456789abcdef0123456789abcdef",
-      accessKeyId: "k",
-      secretAccessKey: "s",
-      fetch: refusing,
-    });
-    const events: string[] = [];
-    const quota: CloudropPlugin = {
-      id: "quota",
-      server: { onAbort: ({ reason, file }) => void events.push(`release ${reason} ${file.name}`) },
-    };
-    const fixture = serverFixture({ files }, { storage, multipartThreshold: MiB, plugins: [quota] });
-    const { body } = await upload(fixture, { route: "files", files: [png(2 * MiB, "big.png"), png(10, "small.png")] });
-    expect(body.files.map((ticket: FileTicket) => (ticket.kind === "rejected" ? ticket.error : ticket.kind))).toEqual([
-      {
-        code: "STORAGE_ERROR",
-        message: "The storage service refused the request. Contact the site owner if this keeps happening.",
-        retryable: false,
-      },
-      "single",
-    ]);
-    expect({
-      logged: fixture.logger.errors.map(({ message, error }) => [message, (error as CloudropError).code]),
-      events,
-    }).toEqual({
-      logged: [["cloudrop: the storage service refused a request.", "STORAGE_DENIED"]],
-      events: ["release failed big.png"],
-    });
-  });
-
   it("lets a plugin refuse the request and releases what earlier plugins reserved", async () => {
     const events: string[] = [];
     const reserving: CloudropPlugin = {

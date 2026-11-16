@@ -2,7 +2,7 @@
 // name and the fix, so a misconfigured server fails at startup instead of on a user's first upload.
 
 import { fromEnv } from "../env.ts";
-import { configError } from "../errors.ts";
+import { CloudropError, configError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
@@ -162,11 +162,25 @@ function readLogger(given: Logger | undefined): Logger {
   return logger;
 }
 
+/** A plugin may refuse a route by throwing; anything but a CloudropError becomes INVALID_CONFIG, with it as the cause. */
+function extendRoute(plugin: CloudropPlugin, route: RouteConfig): void {
+  try {
+    plugin.server?.extendRoute?.({ name: route.name, definition: route.definition });
+  } catch (error) {
+    if (error instanceof CloudropError) throw error;
+    throw new CloudropError(
+      "INVALID_CONFIG",
+      `Plugin "${plugin.id}": extendRoute failed for route "${route.name}". Its cause says why; fix the plugin or the route.`,
+      { cause: error },
+    );
+  }
+}
+
 /** Plugins and the logger hear about a configuration only once every check has passed. */
 function announce(config: ServerConfig): void {
   const { routes, plugins, storage, logger } = config;
   for (const route of routes.values()) {
-    for (const plugin of plugins) plugin.server?.extendRoute?.({ name: route.name, definition: route.definition });
+    for (const plugin of plugins) extendRoute(plugin, route);
     if (route.visibility === "private" && storage.publicUrl) {
       logger.warn(
         `cloudrop: route "${route.name}" is private, but the storage has a publicUrl, so anyone who learns a key can read the file. Serve private files from a bucket without a public domain.`,
