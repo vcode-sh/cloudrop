@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Result } from "../../errors.ts";
 import { MiB, R2_RULES } from "../../rules.ts";
+import { copyStub, credentials, driverWith, endpoint, stubbed, timesOut } from "../../testing/driver-fixture.ts";
 import type { FetchLike, StorageDriver } from "../driver.ts";
 import { createS3Driver } from "../s3-driver.ts";
-import { copyStub, credentials, driverWith, endpoint, stubbed, timesOut } from "./driver-fixture.ts";
 
 describe("createS3Driver", () => {
   it("never passes on a platform error that quotes the Authorization header", async () => {

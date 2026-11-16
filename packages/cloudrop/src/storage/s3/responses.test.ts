@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Result } from "../../errors.ts";
+import { copyStub, driverWith, lastModified, stubbed } from "../../testing/driver-fixture.ts";
 import type { FetchLike, StorageDriver } from "../driver.ts";
-import { copyStub, driverWith, lastModified, stubbed } from "./driver-fixture.ts";
 
 describe("createS3Driver", () => {
   it("reports a HEAD answer without a size as a retryable storage error, never as an empty object", async () => {

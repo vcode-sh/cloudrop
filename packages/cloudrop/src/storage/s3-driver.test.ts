@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Result } from "../errors.ts";
 import { R2_RULES } from "../rules.ts";
+import { credentials, driverWith, endpoint, lastModified, neverCalled, now, setup } from "../testing/driver-fixture.ts";
 import { createFakeR2 } from "../testing/fake-r2.ts";
 import type { StorageDriver } from "./driver.ts";
-import { credentials, driverWith, endpoint, lastModified, neverCalled, now, setup } from "./s3/driver-fixture.ts";
 import { createS3Driver } from "./s3-driver.ts";
 
 describe("createS3Driver", () => {

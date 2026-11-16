@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Result } from "../../errors.ts";
 import { R2_RULES } from "../../rules.ts";
+import {
+  credentials,
+  driverWith,
+  endpoint,
+  neverCalled,
+  now,
+  setup,
+  signedAt,
+  stubbed,
+} from "../../testing/driver-fixture.ts";
 import { offsetBytes } from "../../testing/storage-contract.ts";
 import type { StorageDriver } from "../driver.ts";
 import { createS3Driver } from "../s3-driver.ts";
-import { credentials, driverWith, endpoint, neverCalled, now, setup, signedAt, stubbed } from "./driver-fixture.ts";
 
 // fetch streams a Blob body; loading it whole (arrayBuffer, text) is what put must never do.
 class StreamOnlyBlob extends Blob {

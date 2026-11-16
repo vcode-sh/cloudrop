@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { credentials, driverWith, now, stubbed } from "../../testing/driver-fixture.ts";
 import { createFakeR2 } from "../../testing/fake-r2.ts";
 import type { StorageDriver } from "../driver.ts";
-import { credentials, driverWith, now, stubbed } from "./driver-fixture.ts";
 
 describe("bucket configuration", () => {
   const cors =

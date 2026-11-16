@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { MiB, R2_RULES } from "../../rules.ts";
-import { offsetBytes } from "../../testing/storage-contract.ts";
-import type { FetchLike } from "../driver.ts";
-import { createS3Driver } from "../s3-driver.ts";
-import { sha256Hex, signRequest } from "../sigv4.ts";
 import {
   copyStub,
   credentials,
@@ -14,7 +10,11 @@ import {
   signedAt,
   stubbed,
   timesOut,
-} from "./driver-fixture.ts";
+} from "../../testing/driver-fixture.ts";
+import { offsetBytes } from "../../testing/storage-contract.ts";
+import type { FetchLike } from "../driver.ts";
+import { createS3Driver } from "../s3-driver.ts";
+import { sha256Hex, signRequest } from "../sigv4.ts";
 
 /** Stores an object the way another tool would, with headers the driver itself refuses to send. */
 async function putWithForeignTool(

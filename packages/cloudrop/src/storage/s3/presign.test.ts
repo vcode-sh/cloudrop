@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { R2_RULES } from "../../rules.ts";
-import { driverWith, neverCalled, setup } from "./driver-fixture.ts";
+import { driverWith, neverCalled, setup } from "../../testing/driver-fixture.ts";
 
 describe("createS3Driver", () => {
   it("presigns a PUT of exactly the single-PUT limit and rejects one byte more", async () => {

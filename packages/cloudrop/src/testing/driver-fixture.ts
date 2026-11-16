@@ -1,10 +1,10 @@
 // Setup shared by the S3 driver's unit tests: a driver over the in-process fake R2 or over a stubbed fetch. It builds
 // inputs only; every expected value stays in the tests.
 
-import { R2_RULES } from "../../rules.ts";
-import { createFakeR2, type FakeR2 } from "../../testing/fake-r2.ts";
-import type { FetchLike, StorageDriver } from "../driver.ts";
-import { createS3Driver } from "../s3-driver.ts";
+import { R2_RULES } from "../rules.ts";
+import type { FetchLike, StorageDriver } from "../storage/driver.ts";
+import { createS3Driver } from "../storage/s3-driver.ts";
+import { createFakeR2, type FakeR2 } from "./fake-r2.ts";
 
 export const credentials = { accessKeyId: "fake-access-key", secretAccessKey: "fake-secret-key" };
 export const endpoint = "https://account.r2.cloudflarestorage.com";

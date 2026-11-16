@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { driverWith } from "../../testing/driver-fixture.ts";
 import type { FetchLike } from "../driver.ts";
-import { driverWith } from "./driver-fixture.ts";
 
 describe("createS3Driver", () => {
   it("follows ListParts pagination with the marker the storage returned", async () => {
