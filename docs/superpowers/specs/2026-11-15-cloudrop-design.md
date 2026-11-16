@@ -421,7 +421,8 @@ the driver follows S3's documented `NoSuchCORSConfiguration` and `NoSuchLifecycl
 other `404` as a retryable `STORAGE_ERROR`.
 
 Also unmeasured: how the server's parallel storage calls (a `CreateMultipartUpload` for each large file of an
-`/upload` call, up to 100 files, and `deleteMany` 16 at a time) fit Cloudflare Workers' subrequest limits. No parallelism cap is tuned for Workers yet.
+`/upload` call, up to 100 files, and `deleteMany` 16 at a time) fit Cloudflare Workers' subrequest limits. No
+parallelism cap is tuned for Workers yet.
 
 ## 13. Release
 
