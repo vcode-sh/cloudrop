@@ -103,7 +103,8 @@ sees (for up to 16 origins).
 `deleteMany`, `copy`, `deletePrefix` (a folder prefix ending in `/`, emptied and listed again to prove it) and
 `checkBucket`. `checkBucket({ origins })` reports CORS for browser uploads, the abort-incomplete lifecycle rule and
 private routes on a public bucket. An R2 object token may not read bucket settings, so those checks come back
-`unknown`; with an admin read token, R2's answers have not been measured yet. In development
+`unknown`, as do settings the storage cannot report at all (Wrangler's local R2 answers `501 NotImplemented`); with
+an admin read token, R2's answers have not been measured yet. In development
 (`NODE_ENV=development`) the first request runs it once and logs each problem.
 
 ### Not done yet

@@ -346,7 +346,7 @@ by `file.id`.
 | `delete(key)`, `deleteMany(keys)` | Any number of keys, one DeleteObject request per key, 16 at a time, with per-key results `{ deleted, failed[] }`. |
 | `copy(from, to)` | Server-side; `UploadPartCopy` above the storage's single-PUT limit (4.995 GiB on `r2()`, 5 GiB on `s3()`). |
 | `deletePrefix(prefix)` | A folder prefix ending in `/`, so `users/4/` never matches `users/42/`; a prefix no key can start with (a leading slash, a dot segment, a control character) is `INVALID_INPUT`. Deletes page by page (one request per key, through `deleteMany`), re-lists to prove nothing remains, returns `{ deleted, verifiedAt }`. Fails, never loops, when deleted keys reappear or writers keep adding keys (10,000 pages). For erasure requests. |
-| `checkBucket({ origins })` | Report on CORS for the origins (default `trustedOrigins`: `PUT` and the signed headers allowed, `ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. Each check is `ok`, `problem` or `unknown` (credentials that may not read the setting, or no origin to check). |
+| `checkBucket({ origins })` | Report on CORS for the origins (default `trustedOrigins`: `PUT` and the signed headers allowed, `ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. Each check is `ok`, `problem` or `unknown` (credentials that may not read the setting, a storage that does not implement the read, such as Wrangler's `501`, or no origin to check); any other storage failure fails the call. |
 
 ## 10. Lessons carried over from earlier implementations
 

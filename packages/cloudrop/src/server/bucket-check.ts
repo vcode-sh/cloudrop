@@ -6,7 +6,10 @@ import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
 import type { ServerConfig } from "./config.ts";
 
 export interface BucketCheck {
-  /** "unknown": the credentials may not read this setting (R2 object tokens cannot), or nothing was given to check. */
+  /**
+   * "unknown": the credentials may not read this setting (R2 object tokens cannot), the storage cannot report it
+   * (Wrangler's local R2), or nothing was given to check.
+   */
   status: "ok" | "problem" | "unknown";
   message: string;
 }
@@ -70,18 +73,33 @@ function lifecycleCheck(rules: readonly BucketLifecycleRule[]): BucketCheck {
   };
 }
 
-const unreadable = (setting: string): BucketCheck => ({
-  status: "unknown",
-  message: `These storage credentials may not read the bucket's ${setting} (R2 object tokens cannot). Check it with an admin read token or in the dashboard.`,
-});
+// A read the credentials may not make (403) or the storage does not implement (501, Wrangler's local R2, measured
+// 2026-11-16) says nothing about the setting itself, so it is reported as unknown. Any other failure fails the check.
+function settingCheck<T>(read: Result<T>, setting: string, check: (rules: T) => BucketCheck): Result<BucketCheck> {
+  if (read.error === null) return ok(check(read.data));
+  if (read.error.code === "STORAGE_DENIED") {
+    return ok({
+      status: "unknown",
+      message: `These storage credentials may not read the bucket's ${setting} (R2 object tokens cannot). Check it with an admin read token or in the dashboard.`,
+    });
+  }
+  if (read.error.status === 501) {
+    return ok({
+      status: "unknown",
+      message: `This storage service cannot report the bucket's ${setting}. Check them where the bucket is configured (for R2, the dashboard).`,
+    });
+  }
+  return fail(read.error);
+}
 
 /** `origins` must be exact origins: the caller checks them, since they are echoed in the report. */
 export async function checkBucket(config: ServerConfig, origins: readonly string[]): Promise<Result<BucketReport>> {
   const { storage } = config;
-  const [cors, lifecycle] = await Promise.all([storage.getBucketCors(), storage.getBucketLifecycle()]);
-  for (const result of [cors, lifecycle]) {
-    if (result.error && result.error.code !== "STORAGE_DENIED") return fail(result.error);
-  }
+  const [corsRules, lifecycleRules] = await Promise.all([storage.getBucketCors(), storage.getBucketLifecycle()]);
+  const cors = settingCheck(corsRules, "CORS rules", (rules) => corsCheck(rules, origins));
+  if (cors.error) return cors;
+  const lifecycle = settingCheck(lifecycleRules, "lifecycle rules", lifecycleCheck);
+  if (lifecycle.error) return lifecycle;
   const privateRoutes = [...config.routes.values()].filter((route) => route.visibility === "private");
   const publicAccess: BucketCheck =
     privateRoutes.length > 0 && storage.publicUrl
@@ -90,9 +108,5 @@ export async function checkBucket(config: ServerConfig, origins: readonly string
           message: `Private routes (${privateRoutes.map((route) => route.name).join(", ")}) store files on a bucket with a public URL: anyone who learns a key can read the file.`,
         }
       : { status: "ok", message: "No private route stores files on a public bucket." };
-  return ok({
-    cors: cors.data ? corsCheck(cors.data, origins) : unreadable("CORS rules"),
-    lifecycle: lifecycle.data ? lifecycleCheck(lifecycle.data) : unreadable("lifecycle rules"),
-    publicAccess,
-  });
+  return ok({ cors: cors.data, lifecycle: lifecycle.data, publicAccess });
 }
