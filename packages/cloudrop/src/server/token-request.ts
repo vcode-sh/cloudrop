@@ -5,17 +5,25 @@ import type { AbortContext } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import { type UploadTokenPayload, verifyToken } from "./token.ts";
 
+/** The verified token of a `/sign`, `/complete` or `/abort` body. */
+export async function readToken(
+  body: unknown,
+  config: ServerConfig,
+  options: { allowExpired?: boolean } = {},
+): Promise<Result<UploadTokenPayload>> {
+  if (!isPlainObject(body)) return fail(invalidInput('Send a JSON object with the upload token: { "token": "..." }.'));
+  return verifyToken(body.token, (await config.tokenKeys).all, nowSeconds(), options);
+}
+
 /**
- * The verified token of a `/sign`, `/complete` or `/abort` body and the route it was issued for. The route is looked
- * up again: a route removed by a deploy stops accepting its old tokens.
+ * The verified token of a `/sign` or `/complete` body and the route it was issued for. The route is looked up again: a
+ * route removed by a deploy stops accepting its old tokens.
  */
 export async function readTokenRequest(
   body: unknown,
   config: ServerConfig,
-  options: { allowExpired?: boolean } = {},
 ): Promise<Result<{ token: UploadTokenPayload; route: RouteConfig }>> {
-  if (!isPlainObject(body)) return fail(invalidInput('Send a JSON object with the upload token: { "token": "..." }.'));
-  const verified = await verifyToken(body.token, (await config.tokenKeys).all, nowSeconds(), options);
+  const verified = await readToken(body, config);
   if (verified.error) return verified;
   const route = config.routes.get(verified.data.route);
   if (!route) {

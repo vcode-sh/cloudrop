@@ -8,12 +8,13 @@ import { storageFailure } from "./http.ts";
 import { runOnAbort } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import { isMultipart } from "./token.ts";
-import { abortContext, readTokenRequest } from "./token-request.ts";
+import { abortContext, readToken } from "./token-request.ts";
 
 export async function handleAbort({ body, config }: EndpointInput): Promise<Result<AbortResponse>> {
-  const verified = await readTokenRequest(body, config, { allowExpired: true });
+  // No route lookup: cleaning up must still work after a deploy removed or renamed the token's route.
+  const verified = await readToken(body, config, { allowExpired: true });
   if (verified.error) return verified;
-  const { token } = verified.data;
+  const token = verified.data;
   const { storage, logger } = config;
   if (isMultipart(token)) {
     const aborted = await storage.abortMultipart(token.key, token.uploadId);

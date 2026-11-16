@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SignedPart } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
-import { forgeToken, serverFixture, tokenPayload } from "../testing/server-fixture.ts";
+import { APP_ORIGIN, forgeToken, SECRET, serverFixture, tokenPayload } from "../testing/server-fixture.ts";
+import { createCloudrop } from "./cloudrop.ts";
 import type { AbortContext, CloudropPlugin } from "./plugins.ts";
 import { allowAnyone, route } from "./route.ts";
 
@@ -110,6 +111,31 @@ describe("POST /abort", () => {
     vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
     expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
     expect([(await fixture.storage.head(ticket.key)).data?.size, calls]).toEqual([5, []]);
+  });
+
+  // Abort is the cleanup path: a deploy that renamed the route must not leave the upload and its reservation behind.
+  it("aborts and tells the plugins after a deploy removed the token's route", async () => {
+    const calls: AbortContext[] = [];
+    const fixture = serverFixture({ files }, { multipartThreshold: 0 });
+    const ticket = await fixture.multipart("files", { name: "big.bin", size: 9 * MiB, type: "" });
+    const redeployed = createCloudrop({
+      storage: fixture.storage,
+      secret: SECRET,
+      routes: { renamed: files },
+      plugins: [recordingPlugin(calls)],
+    });
+    const response = await redeployed.handler(
+      new Request(`${APP_ORIGIN}/api/cloudrop/abort`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: APP_ORIGIN },
+        body: JSON.stringify({ token: ticket.token }),
+      }),
+    );
+    expect([response.status, fixture.fake.pendingUploads(), calls.map((call) => call.reason)]).toEqual([
+      200,
+      0,
+      ["aborted"],
+    ]);
   });
 
   it("refuses a token rebound to another key and deletes nothing", async () => {
