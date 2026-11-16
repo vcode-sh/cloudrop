@@ -1,0 +1,72 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SingleTicket } from "../protocol/types.ts";
+import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
+import { files, NOW, png, upload } from "../testing/upload-fixture.ts";
+import { allowAnyone, route } from "./route.ts";
+import type { StandardSchema } from "./schema.ts";
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("POST /upload: metadata", () => {
+  // JSON has no undefined: null is metadata the client sent, and a route without a schema takes none.
+  it("refuses metadata: null on a route without a schema", async () => {
+    const { status, body } = await upload(serverFixture({ files }), { route: "files", files: [png()], metadata: null });
+    expect({ status, error: body.error }).toEqual({
+      status: 400,
+      error: { code: "INVALID_METADATA", message: "This upload takes no metadata. Remove it.", retryable: false },
+    });
+  });
+
+  it("signs the same metadata JSON it measured, while authorize sees the schema's output", async () => {
+    const output = { albumId: "a1", toJSON: (key: string) => (key === "" ? { albumId: "a1" } : "x".repeat(5000)) };
+    const schema = {
+      "~standard": { version: 1, vendor: "test", validate: () => ({ value: output }) },
+    } as StandardSchema;
+    const fixture = serverFixture({
+      files: route({
+        accept: "*/*",
+        maxSize: "1GB",
+        metadata: schema,
+        authorize: ({ metadata }) => ({ live: metadata === output }),
+      }),
+    });
+    const { body } = await upload(fixture, { route: "files", files: [png()], metadata: {} });
+    const payload = tokenPayload((body.files[0] as SingleTicket).token);
+    expect({ owner: payload.owner, metadata: payload.metadata }).toEqual({
+      owner: { live: true },
+      metadata: { albumId: "a1" },
+    });
+  });
+
+  it.for<{ name: string; validate: () => unknown; log: string }>([
+    {
+      name: "throws",
+      validate: () => {
+        throw new Error("schema bug");
+      },
+      log: "Error: schema bug",
+    },
+    {
+      name: "returns a function as metadata",
+      validate: () => ({ value: () => 1 }),
+      log: "TypeError: The metadata schema returned a value with no JSON form, such as a function. Return plain data from the schema.",
+    },
+  ])("answers a generic 500 when the schema $name, and logs why", async ({ validate, log }) => {
+    const schema = { "~standard": { version: 1, vendor: "test", validate } } as StandardSchema;
+    const fixture = serverFixture({
+      files: route({ accept: "*/*", maxSize: "1GB", metadata: schema, authorize: allowAnyone }),
+    });
+    const { status, body } = await upload(fixture, { route: "files", files: [png()], metadata: {} });
+    expect({ status, code: body.error?.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
+      status: 500,
+      code: "SERVER_ERROR",
+      logged: log,
+    });
+  });
+});

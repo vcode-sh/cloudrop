@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MultipartTicket, SingleTicket, UploadResponse } from "../protocol/types.ts";
+import type { MultipartTicket, SingleTicket } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
-import { allowAnyone, route, unauthorized } from "./route.ts";
-import type { StandardSchema } from "./schema.ts";
+import { albumSchema, files, NOW, png, upload } from "../testing/upload-fixture.ts";
+import { route, unauthorized } from "./route.ts";
 
-const NOW = new Date("2026-11-15T12:00:00Z");
 const NOW_SECONDS = 1_794_744_000;
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -16,19 +15,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-
-const albumSchema: StandardSchema<{ albumId: string }> = {
-  "~standard": {
-    version: 1,
-    vendor: "test",
-    validate: (value) => {
-      const albumId = (value as { albumId?: unknown } | null)?.albumId;
-      return typeof albumId === "string"
-        ? { value: { albumId } }
-        : { issues: [{ message: "Expected a string", path: ["albumId"] }] };
-    },
-  },
-};
 
 const avatar = route({
   accept: ["image/png", "image/jpeg"],
@@ -41,18 +27,6 @@ const avatar = route({
       : unauthorized(),
   prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}`,
 });
-const files = route({ accept: "*/*", maxSize: "100GB", authorize: allowAnyone });
-
-const signedIn = { "x-user": "42" };
-const png = (size = 1024, name = "me.png") => ({ name, size, type: "image/png" });
-
-async function upload(fixture: ReturnType<typeof serverFixture>, body: unknown, headers = signedIn) {
-  const response = await fixture.post("upload", body, headers);
-  return {
-    status: response.status,
-    body: (await response.json()) as UploadResponse & { error?: { code: string; message: string } },
-  };
-}
 
 describe("POST /upload: a single PUT ticket", () => {
   it("signs exactly the headers the bucket must store, with no Content-Length, and a token bound to the file", async () => {
@@ -196,190 +170,6 @@ describe("POST /upload: multipart tickets", () => {
     expect({ partCount: ticket.partCount, signed: ticket.parts.map((part) => part.partNumber) }).toEqual({
       partCount: 25,
       signed: Array.from({ length: 20 }, (_, index) => index + 1),
-    });
-  });
-});
-
-describe("POST /upload: authorization comes first", () => {
-  it("refuses with authorize's message and starts nothing", async () => {
-    const fixture = serverFixture(
-      { files: route({ accept: "*/*", maxSize: "1GB", authorize: () => unauthorized("Log in first.") }) },
-      { multipartThreshold: 0 },
-    );
-    const { status, body } = await upload(fixture, {
-      route: "files",
-      files: [{ name: "a.bin", size: 9 * MiB, type: "" }],
-    });
-    expect({ status, error: body.error }).toEqual({
-      status: 401,
-      error: { code: "UNAUTHORIZED", message: "Log in first.", retryable: false },
-    });
-    expect(fixture.storageCalls).toEqual([]);
-  });
-
-  // The authorize result rides in every token, which the browser can read: it must be a small JSON object.
-  it.for<{ name: string; auth: unknown; log: string }>([
-    {
-      name: "null",
-      auth: null,
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
-    },
-    // A Next.js habit: a 401 Response is an object, so a typeof check alone would sign for it.
-    {
-      name: "a Response",
-      auth: new Response(null, { status: 401 }),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
-    },
-    {
-      name: "an Error",
-      auth: new Error("Not signed in"),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
-    },
-    // A refusal brand on a class instance is neither a refusal nor a user.
-    {
-      name: "a branded class instance",
-      auth: Object.assign(new (class Denied {})(), { [Symbol.for("cloudrop.unauthorized")]: true, message: "No." }),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
-    },
-    // Its JSON is the text "x": the token would carry an owner that is not an object.
-    {
-      name: "a plain object whose JSON is not an object",
-      auth: { toJSON: () => "x" },
-      log: 'TypeError: Route "files": authorize returned an object whose toJSON does not give a JSON object. Return plain data or unauthorized().',
-    },
-    {
-      name: "more than 2 KiB of JSON",
-      auth: { record: "x".repeat(2048) },
-      log: 'TypeError: Route "files": authorize returned more than 2 KiB of JSON. Return ids, not records.',
-    },
-  ])("answers 500 when authorize returns $name, and logs why", async ({ auth, log }) => {
-    const fixture = serverFixture({ files: route({ accept: "*/*", maxSize: "1GB", authorize: () => auth as object }) });
-    const { status, body } = await upload(fixture, { route: "files", files: [png()] });
-    expect({ status, code: body.error?.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
-      status: 500,
-      code: "SERVER_ERROR",
-      logged: log,
-    });
-  });
-
-  // A plain-JS or foreign refusal without a usable message is still a refusal, with unauthorized()'s default text.
-  it.for([
-    { name: "no message", refusal: { [Symbol.for("cloudrop.unauthorized")]: true } },
-    { name: "a numeric message", refusal: { [Symbol.for("cloudrop.unauthorized")]: true, message: 5 } },
-  ])("refuses a branded refusal with $name with the default message", async ({ refusal }) => {
-    const fixture = serverFixture({
-      files: route({ accept: "*/*", maxSize: "1GB", authorize: () => refusal as object }),
-    });
-    const { status, body } = await upload(fixture, { route: "files", files: [png()] });
-    expect({ status, error: body.error }).toEqual({
-      status: 401,
-      error: { code: "UNAUTHORIZED", message: "Sign in to upload files here.", retryable: false },
-    });
-  });
-
-  // The cap and the token must read one serialization: a toJSON may answer differently for each key it is asked.
-  it("signs the same owner JSON it measured, while prefix sees the live authorize result", async () => {
-    const live = {
-      userId: "42",
-      toJSON: (key: string) => (key === "" ? { userId: "42" } : "x".repeat(5000)),
-    };
-    const fixture = serverFixture({
-      files: route({
-        accept: "*/*",
-        maxSize: "1GB",
-        authorize: () => live,
-        prefix: (context) => (typeof context.toJSON === "function" ? `users/${context.userId}` : "lost"),
-      }),
-    });
-    const { body } = await upload(fixture, { route: "files", files: [png()] });
-    const ticket = body.files[0] as SingleTicket;
-    expect({ key: ticket.key, owner: tokenPayload(ticket.token).owner }).toEqual({
-      key: `users/42/${ticket.fileId}.png`,
-      owner: { userId: "42" },
-    });
-  });
-
-  it("recognises unauthorized() from another copy of cloudrop in the same app", async () => {
-    // What a second installed version's unauthorized() returns: its own module, the same registered symbol.
-    const foreign = { [Symbol.for("cloudrop.unauthorized")]: true, message: "Sign in first." };
-    const fixture = serverFixture({
-      files: route({ accept: "*/*", maxSize: "1GB", authorize: () => foreign as object }),
-    });
-    const { status, body } = await upload(fixture, { route: "files", files: [png()] });
-    expect({ status, error: body.error }).toEqual({
-      status: 401,
-      error: { code: "UNAUTHORIZED", message: "Sign in first.", retryable: false },
-    });
-  });
-
-  it("validates metadata before authorize sees it", async () => {
-    const authorize = vi.fn(allowAnyone);
-    const fixture = serverFixture({
-      avatar: route({ accept: "image/png", maxSize: "1MB", metadata: albumSchema, authorize }),
-    });
-    const { status, body } = await upload(fixture, { route: "avatar", files: [png()], metadata: { albumId: 7 } });
-    expect({ status, code: body.error?.code, calls: authorize.mock.calls.length }).toEqual({
-      status: 400,
-      code: "INVALID_METADATA",
-      calls: 0,
-    });
-  });
-});
-
-describe("POST /upload: metadata", () => {
-  // JSON has no undefined: null is metadata the client sent, and a route without a schema takes none.
-  it("refuses metadata: null on a route without a schema", async () => {
-    const { status, body } = await upload(serverFixture({ files }), { route: "files", files: [png()], metadata: null });
-    expect({ status, error: body.error }).toEqual({
-      status: 400,
-      error: { code: "INVALID_METADATA", message: "This upload takes no metadata. Remove it.", retryable: false },
-    });
-  });
-
-  it("signs the same metadata JSON it measured, while authorize sees the schema's output", async () => {
-    const output = { albumId: "a1", toJSON: (key: string) => (key === "" ? { albumId: "a1" } : "x".repeat(5000)) };
-    const schema = {
-      "~standard": { version: 1, vendor: "test", validate: () => ({ value: output }) },
-    } as StandardSchema;
-    const fixture = serverFixture({
-      files: route({
-        accept: "*/*",
-        maxSize: "1GB",
-        metadata: schema,
-        authorize: ({ metadata }) => ({ live: metadata === output }),
-      }),
-    });
-    const { body } = await upload(fixture, { route: "files", files: [png()], metadata: {} });
-    const payload = tokenPayload((body.files[0] as SingleTicket).token);
-    expect({ owner: payload.owner, metadata: payload.metadata }).toEqual({
-      owner: { live: true },
-      metadata: { albumId: "a1" },
-    });
-  });
-
-  it.for<{ name: string; validate: () => unknown; log: string }>([
-    {
-      name: "throws",
-      validate: () => {
-        throw new Error("schema bug");
-      },
-      log: "Error: schema bug",
-    },
-    {
-      name: "returns a function as metadata",
-      validate: () => ({ value: () => 1 }),
-      log: "TypeError: The metadata schema returned a value with no JSON form, such as a function. Return plain data from the schema.",
-    },
-  ])("answers a generic 500 when the schema $name, and logs why", async ({ validate, log }) => {
-    const schema = { "~standard": { version: 1, vendor: "test", validate } } as StandardSchema;
-    const fixture = serverFixture({
-      files: route({ accept: "*/*", maxSize: "1GB", metadata: schema, authorize: allowAnyone }),
-    });
-    const { status, body } = await upload(fixture, { route: "files", files: [png()], metadata: {} });
-    expect({ status, code: body.error?.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
-      status: 500,
-      code: "SERVER_ERROR",
-      logged: log,
     });
   });
 });
