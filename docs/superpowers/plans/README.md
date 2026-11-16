@@ -1,9 +1,9 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-16 at the head of `feat/m3-progress-a` (progress plan A executed; `main` once merged). This file is the
-one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub
-marked done, with the commit that holds its full text (`git show 415198a:docs/superpowers/plans/<file>`); every decision
-is in [`docs/decisions/`](../../decisions/README.md).
+Updated 2026-11-16 at `main` after progress plan A (merged from `feat/m3-progress-a`). This file is the one place
+that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
+done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
+in [`docs/decisions/`](../../decisions/README.md).
 
 ## Milestones (spec §14)
 
@@ -27,9 +27,9 @@ is in [`docs/decisions/`](../../decisions/README.md).
 | Hardening phase (no plan file; lanes U, N, L, P, I, L2, R, Z) | Done, `ca91b33` | Decisions log in git, Node URL contract, file splits, `fileId` → `id`; decisions `M3-H1`..`M3-H16` |
 | [M3 vertical slice](2026-11-16-m3-vertical-slice.md) ([audit](2026-11-16-m3-vertical-slice.audit.md)) | Done, `ca91b33..90380fb` | `cloudrop/client`, `examples/next`, browser lanes; decisions `M3-S1`..`M3-S34` |
 | Follow-ups after the slice (no plan file) | Done, `90380fb..dcea6c3` | R2 refusals and checksums measured from a browser, clearer `NETWORK_ERROR` message, `/lab` page, example accepts video, audio and PDF |
-| [M3 progress plan A](2026-11-16-m3-progress-plan-a.md) ([audit](2026-11-16-m3-progress-plan-a.audit.md)), design [`2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md) | Done, `27e9152..` the commit that adds this row (`feat/m3-progress-a`) | XHR progress, the snapshot, one connection pool per client, several files per job with a result per file, pause, resume and cancel, the lab; decisions `M3-U1`..`M3-U22` |
+| [M3 progress plan A](2026-11-16-m3-progress-plan-a.md) ([audit](2026-11-16-m3-progress-plan-a.audit.md)), design [`2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md) | Done, `27e9152..a003cdb` | XHR progress, the snapshot, one connection pool per client, several files per job with a result per file, pause, resume and cancel, the lab; decisions `M3-U1`..`M3-U22` |
 
-## State after progress plan A (`feat/m3-progress-a`, 2026-11-16)
+## State of `main` after progress plan A (2026-11-16)
 
 - **Gates:** `bun run verify` passes: 1081 unit tests, 1 skipped (a pre-existing skip). `test:browser` 10/10 on
   RustFS, `test:browser:live` 10/10 on R2 (plan A task 7). `test:live` was 31/31 on R2 at `dcea6c3`; plan A changed no
@@ -88,5 +88,4 @@ into plans A and B. Plan A is done. Next, in order:
   written.
 - Plan A, parked: one PUT can still start after a part fails its file (`M3-U15`); no unit row for a pause and a pool
   grant in the same microtask (`M3-U21`) or for a failure that wins the race with a pause (`M3-U22`); a long pause
-  may cost one extra `/sign` (`M3-U20`); the lab's notes name a part without its file. The plan A text is not yet
-  reduced to a stub.
+  may cost one extra `/sign` (`M3-U20`); the lab's notes name a part without its file.
