@@ -50,11 +50,12 @@ const child = spawn("bunx", ["playwright", "test", ...process.argv.slice(2)], {
     CLOUDROP_EXAMPLE_PREFIX: prefix,
     // Exported and empty: it wins over a RustFS .env.local, so lib/cloudrop.ts uses r2().
     CLOUDROP_S3_ENDPOINT: "",
-    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it.
-    NO_COLOR: "1",
+    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it. FORCE_COLOR alone,
+    // because Node warns when NO_COLOR is set beside it.
     FORCE_COLOR: "0",
   },
-  // Its own process group, so one signal reaches Playwright, Next.js and Chromium together.
+  // Its own process group, so one signal reaches bunx and Playwright. Playwright starts the web server and Chromium in
+  // groups of their own and stops them itself when it is signalled, but not when it is killed.
   detached: true,
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -63,7 +64,9 @@ const child = spawn("bunx", ["playwright", "test", ...process.argv.slice(2)], {
 // way this script waits for the child to end and then deletes the prefix.
 const GRACE_MS = 30_000;
 let stopSignal: "SIGHUP" | "SIGINT" | "SIGTERM" | undefined;
+let killed = false;
 function signalChild(signal: NodeJS.Signals) {
+  killed ||= signal === "SIGKILL";
   try {
     if (child.pid) process.kill(-child.pid, signal);
   } catch {
@@ -118,5 +121,14 @@ if (removed.error) {
   console.log(`Deleted ${removed.data.deleted} objects under this run's prefix; the prefix is now empty.`);
 }
 console.log(`Browser lane on R2: ${redactor.count()} secret or presigned-URL occurrences redacted from the output.`);
-if (stopSignal) console.error(`Interrupted by ${stopSignal}: this run is not a pass, whatever Playwright reported.`);
+if (stopSignal) {
+  console.error(
+    `Interrupted by ${stopSignal}: this run is not a pass, whatever Playwright reported. An upload cut short can leave an unfinished multipart upload under the prefix, which deletePrefix does not see; the bucket's lifecycle rule aborts it.`,
+  );
+}
+if (killed) {
+  console.error(
+    "Playwright was killed before it could stop the example server, which may still listen on port 5173: find it with `lsof -i :5173` and stop it.",
+  );
+}
 process.exit(exitCodeFor(code, stopSignal) || (removed.error ? 1 : 0));

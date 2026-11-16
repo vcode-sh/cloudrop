@@ -1,5 +1,6 @@
-// The quickstart in a real browser against a real S3 API, run by scripts/test-browser.sh. The oracle is the bytes this
-// test created, read back through the example's own storage, and the kinds of bucket request the page sent.
+// The quickstart in a real browser against a real S3 API, run by scripts/test-browser.sh (RustFS) or
+// scripts/test-browser-live.ts (R2). The oracle is the bytes this test created, read back through the example's own
+// storage, and the kinds of bucket request the page sent.
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
