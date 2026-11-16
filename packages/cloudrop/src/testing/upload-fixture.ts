@@ -1,6 +1,6 @@
 // Setup shared by the /upload unit tests: the time the clock is fixed at, a metadata schema, the avatar route, a route
-// that takes any file, and the call that posts an upload as a signed-in user. It builds inputs only; every expected value
-// stays in the tests.
+// that takes any file, and the call that posts an upload as a signed-in user. It builds inputs only; every expected
+// value stays in the tests.
 
 import type { FileDescriptor, UploadResponse } from "../protocol/types.ts";
 import { allowAnyone, type Route, route, unauthorized } from "../server/route.ts";
