@@ -237,7 +237,9 @@ const again = await job.retry(); // or job.files[0].retry(): the failed files ag
   client.
 - When the page goes offline, every queued and uploading file pauses (`status: "paused"`) and resumes when it is back
   online; a file the caller paused stays paused, and a caller's `pause()` or `resume()` of a file the network paused
-  makes it the caller's. A job started while the page is offline pauses its files at once.
+  makes it the caller's. Files that start while the page is offline pause before any `PUT`. The `/upload` that
+  starts a job is not held: with no network it fails every file with `NETWORK_ERROR` after its attempts, and `retry()`
+  sends it again.
 - `job.files[n].retry()` sends a failed file again and resolves with its outcome; `job.retry()` does that for every
   failed file and resolves with an `UploadResult` of the job's current outcomes once every file has settled (`data` null
   when its `/upload` for every file was refused, as with `done`). A retry reuses the file's ticket when it can, so the
