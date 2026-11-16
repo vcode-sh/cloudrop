@@ -33,7 +33,7 @@ export function fakeAt(secondsAfterSigning = 0): FakeR2 {
   });
 }
 
-export interface SignedOptions {
+interface SignedOptions {
   body?: Uint8Array<ArrayBuffer>;
   headers?: Record<string, string>;
   secret?: string;
