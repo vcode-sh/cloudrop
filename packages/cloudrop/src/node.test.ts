@@ -103,6 +103,22 @@ describe("toNodeHandler", () => {
     expect(await raw(base, request)).toBe(status);
   });
 
+  // The request target is appended to the Host header's origin, so a path smuggled into Host must not become a prefix
+  // of the path the handler matches.
+  it("ignores a path in the Host header: /upload is not the upload endpoint", async () => {
+    const base = await listen();
+    const request = [
+      "POST /upload HTTP/1.1",
+      `Host: ${new URL(base).host}/api/cloudrop`,
+      "Content-Type: application/json",
+      `Content-Length: ${body.length}`,
+      "Connection: close",
+      "",
+      body,
+    ].join("\r\n");
+    expect(await raw(base, request)).toBe("HTTP/1.1 404 Not Found");
+  });
+
   it("answers 413 to a 100 KiB body and still delivers the answer", async () => {
     const base = await listen();
     // Valid JSON, so a body read in full would get 200: only the cap can answer 413.

@@ -101,8 +101,13 @@ async function deletePrefix(
   }
   // A prefix no key can have (a leading slash, a ".." segment, a control character) lists nothing, which would report
   // a verified, empty folder while the files stay stored.
-  const unmatchable = keyProblem(prefix);
-  if (unmatchable) return fail(invalidInput(`No key can start with this prefix. ${unmatchable}`));
+  if (keyProblem(prefix) !== null) {
+    return fail(
+      invalidInput(
+        'No key can start with this prefix. Write it the way keys are written, such as "users/42/": no leading slash, no "." or ".." segment, no control characters, at most 1024 bytes.',
+      ),
+    );
+  }
   let deleted = 0;
   let previous = new Set<string>();
   for (let page = 0; page < MAX_DELETE_PAGES; page++) {

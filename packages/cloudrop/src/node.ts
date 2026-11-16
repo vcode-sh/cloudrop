@@ -65,7 +65,9 @@ function toUrl(request: NodeRequest): URL {
   // No X-Forwarded-* header is trusted: behind a proxy, list the public origin in trustedOrigins instead.
   const scheme = "encrypted" in request.socket && request.socket.encrypted === true ? "https" : "http";
   const host = [request.headers.host].flat()[0] ?? "localhost";
-  const base = URL.canParse(`${scheme}://${host}`) ? `${scheme}://${host}` : `${scheme}://localhost`;
+  // Only the origin of the Host header is kept: a path or credentials written there would otherwise become part of
+  // the URL the handler matches.
+  const base = URL.canParse(`${scheme}://${host}`) ? new URL(`${scheme}://${host}`).origin : `${scheme}://localhost`;
   const target = request.originalUrl ?? request.url ?? "/";
   // Only a path may follow the Host header's origin: "//other.host/…" or an absolute URL would replace that origin,
   // and a caller could then make any Origin look same-origin.
