@@ -74,6 +74,35 @@ describe("toNodeHandler", () => {
     expect(response.status).toBe(403);
   });
 
+  // A target that names a host would otherwise replace the Host header's origin, and the caller's Origin would then
+  // match it: the same-origin check would pass for another site.
+  it.for([
+    {
+      name: "a protocol-relative target",
+      target: "//evil.example/api/cloudrop/upload",
+      status: "HTTP/1.1 404 Not Found",
+    },
+    { name: "a backslash target", target: "/\\evil.example/api/cloudrop/upload", status: "HTTP/1.1 404 Not Found" },
+    {
+      name: "an absolute target",
+      target: "http://evil.example/api/cloudrop/upload",
+      status: "HTTP/1.1 400 Bad Request",
+    },
+  ])("never takes the request's host from $name", async ({ target, status }) => {
+    const base = await listen();
+    const request = [
+      `POST ${target} HTTP/1.1`,
+      `Host: ${new URL(base).host}`,
+      "Origin: http://evil.example",
+      "Content-Type: application/json",
+      `Content-Length: ${body.length}`,
+      "Connection: close",
+      "",
+      body,
+    ].join("\r\n");
+    expect(await raw(base, request)).toBe(status);
+  });
+
   it("answers 413 to a 100 KiB body and still delivers the answer", async () => {
     const base = await listen();
     // Valid JSON, so a body read in full would get 200: only the cap can answer 413.
@@ -125,6 +154,15 @@ describe("toNodeHandler", () => {
     const closed = once(server as Server, "close");
     server?.close();
     expect([response.status, await closed]).toEqual([413, []]);
+  });
+
+  it("sends each of a handler's set-cookie headers on its own", async () => {
+    const cookies = new Headers([
+      ["set-cookie", "a=1; Path=/"],
+      ["set-cookie", "b=2; Path=/"],
+    ]);
+    const base = await serve(toNodeHandler({ handler: async () => new Response("{}", { headers: cookies }) }));
+    expect((await fetch(base)).headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
   });
 
   it("passes CORS preflights through to the handler", async () => {

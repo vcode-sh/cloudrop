@@ -1,5 +1,6 @@
 // cloudrop/node: `http.createServer(toNodeHandler(cloudrop))`, or mount it in Express with
-// `app.use(toNodeHandler(cloudrop))` before any body parser: a parser that reads the body first leaves nothing to read.
+// `app.use("/api/cloudrop", toNodeHandler(cloudrop))` before any body parser: a parser that reads the body first leaves
+// nothing to read.
 // The library compiles without Node's types (tsconfig `types: []`), so the two Node objects are described by the
 // members used here; node.test.ts proves real IncomingMessage and ServerResponse values fit them.
 
@@ -22,8 +23,8 @@ export interface NodeRequest extends AsyncIterable<Uint8Array> {
 export interface NodeResponse {
   /** True once the status line and headers have gone out: no other answer can be sent then. */
   readonly headersSent: boolean;
-  /** `headers` alternates names and values, so a repeated header such as set-cookie keeps every value. */
-  writeHead(status: number, headers: string[]): unknown;
+  /** An object of headers is the form every `writeHead` wrapper understands; set-cookie carries a list of values. */
+  writeHead(status: number, headers: Record<string, string | string[]>): unknown;
   end(body: Uint8Array): unknown;
 }
 
@@ -36,7 +37,8 @@ async function discardRest(iterator: AsyncIterator<Uint8Array>): Promise<void> {
 /**
  * Reads at most one chunk past the cap, so the handler sees an oversized body and answers 413. The iterator is not
  * closed, since that would destroy the socket before the answer is sent. Node does not drop a body that has an
- * iterator, so the rest is read and dropped here; without that the socket waits paused until Node times it out.
+ * iterator, so the rest is read and dropped here; without that the socket waits paused until Node times it out. A
+ * client that never stops sending is cut off by the server's own `requestTimeout` (300 seconds by default in Node).
  */
 async function readBody(request: NodeRequest): Promise<Uint8Array<ArrayBuffer>> {
   const iterator = request[Symbol.asyncIterator]();
@@ -64,7 +66,11 @@ function toUrl(request: NodeRequest): URL {
   const scheme = "encrypted" in request.socket && request.socket.encrypted === true ? "https" : "http";
   const host = [request.headers.host].flat()[0] ?? "localhost";
   const base = URL.canParse(`${scheme}://${host}`) ? `${scheme}://${host}` : `${scheme}://localhost`;
-  return new URL(request.originalUrl ?? request.url ?? "/", base);
+  const target = request.originalUrl ?? request.url ?? "/";
+  // Only a path may follow the Host header's origin: "//other.host/…" or an absolute URL would replace that origin,
+  // and a caller could then make any Origin look same-origin.
+  if (!target.startsWith("/")) throw new TypeError("The request target is not a path.");
+  return new URL(`${base}${target}`);
 }
 
 async function toRequest(request: NodeRequest): Promise<Request> {
@@ -106,7 +112,11 @@ function json(body: ErrorResponse, status: number): Response {
 /** The body is read in full before anything is written, so an answer that fails mid-read can still become a 500. */
 async function send(response: NodeResponse, answer: Response): Promise<void> {
   const body = new Uint8Array(await answer.arrayBuffer());
-  response.writeHead(answer.status, [...answer.headers].flat());
+  const headers: Record<string, string | string[]> = Object.fromEntries(answer.headers);
+  // Headers joins repeated values with a comma, which breaks cookies: they are sent one by one.
+  const cookies = answer.headers.getSetCookie();
+  if (cookies.length > 0) headers["set-cookie"] = cookies;
+  response.writeHead(answer.status, headers);
   response.end(body);
 }
 
