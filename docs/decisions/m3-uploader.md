@@ -787,7 +787,7 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Why:** a `subscribe` listener may call `retry()` inside the status change. Holding afterwards would hold a file
   already running again, and `pagehide` would `/abort` a live upload.
 - **If wrong:** none known.
-- **Status:** in force (`4f1887a`).
+- **Status:** in force (`4f1887a`). A retry queues all its files before the page hears of any: `M3-U59`.
 - **Visible in:** `client/file-run.ts` (`end`).
 
 ### M3-U54: how long the caller's signal is heard
@@ -851,5 +851,22 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   Most of the rest is property names that do not minify and the messages, which stay as worded.
 - **If wrong:** the resume plan must fit in about 0.68 kB, find bytes elsewhere, or ask the owner to raise the ceiling.
 - **Status:** in force (`ab5f0b0`; the size pass `b368bc4`). The early review's fixes (`d399b90`) cost 0.02 kB:
-  8.34 kB, 0.66 kB left.
+  8.34 kB, 0.66 kB left. The final review's fix (`M3-U59`) costs 0.01 kB: 8.35 kB, 0.65 kB left.
 - **Visible in:** `scripts/size-limit.config.ts`.
+
+### M3-U59: a retry queues every file it retries before it tells the page
+
+- **Decision:** plan B final review I1. `retryFiles` queues every failed file it was given without publishing, then
+  publishes once, then starts their runs. A `subscribe` listener that calls `retry()` inside that publish finds no
+  failed file among them and only waits for them (`M3-U56`). One that pauses or cancels one of them leaves it to the
+  run this retry starts: a paused file waits for `resume()`, and a cancelled one ends `aborted` without a `PUT`, with
+  the `/abort` its ticket needs, as `job.abort()` ends a queued file (`M3-U38`).
+- **Why:** each file used to publish as it was queued, so a listener saw the next file still `failed` and retried it
+  itself; the outer loop then queued and ran it again. Two runs sent one file's `PUT` and `/complete` twice on the same
+  ticket, or asked two tickets and stored it twice under two keys, with `onComplete` run twice. A file the listener
+  cancelled was queued again and uploaded.
+- **If wrong:** none known. A re-check of each file's status before its run would guard nothing: after the one publish
+  a listener can only leave a file `queued` or `paused`, cancelled or not, and its run handles each.
+- **Status:** in force (plan B final review I1).
+- **Visible in:** `client/retry-file.ts` (`requeue`, `retryFiles`), `client/retry-file.test.ts` (the "subscriber that
+  retries" rows).

@@ -4,7 +4,8 @@
 // refusal only a new upload fixes, or with an expired ticket, it asks /upload for a new ticket (new key, bytes from 0),
 // one /upload for every file of job.retry(). A file that has not failed is waited for or left as it is, `done` keeps
 // each file's first outcome, and a retry resolves with the outcome the file settled with, though another retry starts it
-// again before the promise resolves (M3-U56). Oracle: the requests the fixture saw, the keys the server issued, and the objects
+// again before the promise resolves (M3-U56). A listener that retries or cancels inside a retry's status change never
+// runs a file twice (M3-U59). Oracle: the requests the fixture saw, the keys the server issued, and the objects
 // the fake bucket holds.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -259,6 +260,58 @@ describe("retry of a file that has not failed", () => {
     const job = createCloudropClient({ fetch: () => Promise.reject(new Error("never sent")) }).start("files", []);
     const [done, retried] = await Promise.all([job.done, job.retry()]);
     expect({ retried, code: retried.error?.code }).toEqual({ retried: done, code: "INVALID_INPUT" });
+  });
+});
+
+describe("a subscriber that retries during job.retry() (M3-U59)", () => {
+  /** Two single-PUT files whose first PUTs fail with `refusal`; the bucket takes every PUT once `done` settled. */
+  async function failedJob(refusal: () => Response) {
+    let failing = true;
+    const setUp = setup(({ label }) => (failing && label === "PUT object" ? refusal() : undefined));
+    const job = setUp.client.start("files", [fileOf(1000, "a.bin"), fileOf(2000, "b.bin")]);
+    await job.done;
+    failing = false;
+    const stored = async () => (await setUp.fixture.server.storage.list("")).data?.items.length;
+    return { ...setUp, job, stored };
+  }
+
+  it.each([
+    { name: "same ticket", refusal: storageDown, upload: [] },
+    {
+      name: "new ticket",
+      refusal: () => errorResponse(403, "SignatureDoesNotMatch", "Signature mismatch."),
+      upload: ["POST /upload"],
+    },
+  ])("runs each file once when the listener retries every failed file: $name", async (row) => {
+    const { job, from, stored } = await failedJob(row.refusal);
+    job.subscribe(() =>
+      job.getSnapshot().files.forEach((file, index) => {
+        if (file.status === "failed") void job.files[index]?.retry();
+      }),
+    );
+    const sent = from();
+    const { error } = await job.retry();
+    expect({ error, sent: sent().sort(), stored: await stored() }).toEqual({
+      error: null,
+      sent: ["POST /complete", "POST /complete", ...row.upload, "PUT object", "PUT object"],
+      stored: 2,
+    });
+  });
+
+  it("keeps a file the listener cancels mid-retry aborted: it sends only its /abort", async () => {
+    const { job, from, stored } = await failedJob(storageDown);
+    let first = true;
+    job.subscribe(() => {
+      if (first) job.files[1]?.abort();
+      first = false;
+    });
+    const sent = from();
+    const { data } = await job.retry();
+    expect({ files: data?.files.map((file) => file.status), sent: sent().sort(), stored: await stored() }).toEqual({
+      files: ["done", "aborted"],
+      sent: ["POST /abort", "POST /complete", "PUT object"],
+      stored: 1,
+    });
   });
 });
 

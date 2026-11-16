@@ -27,8 +27,8 @@ function needsTicket({ upload, error }: Entry): boolean {
   return upload.dropped || Date.parse(upload.ticket.expiresAt) <= Date.now() || NEEDS_NEW_TICKET.has(error?.code);
 }
 
-/** Queues a failed file again. A new ticket starts from no parts and no bytes (M3-U36); the speed starts from 0 when
- * the file sends again, as on every start. */
+/** Queues a failed file again without telling the page. A new ticket starts from no parts and no bytes (M3-U36); the
+ * speed starts from 0 when the file sends again, as on every start. */
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
   job.context.leftovers.release(entry);
   if (fresh) {
@@ -42,7 +42,6 @@ function requeue(job: Job, entry: Entry, fresh: boolean): void {
   }
   entry.error = null;
   entry.status = "queued";
-  entry.changed(true);
 }
 
 /** What a retry ended with: the outcome of every file it was given, and the refusal of an /upload for the whole job. */
@@ -60,6 +59,9 @@ export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<R
   const failed = entries.filter((entry) => entry.status === "failed");
   const fresh = failed.filter(needsTicket);
   for (const entry of failed) requeue(job, entry, fresh.includes(entry));
+  // One publish once every file is queued (M3-U59): a listener that retries then finds none failed and only waits. One
+  // that pauses or cancels a file leaves it to its run below, which ends a cancelled one as job.abort() would.
+  failed[0]?.changed(true);
   // After the requeue: a signal that fired meanwhile cancels the files as queued ones, which tells the server.
   if (failed.length > 0) job.listen();
   for (const entry of failed) {
