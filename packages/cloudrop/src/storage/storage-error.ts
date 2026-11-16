@@ -61,6 +61,12 @@ const RULES: readonly Rule[] = [
     retryable: true,
   },
   {
+    // 501 Not Implemented: the backend lacks the feature (Wrangler's ListParts), so a retry can never succeed.
+    matches: (status) => status === 501,
+    code: "STORAGE_ERROR",
+    message: "The storage service does not support this request. Use R2 or another backend that implements it.",
+  },
+  {
     matches: (status, storageCode) => status >= 500 || status === 408 || storageCode === "OperationAborted",
     code: "STORAGE_ERROR",
     message: "The storage service failed. Retry the request.",

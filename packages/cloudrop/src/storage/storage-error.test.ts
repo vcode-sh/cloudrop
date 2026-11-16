@@ -20,6 +20,7 @@ describe("storageError", () => {
     [503, xml("SlowDown"), "RATE_LIMITED", true, "SlowDown"],
     [503, "", "RATE_LIMITED", true, undefined],
     [500, xml("InternalError"), "STORAGE_ERROR", true, "InternalError"],
+    [501, xml("NotImplemented"), "STORAGE_ERROR", false, "NotImplemented"],
     [502, "", "STORAGE_ERROR", true, undefined],
     [504, "<html><body>Gateway Timeout</body></html>", "STORAGE_ERROR", true, undefined],
     [408, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
@@ -49,6 +50,13 @@ describe("storageError", () => {
 
   it("tells the person to sign again when the signed request expired", () => {
     expect(storageError(403, xml("ExpiredRequest")).message).toContain("expired");
+  });
+
+  // Wrangler's local R2 answers ListParts with 501: a retry can never succeed there.
+  it("tells the person a 501 means the storage service lacks the feature, not that it failed", () => {
+    expect(storageError(501, xml("NotImplemented")).message).toBe(
+      "The storage service does not support this request. Use R2 or another backend that implements it.",
+    );
   });
 
   it("points a missing bucket at the bucket name, not the object key", () => {
