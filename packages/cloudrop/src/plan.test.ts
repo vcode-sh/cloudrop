@@ -1,9 +1,57 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { planParts, planUpload } from "./plan.ts";
+import { countParts, planParts, planUpload, sizeOfPart } from "./plan.ts";
 import { GiB, MiB, R2_RULES, S3_RULES } from "./rules.ts";
 
 const TiB = 1024 * GiB;
+
+describe("countParts and sizeOfPart", () => {
+  it("give every part but the last the part size and the last part the rest", () => {
+    // 64 MiB + 1 byte in 8 MiB parts: eight full parts and a ninth of one byte.
+    expect(countParts(64 * MiB + 1, 8 * MiB)).toBe(9);
+    expect(sizeOfPart(64 * MiB + 1, 8 * MiB, 8)).toBe(8 * MiB);
+    expect(sizeOfPart(64 * MiB + 1, 8 * MiB, 9)).toBe(1);
+  });
+
+  it("give a full last part when the size is a whole number of parts", () => {
+    expect(countParts(80 * MiB, 8 * MiB)).toBe(10);
+    expect(sizeOfPart(80 * MiB, 8 * MiB, 10)).toBe(8 * MiB);
+  });
+
+  it("find the part count and last part of any file built from full parts and a non-empty rest", () => {
+    // The file is built from its answer: count - 1 full parts, then a last part of 1 to partSize bytes.
+    const files = fc.integer({ min: 1, max: 5 * GiB }).chain((partSize) =>
+      fc.record({
+        partSize: fc.constant(partSize),
+        count: fc.integer({ min: 1, max: 10_000 }),
+        last: fc.integer({ min: 1, max: partSize }),
+      }),
+    );
+    fc.assert(
+      fc.property(files, ({ partSize, count, last }) => {
+        const size = (count - 1) * partSize + last;
+        return (
+          countParts(size, partSize) === count &&
+          sizeOfPart(size, partSize, count) === last &&
+          sizeOfPart(size, partSize, 1) === Math.min(size, partSize)
+        );
+      }),
+    );
+  });
+
+  it("agree with planParts for every plan", () => {
+    const sizes = fc.bigInt({ min: 1n, max: BigInt(R2_RULES.maxObjectSize) }).map(Number);
+    fc.assert(
+      fc.property(sizes, (size) => {
+        const plan = planParts(size, R2_RULES);
+        return (
+          countParts(size, plan.partSize) === plan.partCount &&
+          sizeOfPart(size, plan.partSize, plan.partCount) === plan.lastPartSize
+        );
+      }),
+    );
+  });
+});
 
 describe("planUpload", () => {
   it("uses one PUT up to the multipart threshold", () => {

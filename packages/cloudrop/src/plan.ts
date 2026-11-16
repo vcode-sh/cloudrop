@@ -21,6 +21,18 @@ function assertStorable(size: number, rules: StorageRules): void {
   }
 }
 
+/** How many parts of `partSize` bytes a file of `size` bytes needs. */
+export const countParts = (size: number, partSize: number): number => Math.ceil(size / partSize);
+
+/**
+ * The size of part `partNumber` (from 1): `partSize` for every part but the last, which holds the rest. Equal parts
+ * satisfy R2's equal-part rule by construction (spec §5.1).
+ */
+export function sizeOfPart(size: number, partSize: number, partNumber: number): number {
+  const count = countParts(size, partSize);
+  return partNumber < count ? partSize : size - (count - 1) * partSize;
+}
+
 /**
  * Equal parts of 8, 16, 32… MiB: the smallest size that keeps the count within the part limit. Every part except the
  * last has exactly `partSize` bytes, which satisfies R2's equal-part rule by construction (spec §5.1).
@@ -30,9 +42,9 @@ export function planParts(size: number, rules: StorageRules): MultipartPlan {
   if (size === 0) throw new RangeError("An empty file has no parts. Upload it with a single PUT.");
   let partSize = Math.max(FIRST_PART_SIZE, rules.minPartSize);
   // The cap is safe: maxObjectSize <= maxParts * maxPartSize, so maxPartSize parts always fit the count limit.
-  while (Math.ceil(size / partSize) > rules.maxParts) partSize = Math.min(partSize * 2, rules.maxPartSize);
-  const partCount = Math.ceil(size / partSize);
-  return { kind: "multipart", size, partSize, partCount, lastPartSize: size - (partCount - 1) * partSize };
+  while (countParts(size, partSize) > rules.maxParts) partSize = Math.min(partSize * 2, rules.maxPartSize);
+  const partCount = countParts(size, partSize);
+  return { kind: "multipart", size, partSize, partCount, lastPartSize: sizeOfPart(size, partSize, partCount) };
 }
 
 export function planUpload(

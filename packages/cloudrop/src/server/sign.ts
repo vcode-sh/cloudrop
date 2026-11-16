@@ -2,11 +2,12 @@
 // key, the sizes and the part count; the request only says which parts.
 
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
+import { countParts } from "../plan.ts";
 import { PARTS_PER_SIGN, type SignResponse } from "../protocol/types.ts";
 import { invalidInput } from "../storage/validate.ts";
 import type { EndpointInput } from "./config.ts";
 import { storageFailure } from "./http.ts";
-import { partCount, presignParts, presignSingle } from "./presign.ts";
+import { presignParts, presignSingle } from "./presign.ts";
 import { isMultipart } from "./token.ts";
 import { readTokenRequest } from "./token-request.ts";
 
@@ -31,7 +32,7 @@ export async function handleSign({ body, config }: EndpointInput): Promise<Resul
     const put = await presignSingle(config.storage, token);
     return put.error ? failure(put.error) : ok({ put: put.data });
   }
-  const count = partCount(token);
+  const count = countParts(token.size, token.partSize);
   if (!isPartList(parts, count)) {
     return fail(invalidInput(`Ask for 1 to ${PARTS_PER_SIGN} different part numbers, each from 1 to ${count}.`));
   }

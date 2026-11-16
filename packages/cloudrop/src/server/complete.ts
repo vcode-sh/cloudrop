@@ -2,13 +2,13 @@
 // the server's own part list, run afterVerify and onComplete. The client's word is never taken for anything.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { countParts, sizeOfPart } from "../plan.ts";
 import type { CompleteResponse, UploadedFile } from "../protocol/types.ts";
 import type { ObjectInfo } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import { storageFailure } from "./http.ts";
 import { runAfterVerify, runOnAbort } from "./plugins.ts";
-import { partCount, partSizeOf } from "./presign.ts";
 import { isMultipart, type MultipartToken, type UploadTokenPayload } from "./token.ts";
 import { abortContext, readTokenRequest } from "./token-request.ts";
 
@@ -79,9 +79,11 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
       : fail(storageFailure(listed.error, logger));
   }
   const byNumber = new Map(listed.data.map((part) => [part.partNumber, part]));
-  const numbers = Array.from({ length: partCount(token) }, (_, index) => index + 1);
+  const numbers = Array.from({ length: countParts(token.size, token.partSize) }, (_, index) => index + 1);
   // A wrong-sized part is re-sent like a missing one: R2 accepts it at UploadPart and rejects it only at completion.
-  const missing = numbers.filter((partNumber) => byNumber.get(partNumber)?.size !== partSizeOf(token, partNumber));
+  const missing = numbers.filter(
+    (partNumber) => byNumber.get(partNumber)?.size !== sizeOfPart(token.size, token.partSize, partNumber),
+  );
   if (missing.length > 0) {
     return fail(
       new CloudropError(
