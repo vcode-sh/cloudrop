@@ -12,7 +12,8 @@
     "typecheck": "bun run --filter cloudrop typecheck",
     "test": "bun run --filter cloudrop test",
     "test:live": "bun scripts/test-live-r2.ts",
-    "build": "bun run --filter cloudrop build"
+    "build": "bun run --filter cloudrop build",
+    "package:check": "bun run --filter cloudrop package:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8"
