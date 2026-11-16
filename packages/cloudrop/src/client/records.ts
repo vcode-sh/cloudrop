@@ -124,10 +124,10 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
   // the page's life (R2).
   let database: Promise<IDBDatabase> | undefined;
   const connect = (): Promise<IDBDatabase> => {
+    const drop = () => {
+      if (database === opening) database = undefined;
+    };
     const opening = open(factory).then((connection) => {
-      const drop = () => {
-        if (database === opening) database = undefined;
-      };
       connection.onclose = drop;
       connection.onversionchange = () => {
         connection.close();
@@ -135,9 +135,7 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
       };
       return connection;
     });
-    opening.catch(() => {
-      if (database === opening) database = undefined;
-    });
+    opening.catch(drop);
     return opening;
   };
   // Every operation runs after the one made before it, so a remove made after a save never runs first (R2).
@@ -181,7 +179,6 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
           for (const stale of all) usable(store, stale.id, stale);
         });
       });
-      // Handled at once: a record that fails while earlier operations still run is no unhandled rejection.
       // Handled at once: a record that fails while earlier operations still run is no unhandled rejection.
       work.catch(() => undefined);
       void enqueue(work);
