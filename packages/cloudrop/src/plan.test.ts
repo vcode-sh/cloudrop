@@ -56,25 +56,51 @@ describe("planUpload", () => {
     });
   });
 
-  it("keeps 8 MiB parts up to exactly 10,000 parts and doubles one byte later", () => {
-    expect(planUpload(80_000 * MiB, R2_RULES)).toEqual({
+  // Files of 256 MiB or more start at 16 MiB parts: measured faster on live R2 (r2-spike-findings.md, "Part size,
+  // 2026-11-16"). Below that they keep 8 MiB.
+  it("keeps 8 MiB parts one byte below 256 MiB and starts at 16 MiB parts from exactly 256 MiB", () => {
+    expect(planUpload(256 * MiB - 1, R2_RULES)).toEqual({
       kind: "multipart",
-      size: 80_000 * MiB,
+      size: 256 * MiB - 1,
       partSize: 8 * MiB,
-      partCount: 10_000,
-      lastPartSize: 8 * MiB,
+      partCount: 32,
+      lastPartSize: 8 * MiB - 1,
     });
-    expect(planUpload(80_000 * MiB + 1, R2_RULES)).toEqual({
+    expect(planUpload(256 * MiB, R2_RULES)).toEqual({
       kind: "multipart",
-      size: 80_000 * MiB + 1,
+      size: 256 * MiB,
       partSize: 16 * MiB,
+      partCount: 16,
+      lastPartSize: 16 * MiB,
+    });
+  });
+
+  it("keeps 16 MiB parts up to exactly 10,000 parts (156.25 GiB) and doubles one byte later", () => {
+    expect(planUpload(160_000 * MiB, R2_RULES)).toEqual({
+      kind: "multipart",
+      size: 160_000 * MiB,
+      partSize: 16 * MiB,
+      partCount: 10_000,
+      lastPartSize: 16 * MiB,
+    });
+    expect(planUpload(160_000 * MiB + 1, R2_RULES)).toEqual({
+      kind: "multipart",
+      size: 160_000 * MiB + 1,
+      partSize: 32 * MiB,
       partCount: 5001,
       lastPartSize: 1,
     });
   });
 
-  it("doubles the part size until the file fits in 10,000 parts", () => {
-    expect(planUpload(100 * GiB, R2_RULES)).toMatchObject({ partSize: 16 * MiB, partCount: 6400 });
+  it("doubles up to 1 GiB parts for R2's largest object, well under its 4.995 GiB part limit", () => {
+    // 5 TiB - 5 GiB = 5,237,760 MiB: 512 MiB parts would need 10,230 parts, 1 GiB parts need exactly 5,115.
+    expect(planUpload(R2_RULES.maxObjectSize, R2_RULES)).toEqual({
+      kind: "multipart",
+      size: R2_RULES.maxObjectSize,
+      partSize: GiB,
+      partCount: 5115,
+      lastPartSize: GiB,
+    });
   });
 
   it("honours a custom threshold", () => {
@@ -95,14 +121,6 @@ describe("planUpload", () => {
       kind: "single",
       size: R2_RULES.maxSinglePutSize,
     });
-  });
-
-  it("accepts the largest object each storage allows and plans it within the part limit", () => {
-    for (const rules of [R2_RULES, S3_RULES]) {
-      const plan = planUpload(rules.maxObjectSize, rules);
-      expect(plan).toMatchObject({ kind: "multipart", size: rules.maxObjectSize });
-      if (plan.kind === "multipart") expect(plan.partCount).toBeLessThanOrEqual(rules.maxParts);
-    }
   });
 
   it("plans the S3 maximum object as 10,000 parts of exactly 5 GiB", () => {
@@ -177,19 +195,23 @@ describe("planUpload", () => {
 
   it("always produces the smallest plan R2 accepts", () => {
     const anySize = fc.oneof(
-      fc.integer({ min: 0, max: 128 * MiB }),
-      fc.integer({ min: 0, max: 2 ** 31 - 1 }).map((n) => n * 40), // up to ~80 GiB: the 8 and 16 MiB bands
+      fc.integer({ min: 0, max: 512 * MiB }), // single PUT, 8 MiB parts, and 16 MiB parts from 256 MiB
+      fc.integer({ min: -64, max: 64 }).map((n) => 256 * MiB + n),
+      fc.integer({ min: 0, max: 2 ** 31 - 1 }).map((n) => n * 80), // up to ~160 GiB: the 16 and 32 MiB bands
       fc.bigInt({ min: 0n, max: BigInt(R2_RULES.maxObjectSize) }).map(Number),
     );
     fc.assert(
       fc.property(anySize, (size) => {
         const plan = planUpload(size, R2_RULES);
         if (plan.kind === "single") return size <= 64 * MiB;
-        const isPowerOfTwoTimes8MiB = Number.isInteger(Math.log2(plan.partSize / (8 * MiB)));
-        const halfWouldFit = plan.partSize === 8 * MiB || Math.ceil(size / (plan.partSize / 2)) > R2_RULES.maxParts;
+        const firstPartSize = size < 256 * MiB ? 8 * MiB : 16 * MiB;
+        const isPowerOfTwoTimesFirst = Number.isInteger(Math.log2(plan.partSize / firstPartSize));
+        const halfWouldFit =
+          plan.partSize === firstPartSize || Math.ceil(size / (plan.partSize / 2)) > R2_RULES.maxParts;
         return (
           size > 64 * MiB &&
-          isPowerOfTwoTimes8MiB &&
+          plan.partSize >= firstPartSize &&
+          isPowerOfTwoTimesFirst &&
           halfWouldFit &&
           plan.partSize <= R2_RULES.maxPartSize &&
           plan.partCount <= R2_RULES.maxParts &&
