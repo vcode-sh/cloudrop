@@ -86,10 +86,10 @@ async function run(
       else if (ticket) await runFile(context, entry, ticket);
     }),
   );
-  const outcomes = entries.map(outcomeOf);
+  const data = { files: entries.map(outcomeOf) };
   // The first file, in the order passed, that did not end done (ruling P3).
-  const error = outcomes.find((outcome) => outcome.status !== "done")?.error ?? null;
-  return error ? { data: { files: outcomes }, error } : { data: { files: outcomes }, error: null };
+  const error = data.files.find((outcome) => outcome.status !== "done")?.error ?? null;
+  return error ? { data, error } : { data, error: null };
 }
 
 export function startJob(context: UploadContext, route: unknown, files: unknown, options: unknown): UploadJob<unknown> {
@@ -118,23 +118,21 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
     () => snapshotOf(entries),
     () => entries.some((entry) => entry.status === "uploading"),
   );
-  // Taken from the store as they are: neither needs `this`.
-  const snapshot = { subscribe: store.subscribe, getSnapshot: store.get };
-  const nothing = () => {};
-  if (args.error) {
-    return { files: [], done: Promise.resolve(args), abort: nothing, pause: nothing, resume: nothing, ...snapshot };
-  }
   // The caller's signal and job.abort() both cancel every file.
   const job = new AbortController();
   job.signal.addEventListener("abort", () => {
     for (const entry of entries) entry.cancel.abort();
   });
-  const { signal } = args.data;
   const abort = () => job.abort();
-  signal.addEventListener("abort", abort, { once: true });
-  if (signal.aborted) abort();
-  // The caller's signal may outlive the job: drop the listener that holds it.
-  const done = run(context, args.data, entries, job.signal).finally(() => signal.removeEventListener("abort", abort));
+  let done: Promise<UploadResult<unknown>>;
+  if (args.error) done = Promise.resolve(args);
+  else {
+    const { signal } = args.data;
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    // The caller's signal may outlive the job: drop the listener that holds it.
+    done = run(context, args.data, entries, job.signal).finally(() => signal.removeEventListener("abort", abort));
+  }
   return {
     files: entries.map((entry) => ({
       id: entry.id,
@@ -147,6 +145,8 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
     abort,
     pause: () => entries.forEach(pauseFile),
     resume: () => entries.forEach(resumeFile),
-    ...snapshot,
+    // Taken from the store as they are: neither needs `this`.
+    subscribe: store.subscribe,
+    getSnapshot: store.get,
   };
 }
