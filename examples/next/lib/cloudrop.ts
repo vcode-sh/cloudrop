@@ -13,7 +13,10 @@ export const storage = endpoint
     })
   : r2({ bucket: process.env.CLOUDROP_R2_BUCKET ?? "" });
 
-/** Demo only: the page sets this cookie. A real app reads its session here. */
+/**
+ * Demo only, never ship this: any visitor can set this cookie to any name and upload under that user's prefix.
+ * app/api/demo-sign-in/route.ts sets it. A real app reads its own signed session here.
+ */
 const demoUser = (request: Request): string | undefined =>
   /(?:^|;\s*)demo-user=([a-z0-9-]{1,32})(?:;|$)/.exec(request.headers.get("cookie") ?? "")?.[1];
 

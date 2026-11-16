@@ -7,10 +7,13 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
 - `app/page.tsx` uploads with `cloudrop/client`. It imports only the server's type, so the server module and its
   secret never reach the browser bundle.
 
-Signing in is a demo cookie (`demo-user=demo`) that the page sets and `authorize` reads. A real application reads its
-own session there. Files up to 8 MB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
+- `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
+  answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
 
-Prerequisites: Docker (for RustFS) and Bun. Run every command below from this directory unless it says otherwise.
+The demo sign-in must never ship: any visitor can set that cookie to any name and upload under that user's prefix. A
+real application reads its own signed session in `authorize`. Files up to 8 MB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
+
+Prerequisites: Docker (for RustFS), Bun and Node.js 24 (Next.js runs on the `node` on your `PATH`). Run every command below from this directory unless it says otherwise.
 
 ## The build needs the settings
 
@@ -22,6 +25,7 @@ pass them as build secrets, or it fails with `INVALID_CONFIG`.
 ## Run with RustFS (the default)
 
 ```sh
+(cd ../.. && bun install)     # once, after cloning
 CLOUDROP_RUSTFS_NAME=cloudrop-example-rustfs ../../scripts/rustfs.sh up
 (cd ../.. && bun run build)   # builds the cloudrop package the example imports
 bun run setup:rustfs
@@ -29,7 +33,7 @@ bun run dev
 ```
 
 Open <http://localhost:5173>. Choose a file before signing in to see the `UNAUTHORIZED` answer, then select
-"Sign in as the demo user" and upload again.
+"Sign in as the demo user" (the page reloads) and choose a file again.
 
 `bun run setup:rustfs` creates the bucket `cloudrop-example`, sets its CORS rule, checks that a browser preflight from
 `http://localhost:5173` is allowed, sets a lifecycle rule that aborts incomplete multipart uploads after a day, and
@@ -71,6 +75,9 @@ local R2 does not implement ListParts, which the server needs to verify a multip
 storage service does not support this request"). The parts stay in Wrangler's state; stop Wrangler and delete
 `packages/cloudrop/fixtures/wrangler/.state` to clear them. `api.checkBucket` there reports CORS and lifecycle as
 unknown: Wrangler cannot report bucket settings.
+
+Delete `.env.local` before switching back to RustFS: Bun loads it before `bun run setup:rustfs` runs, so the script
+would talk to Wrangler and keep the Wrangler settings.
 
 ## Run with R2
 
