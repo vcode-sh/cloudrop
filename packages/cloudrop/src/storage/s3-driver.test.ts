@@ -11,6 +11,7 @@ const credentials = { accessKeyId: "fake-access-key", secretAccessKey: "fake-sec
 const endpoint = "https://account.r2.cloudflarestorage.com";
 const signedAt = new Date("2026-11-15T12:00:00Z");
 const now = () => signedAt;
+const lastModified = "Sun, 15 Nov 2026 12:00:00 GMT";
 
 function setup() {
   const fake = createFakeR2({ bucket: "test", credentials, now });
@@ -78,8 +79,11 @@ async function putWithForeignTool(
 /** Answers a copy: HEAD with the given source size, create and abort as R2 does, and the copy itself with `onCopy`. */
 function copyStub(size: number, onCopy: FetchLike, aborted: string[] = []): FetchLike {
   return async (input, init) => {
-    if (init?.method === "HEAD")
-      return new Response(null, { headers: { "content-length": String(size), etag: '"src"' } });
+    if (init?.method === "HEAD") {
+      return new Response(null, {
+        headers: { "content-length": String(size), etag: '"src"', "last-modified": lastModified },
+      });
+    }
     if (init?.method === "POST") {
       return new Response("<InitiateMultipartUploadResult><UploadId>u1</UploadId></InitiateMultipartUploadResult>");
     }
@@ -404,7 +408,9 @@ describe("createS3Driver", () => {
         const body = new Headers(init?.headers).has("x-amz-copy-source")
           ? "<CopyObjectResult><ETag>&quot;e&quot;</ETag></CopyObjectResult>"
           : null;
-        return new Response(body, { headers: { etag: '"e"', "content-length": "1" } });
+        return new Response(body, {
+          headers: { etag: '"e"', "content-length": "1", "last-modified": lastModified },
+        });
       },
     });
     expect((await driver.put("a b.txt", "x")).error).toBeNull();
@@ -465,6 +471,84 @@ describe("createS3Driver", () => {
       code: "STORAGE_ERROR",
       retryable: true,
       message: "The storage service's response had no ETag. Retry the request.",
+    });
+  });
+
+  const partsPage = (part: string) =>
+    `<ListPartsResult><IsTruncated>false</IsTruncated><Part>${part}</Part></ListPartsResult>`;
+  const objectsPage = (contents: string) =>
+    `<ListBucketResult><IsTruncated>false</IsTruncated><Contents>${contents}</Contents></ListBucketResult>`;
+  it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, () => Response, string]>([
+    // /complete compares each listed part's size with the plan; a NaN size would read as a part to upload again.
+    [
+      "a part without a size",
+      (driver) => driver.listParts("a.bin", "u"),
+      () => new Response(partsPage('<PartNumber>1</PartNumber><ETag>"a"</ETag>')),
+      "valid part size",
+    ],
+    [
+      "a part number of 0",
+      (driver) => driver.listParts("a.bin", "u"),
+      () => new Response(partsPage('<PartNumber>0</PartNumber><ETag>"a"</ETag><Size>5</Size>')),
+      "valid part number",
+    ],
+    [
+      "a part number over the part limit",
+      (driver) => driver.listParts("a.bin", "u"),
+      () => new Response(partsPage('<PartNumber>10001</PartNumber><ETag>"a"</ETag><Size>5</Size>')),
+      "valid part number",
+    ],
+    [
+      "a part with an empty ETag",
+      (driver) => driver.listParts("a.bin", "u"),
+      () => new Response(partsPage('<PartNumber>1</PartNumber><ETag>""</ETag><Size>5</Size>')),
+      "part ETag",
+    ],
+    [
+      "a listed object without a key",
+      (driver) => driver.list(""),
+      () =>
+        new Response(
+          objectsPage('<Size>1</Size><ETag>"e"</ETag><LastModified>2026-11-15T12:00:00.000Z</LastModified>'),
+        ),
+      "object key",
+    ],
+    [
+      "a listed object with a negative size",
+      (driver) => driver.list(""),
+      () =>
+        new Response(
+          objectsPage(
+            '<Key>a</Key><Size>-1</Size><ETag>"e"</ETag><LastModified>2026-11-15T12:00:00.000Z</LastModified>',
+          ),
+        ),
+      "valid object size",
+    ],
+    [
+      "a listed object with an unreadable date",
+      (driver) => driver.list(""),
+      () =>
+        new Response(objectsPage('<Key>a</Key><Size>1</Size><ETag>"e"</ETag><LastModified>yesterday</LastModified>')),
+      "valid last-modified date",
+    ],
+    [
+      "a HEAD answer with a size that is not a number",
+      (driver) => driver.head("a.txt"),
+      () => new Response(null, { headers: { "content-length": "abc", etag: '"e"', "last-modified": lastModified } }),
+      "valid content length",
+    ],
+    // Read as the epoch until now: a valid Date, and a false one.
+    [
+      "a HEAD answer without a last-modified date",
+      (driver) => driver.head("a.txt"),
+      () => new Response(null, { headers: { "content-length": "1", etag: '"e"' } }),
+      "valid last-modified date",
+    ],
+  ])("reports %s as a retryable storage error", async (_name, call, respond, missing) => {
+    expect((await call(driverWith(stubbed(async () => respond())))).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: `The storage service's response had no ${missing}. Retry the request.`,
     });
   });
 

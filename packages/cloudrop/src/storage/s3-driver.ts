@@ -4,6 +4,7 @@ import type {
   BucketLifecycleRule,
   CompletedPart,
   FetchLike,
+  ListedObject,
   ObjectInfo,
   ObjectOptions,
   PartInfo,
@@ -116,21 +117,74 @@ function copyError(error: CloudropError): CloudropError {
   });
 }
 
-function readObjectInfo(key: string, headers: Headers): ObjectInfo {
+/** A count or a size read from a storage answer: a whole number a JavaScript number holds exactly. */
+function wholeNumber(text: string | null | undefined): number | undefined {
+  if (text == null || !/^\d+$/.test(text)) return undefined;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+function validDate(text: string | null | undefined): Date | undefined {
+  const date = new Date(text ?? Number.NaN);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function readObjectInfo(key: string, headers: Headers): Result<ObjectInfo> {
+  // A missing size would read as an empty object, and a copy would then copy nothing. A missing ETag would make a
+  // copy send an empty x-amz-copy-source-if-match.
+  if (!headers.has("content-length")) return fail(incompleteResponse("content length"));
+  const size = wholeNumber(headers.get("content-length"));
+  if (size === undefined) return fail(incompleteResponse("valid content length"));
+  const etag = stripQuotes(headers.get("etag") ?? "");
+  if (etag === "") return fail(incompleteResponse("ETag"));
+  const uploadedAt = validDate(headers.get("last-modified"));
+  if (uploadedAt === undefined) return fail(incompleteResponse("valid last-modified date"));
   const metadata: Record<string, string> = {};
   headers.forEach((value, name) => {
     if (name.startsWith(META_PREFIX)) metadata[name.slice(META_PREFIX.length)] = value;
   });
-  return {
+  return ok({
     key,
-    size: Number(headers.get("content-length")),
+    size,
     type: headers.get("content-type") ?? undefined,
     disposition: headers.get("content-disposition") ?? undefined,
-    etag: stripQuotes(headers.get("etag") ?? ""),
-    uploadedAt: new Date(headers.get("last-modified") ?? 0),
+    etag,
+    uploadedAt,
     metadata,
     checksumCrc64nvme: headers.get("x-amz-checksum-crc64nvme") ?? undefined,
-  };
+  });
+}
+
+function readPart(block: string, maxParts: number): Result<PartInfo> {
+  const partNumber = wholeNumber(xmlText(block, "PartNumber"));
+  if (partNumber === undefined || partNumber < 1 || partNumber > maxParts) {
+    return fail(incompleteResponse("valid part number"));
+  }
+  const size = wholeNumber(xmlText(block, "Size"));
+  if (size === undefined) return fail(incompleteResponse("valid part size"));
+  const etag = etagIn(block);
+  if (etag === "") return fail(incompleteResponse("part ETag"));
+  return ok({ partNumber, size, etag, checksumCrc32c: xmlText(block, "ChecksumCRC32C") });
+}
+
+function readListedObject(block: string): Result<ListedObject> {
+  const key = xmlText(block, "Key");
+  if (!key) return fail(incompleteResponse("object key"));
+  const size = wholeNumber(xmlText(block, "Size"));
+  if (size === undefined) return fail(incompleteResponse("valid object size"));
+  const uploadedAt = validDate(xmlText(block, "LastModified"));
+  if (uploadedAt === undefined) return fail(incompleteResponse("valid last-modified date"));
+  return ok({ key, size, etag: etagIn(block), uploadedAt });
+}
+
+/** The first failure among the results, or all their values. */
+function allOk<T>(results: Result<T>[]): Result<T[]> {
+  const values: T[] = [];
+  for (const result of results) {
+    if (result.error) return result;
+    values.push(result.data);
+  }
+  return ok(values);
 }
 
 /**
@@ -495,14 +549,9 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
           objectUrl(key, { uploadId, "max-parts": String(MAX_LIST_PAGE), "part-number-marker": marker }),
         );
         if (result.error) return result;
-        for (const block of xmlBlocks(result.data, "Part")) {
-          parts.push({
-            partNumber: Number(xmlText(block, "PartNumber")),
-            size: Number(xmlText(block, "Size")),
-            etag: etagIn(block),
-            checksumCrc32c: xmlText(block, "ChecksumCRC32C"),
-          });
-        }
+        const page = allOk(xmlBlocks(result.data, "Part").map((block) => readPart(block, rules.maxParts)));
+        if (page.error) return page;
+        parts.push(...page.data);
         truncated = xmlText(result.data, "IsTruncated") === "true";
         const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
         // A missing or non-advancing marker would loop forever.
@@ -547,12 +596,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (problem) return fail(invalidInput(problem));
       const result = await send("HEAD", objectUrl(key), { headers: { "x-amz-checksum-mode": "ENABLED" } });
       if (result.error) return result.error.code === "NOT_FOUND" ? ok(null) : result;
-      // A missing size would read as an empty object, and a copy would then copy nothing. A missing ETag would make a
-      // copy send an empty x-amz-copy-source-if-match.
-      if (!result.data.headers.has("content-length")) return fail(incompleteResponse("content length"));
-      const info = readObjectInfo(key, result.data.headers);
-      if (info.etag === "") return fail(incompleteResponse("ETag"));
-      return ok(info);
+      return readObjectInfo(key, result.data.headers);
     },
 
     async getRange(key, start, end) {
@@ -643,12 +687,9 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (cursor !== undefined) url.searchParams.set("continuation-token", cursor);
       const result = await sendForXml("GET", url);
       if (result.error) return result;
-      const items = xmlBlocks(result.data, "Contents").map((block) => ({
-        key: xmlText(block, "Key") ?? "",
-        size: Number(xmlText(block, "Size")),
-        etag: etagIn(block),
-        uploadedAt: new Date(xmlText(block, "LastModified") ?? 0),
-      }));
+      const listed = allOk(xmlBlocks(result.data, "Contents").map(readListedObject));
+      if (listed.error) return listed;
+      const items = listed.data;
       if (xmlText(result.data, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
       // Ending the listing here would silently skip the rest of the prefix.
       const nextCursor = xmlText(result.data, "NextContinuationToken");
