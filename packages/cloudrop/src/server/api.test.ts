@@ -119,15 +119,21 @@ describe("api.getUrl", () => {
 
 describe("api.deletePrefix", () => {
   it("deletes every page under the prefix, proves it empty, and leaves a neighbouring prefix alone", async () => {
-    const fixture = serverFixture({ files });
-    // 1,001 keys: one more than a list page, so the second page must be fetched.
-    const keys = Array.from({ length: 1001 }, (_, index) => `users/42/${index}.txt`);
-    await Promise.all([...keys, "users/420/keep.txt"].map((key) => fixture.storage.put(key, "x")));
-    expect(await fixture.cloudrop.api.deletePrefix("users/42/")).toEqual({
-      data: { deleted: 1001, verifiedAt: new Date("2026-11-15T12:34:56Z") },
+    const { storage } = serverFixture({ files });
+    // Pages of two keys, so three keys need a second page. At R2's 1,000-key page that took 1,001 keys and ~2,000
+    // signed requests to the fake, about 250 ms, for the same loop.
+    const { cloudrop } = serverFixture(
+      { files },
+      { storage: { ...storage, list: (prefix, options) => storage.list(prefix, { ...options, limit: 2 }) } },
+    );
+    await Promise.all(
+      ["users/42/a.txt", "users/42/b.txt", "users/42/c.txt", "users/420/keep.txt"].map((key) => storage.put(key, "x")),
+    );
+    expect(await cloudrop.api.deletePrefix("users/42/")).toEqual({
+      data: { deleted: 3, verifiedAt: new Date("2026-11-15T12:34:56Z") },
       error: null,
     });
-    expect((await fixture.storage.list("users/")).data?.items.map((item) => item.key)).toEqual(["users/420/keep.txt"]);
+    expect((await storage.list("users/")).data?.items.map((item) => item.key)).toEqual(["users/420/keep.txt"]);
   });
 
   it.for<{ name: string; prefix: unknown }>([
