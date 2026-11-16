@@ -26,14 +26,13 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
-  // Bundled and minified, the size an app ships. 8.32 kB after progress plan B (6.74 kB after plan A); the measured
-  // size plus 10% would be 9.2 kB, above the owner's 9 kB ceiling for the rest of M3 (2026-11-16, ruling M3-U43), so
-  // the budget is the ceiling: about 0.68 kB is left for the resume plan.
+  // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decision 2026-11-16: resume
+  // after reload is on by default, so the ceiling rises to 10 kB; the resume plan's last task sets it from measurement.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "9 kB",
+    limit: "10 kB",
   },
 ];
