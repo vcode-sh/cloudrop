@@ -22,6 +22,13 @@ const unfinished = (): CloudropError =>
     { retryable: true },
   );
 
+const partChanged = (): CloudropError =>
+  new CloudropError(
+    "STORAGE_ERROR",
+    "A part of the file changed while the upload was being completed. Complete the upload again.",
+    { retryable: true },
+  );
+
 /** This upload is over: plugins release what they reserved for it. */
 const release = (config: ServerConfig, token: UploadTokenPayload): Promise<void> =>
   runOnAbort(config.plugins, [abortContext(token, "rejected")], config.logger);
@@ -98,6 +105,12 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
   const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
   if (!completed.error) return ok(undefined);
   if (completed.error.code === "NO_SUCH_UPLOAD") return completedBefore(config, token);
+  if (completed.error.code === "INVALID_PART") {
+    // The parts and ETags were listed a moment ago, so a stale one is a part uploaded again in between. The upload
+    // stays open: a retry lists the parts again.
+    logger.error(`cloudrop: a part of ${token.key} changed while its upload was being completed.`, completed.error);
+    return fail(partChanged());
+  }
   if (completed.error.code === "ALREADY_EXISTS") {
     // A concurrent /complete of this same upload may have won the race: its object carries this upload's id. Only an
     // object shown not to be this upload's is a collision; an unanswered HEAD keeps the reservation for a retry.
