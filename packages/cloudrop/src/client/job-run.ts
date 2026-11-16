@@ -136,8 +136,7 @@ export async function allSettled(entries: readonly Entry[]): Promise<FileOutcome
 
 /** The job's result over `files`: the first file, in the order passed, that did not end done (ruling M3-U3). */
 export function resultOf(files: FileOutcome<unknown>[]): UploadResult<unknown> {
-  const error = files.find((outcome) => outcome.status !== "done")?.error ?? null;
-  return error ? { data: { files }, error } : { data: { files }, error: null };
+  return { data: { files }, error: files.find((outcome) => outcome.status !== "done")?.error ?? null };
 }
 
 /** The first run: `done` settles once every file first settled, with those outcomes, whatever a retry did (M3-U35). */
