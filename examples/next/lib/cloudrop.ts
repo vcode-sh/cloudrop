@@ -28,7 +28,10 @@ export const cloudrop = createCloudrop({
   multipartThreshold: "8MB",
   routes: {
     files: route({
-      accept: ["text/plain", "application/octet-stream", "image/*"],
+      // Wide enough for the lab's own files (video, audio, PDF); anything else gets FILE_TYPE_NOT_ALLOWED.
+      accept: ["text/plain", "application/octet-stream", "application/pdf", "image/*", "video/*", "audio/*"],
+      // At most 13 parts of 8 MiB, so the /upload ticket signs every part (a ticket signs up to 20); the lab page
+      // relies on that to tell a renewal from a first /sign (app/lab/run-report.ts).
       maxSize: "100MB",
       authorize: ({ request }) => {
         const userId = demoUser(request);
