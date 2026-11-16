@@ -67,8 +67,12 @@ http.createServer(toNodeHandler(cloudrop));
 app.use("/api/cloudrop", toNodeHandler(cloudrop));
 ```
 
-`toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and answers `400` to a request
-target that is not a path, such as the absolute form `POST http://host/api/cloudrop/upload`.
+`toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and the scheme from the connection,
+never from `X-Forwarded-*` or `:scheme`. It answers `400` when that host is missing, sent twice, malformed (userinfo, a
+path, an invalid port) or different in `host` and `:authority`, rather than guess one such as `localhost`, since the
+origin decides the same-origin check. It also answers `400` to a request target that is not a path, such as the
+absolute form `POST http://host/api/cloudrop/upload`: browsers send that form only to proxies, and accepting it would
+let the target choose the origin. A hand-built request without `rawHeaders` is read from `headers` alone.
 
 ### Origins
 

@@ -133,8 +133,12 @@ export const cloudrop = createCloudrop({
   and TanStack Start mount it in one line; `toNodeHandler` bridges Node `http` and `http2`. `toNextHandler` returns
   `GET`, `POST` and `OPTIONS`; `OPTIONS` answers the CORS preflight of `trustedOrigins`. Both adapters take any
   `{ handler }`, so `cloudrop/next` and `cloudrop/node` import no server code.
-- `toNodeHandler` builds the request URL from the origin of `Host` (HTTP/2: `:authority`) and the request target. A
-  target that is not a path, such as the absolute form `POST http://host/api/cloudrop/upload`, answers `400`.
+- `toNodeHandler` builds the request URL from the origin of `Host` (HTTP/2: `:authority`), the connection's scheme
+  and the request target. That origin decides the same-origin check, so no host is invented (no `localhost`
+  fallback): a missing, duplicated (RFC 9112 §3.2) or malformed host, or a `host` naming another origin than
+  `:authority` (RFC 9113 §8.3.1), answers `400`. A target that is not a path, such as the absolute form
+  `POST http://host/api/cloudrop/upload`, answers `400` too: browsers send that form only to proxies, and accepting it
+  would let the target choose the origin. `rawHeaders`, which shows a second Host, is read when the request has it.
 - `onComplete` runs inside the client's `/complete` request and its return value reaches the client, typed. Delivery
   is at-least-once with a stable `file.id`; the docs say so. The 1.1 adapters make it exactly-once.
 - `createCloudrop` warns about private routes on a bucket with a public domain. In development
