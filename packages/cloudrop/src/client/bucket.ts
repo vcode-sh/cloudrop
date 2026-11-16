@@ -37,8 +37,8 @@ export function classifyAnswer(status: number, storageCode: string | undefined, 
   }
   // R2 throttles with 429 and the S3 code ServiceUnavailable (spike Q9), so the status decides.
   if (status === 429 || status === 503) return { kind: "retry", error: storageBusy(), retryAfterMs };
-  if (status === 501) return { kind: "rejected", error: uploadRejected(status) };
-  if (status === 408 || status >= 500) return { kind: "retry", error: storageDown(), retryAfterMs };
+  // 501 Not Implemented: the storage service lacks the feature, so a retry can never succeed.
+  if (status === 408 || (status >= 500 && status !== 501)) return { kind: "retry", error: storageDown(), retryAfterMs };
   return { kind: "rejected", error: uploadRejected(status) };
 }
 
