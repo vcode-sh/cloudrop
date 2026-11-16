@@ -1,0 +1,108 @@
+/* Light or dark from prefers-color-scheme: `light dark` lets the browser pick, and light-dark() follows its pick. */
+html:has(.lab) {
+  color-scheme: light dark;
+}
+
+.lab {
+  --muted: light-dark(#5b6170, #a3a9b7);
+  --line: light-dark(#d8dbe2, #3a3f4b);
+  --track: light-dark(#f1f3f7, #23262e);
+  --bar: light-dark(#2563eb, #60a5fa);
+  --bad: light-dark(#b91c1c, #f87171);
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  max-width: 48rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.section {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.fault {
+  margin: 0.5rem 0;
+}
+
+.fault p {
+  margin: 0 0 0 1.5rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table caption {
+  text-align: left;
+  font-weight: 600;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.timeline {
+  width: 40%;
+}
+
+.track {
+  position: relative;
+  height: 0.75rem;
+  background: var(--track);
+}
+
+.bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  background: var(--bar);
+}
+
+.failed {
+  color: var(--bad);
+}
+
+.failed .bar {
+  background: var(--bad);
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.1rem 1rem;
+}
+
+.summary dd {
+  margin: 0;
+}
+
+.figure {
+  margin: 0;
+}
+
+.result {
+  background: var(--track);
+  padding: 0.5rem;
+  overflow-x: auto;
+}
