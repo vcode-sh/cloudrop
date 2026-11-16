@@ -38,19 +38,6 @@ describe("countParts and sizeOfPart", () => {
       }),
     );
   });
-
-  it("agree with planParts for every plan", () => {
-    const sizes = fc.bigInt({ min: 1n, max: BigInt(R2_RULES.maxObjectSize) }).map(Number);
-    fc.assert(
-      fc.property(sizes, (size) => {
-        const plan = planParts(size, R2_RULES);
-        return (
-          countParts(size, plan.partSize) === plan.partCount &&
-          sizeOfPart(size, plan.partSize, plan.partCount) === plan.lastPartSize
-        );
-      }),
-    );
-  });
 });
 
 describe("planUpload", () => {

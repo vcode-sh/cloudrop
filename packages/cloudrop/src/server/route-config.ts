@@ -1,5 +1,4 @@
-// One route's options, checked at construction in the order the messages promise: what the route is, who may upload,
-// what may be uploaded, then the callbacks and where the file is served from.
+// One route's options, checked once at construction. The first mistake found is the one reported.
 
 import { configError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";

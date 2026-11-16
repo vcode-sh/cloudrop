@@ -7,7 +7,7 @@ import type { Endpoint } from "../protocol/types.ts";
 import { handleAbort } from "./abort.ts";
 import { checkBucket } from "./bucket-check.ts";
 import { handleComplete } from "./complete.ts";
-import type { EndpointInput, ServerConfig } from "./config.ts";
+import { type EndpointInput, isExactOrigin, type ServerConfig } from "./config.ts";
 import {
   checkOrigin,
   errorResponse,
@@ -19,7 +19,6 @@ import {
   readJson,
   serverError,
 } from "./http.ts";
-import { originHint } from "./origin-hint.ts";
 import type { Logger } from "./plugins.ts";
 import { handleSign } from "./sign.ts";
 import { handleUpload } from "./upload.ts";
@@ -114,6 +113,27 @@ async function warnAboutBucket(config: ServerConfig, pageOrigin: string): Promis
   for (const check of Object.values(report.data)) {
     if (check.status === "problem") config.logger.warn(`cloudrop: ${check.message}`);
   }
+}
+
+/** Enough for the few origins an operator needs to see, too few for a flood of cross-site requests to matter. */
+const MAX_HINTED_ORIGINS = 16;
+
+/**
+ * Warns once per refused origin, for at most MAX_HINTED_ORIGINS origins per handler. Behind a proxy that terminates
+ * TLS or rewrites Host, the app's own pages look cross-origin. Refusing them is right (no forwarded header is
+ * trusted), but the fix, listing the public origin in trustedOrigins, is not obvious from a 403.
+ */
+function originHint(logger: Logger): (request: Request) => void {
+  const hinted = new Set<string>();
+  return (request) => {
+    const origin = request.headers.get("origin");
+    // Only an exact origin is echoed: any other value is client text.
+    if (!isExactOrigin(origin) || hinted.has(origin) || hinted.size >= MAX_HINTED_ORIGINS) return;
+    hinted.add(origin);
+    logger.warn(
+      `cloudrop: refused a request from ${origin}, but this server sees its own origin as ${new URL(request.url).origin}. If a proxy terminates TLS or rewrites Host, add the app's public origin to trustedOrigins.`,
+    );
+  };
 }
 
 export function createHandler(given: ServerConfig): (request: Request) => Promise<Response> {
