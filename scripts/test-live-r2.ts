@@ -32,8 +32,9 @@ const child = spawn(
   ],
   {
     cwd: fileURLToPath(new URL("../packages/cloudrop/", import.meta.url)),
-    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it.
-    env: { ...process.env, ...settings, NO_COLOR: "1", FORCE_COLOR: "0" },
+    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it. FORCE_COLOR alone,
+    // because Node warns when NO_COLOR is set beside it.
+    env: { ...process.env, ...settings, FORCE_COLOR: "0" },
     // Its own process group, so one signal reaches bunx, Vitest and every worker, and a force-kill leaves none behind.
     // No stdin: a background group must not read the terminal, and `vitest run` takes no input.
     detached: true,
