@@ -22,7 +22,7 @@ export const aborted = (): CloudropError =>
 export const uploadInUse = (): CloudropError =>
   new CloudropError(
     "UPLOAD_IN_USE",
-    "This upload is being sent in another tab of this browser. Finish or close it there, then try again.",
+    "This upload is already being sent in this browser, in this tab or another. Let that upload finish or cancel it, then try again.",
   );
 
 export const notResumable = (): CloudropError =>
