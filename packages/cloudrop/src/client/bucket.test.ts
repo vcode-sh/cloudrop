@@ -156,15 +156,35 @@ describe("putObject", () => {
     });
   });
 
-  it("sends the signed headers and no credentials to the bucket", async () => {
+  it("passes the bucket's Retry-After on", async () => {
+    const busyBucket: ClientFetch = async () =>
+      new Response("<Error><Code>ServiceUnavailable</Code></Error>", { status: 429, headers: { "retry-after": "2" } });
+    expect(await putObject(busyBucket, target, body, new AbortController().signal)).toEqual({
+      kind: "retry",
+      error: error("RATE_LIMITED", BUSY, true),
+      retryAfterMs: 2000,
+    });
+  });
+
+  it("sends the signed headers, the body and the caller's signal, and no credentials, to the bucket", async () => {
     const bucket = vi.fn<ClientFetch>(async () => new Response(null, { status: 200 }));
-    await putObject(bucket, target, body, new AbortController().signal);
+    const controller = new AbortController();
+    await putObject(bucket, target, body, controller.signal);
     const [url, init] = bucket.mock.calls[0] ?? [];
-    expect({ url, method: init?.method, headers: init?.headers, credentials: init?.credentials }).toEqual({
+    expect({
+      url,
+      method: init?.method,
+      headers: init?.headers,
+      credentials: init?.credentials,
+      signal: init?.signal,
+      body: init?.body,
+    }).toEqual({
       url: target.url,
       method: "PUT",
       headers: { "content-type": "text/plain", "if-none-match": "*" },
       credentials: "omit",
+      signal: controller.signal,
+      body,
     });
   });
 });

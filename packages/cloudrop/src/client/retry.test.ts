@@ -49,14 +49,7 @@ describe("parseRetryAfter", () => {
 describe("withRetry", () => {
   it("retries a retryable error until it succeeds", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
-    const run = vi
-      .fn()
-      .mockResolvedValueOnce(busy())
-      .mockResolvedValueOnce(busy())
-      .mockResolvedValueOnce(busy())
-      .mockResolvedValueOnce(busy())
-      .mockResolvedValueOnce(busy())
-      .mockResolvedValueOnce(ok("stored"));
+    const run = vi.fn(async () => (run.mock.calls.length < 6 ? busy() : ok("stored")));
     const result = await withRetry(run, new AbortController().signal);
     expect({ result, calls: run.mock.calls.length }).toEqual({ result: ok("stored"), calls: 6 });
   });
