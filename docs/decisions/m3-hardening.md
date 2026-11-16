@@ -2,8 +2,8 @@
 
 Decisions of the hardening phase between M2 and the M3 slice (2026-11-16). `M3-O<n>` are the owner's answers to the
 questions the M2 reviews and the M3 plan left open. `M3-H<n>` are the controller's rulings, numbered as in the phase's
-ledger (H1 to H9 and H11), plus `M3-H10` and `M3-H12` for behaviour that lanes N and I built and their reviews
-accepted.
+ledger (H1 to H9, H11 and H13 to H15), plus `M3-H10` and `M3-H12` for behaviour that lanes N and I built and their
+reviews accepted.
 
 ## Owner decisions
 
@@ -14,7 +14,8 @@ accepted.
 - **Why:** M2-X38 took the wire types out of the root entry on the understanding that the client would export them; a
   third-party client or a test of the protocol needs them, and they already are the server's wire contract.
 - **If wrong:** every exported type is a semver promise; removing one after the first release is breaking.
-- **Status:** decided; upholds M2-X38 and overrules the plan's S4, which the plan revision rewrites.
+- **Status:** decided; upholds M2-X38 and overrules the plan's S4, which the plan revision rewrites. Scoped by M3-H13
+  (what "all wire types" covers) and M3-H15 (the 31 names).
 - **Visible in:** `src/protocol/types.ts`, `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S4).
 
 ### M3-O2: the file id is `id` everywhere on the wire
@@ -47,7 +48,8 @@ accepted.
 - **Why:** the owner reviewed the recommendations and their costs and found no reason to differ.
 - **If wrong:** each item names its own cost in the plan.
 - **Status:** in force. Lane P's review already found S22 contradicted by measurement (Wrangler's multipart
-  `/complete` answers 502, not retryable); the plan revision handles it under M3-H7.
+  `/complete` answers 502, not retryable); the plan revision handles it under M3-H7. The plan audit's five decisions
+  were taken under this entry as M3-H15.
 - **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` ("Decisions").
 
 ## Controller rulings
@@ -167,3 +169,51 @@ accepted.
 - **Status:** in force (`5fede9b`); amends M2-D25.
 - **Visible in:** spec §9 (the `checkBucket` row already states it), `src/server/bucket-check.ts` (`settingCheck`),
   `src/server/bucket-check.test.ts`.
+
+### M3-H13: "all wire types" means the shapes a client user sees
+
+- **Decision:** "All wire types" in M3-O1 means the request and response shapes of the four endpoints, the error body
+  and the route inference types a client user annotates with (`InferableCloudrop`, `RouteName`, `RouteMetadata`,
+  `RouteResult`). It leaves out the protocol constants (`MAX_BODY_BYTES`, `PARTS_PER_SIGN`, `MAX_NAME_LENGTH`),
+  `RequestHandler`, the client's internal fetch type (`ClientFetch`) and `CloudropErrorOptions`.
+- **Why:** the owner chose the wire types, not every symbol in `src/protocol/types.ts`. Values are a stronger promise
+  than types; `RequestHandler` is a server adapter type; users do not construct errors. The inference types are what
+  client code annotates with, and the root entry already promises them.
+- **If wrong:** adding an export later is not breaking; removing one after the first release is.
+- **Status:** decided; scopes M3-O1. The M3 plan's S4 and Tasks 6 and 7 carry it out; M3-H15 fixes the count at 31.
+- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S4), `src/client.ts` once Task 6 lands.
+
+### M3-H14: the example creates its server when the module loads
+
+- **Decision:** The M3 plan's S21 stands: `examples/next/lib/cloudrop.ts` calls `createCloudrop` when the module loads,
+  as the quickstart (spec §1) does, so `next build`, which evaluates the route module while collecting page data,
+  needs the storage settings and `CLOUDROP_SECRET`.
+- **Why:** it matches the quickstart (`typeof cloudrop`, not `ReturnType<typeof getCloudrop>`), and a missing setting
+  fails at build time instead of at the first upload.
+- **If wrong:** the example's CI build needs dummy settings, and every app that follows the quickstart learns at its
+  first CI build that the build needs them; the fix would then be a library change (deferring the setting checks to
+  the first request).
+- **Status:** decided; the M3 plan's S21 and Tasks 8 to 10 carry it out. M3-H15 adds the README line for builds without
+  secrets.
+- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S21), `examples/next/` once Task 8 lands.
+
+### M3-H15: the M3 plan audit's five decisions
+
+- **Decision:** The five decisions of the M3 plan audit
+  (`docs/superpowers/plans/2026-11-16-m3-vertical-slice.audit.md`, "Owner decisions") are taken as it recommends:
+  1. `cloudrop/client` exports 31 names: the plan's 27 and the four route inference types (follows M3-O1 and M3-H13).
+  2. After a cancel whose last `/complete` got no answer, the client keeps the file and never deletes it: it sends no
+     `/abort` and returns `ABORTED`. `/complete` runs without the caller's signal.
+  3. S21 stands (M3-H14), with one README line: a build without secrets (a Docker build stage with secrets only at run
+     time) must pass them as build secrets or fails with `INVALID_CONFIG`.
+  4. The server type fix of the audit's I-2 (`NoInfer` on `route()`'s return type, so an inline route without
+     `onComplete` types its result as `null`) is part of the M3 slice.
+  5. Task 10's prerequisite, the test bucket's CORS rule for `http://localhost:5173`, is confirmed when Task 10 runs;
+     it stays that task's precondition and stop condition.
+- **Why:** the owner accepted the plan's recommendations subject to the audit (M3-O4), and each recommendation is the
+  safer or the already-ruled choice. A file that may have completed, and that `onComplete` may have recorded, must not
+  be destroyed, and any live token can delete its own object (`server/abort.ts`).
+- **If wrong:** an object orphaned after an uncertain cancel stays until the app deletes it; one more public type
+  export if the owner wanted fewer.
+- **Status:** decided; taken under M3-O4. The M3 plan (S4, S14, S21, Task 7 step 1, Task 10 step 1) carries it out.
+- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md`.

@@ -39,16 +39,19 @@ measurements made for this plan,
 measurements" below; its sections are §1 RustFS, §2 Wrangler, §3 Next.js, §4 Playwright).
 
 **Decision ids:** `docs/decisions/` holds every ruling (`docs/decisions/README.md` gives the prefixes). The owner's
-answers of 2026-11-16 are `M3-O1` to `M3-O4`, the hardening phase's rulings `M3-H<n>`; a parallel lane writes those
-entries, so if an id here does not resolve when the plan executes, report it rather than renumber it.
+answers of 2026-11-16 are `M3-O1` to `M3-O4`, the hardening phase's rulings `M3-H<n>`. Three of those rulings scope
+this plan: `M3-H13` (what "all wire types" in M3-O1 covers, S4), `M3-H14` (the example creates the server when its
+module loads, S21) and `M3-H15` (the five decisions of the plan audit,
+[`2026-11-16-m3-vertical-slice.audit.md`](2026-11-16-m3-vertical-slice.audit.md)). If an id here does not resolve when
+the plan executes, report it rather than renumber it.
 
 ## Before Task 1
 
 This plan executes on a branch from `main` **after** the controller has merged the hardening phase (`feat/hardening`:
-lanes U, N, L, P, then I, L2 and R). Its citations were checked on `feat/hardening` at `7fc6f6f`, before lane I merged;
-lane I edits `protocol/types.ts`, `server/upload.ts`, `server/presign.ts`, `server/complete.ts`, `server/abort.ts`,
-`server/token.ts` and `server/bucket-check.ts`, so a line number into one of them may be off by a few lines. The quoted
-code and names are authoritative; correct a stale number in the task report, not by guessing.
+lanes U, N, L, P, then I, L2, R and Z, then the plan audit and its revision). Its citations were checked on
+`feat/hardening` at `7fc6f6f` and re-checked by the plan audit at `f946826`, after lane I merged; the four numbers the
+audit found stale are corrected here. The quoted code and names are authoritative; correct a stale number in the task
+report, not by guessing.
 
 What this plan relies on, and the check for each before Task 1:
 
@@ -66,8 +69,8 @@ What this plan relies on, and the check for each before Task 1:
 - **`checkBucket` on a storage that cannot read a setting (lane I).** A bucket CORS or lifecycle read that the storage
   does not support (a `501`, as Wrangler's local R2 answers) reports that check as `status: "unknown"`, with a message
   that the storage cannot report the setting and where to check it, the way a denied read does; a real failure still
-  fails the call. Check: `grep -n "unknown" packages/cloudrop/src/server/bucket-check.ts` shows the new case. If lane I
-  has not landed it, the example README (Task 8) describes the behaviour of `main` as it is and says so.
+  fails the call (ruling M3-H12). Check: `grep -n "unknown" packages/cloudrop/src/server/bucket-check.ts` shows the new
+  case. Landed at `f946826`: `bucket-check.ts:45` and `:82`.
 - **Split server files (lane U).** `server/upload.ts` became `upload.ts` (orchestration) and `upload-request.ts` (the
   request and per-file checks); the handler tests are `handler.test.ts`, `handler-cors.test.ts`,
   `handler-failures.test.ts` and `handler-origin-hint.test.ts`. The citations below use the split files.
@@ -79,7 +82,8 @@ What this plan relies on, and the check for each before Task 1:
 Read the merged `packages/cloudrop/package.json`, `scripts/size-limit.config.ts`, `scripts/check-package.sh`,
 `biome.json` and `.github/workflows/ci.yml` before Task 1: Tasks 7 and 9 extend them and must keep their structure
 (every action pinned to a commit SHA, no new action). Record the unit-lane baseline (`bun run test`: N passed,
-1 skipped) in Task 1's report; every task below states how many tests it adds to that N.
+1 skipped) in Task 1's report; every task below states how many tests it adds to that N. The plan audit measured
+N = 896 (1 skipped, 50 files) at `f946826`; record what the base shows, and a different N is not a failure.
 
 ## Global constraints
 
@@ -97,7 +101,8 @@ Read the merged `packages/cloudrop/package.json`, `scripts/size-limit.config.ts`
 - Never print, log or commit a credential, a token or a presigned URL. Tests record request labels such as
   `PUT part 2`, never URLs.
 - File size: about 200 to 220 lines per source file; hard caps 250 (source) and 400 (`*.test.ts`), enforced by
-  `bun run check`. Cognitive complexity at most 15 per function. Every file in the file map is planned under 220 lines;
+  `bun run check` (which also covers `examples/` from Task 8 on). Cognitive complexity at most 15 per function. Every
+  file in the file map is planned under 220 lines;
   reach the numbers by separating responsibilities, never by reformatting or `biome-ignore`.
 - Every exported name is a semver promise; the public entry exports exactly the names in decision S4.
 - `isolatedDeclarations`: every exported function and constant has an explicit type.
@@ -119,8 +124,9 @@ Read the merged `packages/cloudrop/package.json`, `scripts/size-limit.config.ts`
 
 Each decision says where it comes from. The owner answered the plan's open questions on 2026-11-16: S4 and the wire
 name of the file id were decided (M3-O1, M3-O2), S5's codes were accepted (M3-O3), and every other recommendation was
-accepted as written (M3-O4). Those are marked "(owner, accepted 2026-11-16)". Where the measurements changed a
-decision after that, the decision says so; "Not settled here" lists what is still open.
+accepted as written (M3-O4). Those are marked "(owner, accepted 2026-11-16)". Where the measurements or the plan audit
+changed a decision after that, the decision says so; the audit's five decisions were ruled as it recommended
+(M3-H15), and "Not settled here" records that nothing is open.
 
 - **S1 One file per `upload()` call (owner, accepted 2026-11-16).** Spec §5.4 lets one `/upload` request start several
   files ("Multiple files in one `/upload` call share one round trip"), and the snapshot of §6.4 tracks files one by
@@ -135,9 +141,12 @@ decision after that, the decision says so; "Not settled here" lists what is stil
 - **S3 Result type.** `Promise<Result<CompleteResponse<RouteResult<TCloudrop, TName>>>>`: the existing wire type
   (`protocol/types.ts:103-107`) carries `{ file, data }`, and `RouteResult` (`:177`) is already the JSON form of the
   route's `onComplete` result, `null` without one (`server/route.ts:56`, tested at `server/types.test.ts:79-88` and
-  `:133-150`). No new result type.
-- **S4 Public surface of `cloudrop/client` (owner decision M3-O1: every wire type).** Exactly these 27 names, each a
-  semver promise:
+  `:133-150`). No new result type. Today `null` holds only for a route assigned to a constant first: written
+  inline inside `createCloudrop({ routes })`, as spec §1 does, `route()` infers its result from the expected `Route`,
+  and a route without `onComplete` gives the client `unknown` (measured by the plan audit, I-2). Task 7 step 1 fixes it
+  in the server with `NoInfer` on `route()`'s return type (ruled part of this slice, M3-H15).
+- **S4 Public surface of `cloudrop/client` (owner decision M3-O1, scoped by ruling M3-H13; the 31 names ruled in
+  M3-H15).** Exactly these 31 names, each a semver promise:
   - Values (2): `createCloudropClient`, `CloudropError`.
   - Client types (6): `ClientOptions`, `CloudropClient`, `UploadOptions`, `UploadArguments`, `Result`,
     `CloudropErrorCode`.
@@ -147,13 +156,17 @@ decision after that, the decision says so; "Not settled here" lists what is stil
     `SignedRequest`, `SignRequest`, `SignResponse`, `SingleTicket`, `UploadedFile`, `UploadRequest`,
     `UploadResponse`. These are the 18 the root entry dropped (ruling M2-X38) plus `UploadedFile`, which the root also
     keeps.
+  - Route inference types (4): `InferableCloudrop`, `RouteName`, `RouteMetadata`, `RouteResult`, the types a client
+    user annotates with (`RouteName<typeof cloudrop>`, a wrapper over `CloudropClient<T extends InferableCloudrop>`);
+    the root entry exports the same four for server code (`src/index.ts:2-8`), so exporting them here adds no new
+    promise. `InferableCloudrop` is also the constraint of the public `CloudropClient` generic.
 
-  Not exported from `cloudrop/client`: the constants `MAX_BODY_BYTES`, `PARTS_PER_SIGN`, `MAX_NAME_LENGTH` (values, not
-  types; M3-O1 names types); `InferableCloudrop`, `RouteName`, `RouteMetadata`, `RouteResult`, `RouteTypes`, `Jsonified`
-  and `RequestHandler` (type machinery and the adapters' contract, not wire shapes; the root exports the first four for
-  server code); `ClientFetch` (reachable as `ClientOptions["fetch"]`); `CloudropErrorOptions` (client code never
-  constructs an error). Adding any of them later is not breaking (owner item 1 below). `CloudropError` is the same
-  class the root exports (one shared chunk), so `instanceof` agrees across entries.
+  Not exported from `cloudrop/client` (M3-H13): the constants `MAX_BODY_BYTES`, `PARTS_PER_SIGN`, `MAX_NAME_LENGTH`
+  (values are a stronger promise than types); `RouteTypes`, `Jsonified` (nobody annotates client code with them, and the
+  root does not export them either, M2-X38); `RequestHandler` (a server adapter type); `ClientFetch` (the client's
+  internal fetch type, reachable as `ClientOptions["fetch"]`); `CloudropErrorOptions` (client code never constructs an
+  error). Adding one later is not breaking. `CloudropError` is the same class the root exports (one shared chunk), so
+  `instanceof` agrees across entries.
 - **S5 Three client error codes (owner decision M3-O3).** `UPLOAD_REJECTED` (named by spec §6.2's
   `SignatureDoesNotMatch` row and by M2-D17 as "a client classification"), and two the spec does not name yet:
   `ABORTED` (the caller's signal fired) and `NETWORK_ERROR` (no answer at all, retryable). They join
@@ -240,11 +253,18 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   carried by `ErrorBody.parts`, `protocol/types.ts:121-122`); the client re-sends exactly those parts and completes
   again, at most 2 repair rounds (3 `/complete` answers), then returns the `PARTS_MISSING` error. The spec gives no
   bound (§6.3, last item); a bound is needed so a part that never lands cannot loop.
-- **S14 Cancellation.** `options.signal` reaches every `fetch` and every backoff pause. When it fires before the upload
-  completed, the client sends one `POST /abort { token }` without the signal, ignores its answer (the bucket's
-  lifecycle rule cleans the rest, spec §5.5) and returns `ABORTED`. A signal already aborted at the call starts no
-  request. A signal that fires after `/complete` succeeded changes nothing: the result is returned, because `/abort`
-  with a live token would delete the completed object (ruling M2-X1, `server/abort.ts:23-31`).
+- **S14 Cancellation (corrected by the plan audit, C-1; the keep rule ruled in M3-H15).** `options.signal` reaches
+  every `fetch` except `/complete` and `/abort`, and every backoff pause. A signal already aborted at the call starts no
+  request. A cancel stops the upload before the next request starts; `/complete` runs without the signal, because the
+  server may finish it (and run `onComplete`) after the browser gave up waiting, and `/abort` with a live token would
+  then delete a recorded file (ruling M2-X1, `server/abort.ts:23-31`). After a cancel the client returns `ABORTED` and
+  sends one `POST /abort { token }` (bounded by 10 s, answer ignored) unless the last `/complete` got no answer: then
+  the file may be complete, and it is kept, never deleted. A `/complete` that succeeds is returned as a success even
+  when the signal fired meanwhile. Cancelling during `/upload` loses the token: the multipart upload (if any) waits for
+  the lifecycle rule and a plugin's reservation for its expiry (M2-X27). A single PUT cancelled after its bytes reached
+  the bucket may land after `/abort`'s HEAD; that object is an orphan the lifecycle rule does not remove (the 1.1
+  adapters close it). Cost of keeping the file (M3-H15): an object the user believes cancelled stays until the app
+  deletes it.
 - **S15 No `/abort` after a failure (owner, accepted 2026-11-16).** A file that fails for any reason other than
   cancellation is left to the lifecycle rule: after a `/complete` attempt the object may be verified and `onComplete`
   may have run (`server/complete.ts:147-170`), and `/abort` would delete it. The resume plan owns re-trying a failed
@@ -261,9 +281,10 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   `fetch` is called as a method of another object, and a late lookup picks up a `fetch` patched after the client was
   created (test tools, service-worker shims).
 - **S19 The import boundary is a lint rule.** A `biome.json` override for `packages/cloudrop/src/client.ts` and
-  `packages/cloudrop/src/client/**` (test files excluded) turns on `style/noRestrictedImports` with patterns for
-  `storage` and `server` paths. Whether Biome's gitignore-style patterns match relative specifiers such as
-  `../storage/validate.ts` is unverified (U7); Task 7 proves it with a fault probe.
+  `packages/cloudrop/src/client/**` (test files excluded) turns on `style/noRestrictedImports` with the two patterns
+  `**/storage/**` and `**/server/**`. Measured by the plan audit (Biome 2.6.8, U7): they match `./`, `../` and `../../`
+  specifiers and an `import type`, and skip `*.test.ts`. Task 7's fault probe proves the override is wired into this
+  repository's `biome.json`.
 - **S20 Bundle budget (owner, accepted 2026-11-16: one dev dependency).** Spec §1 allots "Client plus React under
   about 8 kB gzip", the size an application ships. The slice's budget is the gzip size of
   `import { createCloudropClient } from "cloudrop/client"` as `@size-limit/esbuild` bundles it (tree-shaken and
@@ -272,9 +293,11 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   hooks). The budget goes into `scripts/size-limit.config.ts` beside the three existing ones. Those count an entry
   together with the hashed chunks it imports, unminified and not tree-shaken (`withImportedChunks`), so they do not
   miss shared chunks; the reason to add the esbuild plugin for the client is the different question it answers: the
-  minified, tree-shaken size the spec's 8 kB is stated in. Whether installing the plugin changes how size-limit
-  measures the three existing file entries is unverified (U8): Task 7 measures them before and after, and stops if
-  they change. Task 7 also records the client entry's `withImportedChunks` figure for comparison.
+  minified, tree-shaken size the spec's 8 kB is stated in. Installed, the plugin bundles every check unless the check
+  lists it in `disablePlugins` (read from `size-limit@14.3.0` and `@size-limit/esbuild@14.3.0`'s code by the plan audit,
+  I-3; `esbuild` is not an accepted option key), so the three existing entries gain
+  `disablePlugins: ["@size-limit/esbuild"]` and keep measuring summed files. Task 7 records their figures before and
+  after and stops if one changes. Task 7 also records the client entry's `withImportedChunks` figure for comparison.
 - **S21 The example (owner, accepted 2026-11-16, for the demo cookie).** `examples/next`, its own workspace package
   `cloudrop-example-next` (private), the root `workspaces` gains `"examples/*"`. Next.js 16.4.6 app router, React
   19.3.1, TypeScript 7.0.2, port 5173 (the live test bucket's CORS rule names `http://localhost:5173`, spec §12 "Still
@@ -283,7 +306,8 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   `authorize` reads, labelled as a stand-in for a session. `multipartThreshold: "8MB"` makes a 20 MiB file a
   three-part upload (8, 8, 4 MiB: `planParts`, `plan.ts:40-48`, first part size 8 MiB, `plan.ts:13`).
 
-  **The server is created when its module loads, so `next build` needs the settings.** Measured (the measurements §3):
+  **The server is created when its module loads, so `next build` needs the settings (ruling M3-H14; confirmed with
+  the README line below in M3-H15).** Measured (the measurements §3):
   `next build` evaluates the route module while it collects page data, so `lib/cloudrop.ts` runs `s3()`/`r2()` and
   `createCloudrop` at build time and the build fails with `INVALID_CONFIG` unless the storage settings and
   `CLOUDROP_SECRET` are set then. The example keeps that shape and requires the settings at build time, instead of
@@ -292,9 +316,11 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   function and the client's type into `ReturnType<typeof getCloudrop>`, which is not what users will write; and a
   missing setting then fails the build, earlier than the first upload. Cost: every build of the example needs the
   settings. Task 8 gets them from `.env.local` (that `next build` reads it is unmeasured, U11), Tasks 9 and 10 export
-  them before building, and `verify` only type-checks the example, which needs none. `CLOUDROP_SECRET` has no
-  `NEXT_PUBLIC_` prefix, so Next does not inline it into browser code; Task 8 checks that no file under `.next/static`
-  contains it.
+  them before building, and `verify` only type-checks the example, which needs none. A build that has no secrets (a
+  Docker build stage with secrets only at run time) must pass them as build secrets or fails with `INVALID_CONFIG`;
+  the example README says so in one sentence (Task 8). `export const dynamic` does not avoid it: Next reads that export
+  from the evaluated module. `CLOUDROP_SECRET` has no `NEXT_PUBLIC_` prefix, so Next does not inline it into browser
+  code; Task 8 checks that no file under `.next/static` contains it.
 - **S22 Local backends for the example (owner, accepted 2026-11-16; corrected by the measurements §1 and §2).** RustFS
   1.0.5 is the documented default: it accepts and enforces `PutBucketCors`, answers the preflight with the origin, and
   a browser uploads single files and every part with `ETag` readable (measured). Wrangler's local R2 lets any local
@@ -309,8 +335,8 @@ decision after that, the decision says so; "Not settled here" lists what is stil
   one `/complete`; it sends no `/abort` (S15). The upload then stays open in Wrangler's state (from the code: nothing
   aborts it; Wrangler's `ListMultipartUploads` also answers `501`, so it cannot be listed). Only the server log says
   "The storage service does not support this request." The example README documents Wrangler for single uploads only,
-  in those words. `api.checkBucket` on Wrangler reports CORS and lifecycle as `unknown` once lane I has landed (before
-  it, the whole call fails with `STORAGE_ERROR`, as spec §9 defined it).
+  in those words. `api.checkBucket` on Wrangler reports CORS and lifecycle as `unknown` (ruling M3-H12,
+  `server/bucket-check.ts:45`, `:82`).
 - **S23 Browser lane (owner, accepted 2026-11-16: CI minutes).** Playwright 1.65.1, Chromium only (headless, which
   uses Chromium's headless shell), files named `*.browser.test.ts`, run by `scripts/test-browser.sh` against a
   disposable RustFS container and the example built with `next build` and served with `next start`. A CI job runs it
@@ -319,7 +345,9 @@ decision after that, the decision says so; "Not settled here" lists what is stil
 - **S24 Live R2 in the browser (owner, accepted 2026-11-16).** Task 10 runs the same browser check against the owner's
   test bucket and measures spec §12's "Still unverified" item 1 (browser PUT and parts, reading `ETag`, CORS on an
   expired URL's 403) once, recording the result in `docs/research/r2-spike-findings.md`. It needs the owner's test
-  bucket and a confirmation of its CORS rule (owner item 2 below).
+  bucket and a confirmation of its CORS rule, checked when Task 10 runs (its step 1 is the precondition and the stop
+  condition; ruled in M3-H15). Spec §12 records that the rule `cloudrop-browser-tests` was added on 2026-11-15 for
+  `http://localhost:5173` and `http://127.0.0.1:5173`.
 - **S25 `src/server/protocol.test.ts` stays (owner, accepted 2026-11-16).** It pins the wire format without the client
   (its header, `protocol.test.ts:1-2`); the client tests prove the client against the same server. Pruning the overlap
   is a later audit (M2 audit finding T7-3, "A9"), once the client is the main consumer.
@@ -347,7 +375,7 @@ Out of the slice, each owned by a later plan:
 ## Unverified behaviour and where it gets measured
 
 The measurements settled U4 and U5, U6 for the server entries, and the local-backend half of U1 to U3 and U10, each
-with requests a page made by hand, not with the client. What is left:
+with requests a page made by hand, not with the client. The plan audit settled U7 and U8 and added U15. What is left:
 
 | # | Behaviour | State | Measured in |
 |---|---|---|---|
@@ -357,8 +385,9 @@ with requests a page made by hand, not with the client. What is left:
 | U4 | RustFS 1.0.5 accepts `PutBucketCors` and answers a preflight from `http://localhost:5173` | **Settled** (the measurements §1, on port 3050 with the same rule shape) | Task 8 step 2 runs it again as the setup check |
 | U5 | Next.js 16.4.6 builds with TypeScript 7.0.2 | **Settled**: builds and type-checks through TypeScript's CLI (`experimental.useTypeScriptCli`, default `true`; the measurements §3). The TypeScript 6 fallback is dropped | — |
 | U6 | Next.js resolves the workspace package `cloudrop` through its `exports` to `dist/` | Settled for the server entries (`cloudrop`, `cloudrop/next` in a route handler). `cloudrop/client` in a `"use client"` page (the browser bundle) is not measured: the entry did not exist | Task 8 step 3 (fallback and stop condition kept) |
-| U7 | Biome's `noRestrictedImports` patterns match relative specifiers | not tried | Task 7, fault probe |
-| U8 | `@size-limit/esbuild`'s tree-shaking of an ESM entry, and whether installing it changes the three existing file-based budgets | not tried | Task 7, steps 4 and 5 (stop condition) |
+| U7 | Biome's `noRestrictedImports` patterns match relative specifiers | **Settled** (plan audit, Biome 2.6.8): `**/storage/**` and `**/server/**` match `./`, `../`, `../../` and `import type`, and skip `*.test.ts` | Task 7 step 4 (fault probe: the override is wired in) |
+| U8 | `@size-limit/esbuild`'s tree-shaking of an ESM entry, and whether installing it changes the three existing file-based budgets | **Settled** from `size-limit@14.3.0` and `@size-limit/esbuild@14.3.0`'s code (plan audit): the plugin applies to every check unless the check lists it in `disablePlugins` | Task 7 steps 5 and 6 (the three figures stay byte-equal; stop otherwise) |
+| U15 | The extra install `examples/*` adds to every CI job's `bun install --frozen-lockfile` (Next with its SWC binaries, React, Playwright's package; no browser download) | not measured (plan audit, X-6) | Task 9, the first CI run, beside U13 |
 | U9 | `Retry-After` is readable in a browser only if the bucket's CORS rule exposes it; whether R2 sends it at all | not measured | Not in the slice; the client reads it when visible |
 | U10 | `fetch` with a `Blob` body sends exactly the signed `content-length` | RustFS and Wrangler: yes, by hand, single PUT and `Blob.slice` parts (the measurements §1, §2). R2 and the client's own requests: not measured (spike "Not verified", `r2-spike-findings.md:398-399`, "should match") | Task 9 (RustFS), Task 10 (R2) |
 | U11 | `next build` reads `examples/next/.env.local` | not measured (Next's documented behaviour) | Task 8 step 3 |
@@ -373,31 +402,34 @@ packages/cloudrop/
   src/input.ts                          invalidInput, isPlainObject (Task 1)                          ~25 lines
   src/errors.ts                         + UPLOAD_REJECTED, ABORTED, NETWORK_ERROR; ClientErrorCode (Task 2)
   src/server/http.ts                    STATUS keyed by ServerErrorCode; hasKnownCode a type guard (Task 2)
+  src/server/route.ts                   NoInfer on route()'s return type (Task 7)
   src/client/failures.ts                the client's error constructors (Task 3)                     ~70 lines
   src/client/retry.ts                   MAX_ATTEMPTS, retryDelay, parseRetryAfter, pause, withRetry (Task 3) ~80
   src/client/bucket.ts                  BucketOutcome, classifyAnswer, putObject (Task 3)              ~90 lines
   src/client/answers.ts                 shape checks for the four endpoints' answers (Task 4)          ~120 lines
-  src/client/endpoints.ts               ClientFetch, Ticket, Endpoints, createEndpoints (Task 4)       ~100 lines
+  src/client/endpoints.ts               ClientFetch (Task 3); Ticket, Endpoints, createEndpoints (Task 4) ~105 lines
   src/client/parts.ts                   PARTS_IN_FLIGHT, PartSender, nextStep, sendParts (Task 5)      ~140 lines
-  src/client/upload.ts                  uploadFile: start, send, complete, repair, cancel (Task 6)     ~130 lines
+  src/client/upload.ts                  uploadFile: start, send, complete, repair, cancel (Task 6)     ~145 lines
   src/client.ts                         the cloudrop/client entry (Task 6)                            ~110 lines
   src/testing/client-fixture.ts         the server fixture behind a fetch the client can use (Task 4) ~105 lines
-  tests: src/client/{retry,bucket,endpoints,parts,upload,upload-failures,types}.test.ts, src/client.test.ts
+  tests: src/client/{retry,bucket,endpoints,parts,upload,upload-failures,types}.test.ts, src/client.test.ts;
+         one new `it` in src/server/types.test.ts (Task 7)
   package.json                          exports "./client"; dev @size-limit/esbuild (Task 7)
   tsdown.config.ts                      entry src/client.ts (Task 7)
 scripts/size-limit.config.ts            the cloudrop/client budget (Task 7)
 examples/next/                          (Task 8)
   package.json, next.config.ts, tsconfig.json (in the shape Next writes), README.md
-  lib/cloudrop.ts                       the server: createCloudrop with one route
+  lib/cloudrop.ts                       the server: createCloudrop with one route; the exported storage
   app/api/cloudrop/[...all]/route.ts    export const { GET, POST, OPTIONS } = toNextHandler(cloudrop)
   app/layout.tsx, app/page.tsx          the upload page ("use client")
   scripts/setup-rustfs.ts               bucket, CORS rule, preflight check, lifecycle rule, .env.local
   playwright.config.ts, app/upload.browser.test.ts (Task 9)
 scripts/test-browser.sh                 the browser lane (Task 9)
 scripts/test-browser-live.ts            the browser lane on live R2 (Task 10)
+scripts/check-file-size.ts              also lists examples/*/**/*.ts and *.tsx (Task 8)
 package.json                            workspaces + examples/*; test:browser; test:browser:live; verify (Tasks 8-10)
 biome.json, .gitignore                  client import rule; .next and Playwright output ignored (Tasks 7, 8)
-.github/workflows/ci.yml                browser job (Task 9)
+.github/workflows/ci.yml                browser job; the example's typecheck in the check job (Task 9)
 AGENTS.md, README.md, docs/research/*, docs/decisions/*   (Tasks 10, 11)
 ```
 
@@ -413,7 +445,8 @@ test infrastructure, like `server-fixture.ts`, and is not an entry.
 | Bytes of one part sent under another part's URL | parts cut with the server's `sizeOfPart`; the bucket refuses another length (spike Q1) | upload › "uploads a multipart file…" (bytes on both sides of the boundary) |
 | A wrong server answer making `upload()` reject | every answer validated (S16) | endpoints › non-JSON, wrong-shape and short `/sign` rows |
 | Endless retries or repairs | 6 attempts (S9), 2 repair rounds (S13) | retry › "gives up after 6 attempts"; upload-failures › "gives up after two repair rounds" |
-| A cancelled upload left open, or a completed one deleted by a late cancel | `/abort` on cancel only before completion (S14) | upload-failures › cancel rows |
+| A cancelled upload left open, or a completed one deleted by a late cancel | `/abort` only when no `/complete` may have succeeded; `/complete` runs without the signal (S14) | upload-failures › cancel rows and the three /complete cancel rows |
+| A route result typed `unknown` for the quickstart's inline routes | `NoInfer` on `route()` (S3, Task 7 step 1) | types › "types an inline route without onComplete as null, as the quickstart writes routes" |
 | Server code in the browser bundle | Biome import rule (S19); budget (S20) | Task 7 fault probe; `bun run package:check` |
 | The upload secret in the browser bundle | `import type` of the server; no `NEXT_PUBLIC_` prefix (S21) | Task 8 step 3, the `.next/static` check |
 
@@ -425,8 +458,8 @@ A pure move: same behaviour, same messages, no test changes.
 
 **Files:**
 - Create: `packages/cloudrop/src/input.ts`
-- Modify: `packages/cloudrop/src/storage/validate.ts:10-19` (drop `invalidInput` and `isPlainObject`, import
-  `isPlainObject` from `../input.ts`); the import lines listed in S6.
+- Modify: `packages/cloudrop/src/storage/validate.ts:1`, `:10-19` (drop `invalidInput` and `isPlainObject` and the
+  now unused `CloudropError` import, import `isPlainObject` from `../input.ts`); the import lines listed in S6.
 
 **Interfaces:**
 - Produces: `invalidInput(message: string): CloudropError` (code `INVALID_INPUT`) and
@@ -441,7 +474,8 @@ again on the base and record the answer).
   passed) in the report.
 - [ ] **Step 2:** Create `src/input.ts` with the two functions and a one-line header: "Untrusted input: the error for
   it, and the plain-object check every JSON reader uses. Shared by storage, server and client."
-- [ ] **Step 3:** Delete them from `validate.ts`; add `import { isPlainObject } from "../input.ts";` there. Rewrite
+- [ ] **Step 3:** Delete them from `validate.ts`, replace its `import { CloudropError } from "../errors.ts";` with
+  `import { isPlainObject } from "../input.ts";` (nothing else in the file uses `CloudropError`). Rewrite
   each importer in S6 to import from `../input.ts` (server) or `../../input.ts` (storage/s3), keeping its other
   `validate.ts` names where it had any.
 - [ ] **Step 4:** `bun run typecheck` proves no importer was missed: `validate.ts` no longer exports either name, so a
@@ -496,6 +530,7 @@ row's literal body and log line; bug caught: a later edit adds the client codes 
 **Files:**
 - Create: `packages/cloudrop/src/client/failures.ts`, `packages/cloudrop/src/client/retry.ts`,
   `packages/cloudrop/src/client/bucket.ts`
+- Create: `packages/cloudrop/src/client/endpoints.ts` (only `ClientFetch`; Task 4 fills it)
 - Test: `packages/cloudrop/src/client/retry.test.ts`, `packages/cloudrop/src/client/bucket.test.ts`
 
 **Interfaces (produces):**
@@ -552,8 +587,10 @@ export function retryDelay(failedAttempts: number, retryAfterMs = 0): number {
 ```
 
 `withRetry` calls `run`; while the result's error is `retryable`, fewer than `MAX_ATTEMPTS` calls were made and the
-signal has not fired, it waits `retryDelay(attempt)` with `pause` and calls again. It returns `aborted()` when the
-signal fired, otherwise the last result.
+signal has not fired, it waits `retryDelay(attempt)` with `pause` and calls again. It checks the signal before each
+attempt and after each pause, and returns `aborted()` when the signal fired there. A success or a non-retryable error
+is returned as it is, even when the signal fired while that call ran (S14: a `/complete` that succeeded stays a
+success), and so is the last retryable error once the attempts run out.
 
 `putObject` sends `fetch(target.url, { method: "PUT", headers: target.headers, body, credentials: "omit", signal })`.
 A throw becomes `aborted` when `signal.aborted`, else `{ kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 }`.
@@ -584,6 +621,7 @@ hand):
 | gives up after 6 attempts | always retryable | last error, 6 calls | endless retry |
 | does not retry an error the server marked final | non-retryable | that error, 1 call | retrying 4xx |
 | stops waiting when the upload is cancelled | abort during the pause | `ABORTED`, no further call, resolves without the timer firing | pause ignores the signal |
+| keeps a success that arrives after a cancel | `run` aborts the controller, then resolves ok | ok, 1 call | a completed `/complete` reported as `ABORTED` (S14) |
 
 `bucket.test.ts` (contract: S10; oracle: the spec §6.2 table and the measured answers named in S10):
 
@@ -610,11 +648,12 @@ The 412 row gets its URL from `serverFixture(...).single(...)` (`testing/server-
 
 - [ ] **Step 1:** Write `retry.test.ts` and `bucket.test.ts`. Run them: they fail (modules missing).
 - [ ] **Step 2:** Implement `failures.ts`, `retry.ts`, `bucket.ts` and the `ClientFetch` type.
-- [ ] **Step 3:** Run the two files: 12 + 15 rows (the three-input `parseRetryAfter` row is one `it.each` row per
-  input, so Vitest reports 29); write what Vitest reports in the report.
+- [ ] **Step 3:** Run the two files: 13 + 15 rows (the three-input `parseRetryAfter` row is one `it.each` row per
+  input, so Vitest reports 30); write what Vitest reports in the report.
 - [ ] **Step 4:** Fault probes, one at a time, each restored: remove the cap in `retryDelay` (the 20 s rows fail);
   classify 403 `SignatureDoesNotMatch` as expired (its row fails); drop the 501 rule (its row fails: 501 retried);
-  drop `credentials: "omit"` (last row fails).
+  drop `credentials: "omit"` (last row fails); return `aborted()` whenever the signal has fired, also after a success
+  ("keeps a success that arrives after a cancel" fails).
 - [ ] **Step 5:** Gates; `bunx biome lint --only=complexity/noExcessiveCognitiveComplexity packages/cloudrop/src/client`
   reports nothing. N + 1 + the count of step 3.
 - [ ] **Step 6:** Commit `feat(client): add the retry budget and the bucket answer classifier`.
@@ -622,8 +661,8 @@ The 412 row gets its URL from `serverFixture(...).single(...)` (`testing/server-
 ### Task 4: Talking to the server
 
 **Files:**
-- Create: `packages/cloudrop/src/client/answers.ts`, `packages/cloudrop/src/client/endpoints.ts` (extend the file from
-  Task 3), `packages/cloudrop/src/testing/client-fixture.ts`
+- Create: `packages/cloudrop/src/client/answers.ts`, `packages/cloudrop/src/testing/client-fixture.ts`
+- Modify: `packages/cloudrop/src/client/endpoints.ts` (extend the file from Task 3)
 - Test: `packages/cloudrop/src/client/endpoints.test.ts`
 
 **Interfaces:**
@@ -642,9 +681,9 @@ export interface Endpoints {
   signSingle(token: string, signal: AbortSignal): Promise<Result<SignedRequest>>;
   /** POST /sign { token, parts }: one URL per asked part, nothing else. */
   signParts(token: string, parts: readonly number[], signal: AbortSignal): Promise<Result<SignedPart[]>>;
-  /** POST /complete { token }. */
-  complete(token: string, signal: AbortSignal): Promise<Result<CompleteResponse<unknown>>>;
-  /** POST /abort { token }, once, without a signal; the answer ({ id }) is ignored. */
+  /** POST /complete { token }, without the caller's signal: a cancel must not cut off a /complete the server may finish. */
+  complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
+  /** POST /abort { token }, once; never rejects, gives up after ABORT_TIMEOUT_MS (10 s); the answer ({ id }) is ignored. */
   abort(token: string): Promise<void>;
 }
 export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints;
@@ -679,9 +718,12 @@ export function clientFixture<TRoutes extends Record<string, Route>>(
 ```
 
 Rules for `endpoints.ts`. Every call `POST`s `JSON.stringify(body)` to `` `${basePath}/${endpoint}` `` with
-`{ "content-type": "application/json" }`, `credentials: "include"` and the signal. A throw becomes `aborted()` when the
-signal fired, else `serverUnreachable()`. A body that is not JSON becomes `unreadableAnswer(status)`. A non-2xx answer
-becomes `new CloudropError(body.code, body.message, { retryable: body.retryable, parts: body.parts })` from
+`{ "content-type": "application/json" }`, `credentials: "include"` and the signal (`complete` and `abort` send none).
+A throw becomes `aborted()` when the signal fired, else `serverUnreachable()`; for `complete`, which has no signal, a
+throw is always `serverUnreachable()`. `abort` sends `signal: AbortSignal.timeout(ABORT_TIMEOUT_MS)` with
+`const ABORT_TIMEOUT_MS = 10_000;` (so a server that never answers cannot hold a cancelled `upload()` open), and wraps
+the call in `catch`: it resolves whatever happens. No test of its own: the cancel rows show `/abort` is sent. A body
+that is not JSON becomes `unreadableAnswer(status)`. A non-2xx answer becomes `new CloudropError(body.code, body.message, { retryable: body.retryable, parts: body.parts })` from
 `readErrorBody` (the `code` string is taken as a `CloudropErrorCode`: a newer server's code passes through), or
 `unreadableAnswer(status)` when the body has another shape. A 2xx answer that its reader refuses becomes
 `unreadableAnswer(status)`. `start` sends `{ route, files: [{ name: file.name, size: file.size, type: file.type }],
@@ -724,7 +766,7 @@ fetch rules of S8):**
 | refuses a multipart ticket whose part count disagrees with the file | fault forwards `POST /upload` and answers its JSON with `partCount` 3 for the 8 MiB + 5 byte file | `unreadableAnswer(200)` | wrong byte ranges after a version mismatch (S7) |
 | refuses a /sign answer without every asked part | fault: 200 `{ parts: [part 1 only] }` for `signParts([1, 2])` | `unreadableAnswer(200)` | a worker waits forever for part 2 |
 | reports an unreachable server | fault throws `TypeError` | `NETWORK_ERROR`, `serverUnreachable()` message, retryable | |
-| reports a cancelled call as aborted | aborted signal | `ABORTED` | |
+| reports a cancelled call as aborted | `start` with an aborted signal | `ABORTED` | |
 | sends JSON with the page's credentials | fault records `init` and forwards | `content-type` `application/json`, `credentials` `"include"` | cookies missing cross-origin |
 
 - [ ] **Step 1:** Write the fixture and the test file; run: fails (missing modules).
@@ -835,6 +877,8 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
   for (let attempt = 1; ; attempt++) {
     if (run.sender.signal.aborted) return aborted();
     const target = await urlFor(run, partNumber, renew);
+    // urlFor may have waited for a /sign; the upload may have been cancelled meanwhile.
+    if (run.sender.signal.aborted) return aborted();
     const outcome = target.error ? signFailure(target.error) : await run.sender.put(target.data, partNumber);
     const step = nextStep(outcome, attempt, renewed);
     if (step.kind === "done") return null;
@@ -881,7 +925,7 @@ peak number of unfinished calls; `Math.random` stubbed to 0, so every backoff wa
 | renews only once per part | put: opaque, opaque, stored | one `sign` call | a sign storm during an outage |
 | retries a readable expiry at once with a new URL | `nextStep(expired, 1, false)`, `Math.random` stubbed to 1 | `{ kind: "again", renew: true, waitMs: 0 }` | backoff before renewal |
 | fails a part whose renewed URL is refused as expired | `nextStep(expired, 2, true)` | `{ kind: "fail", error: linkRefused() }` | six attempts on a URL that cannot work |
-| stops starting parts after one fails for good, and lets the others finish | 10 parts, part 2 rejected; every `put` resolves one microtask after it starts | result `UPLOAD_REJECTED`; parts 1 to 5 put (part 1's worker takes part 5 before part 2's answer arrives), none of 6 to 10 | siblings aborted; the queue keeps going; part 5's success overwriting part 2's failure |
+| stops starting parts after one fails for good, and lets the others finish | 10 parts, part 2 rejected; every `put` resolves one microtask after it starts | result `UPLOAD_REJECTED`; the parts put are a subset of 1 to 5 that includes 1 to 4 (with this double part 1's worker takes part 5 before part 2's answer arrives, but the exact count follows microtask order, not the contract), none of 6 to 10. The test carries a comment naming the bug it guards: `failure ??= await sendPart(…)` lets part 5's success overwrite part 2's failure | siblings aborted; the queue keeps going; part 5's success overwriting part 2's failure |
 | gives up on a part after 6 attempts | put always `retry` (`storageDown`) | 6 puts, error `STORAGE_ERROR` retryable | endless retry |
 | fails with a /sign error that cannot be retried | part 21 needs a URL, `sign` answers `UPLOAD_EXPIRED` | that error; no put for part 21 | sign errors swallowed |
 | stops when the upload is cancelled | abort after the first put starts | `ABORTED`; no `sign` or `put` starts afterwards | work after cancel |
@@ -890,7 +934,8 @@ peak number of unfinished calls; `Math.random` stubbed to 0, so every backoff wa
 - [ ] **Step 2:** Implement `parts.ts` as above.
 - [ ] **Step 3:** Run: 10 passed.
 - [ ] **Step 4:** Fault probes: `PARTS_IN_FLIGHT = 5` (first row fails); drop `&& !renewed` (fourth row fails); start
-  `worker` while `failure` is set (the "stops starting parts" row fails).
+  `worker` while `failure` is set (the "stops starting parts" row fails); drop the signal check after `urlFor` (the
+  cancel row fails: three more `put` calls).
 - [ ] **Step 5:** Gates; complexity check on `src/client` reports nothing. N + the counts so far + 10.
 - [ ] **Step 6:** Commit `feat(client): send parts four at a time with lazy batch signing and URL renewal`.
 
@@ -904,7 +949,7 @@ peak number of unfinished calls; `Math.random` stubbed to 0, so every backoff wa
 **Interfaces:**
 - Consumes: everything above; `sizeOfPart` (`plan.ts:31-34`); `configError` (`errors.ts:75-78`); `RouteName`,
   `RouteMetadata`, `RouteResult`, `InferableCloudrop`, `CompleteResponse` (`protocol/types.ts:103-107`, `:164-177`).
-- Produces (`client.ts`, the public entry; decision S4, all 27 names):
+- Produces (`client.ts`, the public entry; decision S4, all 31 names):
 
 ```ts
 export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
@@ -929,6 +974,8 @@ export type {
   UploadRequest,
   UploadResponse,
 } from "./protocol/types.ts";
+// The route inference types a client user annotates with (S4, ruling M3-H13); the root exports the same four.
+export type { InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
 
 export interface ClientOptions {
   /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */
@@ -997,20 +1044,28 @@ function senderFor(context: UploadContext, ticket: Ticket, file: File, signal: A
   return { signal, first: [{ partNumber: 1, ...ticket.put }], put, sign };
 }
 
-async function sendAndComplete(
-  context: UploadContext,
-  ticket: Ticket,
-  file: File,
-  signal: AbortSignal,
-): Promise<Result<CompleteResponse<unknown>>> {
+interface Sent {
+  result: Result<CompleteResponse<unknown>>;
+  /** The last /complete got no answer, so the server may have completed the file: a cancel keeps it. */
+  mayBeComplete: boolean;
+}
+
+async function sendAndComplete(context: UploadContext, ticket: Ticket, file: File, signal: AbortSignal): Promise<Sent> {
   const sender = senderFor(context, ticket, file, signal);
   let parts = Array.from({ length: ticket.kind === "single" ? 1 : ticket.partCount }, (_, index) => index + 1);
+  let mayBeComplete = false;
+  // Without the signal: the server may finish a /complete (and run onComplete) after the browser stopped waiting (S14).
+  const complete = async (): Promise<Result<CompleteResponse<unknown>>> => {
+    const done = await context.endpoints.complete(ticket.token);
+    mayBeComplete = done.error?.code === "NETWORK_ERROR";
+    return done;
+  };
   for (let round = 0; ; round++) {
     const sent = await sendParts(sender, parts);
-    if (sent.error) return fail(sent.error);
-    const done = await withRetry(() => context.endpoints.complete(ticket.token, signal), signal);
+    if (sent.error) return { result: fail(sent.error), mayBeComplete: false };
+    const done = await withRetry(complete, signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
-    if (!missing?.length || round === REPAIR_ROUNDS) return done;
+    if (!missing?.length || round === REPAIR_ROUNDS) return { result: done, mayBeComplete };
     parts = [...missing];
   }
 }
@@ -1028,13 +1083,17 @@ export async function uploadFile(
   if (signal.aborted) return fail(aborted());
   const started = await withRetry(() => context.endpoints.start(route as string, file as File, metadata, signal), signal);
   if (started.error) return fail(signal.aborted ? aborted() : started.error);
-  const result = await sendAndComplete(context, started.data, file as File, signal);
+  const { result, mayBeComplete } = await sendAndComplete(context, started.data, file as File, signal);
   // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
   if (!result.error || !signal.aborted) return result;
-  await context.endpoints.abort(started.data.token);
+  // A /complete that got no answer may have succeeded: keep the file rather than delete a recorded one (M3-H15).
+  if (!mayBeComplete) await context.endpoints.abort(started.data.token);
   return fail(aborted());
 }
 ```
+
+`withRetry` checks the signal before each attempt and in its pause (Task 3), so a cancel during the backoff after an
+answered `/complete` error still ends in `/abort`; a cancel during a `/complete` that then succeeds returns the success.
 
 `argumentProblem(route, file, options): string | null` narrows `route` and `file` with type guards instead of the casts
 above if that reads cleaner (the reviewer decides; behaviour is the same). Messages:
@@ -1084,11 +1143,19 @@ named in S10, built by `fault` exactly as the fake sends them, `testing/fake-r2/
 | re-sends the parts /complete names as missing | first `PUT part 2` answers 200 without forwarding | upload, PUT part 1, PUT part 2, complete, PUT part 2, complete (the ticket's URL for part 2 is still valid, so no `/sign`) | success; bytes equal |
 | gives up after two repair rounds | every `PUT part 2` answers 200 without forwarding | three `POST /complete` | `PARTS_MISSING`, `parts` `[2]` |
 | cancels a multipart upload and tells the server | `fault` aborts the controller at the first `PUT part 1` | ends with `POST /abort` | `ABORTED`; `fixture.server.fake.pendingUploads()` is 0 |
+| keeps a file whose /complete finished while the upload was cancelled | `POST /complete`: forward, abort the controller, return the forwarded answer | upload, PUT, complete; no `/abort` | success with the route's `data`; `fixture.server.storage.head(key)` finds the object |
+| keeps a file whose /complete answer was lost to a cancel | `POST /complete`: forward, abort the controller, then throw `TypeError` | upload, PUT, complete; no `/abort` | `ABORTED`; the object exists |
+| cleans up after a cancel during a /complete the server refused | first `POST /complete`: abort the controller, answer 503 `SERVER_ERROR` retryable without forwarding | upload, PUT, complete, abort | `ABORTED`; `head(key)` is `null` |
 | starts nothing for a signal that has already fired | aborted signal | none | `ABORTED` |
 | reports an unreachable server after six tries | every `POST /upload` throws `TypeError` | six `POST /upload` | `NETWORK_ERROR`, `serverUnreachable()` message, retryable |
 
 Every failure row asserts `{ code, message, retryable }` with `toEqual` against the literal from `failures.ts` or the
 server's message: an exact message cannot contain a URL or a token.
+
+The three `/complete` cancel rows (contract: S14 as corrected; oracle: the stored object and the request list, from the
+real handler on the fake; bug caught: the signal reaching `/complete`, or `/abort` after an unanswered `/complete`)
+upload a small `albums` file as the first `upload.test.ts` row does (one `PUT object`, an `onComplete` that returns
+data); `key` is the ticket's key, read from the forwarded `/upload` answer.
 
 `client.test.ts` (contract: S4, S17, S18):
 
@@ -1097,18 +1164,19 @@ server's message: an exact message cannot contain a URL or a token.
 | accepts a path or an absolute URL | `"/api/cloudrop"`, `"https://api.example.com/api/cloudrop"` | no throw |
 | refuses a base path the handler cannot be at | `"api/cloudrop"`, `"/api/cloudrop/"`, `"/api?x=1"`, `""` | throws `CloudropError` `INVALID_CONFIG` with the S17 message |
 | calls the global fetch at request time, not as a method | `globalThis.fetch` replaced with a recording function after the client was created (`vi.stubGlobal`) | the recording function received the `/upload` call with `this` undefined |
-| exports only the two values of the public surface | `Object.keys(await import("./client.ts")).sort()` | `["CloudropError", "createCloudropClient"]` |
+| exports only the two values of the public surface | `Object.keys(await import("./client.ts")).sort()` | `["CloudropError", "createCloudropClient"]` (the other 29 names are types; Task 7 step 3 checks them in the d.ts) |
 
 - [ ] **Step 1:** Write the three test files; run: fail (modules missing).
 - [ ] **Step 2:** Implement `upload.ts` and `client.ts`.
 - [ ] **Step 3:** Run: `upload.test.ts` 6 rows (8 tests with the three-input row as `it.each`),
-  `upload-failures.test.ts` 9, `client.test.ts` 4 rows (8 tests with `it.each` inputs); write what Vitest reports.
+  `upload-failures.test.ts` 12, `client.test.ts` 4 rows (8 tests with `it.each` inputs); write what Vitest reports.
   Measure with `--reporter=verbose`; the multipart rows move 8 MiB and may pass 50 ms; any row over 250 ms states why
   in a comment.
 - [ ] **Step 4:** Fault probes: `REPAIR_ROUNDS = 0` ("re-sends the parts…" fails); drop the `!result.error ||` guard
-  and abort right after completion in a scratch row (the object is deleted: prove it, then delete the scratch row);
-  send `metadata: null` when absent (last `upload.test.ts` row fails); add `export const probe = 1;` to `client.ts`
-  (the surface row fails). Restore each.
+  ("keeps a file whose /complete finished…" fails: an `/abort` appears and the object is gone); pass `signal` to
+  `endpoints.complete` again (the same row fails); drop the `!mayBeComplete` condition ("keeps a file whose /complete
+  answer was lost…" fails); send `metadata: null` when absent (last `upload.test.ts` row fails); add
+  `export const probe = 1;` to `client.ts` (the surface row fails). Restore each.
 - [ ] **Step 5:** Gates; complexity check; `wc -l` of every new file under the caps.
 - [ ] **Step 6:** Commit `feat(client): add createCloudropClient and upload()`.
 
@@ -1116,8 +1184,8 @@ server's message: an exact message cannot contain a URL or a token.
 
 **Files:**
 - Modify: `packages/cloudrop/package.json` (`exports`, dev dependency), `packages/cloudrop/tsdown.config.ts:4`,
-  `scripts/size-limit.config.ts`, `biome.json`
-- Test: `packages/cloudrop/src/client/types.test.ts`
+  `scripts/size-limit.config.ts`, `biome.json`, `packages/cloudrop/src/server/route.ts:122-124`
+- Test: `packages/cloudrop/src/client/types.test.ts`, `packages/cloudrop/src/server/types.test.ts`
 
 **Interfaces:**
 - Produces: `"./client": { "types": "./dist/client.d.ts", "default": "./dist/client.js" }` beside `"./next"` and
@@ -1127,7 +1195,9 @@ server's message: an exact message cannot contain a URL or a token.
 `server/types.test.ts:34-88`; compiled by `bun run typecheck`, one runtime `it` so Vitest does not report an empty
 file).** Build a `cloudrop` with `avatar` (required metadata schema `{ albumId: string }` in, `onComplete` returning
 `{ url: file.url, at: new Date() }`), `notes` (no schema, no `onComplete`) and `optional` (schema input
-`{ a: string } | undefined`), then `const client = createCloudropClient<typeof cloudrop>()`:
+`{ a: string } | undefined`), then `const client = createCloudropClient<typeof cloudrop>()`. Routes are written inline
+inside `createCloudrop({ routes })`, as spec §1 does (with constants the "schemaless result" row would pass even
+without step 1's fix):
 
 | Row | Expression | Expected |
 |---|---|---|
@@ -1142,6 +1212,7 @@ file).** Build a `cloudrop` with `avatar` (required metadata schema `{ albumId: 
 | untyped client | `createCloudropClient().upload("anything", file)` | `Promise<Result<CompleteResponse<unknown>>>` |
 | destructuring | `const { upload } = client; upload("notes", file)` | compiles |
 | wire types carry `id` | `MultipartTicket["id"]`, `AbortResponse["id"]`, `UploadedFile["id"]` imported from `../client.ts` | each `string`; `@ts-expect-error` on `SingleTicket["fileId"]` (M3-O2) |
+| inference types from the client entry | `RouteName<typeof cloudrop>`, `RouteMetadata<typeof cloudrop, "avatar">`, `RouteResult<typeof cloudrop, "notes">` imported from `../client.ts` | `"avatar" \| "notes" \| "optional"`, `{ albumId: string }`, `null` |
 
 Biome override (S19), added to `biome.json` (read Biome's own docs for the exact `overrides` shape, as lane G did for
 its rule; do not write it from memory):
@@ -1157,7 +1228,7 @@ its rule; do not write it from memory):
           "options": {
             "patterns": [
               {
-                "group": ["**/storage/**", "**/server/**", "./storage/**", "./server/**", "../storage/**", "../server/**"],
+                "group": ["**/storage/**", "**/server/**"],
                 "message": "cloudrop/client must not import storage or server code. Import from errors, input, plan or protocol."
               }
             ]
@@ -1169,30 +1240,50 @@ its rule; do not write it from memory):
 }
 ```
 
-- [ ] **Step 1:** Write `types.test.ts`; `bun run typecheck` passes only once `client.ts` exists (Task 6), so the RED
-  here is a fault probe: change `UploadArguments` to always `[options?: …]`; typecheck reports the "required metadata"
-  `@ts-expect-error` as unused. Restore.
-- [ ] **Step 2:** Add the entry and the export. `bun run build`; `dist/client.d.ts` exists. Take the names of its final
-  `export { … }` statement, sort them and compare them with the 27 names of S4 sorted; record the comparison in the
+- [ ] **Step 1 (audit I-2, ruled part of this slice in M3-H15):** In `src/server/route.ts`, change the return type of
+  `route()` (`:122-124`) to `NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>>` with the comment
+  `// NoInfer: written inside createCloudrop({ routes }), the call would otherwise infer TResult from the expected Route`
+  `// and type a route without onComplete as unknown, not null.` Add to `src/server/types.test.ts`, inside
+  `describe("type inference for the client", …)`:
+
+  ```ts
+    it("types an inline route without onComplete as null, as the quickstart writes routes", () => {
+      const inline = createCloudrop({
+        storage: r2({ bucket: "uploads", accountId: "0123456789abcdef0123456789abcdef", accessKeyId: "k", secretAccessKey: "s" }),
+        secret: "test-secret-0123456789abcdef0123456789",
+        routes: { notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }) },
+      });
+      expectTypeOf<RouteResult<typeof inline, "notes">>().toEqualTypeOf<null>();
+    });
+  ```
+
+  RED first: without the `NoInfer` `bun run typecheck` fails with "Expected: null, Actual: unknown". It passes after,
+  and the existing rows of `server/types.test.ts` (`Route<undefined, null>` for a void `onComplete`,
+  `Route<undefined, { id: string }>` for an async one) stay equal (measured by the plan audit).
+- [ ] **Step 2:** Write `client/types.test.ts`; `bun run typecheck` passes only once `client.ts` exists (Task 6), so the
+  RED here is a fault probe: change `UploadArguments` to always `[options?: …]`; typecheck reports the "required
+  metadata" `@ts-expect-error` as unused. Restore.
+- [ ] **Step 3:** Add the entry and the export. `bun run build`; `dist/client.d.ts` exists. Take the names of its final
+  `export { … }` statement, sort them and compare them with the 31 names of S4 sorted; record the comparison in the
   report (no extra, none missing). Read the d.ts: it imports nothing from a server or storage chunk.
-- [ ] **Step 3:** Add the Biome override. Fault probe (U7): add `import { keyProblem } from "../storage/validate.ts";`
-  to `src/client/upload.ts`; `bun run check` must fail with the message above. Restore. If it does not fail, find
-  the pattern form that does (Biome docs), and record what matched in the report.
-- [ ] **Step 4:** Record the three existing budgets' figures: `bun run package:check` prints each entry's size. Then
-  `bun add -d --exact @size-limit/esbuild@14.3.0` in `packages/cloudrop` (after
-  `npm view @size-limit/esbuild@14.3.0 time`). U8: read size-limit's README for the esbuild plugin's `import` option
-  and for how it treats a check that has no `import`. Run `bun run package:check` again: if any of the three existing
-  figures changed, STOP and report both sets of figures (the owner chooses between configuring the plugin per check
-  and measuring the client with `withImportedChunks` too).
-- [ ] **Step 5:** Add the budget entry to `scripts/size-limit.config.ts`, after the three existing ones and in their
-  style: `{ name: "cloudrop/client", path: join(dist, "client.js"), import: "{ createCloudropClient }", gzip: true,
-  limit: "<measured + 10 %>" }`, with a comment that this one entry is bundled (tree-shaken and minified), the size an
-  application ships, which spec §1's 8 kB is stated in. Measure first with a high limit; if the measurement is over
-  4 kB, STOP and report it (S20). Record in the commit body: the bundled gzip figure, the limit, and for comparison
-  the gzip figure of `withImportedChunks("client.js")`.
-- [ ] **Step 6:** `bun run package:check` passes (publint and attw see the new export). Gates. N + every count so far
-  + 1.
-- [ ] **Step 7:** Commit `feat(client): publish cloudrop/client with its type tests, import rule and size budget`.
+- [ ] **Step 4:** Add the Biome override. Fault probe: add `import { keyProblem } from "../storage/validate.ts";` to
+  `src/client/upload.ts`; `bun run check` must fail with the message above. Restore. The patterns themselves are
+  settled (U7); this probe proves the override is wired into this repository's `biome.json`.
+- [ ] **Step 5 (U8, settled):** Record the three existing figures (`bun run package:check`).
+  `npm view @size-limit/esbuild@14.3.0 time`; `bun add -d --exact @size-limit/esbuild@14.3.0` in `packages/cloudrop`.
+  Add `disablePlugins: ["@size-limit/esbuild"]` to the three existing entries of `scripts/size-limit.config.ts`, with
+  the comment `// Summed files, not a bundle: these budgets count the entry and its chunks as published.` Run
+  `bun run package:check` again: the three figures are byte-equal to the recorded ones. If one differs, STOP and report
+  both sets.
+- [ ] **Step 6:** Add the budget entry to `scripts/size-limit.config.ts`, after the three existing ones and in their
+  style, without `disablePlugins`: `{ name: "cloudrop/client", path: join(dist, "client.js"), import:
+  "{ createCloudropClient }", gzip: true, limit: "<measured + 10 %>" }`, with a comment that this one entry is bundled
+  (tree-shaken and minified), the size an application ships, which spec §1's 8 kB is stated in. Measure first with a
+  high limit; if the measurement is over 4 kB, STOP and report it (S20). Record in the commit body: the bundled gzip
+  figure, the limit, and for comparison the gzip figure of `withImportedChunks("client.js")`.
+- [ ] **Step 7:** `bun run package:check` passes (publint and attw see the new export). Gates. N + every count so far
+  + 2 (the runtime `it` of `client/types.test.ts` and the new `it` of `server/types.test.ts`).
+- [ ] **Step 8:** Commit `feat(client): publish cloudrop/client with its type tests, import rule and size budget`.
 
 ### Task 8: The Next.js example
 
@@ -1201,7 +1292,9 @@ its rule; do not write it from memory):
 - Modify: root `package.json` (`"workspaces": ["packages/*", "examples/*"]`), `.gitignore` (`.next/`,
   `next-env.d.ts`, `*.tsbuildinfo`, `test-results/`, `playwright-report/`; `.env.local` is already covered by
   `.env.*`), `biome.json` (ignore `**/.next`, `**/next-env.d.ts`, `**/test-results`, `**/playwright-report`),
-  `bun.lock` (through `bun install` only).
+  `bun.lock` (through `bun install` only), `scripts/check-file-size.ts` (add `:(glob)examples/*/**/*.ts` and
+  `:(glob)examples/*/**/*.tsx` to the listed paths; `.next/` is git-ignored, so `--exclude-standard` drops it; update
+  the header comment, which names only `packages/*/src` and `scripts`).
 
 **Interfaces:**
 - Consumes: `createCloudrop` (`src/index.ts:12`), `route` and `unauthorized` (`:23-34`), `r2` and `s3` (`:50`) from
@@ -1257,7 +1350,8 @@ import { createCloudrop, r2, route, s3, unauthorized } from "cloudrop";
 
 // An empty CLOUDROP_S3_ENDPOINT counts as unset, so the live run can switch a RustFS .env.local back to R2.
 const endpoint = process.env.CLOUDROP_S3_ENDPOINT;
-const storage = endpoint
+// Exported for the browser test, which reads the uploads back through the same storage.
+export const storage = endpoint
   ? s3({
       endpoint,
       region: process.env.CLOUDROP_S3_REGION ?? "us-east-1",
@@ -1295,7 +1389,7 @@ export const cloudrop = createCloudrop({
 `s3()` and `r2()` throw `INVALID_CONFIG` naming every missing setting (`throwIfMissing`, `storage/presets.ts:39-42`),
 so the `?? ""` fallbacks surface as one clear start-up (and build) error. `createCloudrop` reads `CLOUDROP_SECRET`
 (`server/config.ts:64-77`). In development the handler checks the bucket once and warns about settings that would
-break uploads (`server/handler.ts:106-115`): on the example's RustFS bucket expect no warning if step 2's lifecycle
+break uploads (`server/handler.ts:107-116`): on the example's RustFS bucket expect no warning if step 2's lifecycle
 rule was accepted, one lifecycle warning otherwise.
 
 `app/api/cloudrop/[...all]/route.ts`: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);` (the spec §1
@@ -1305,8 +1399,8 @@ quickstart line; `OPTIONS` answers preflights from `trustedOrigins`, M2-D27).
 `const client = createCloudropClient<typeof cloudrop>();` at module scope, a button that sets
 `document.cookie = "demo-user=demo; path=/; SameSite=Lax"`, and an `onChange` that calls
 `client.upload("files", file)` and writes the status line from `{ data, error }`. No other state, no styling beyond
-what makes it readable. `import type` keeps `lib/cloudrop.ts` (and the secret) out of the browser bundle (spec §1, the
-paragraph after the quickstart).
+what makes it readable. The button has `type="button"` (Biome `a11y/useButtonType`). `import type` keeps
+`lib/cloudrop.ts` (and the secret) out of the browser bundle (spec §1, the paragraph after the quickstart).
 
 `scripts/setup-rustfs.ts` (Bun; English output, one line per step, never a secret):
 1. Reads `CLOUDROP_S3_ENDPOINT` (default `http://127.0.0.1:19000`), bucket `cloudrop-example`, the RustFS keys
@@ -1314,8 +1408,8 @@ paragraph after the quickstart).
 2. Creates the bucket with an `aws4fetch` `AwsClient` (`service: "s3"`, `region: "us-east-1"`); 409 means it exists.
 3. Puts the CORS rule (S3 `PutBucketCors` XML with `Content-MD5`): origins `http://localhost:5173` and
    `http://127.0.0.1:5173`, methods `PUT`, `GET`, `HEAD`, allowed headers `content-type`, `content-disposition`,
-   `if-none-match`, `x-amz-meta-cloudrop-id` (the headers `checkBucket` requires, `server/bucket-check.ts:21`), expose
-   `ETag` (`bucket-check.ts:36`). This is the rule shape measured on RustFS 1.0.5 (the measurements §1).
+   `if-none-match`, `x-amz-meta-cloudrop-id` (the headers `checkBucket` requires, `server/bucket-check.ts:24`), expose
+   `ETag` (`bucket-check.ts:39`). This is the rule shape measured on RustFS 1.0.5 (the measurements §1).
 4. Sends a preflight (`OPTIONS` on an object URL, `Origin: http://localhost:5173`,
    `Access-Control-Request-Method: PUT`, `Access-Control-Request-Headers: content-type,if-none-match,x-amz-meta-cloudrop-id,content-disposition`)
    and exits 1 with "RustFS did not accept the CORS rule: browsers cannot upload to it. See examples/next/README.md."
@@ -1326,13 +1420,17 @@ paragraph after the quickstart).
    "RustFS did not accept the lifecycle rule (HTTP <status>); the dev server will warn about it. Uploads work without
    it." and the script goes on (U12).
 6. Writes `.env.local` only if it does not exist: `CLOUDROP_SECRET` (32 random bytes, base64), the five
-   `CLOUDROP_S3_*` values. Prints "Wrote .env.local" or "Kept the existing .env.local".
+   `CLOUDROP_S3_*` values. Prints "Wrote .env.local" or "Kept the existing .env.local". Skips this step when
+   `CLOUDROP_SETUP_ENV_FILE=0` (the browser lane sets it: it exports every setting itself, and an `.env.local` it wrote
+   would point the developer's next `bun run dev` at the lane's removed container).
 
 `README.md` (the example's):
 - What it shows; prerequisites (Docker, Bun).
 - **The build needs the settings:** `next build` loads `lib/cloudrop.ts`, so `CLOUDROP_SECRET` and the storage
   settings must be set when building, from `.env.local` or the environment; a build without them fails with
-  `INVALID_CONFIG` naming what is missing. Exported variables win over `.env.local`.
+  `INVALID_CONFIG` naming what is missing. Exported variables win over `.env.local`. A build that has no secrets (a
+  Docker build stage with secrets only at run time) must pass them as build secrets, or it fails with
+  `INVALID_CONFIG` (S21, M3-H14).
 - Run with RustFS: `CLOUDROP_RUSTFS_NAME=cloudrop-example-rustfs scripts/rustfs.sh up`, `bun run build` at the root,
   `bun run setup:rustfs`, `bun run dev`, open `http://localhost:5173`; `CLOUDROP_RUSTFS_NAME=cloudrop-example-rustfs
   scripts/rustfs.sh down` when done.
@@ -1345,7 +1443,7 @@ paragraph after the quickstart).
   local R2 does not implement ListParts, which the server needs to verify a multipart upload (the server log says "The
   storage service does not support this request"). The parts stay in Wrangler's state; stop Wrangler and delete
   `packages/cloudrop/fixtures/wrangler/.state` to clear them. `api.checkBucket` there reports CORS and lifecycle as
-  unknown (or, on a release before lane I, fails with `STORAGE_ERROR`): Wrangler cannot report bucket settings.
+  unknown: Wrangler cannot report bucket settings.
 - Run with R2: `CLOUDROP_R2_*`, the bucket's CORS rule in the S3 JSON shape of spike Q8 with this example's origin.
 - What must be true of any bucket: the CORS rule above; `ETag` exposed because `checkBucket` asks for it and the
   resume plan will read it; an abort-incomplete lifecycle rule.
@@ -1369,8 +1467,8 @@ paragraph after the quickstart).
 - [ ] **Step 4:** `bun run --filter cloudrop-example-next start`; in a browser on `http://localhost:5173`: upload
   before signing in (status shows `UNAUTHORIZED: Sign in as the demo user first.`), sign in, upload a small text file
   and a 20 MiB file. Both show `Uploaded …`. Stop the server and `scripts/rustfs.sh down` (same name).
-- [ ] **Step 5:** `bun run --filter cloudrop-example-next typecheck`; `bun run check` (Biome now formats the example);
-  root gates unchanged.
+- [ ] **Step 5:** `bun run --filter cloudrop-example-next typecheck`; `bun run check` (Biome now formats the example,
+  and `bun run check` now also caps the example's files); root gates unchanged.
 - [ ] **Step 6:** `docker ps -a --filter label=cloudrop.test` is empty; no `next` process of this task left (find it by
   its working directory, not `pgrep -f "next start"`, which also matches the shell that runs the search and another
   session's Next).
@@ -1381,28 +1479,36 @@ paragraph after the quickstart).
 **Files:**
 - Create: `examples/next/playwright.config.ts`, `examples/next/app/upload.browser.test.ts`, `scripts/test-browser.sh`
 - Modify: root `package.json` (`"test:browser": "scripts/test-browser.sh"`; `verify` gains
-  `&& bun run --filter cloudrop-example-next typecheck` after the build), `.github/workflows/ci.yml` (job `browser`)
+  `&& bun run --filter cloudrop-example-next typecheck` after the build), `.github/workflows/ci.yml` (job `browser`;
+  in job `check`, which runs the gates one by one rather than `verify`, a step
+  `bun run --filter cloudrop-example-next typecheck` after `bun run package:check`)
 
 **Interfaces:**
 - `scripts/test-browser.sh`, in the shape of `scripts/test-rustfs.sh`: fails when port 5173 or the RustFS port is in
   use; sets `CLOUDROP_RUSTFS_NAME=cloudrop-browser-rustfs-$$`; registers `trap '"$ROOT/scripts/rustfs.sh" down' EXIT`
   before `up`; runs `bun run build`; exports `CLOUDROP_SECRET` (random per run), the `CLOUDROP_S3_*` values and
-  `CLOUDROP_EXAMPLE_PREFIX=browser`; runs `setup:rustfs` (it keeps any developer `.env.local`; the exported variables
-  win over it, U14, and the `next build` inside Playwright's `webServer` inherits them, which the build needs, S21);
-  then `cd examples/next && bunx playwright test`.
+  `CLOUDROP_EXAMPLE_PREFIX=browser` and `CLOUDROP_SETUP_ENV_FILE=0`; runs `setup:rustfs` (which then writes no
+  `.env.local` and leaves any developer one untouched; the exported variables win over it, U14, and the `next build`
+  inside Playwright's `webServer` inherits them, which the build needs, S21); then
+  `cd examples/next && bunx playwright test`.
 - `playwright.config.ts`: `testDir: "app"`, `testMatch: "**/*.browser.test.ts"`, one worker, Chromium only,
   `baseURL: "http://localhost:5173"`, `webServer: { command: "bun run build && bun run start", url:
   "http://localhost:5173", reuseExistingServer: false, timeout: 180_000 }`, `trace`, `video` and `screenshot` off (no
   artefact may hold a presigned URL; Task 10 reuses this config).
 
 **Tests (`upload.browser.test.ts`; contract: the quickstart works in a real browser against a real S3 API; oracle: the
-bytes the test created, read back through the `s3()` driver with the lane's settings, and the request kinds the page
-sent):**
+bytes the test created, read back through the `storage` that `lib/cloudrop.ts` exports (RustFS in this lane, R2 in
+Task 10), and the request kinds the page sent). The expected key starts with
+`` `${process.env.CLOUDROP_EXAMPLE_PREFIX}/demo/` ``; the test fails when that variable is unset, never defaults:**
 
 | Name | Steps | Expected | Bug caught |
 |---|---|---|---|
-| uploads a small file with one PUT | sign in; `setInputFiles` `hello.txt`, `text/plain`, 14 bytes `"hello cloudrop"` | status `Uploaded hello.txt (14 bytes) as browser/demo/<ulid>.txt`; one bucket PUT without `partNumber`; `head(key)` size 14, type `text/plain`; `getRange` equals the bytes | CORS, signed headers or Blob framing wrong in a real browser (U10) |
-| uploads a 20 MiB file in three parts | sign in; `big.bin`, `application/octet-stream`, 20 MiB of `index % 251` | status `Uploaded big.bin (20971520 bytes) …`; bucket PUTs with `partNumber` 1, 2, 3; `head(key).size` 20971520; bytes `8 MiB - 2 … 8 MiB + 1` and `16 MiB - 2 … 16 MiB + 1` equal | parts cut or sent wrongly from a browser |
+| uploads a small file with one PUT | sign in; `setInputFiles` `hello.txt`, `text/plain`, 14 bytes `"hello cloudrop"` | status `` Uploaded hello.txt (14 bytes) as ${CLOUDROP_EXAMPLE_PREFIX}/demo/<ulid>.txt ``; one bucket PUT without `partNumber`; `head(key)` size 14, type `text/plain`; `getRange` equals the bytes | CORS, signed headers or Blob framing wrong in a real browser (U10) |
+| uploads a 20 MiB file in three parts | sign in; `big.bin`, `application/octet-stream`, 20 MiB of `index % 251` | status `` Uploaded big.bin (20971520 bytes) as ${CLOUDROP_EXAMPLE_PREFIX}/demo/<ulid>.bin ``; bucket PUTs with `partNumber` 1, 2, 3; `head(key).size` 20971520; bytes `8 MiB - 2 … 8 MiB + 1` and `16 MiB - 2 … 16 MiB + 1` equal | parts cut or sent wrongly from a browser |
+
+The test imports `storage` from `../lib/cloudrop`, so the Playwright process evaluates that module too and needs the
+same settings and `CLOUDROP_SECRET` as the build; it inherits them from the script that started it (this task's
+`scripts/test-browser.sh`, Task 10's `scripts/test-browser-live.ts`).
 
 PUTs are counted with `page.on("request")`, recording only the method and whether `partNumber` is present and its
 value: never the URL. The same files and checks passed with requests made by hand on RustFS 1.0.5 (the measurements
@@ -1411,8 +1517,9 @@ with a readable 403 (S10), and the opaque path exists only on R2 (Task 10) and i
 
 CI job `browser` (after `check`, `ubuntu-latest`, 20 minutes, the same three pinned actions as the `rustfs` job, no new
 action): `bun install --frozen-lockfile`, `cd examples/next && bunx playwright install --with-deps --only-shell
-chromium`, `bun run test:browser`. `--with-deps` on `ubuntu-latest` is unmeasured (U13): the first CI run records the
-step's time in the PR description.
+chromium`, `bun run test:browser`. `--with-deps` on `ubuntu-latest` is unmeasured (U13), and so is the extra install
+`examples/*` adds to every job's `bun install --frozen-lockfile` (U15): the first CI run records both times in the PR
+description.
 
 - [ ] **Step 1:** `cd examples/next && bunx playwright install --only-shell chromium` (locally without `--with-deps`,
   which needs root and was not needed here, the measurements §4; this writes about 287 MB on disk to
@@ -1430,8 +1537,9 @@ step's time in the PR description.
 
 ### Task 10: Live R2 from a browser (decision S24)
 
-Run only after the owner has confirmed the test bucket's CORS rule (step 1). It measures U1 to U3 and U10 on real R2
-once, then leaves the browser lane able to repeat the two rows against R2.
+Run only after the test bucket's CORS rule is confirmed (step 1: the precondition and the stop condition, ruled in
+M3-H15). It measures U1 to U3 and U10 on real R2 once, then leaves the browser lane able to repeat the two rows against
+R2.
 
 **Files:**
 - Create: `scripts/test-browser-live.ts`; `examples/next/scripts/measure-r2-browser.ts` (deleted again in this task)
@@ -1448,12 +1556,15 @@ variable, empty or not, wins over `.env.local`). Everything the child prints pas
 deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the proof's `deleted` count (never a key).
 
 - [ ] **Step 1:** Confirm the test bucket's CORS rule `cloudrop-browser-tests` covers `http://localhost:5173` (spec
-  §12 "Still unverified" item 1) with an account token the owner provides, or ask the owner; never write CORS on that
-  bucket.
+  §12 "Still unverified" item 1; the spec records the rule as added on 2026-11-15 for `http://localhost:5173` and
+  `http://127.0.0.1:5173`) with an account token the owner provides, or ask the owner; never write CORS on that
+  bucket. If neither confirms it, STOP and report: run none of steps 2 to 5.
 - [ ] **Step 2:** `CLOUDROP_R2_ENV_FILE=~/.config/cloudrop/live-r2.env bun run test:browser:live`: 2 passed;
   `deleted` equals the objects written (2), which also proves the example used R2, not RustFS.
-- [ ] **Step 3:** The measurement script launches Chromium through `@playwright/test`'s `chromium`, opens
-  `http://localhost:5173` (the example started with the live settings, as in step 2), and from the page: (a) PUTs to a
+- [ ] **Step 3:** The measurement script launches Chromium through `@playwright/test`'s `chromium`, routes
+  `http://localhost:5173/` to a blank page with `page.route(…, (route) => route.fulfill({ contentType: "text/html",
+  body: "<!doctype html>" }))` and opens it, so the page has the origin the CORS rule names without a server, and from
+  the page: (a) PUTs to a
   URL presigned with `expiresIn: 1` by `r2().presignPut` under the run prefix, after waiting 2 s, recording whether
   `fetch` rejected (`TypeError`) or answered (status, and whether the body was readable); (b) PUTs to a fresh URL and
   records whether `response.headers.get("etag")` is non-null. URLs are passed into `page.evaluate` as arguments and
@@ -1479,12 +1590,26 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
   line saying hooks (`useUpload`) arrive in M4. Wire types are imported from `cloudrop/client`, never from `cloudrop`.
 - [ ] **Step 2:** Spec edits for the decisions the owner accepted, each listed in the commit body: §6.2 names the
   client codes `ABORTED` and `NETWORK_ERROR` beside `UPLOAD_REJECTED` (S5); §6.4 says the slice's `upload(route, file)`
-  takes one file until the scheduler plan (S1); §3 says `cloudrop/client` exports the protocol's wire types (S4).
+  takes one file until the scheduler plan (S1); §3 says "`cloudrop/client` exports the wire types of the four
+  endpoints and the route inference types `RouteName`, `RouteMetadata`, `RouteResult` and `InferableCloudrop`" (S4,
+  M3-H13); §5.5 gains "The client never sends `/abort` after a `/complete` that may have succeeded." (S14).
 - [ ] **Step 3:** `docs/decisions/`: add the entries this slice's decisions need, following `docs/decisions/README.md`
-  ("Adding an entry"; the M3 series). M3-O1 to M3-O4 exist already; add one entry per decision of this plan that
-  changes behaviour or a public contract and has no entry yet (at least S9, S10, S11, S13, S14, S15, S20, S21, S22),
-  under the prefix the README gives for M3 plan decisions. If the README defines none, use `M3-S<n>` with this plan's
-  numbers, and list that choice in the report for the owner.
+  ("Adding an entry"). M3-O1 to M3-O4 and M3-H13 to M3-H15 exist already: S4's surface is M3-H13 (with the 31 names
+  of M3-H15), S21 is M3-H14, and the audit's five decisions are M3-H15; cite those, do not repeat them. Add one entry
+  per decision of this plan that changes behaviour or a public contract and has no entry yet, in a new series
+  `M3-S<n>` numbered as this plan's decisions (S9's entry takes the number 9). That series needs, in the same change,
+  a row in the README's prefix table and an entry in `AGENTS.md`'s list of series (the "Rules" item on
+  `docs/decisions/`). At least:
+  - S9 (retry budget), S10 (bucket answers), S11 (renewal), S13 (repair rounds), S15 (no `/abort` after a failure),
+    S22 (local backends; Wrangler's multipart `/complete`);
+  - S14 as corrected by the audit (C-1): `/complete` runs without the signal, and after a cancel the file is kept when
+    the last `/complete` got no answer (cite M3-H15 for the ruling);
+  - S20 with the size-limit split (I-3): the three existing budgets carry `disablePlugins: ["@size-limit/esbuild"]`
+    and count summed files; only the client entry is bundled;
+  - the `NoInfer` return type of `route()` (I-2, ruled in M3-H15), as its own entry (number 27, the next one this plan
+    does not use): a route's result type no longer follows the expected type of its position, so an inline route without
+    `onComplete` gives the client `null`.
+  List the new series in the report for the owner.
 - [ ] **Step 4:** `bun run check`; commit `docs: document cloudrop/client, the example and the browser lane`.
 
 ## Definition of done for the slice
@@ -1493,14 +1618,19 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
   that does not say why.
 - `bun run test:browser` passes (2 tests) and leaves no container or process; CI's `browser` job passes on the pull
   request.
-- `dist/client.d.ts` exports exactly the 27 names of S4; the client entry ships no server or storage code: no file in
+- `dist/client.d.ts` exports exactly the 31 names of S4; the client entry ships no server or storage code: no file in
   `withImportedChunks("client.js")` (the entry and every chunk it imports) contains `signToken`, `presignPut` or
-  `storageError` (`grep -l`), and the size budget holds.
+  `storageError` (`grep -l`), and the size budget holds; the three existing budgets measure what they measured before
+  the esbuild plugin was installed.
+- A cancel never deletes a file whose `/complete` may have succeeded (the three `/complete` cancel rows), and an inline
+  route without `onComplete` types the client's result as `null` (the `server/types.test.ts` row).
 - The example runs from its README against RustFS without credentials; `examples/next/tsconfig.json` is unchanged by
-  `next build`; `.next/static` does not contain the secret.
+  `next build`; `.next/static` does not contain the secret; the README says a build without secrets fails; the browser
+  lane leaves no `.env.local` behind; `bun run check` caps the example's files and CI's `check` job type-checks it.
 - The README documents Wrangler for single uploads only, with the error a multipart upload ends in.
 - Every decision this slice changes or adds has its `docs/decisions/` entry (Task 11 step 3).
-- The owner items in "Not settled here" are answered, or the report says which were taken as recommended.
+- Task 10 ran, or its report says the CORS precondition was not confirmed and spec §12's browser items stay open.
+- "Not settled here" still holds nothing open, or the report names what became open during execution.
 
 ## Self-review
 
@@ -1516,7 +1646,7 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
 | Running against Wrangler or RustFS without credentials; bucket requirements | S22; Task 8 README |
 | Client-driven protocol on the fake R2, type tests, one browser check, lanes named | Tasks 4 to 7 (unit, typecheck), Task 9 (browser) |
 | Out of the slice, each with its owner | the "Out of the slice" table |
-| Wire types exported by `cloudrop/client` | S4 (M3-O1: all 19, listed) |
+| Wire types exported by `cloudrop/client` | S4 (M3-O1 as scoped by M3-H13: the 19 wire types and the 4 inference types, listed) |
 | Neutral module first, every importer named | S6; Task 1 |
 | Part arithmetic from `src/plan.ts` | S7 |
 | File-size and complexity rule | Global constraints; the file map's estimates; complexity checks in Tasks 3 to 6 |
@@ -1529,7 +1659,7 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
 
 | Input | Where it landed |
 |---|---|
-| M3-O1, every wire type | S4 (27 names), Task 6 `client.ts`, Task 7 step 2, client.test surface row, Definition of done |
+| M3-O1, every wire type | S4 (31 names since the audit, M3-H13), Task 6 `client.ts`, Task 7 step 3, client.test surface row, Definition of done |
 | M3-O2, `id` on the wire | Before Task 1 check; Task 4 shapes; Task 7 type row |
 | M3-O3, client codes | S5; Task 2 |
 | M3-O4, other recommendations accepted | "(owner, accepted 2026-11-16)" on S1, S8, S9, S10, S15, S20 to S25; S26 |
@@ -1541,6 +1671,20 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
 | Opaque expired-URL answer only on R2 | S10; Task 5 row; Task 9 note; Task 10 step 4 |
 | `cloudrop/client` in the browser bundle unmeasured | U6; Task 8 step 3 (fallback and stop kept) |
 | Split server files; `checkBucket` and Node adapter changes | Before Task 1; S6; citations throughout; S22 |
+
+### Coverage of the plan audit (2026-11-16, rulings M3-H13 to M3-H15)
+
+| Finding | Where it landed |
+|---|---|
+| C-1 a cancel during `/complete` deletes a recorded file | S14 (replaced); Task 3 `withRetry` rule and its new row; Task 4 `Endpoints.complete` without signal, endpoint rules; Task 6 `Sent`, `sendAndComplete`, `uploadFile`, three `upload-failures` rows, step 3 count 12, step 4 probes; threat table; Task 11 steps 2 and 3; Definition of done |
+| I-1 the four inference types | S4 (31 names); Task 6 export block; Task 7 type row and step 3; Definition of done; Task 11 step 2 |
+| I-2 `unknown` for an inline route | S3; Task 7 **Files**, step 1 (`NoInfer`, new `server/types.test.ts` row), inline routes in the type tests, step 7 count; file map; threat table; Task 11 step 3 |
+| I-3 the esbuild plugin bundles every check | S20; U8 settled; Task 7 steps 5 and 6; Definition of done; Task 11 step 3 |
+| I-4 the browser test cannot run on R2 | Task 8 `lib/cloudrop.ts` exports `storage`; Task 9 oracle, both rows' keys, the note on the test's environment |
+| M-1 to M-14, X-1 | Task 1 step 3 and **Files** (M-1); Task 3 **Files** (M-2); "Before Task 1" and Task 8 citations (M-3); S19, U7, Biome override (M-4); Task 4 `abort` (M-5); `sendPart` and Task 5 probes (M-6); Task 5 row (M-7); "Before Task 1", S22, Task 8 README (M-8); Task 8 `app/page.tsx` (M-9); Task 8 **Files**, step 5, Global constraints (M-10); Task 8 `setup-rustfs.ts` item 6, Task 9 script (M-11); Task 9 **Files** (M-12); Task 10 step 3 (M-13); Task 11 steps 2 and 3 (M-14); threat table (X-1) |
+| X-2 counts | "Before Task 1" (N = 896); Task 3 step 3 (+1 row); Task 6 step 3; Task 7 step 7 |
+| X-6 unverified | U7, U8 settled; U15 added; Task 9 CI note |
+| Owner decisions 1 to 5 | Ruled in M3-H15: S4, S14, S21 and the Task 8 README line, Task 7 step 1, Task 10 step 1; removed from "Not settled here" |
 
 ### Placeholder scan
 
@@ -1554,25 +1698,28 @@ implementer fills in are measurements: the baseline N (Task 1), the bundle sizes
 `aborted`, `serverUnreachable`, `bucketUnreachable`, `unreadableAnswer`, `signatureMismatch`, `linkRefused`,
 `uploadRejected`, `storageBusy`, `storageDown`, `MAX_ATTEMPTS`, `retryDelay`, `parseRetryAfter`, `pause`,
 `withRetry`, `BucketOutcome`, `classifyAnswer`, `putObject`, `ClientFetch` (Task 3); `Ticket`, `Endpoints`,
-`createEndpoints`, `readTicket`, `readSignedRequest`, `readSignedParts`, `readCompleted`, `readErrorBody`,
-`clientFixture`, `ClientFixture`, `Fault`, `FaultCall`, `appHeaders` (Task 4); `PARTS_IN_FLIGHT`, `PartSender`,
-`Step`, `nextStep`, `sendParts` (Task 5); `UploadContext`, `uploadFile`, `ClientOptions`, `UploadOptions`,
-`UploadArguments`, `CloudropClient`, `createCloudropClient` (Task 6). Each is defined once, in the task named.
+`createEndpoints`, `ABORT_TIMEOUT_MS`, `readTicket`, `readSignedRequest`, `readSignedParts`, `readCompleted`,
+`readErrorBody`, `clientFixture`, `ClientFixture`, `Fault`, `FaultCall`, `appHeaders` (Task 4); `PARTS_IN_FLIGHT`,
+`PartSender`, `Step`, `nextStep`, `sendParts` (Task 5); `UploadContext`, `Sent`, `uploadFile`, `ClientOptions`,
+`UploadOptions`, `UploadArguments`, `CloudropClient`, `createCloudropClient` (Task 6); `storage` in
+`examples/next/lib/cloudrop.ts` (Task 8), `CLOUDROP_SETUP_ENV_FILE` (Task 8, set in Task 9). Each is defined once, in
+the task named.
 
-The code in this plan was not compiled: it is the exact algorithm for the two places where the order of checks
-matters (`parts.ts`, `upload.ts`), written against the types read from the branch. The implementer compiles it, and
-the reviewer checks it against the decisions, not the other way round.
+The plan audit compiled the client's public declarations (S2, S3, Task 7's type table) and the `NoInfer` change against
+the real server types. The runtime code in this plan was not compiled: it is the exact algorithm for the two places
+where the order of checks matters (`parts.ts`, `upload.ts`), written against the types read from the branch. The
+implementer compiles it, and the reviewer checks it against the decisions, not the other way round.
 
 ## Not settled here (for the owner)
 
 The owner answered the plan's eighteen questions on 2026-11-16 (M3-O1 to M3-O4); the measurements closed the
-TypeScript 6 fallback. Still open:
+TypeScript 6 fallback. Nothing is open. Settled since the plan audit:
 
-1. **The edge of "all wire types" (S4).** The plan reads M3-O1 as the 19 request and answer types of
-   `src/protocol/types.ts` and leaves out the three protocol constants (`MAX_BODY_BYTES`, `PARTS_PER_SIGN`,
-   `MAX_NAME_LENGTH`), the inference types (`InferableCloudrop`, `RouteName`, `RouteMetadata`, `RouteResult`,
-   `RouteTypes`, `Jsonified`), `RequestHandler`, `ClientFetch` and `CloudropErrorOptions`. If wrong: adding any of them
-   later is not breaking; removing one after the first publish is.
-2. **Task 10's prerequisites.** It needs the owner's test bucket and an account token (or the owner) to confirm the CORS
-   rule `cloudrop-browser-tests` covers `http://localhost:5173`. Without it, spec §12's open browser items stay open
-   until the browser-lane plan.
+- **The edge of "all wire types" (S4):** ruled in M3-H13; the 31 names, with the four route inference types, in
+  M3-H15.
+- **A cancel after a `/complete` that may have succeeded (S14):** the file is kept, never deleted (M3-H15).
+- **The build needs the settings (S21):** stands, with a README line for builds without secrets (M3-H14, M3-H15).
+- **The I-2 server type fix:** part of this slice, Task 7 step 1 (M3-H15).
+- **Task 10's prerequisites:** the test bucket and its CORS rule `cloudrop-browser-tests` for `http://localhost:5173`
+  are confirmed when Task 10 runs; its step 1 is the precondition and the stop condition (M3-H15). Without the
+  confirmation, spec §12's open browser items stay open until the browser-lane plan.
