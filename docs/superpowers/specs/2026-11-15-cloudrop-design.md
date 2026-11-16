@@ -1,6 +1,7 @@
 # cloudrop: design
 
-Date: 2026-11-15. Status: approved design, updated with real-R2 spike results (§12).
+Date: 2026-11-15. Status: approved design, updated with real-R2 spike results (§12) and with the decisions and
+measurements of M2, the server (2026-11-16).
 
 cloudrop is an MIT TypeScript library for fast, resumable, direct-to-bucket file uploads to Cloudflare R2 and
 S3-compatible storage. Background research: [`docs/research`](../../research).
@@ -33,7 +34,7 @@ export const cloudrop = createCloudrop({
 })
 
 // app/api/cloudrop/[...all]/route.ts
-export const { GET, POST } = toNextHandler(cloudrop)
+export const { GET, POST, OPTIONS } = toNextHandler(cloudrop)
 
 // client
 const { upload, files } = useUpload<typeof cloudrop>('avatar')
@@ -63,9 +64,9 @@ One npm package, `cloudrop`, with subpath exports. One install and one version; 
 
 | Import | Contents | Runtime |
 |---|---|---|
-| `cloudrop` | `createCloudrop`, `route`, `r2`, `s3`, `allowAnyone`, types, `CloudropError` | Node 24+, Bun, Deno, Workers |
+| `cloudrop` | `createCloudrop`, `route`, `r2`, `s3`, `allowAnyone`, `unauthorized`, types, `CloudropError` | Node 24+, Bun, Deno, Workers |
 | `cloudrop/next`, `cloudrop/node` | `toNextHandler`, `toNodeHandler` | Server |
-| `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence | Browser, React Native |
+| `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence; the wire types of the four endpoints | Browser, React Native |
 | `cloudrop/react` | `useUpload`, `useDropzone` | React 18 and 19 (optional peer) |
 | `cloudrop/plugins` | `contentChecks`, `checksums`, `limits`, `images` (server halves) | Server |
 | `cloudrop/client/plugins` | Client halves of the same plugins | Browser |
@@ -76,9 +77,11 @@ Internal modules, each testable on its own and reachable only through its interf
 1. **`protocol`**: request and response types for the four endpoints, error codes, token format. The only thing
    client and server share.
 2. **`storage`**: the `StorageDriver` interface (`presignPut`, `createMultipart`, `presignPart`, `listParts`,
-   `completeMultipart`, `abortMultipart`, `head`, `getRange`, `put`, `copy`, `delete`, `deleteMany`, `list`) and two
-   implementations, `r2` and `s3`, built on our own SigV4 signer over WebCrypto. The `r2` preset encodes R2 rules:
-   equal part sizes, no presigned POST, 7-day maximum presign expiry, S3 endpoint for presigned URLs.
+   `completeMultipart`, `abortMultipart`, `presignGet`, `getBucketCors`, `getBucketLifecycle`, `head`, `getRange`,
+   `put`, `copy`, `delete`, `deleteMany`, `list`) and two implementations, `r2` and `s3`, built on our own SigV4 signer
+   over WebCrypto. The `r2` preset encodes R2 rules: equal part sizes, no presigned POST, 7-day maximum presign expiry,
+   S3 endpoint for presigned URLs. A storage answer with a missing or malformed size, part number, key or date is a
+   retryable `STORAGE_ERROR`, never `NaN` or an empty key.
 3. **`server`**: the `Request → Response` router, HMAC tokens, policy, authorization, completion verification,
    plugin hooks, `api.*` and the `store` interface (stateless by default).
 4. **`engine`**: a pure state machine, the part planner and the scheduler. No network, no DOM, deterministic under a
@@ -91,8 +94,10 @@ Metadata schemas use Standard Schema, so users bring zod, valibot or arktype and
 
 Repository: Bun workspaces with `packages/cloudrop`, `packages/registry` (shadcn components), `apps/docs`,
 `examples/{next,hono,workers,vite-react}`. Tests sit next to the source they test; the storage contract suite is
-`packages/cloudrop/src/testing/storage-contract.ts`, run by one colocated lane file per backend
-(`src/storage/s3-driver.*.test.ts`).
+`packages/cloudrop/src/testing/storage-contract.ts`, with its case groups under `src/testing/storage-contract/`, run by
+one colocated lane file per backend (`src/storage/s3-driver.*.test.ts`). The S3 driver is `src/storage/s3-driver.ts`,
+composing modules under `src/storage/s3/`; the in-process fake R2 is `src/testing/fake-r2.ts`, with its modules under
+`src/testing/fake-r2/`.
 
 ## 4. Server API
 
@@ -108,13 +113,13 @@ export const cloudrop = createCloudrop({
       maxSize: '5MB',
       maxFiles: 1,
       metadata: z.object({ albumId: z.string() }),       // any Standard Schema
-      prefix: ({ user }) => `users/${user.id}/avatars`,
-      visibility: 'public',                              // or 'private'
-      authorize: async ({ request, metadata }) => {      // required; allowAnyone must be explicit
+      authorize: async ({ request, metadata }) => {      // required, and first: the callbacks below infer from it
         const user = await getUser(request)
         if (!user) return unauthorized()
         return { user }
       },
+      prefix: ({ user }) => `users/${user.id}/avatars`,
+      visibility: 'public',                              // or 'private'
       onComplete: async ({ file, user, metadata }) => ({ url: file.url }), // typed result returned to the client
     }),
   },
@@ -123,11 +128,14 @@ export const cloudrop = createCloudrop({
 ```
 
 - `cloudrop.handler(request)` is the single adapter surface. Next.js, Hono, Workers, Bun, Elysia, SvelteKit, Remix
-  and TanStack Start mount it in one line; `toNodeHandler` bridges Node `http`.
+  and TanStack Start mount it in one line; `toNodeHandler` bridges Node `http`. `toNextHandler` returns `GET`, `POST`
+  and `OPTIONS`; `OPTIONS` answers the CORS preflight of `trustedOrigins`. Both adapters take any `{ handler }`, so
+  `cloudrop/next` and `cloudrop/node` import no server code.
 - `onComplete` runs inside the client's `/complete` request and its return value reaches the client, typed. Delivery
   is at-least-once with a stable `file.id`; the docs say so. The 1.1 adapters make it exactly-once.
-- In development, startup warns about missing bucket CORS (`ExposeHeaders: ETag`), a missing abort-incomplete
-  lifecycle rule, and private routes on a bucket with a public domain.
+- `createCloudrop` warns about private routes on a bucket with a public domain. In development
+  (`NODE_ENV === "development"` exactly) the first request also runs `api.checkBucket()` once in the background and
+  logs missing bucket CORS (`ExposeHeaders: ETag`) and a missing abort-incomplete lifecycle rule.
 
 ## 5. Upload protocol
 
@@ -137,7 +145,7 @@ server never handles them.
 ```
 client                     server (cloudrop.handler)                  bucket
   │ POST /upload  {route, files[], metadata}                            │
-  │──────────────▶ bounds → authorize → plugins.before → policy → plan ─▶ CreateMultipartUpload (multipart only)
+  │──────────────▶ bounds → metadata → authorize → policy → plugins.before → plan ─▶ CreateMultipartUpload
   │◀────────────── per file: token, plan, first batch of signed URLs     │
   │ PUT bytes (parallel, retried) ──────────────────────────────────────▶│
   │ POST /sign    {token, parts[]}  → more or renewed URLs              │
@@ -160,11 +168,16 @@ The server decides; the client cannot.
 ### 5.2 Upload token
 
 - An HMAC-SHA256 signed, base64url token carrying
-  `{ v, route, key, uploadId?, size, type, partSize, owner, metadataHash, fileId, exp }`.
+  `{ v, route, fileId, key, name, size, type, uploadId?, partSize?, owner, metadata, exp }`. `owner` is the JSON of
+  `authorize`'s result and `metadata` the JSON of the schema's output, each at most 2 KiB: `/complete` takes only the
+  token, and `onComplete` needs both. The token is signed, not encrypted, so it never carries a secret.
 - Every call after `/upload` must present it. The server ignores any key, size or upload ID that is not in the token,
   which rules out completion forgery and key rebinding without a database.
-- Lifetime 24 hours by default; this is the resume window. Signed URLs live 15 minutes and are renewed through
-  `/sign`, in batches (default 20 parts).
+- Lifetime 24 hours by default; this is the resume window. Signed URLs live 15 minutes, never past the token's
+  expiry, and are renewed through `/sign`, in batches (default 20 parts).
+- The token is the authority for its whole lifetime: `authorize` runs only in `/upload`, so a session revoked
+  mid-upload can still finish that upload. `onComplete` receives the request and re-checks the session when that
+  matters. Nothing revokes a live token (§5.5).
 - Verification accepts any secret in the `secret` array, so secrets rotate without breaking live uploads.
 
 ### 5.3 Keys
@@ -182,11 +195,25 @@ The server decides; the client cannot.
 - Every object carries `x-amz-meta-cloudrop-id` (the token's `fileId`). A retried `/complete` whose multipart upload
   no longer exists succeeds only after a `HEAD` shows the object with the matching ID and size.
 - Multiple files in one `/upload` call share one round trip: a small file costs three requests (init, PUT, complete).
+- A part uploaded again while `/complete` runs makes the listed ETag stale (`InvalidPart`). That answers a retryable
+  `STORAGE_ERROR`; the upload stays open and the client completes again.
+- A retried or replayed request runs its hooks again: `afterVerify` and `onComplete` on `/complete`, `onAbort` on
+  `/abort`. Their side effects are idempotent by the stable `file.id`; the server keeps no state that would run them
+  exactly once.
 
 ### 5.5 Abandoned uploads
 
-The client calls `/abort` when a user cancels (abort is free on R2). Everything else is cleaned by the bucket's
-abort-incomplete multipart lifecycle rule; `api.checkBucket()` verifies it exists.
+The client calls `/abort` when a user cancels (abort is free on R2). It aborts a multipart upload and, while the token
+is valid, deletes the upload's own object (matched by `cloudrop-id`), even after `/complete`. An expired token only
+aborts; it never deletes a stored file. Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle
+rule; `api.checkBucket()` verifies it exists.
+
+`/abort` is cleanup, not revocation. The server keeps no state, so until the token expires 24 hours after `/upload`:
+a single-PUT URL signed before the abort stays usable for its 15 minutes, a single-PUT token can still get a new URL
+through `/sign`, upload and complete, and any live token can delete its own completed object through `/abort`. (An
+aborted multipart upload is gone from the bucket, so its parts cannot be uploaded again.) An application that must
+refuse such a late upload checks its own record in `afterVerify` (for example a released quota reservation) and
+refuses it, which deletes the object. The 1.1 database adapters close this window.
 
 ## 6. Client resilience
 
@@ -241,11 +268,19 @@ only the missing parts.
 ## 7. Security and verification
 
 1. **Authorization.** `authorize` is required by the route type; public uploads need an explicit `allowAnyone`. Its
-   result flows into the token and `onComplete`.
+   result flows into the token and `onComplete`. It runs only in `/upload` (§5.2).
 2. **Origin and CSRF.** The handler accepts same-origin requests and `trustedOrigins` only, requires
-   `Content-Type: application/json` (cross-origin calls must preflight), and checks `Origin`.
-3. **Input bounds.** Body at most 64 KiB; `maxFiles` (default 10); filenames at most 255 characters; metadata
-   validated by its schema and size-capped.
+   `Content-Type: application/json` (cross-origin calls must preflight), and checks `Origin`. A request without
+   `Origin` comes from a server or a native app, never from a browser page, and is accepted; `Origin: null` is not.
+   Same-origin means `Origin` equals the origin of the request URL the handler sees. No `X-Forwarded-*` header is
+   trusted, so behind a proxy that terminates TLS or rewrites `Host` the app's public origin is listed in
+   `trustedOrigins`; the first refusal of each origin logs a hint naming both origins.
+3. **Input bounds.** Body at most 64 KiB; `maxFiles` (default 10, at most 100); filenames 1 to 255 Unicode code
+   points, counted after normalization to NFC, the form the name is stored and signed in; metadata validated by its
+   schema and size-capped. The Node adapter reads at most one chunk past the body cap so the handler answers `413`,
+   then reads and drops the rest in the background: Node does not discard the unread rest of a body read through an
+   async iterator, and without the drain the socket stays open until Node times it out (measured on Node 24: the
+   socket closed after about 6 s without the drain, 19 ms with it).
 4. **Policy before signing.** `maxSize`, `accept` (MIME and extension agree), file count, `prefix` per tenant.
 5. **Signed headers.** Exact `content-length` and `content-type` on single PUTs, exact `content-length` per part,
    `If-None-Match: *` on single PUTs, `x-amz-meta-cloudrop-id`, and `content-disposition`: `inline` for raster images,
@@ -255,7 +290,9 @@ only the missing parts.
    - Multipart: `ListParts`; part count, every part's size against the plan, and the total against the declared size
      must match. Completion uses the server's part list and ETags, never the client's.
    - Single PUT: `HEAD`; size, type and `cloudrop-id` must match.
-   - On mismatch the object is deleted or the upload aborted, and the client gets `VERIFICATION_FAILED`.
+   - A wrong size or type deletes the object and answers `VERIFICATION_FAILED`. Another writer's object (a different
+     `cloudrop-id`) is kept and answers `VERIFICATION_FAILED`. A missing or wrong-sized part answers `PARTS_MISSING`
+     with its number, and the client sends it again.
    - On R2 a mismatched size or type is already rejected at upload time (§12). Completion verification stays for
      defence in depth, for S3-compatible backends that behave differently, and because R2 rejects bad part sizes only
      at completion.
@@ -267,7 +304,9 @@ only the missing parts.
 ## 8. Plugins (1.0)
 
 A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpload`, `afterVerify`, `onAbort`,
-`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`.
+`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs for every file
+a plugin's `beforeUpload` accepted that will not complete. Hooks can run more than once for one file (§5.4), so a
+plugin that reserves and releases makes both idempotent by `file.id`.
 
 - **`contentChecks()`**: ranged GET of the first 4 KiB at completion, magic bytes checked against `accept`; rejects
   executables and HTML disguised as other types by default; optional quarantine (upload under `_pending/`, promote
@@ -287,13 +326,13 @@ A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpl
 
 | Method | Behaviour |
 |---|---|
-| `getUrl(key, { expiresIn, download })` | Public domain: plain URL. Private: presigned GET whose expiry is rounded to a time window, so every viewer in that window gets an identical, cacheable URL. `download` sets the filename. |
+| `getUrl(key, { expiresIn, download })` | Public domain and no options: plain URL. Otherwise a presigned GET signed at the start of an `expiresIn` window (default 3600 s) and valid for two windows, so every viewer in that window gets an identical, cacheable URL that stays valid at least `expiresIn` seconds. `download` sets the filename through a signed `response-content-disposition`, also on a public bucket. |
 | `head(key)` | `{ size, type, etag, uploadedAt, metadata }`; `null` only on 404. Network errors are errors, never "not found". |
 | `put(key, body, { type })` | Small server-side upload (Blob, ArrayBuffer, string) up to the single-PUT limit. |
 | `delete(key)`, `deleteMany(keys)` | Any number of keys, one DeleteObject request per key, 16 at a time, with per-key results `{ deleted, failed[] }`. |
 | `copy(from, to)` | Server-side; `UploadPartCopy` above 5 GiB. |
-| `deletePrefix(prefix)` | Deletes page by page (one request per key, through `deleteMany`), re-lists to prove nothing remains, returns the proof. For erasure requests. |
-| `checkBucket()` | Report on CORS (`ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. |
+| `deletePrefix(prefix)` | A folder prefix ending in `/`, so `users/4/` never matches `users/42/`; a prefix no key can start with (a leading slash, a dot segment, a control character) is `INVALID_INPUT`. Deletes page by page (one request per key, through `deleteMany`), re-lists to prove nothing remains, returns `{ deleted, verifiedAt }`. Fails, never loops, when deleted keys reappear or writers keep adding keys (10,000 pages). For erasure requests. |
+| `checkBucket({ origins })` | Report on CORS for the origins (default `trustedOrigins`: `PUT` and the signed headers allowed, `ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. Each check is `ok`, `problem` or `unknown` (credentials that may not read the setting, or no origin to check). |
 
 ## 10. Lessons carried over from earlier implementations
 
@@ -315,14 +354,17 @@ Audits of two private production codebases informed these rules (findings kept o
 
 1. **Unit (Vitest):** state machine and scheduler under a fake clock; part planner with property tests; SigV4 signer
    against AWS's published test vectors; token encode, verify and rotation.
-2. **Contract:** one suite (`src/testing/storage-contract.ts`, colocated lane files) run against an in-process fake encoding R2's rules (every commit), the
+2. **Contract:** one suite (`src/testing/storage-contract.ts`, case groups under `src/testing/storage-contract/`,
+   colocated lane files) run against an in-process fake encoding R2's rules (every commit), the
    Wrangler local S3 endpoint and RustFS (every pull request), and a real R2 bucket (nightly and before every release,
-   with a dedicated bucket and CI-only credentials).
+   with a dedicated bucket and CI-only credentials). The upload protocol runs end to end through `cloudrop.handler` on
+   the fake (unit lane) and on real R2 (`bun run test:live`); RustFS and Wrangler run only the storage contract until
+   M3.
 3. **Chaos:** a fault-injecting proxy (dropped connections, 429, 503, latency, truncated responses, expired URLs). A
    run passes when every upload ends correct or with a clear error code.
 4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB and OPFS, offline and online, CORS.
 5. **Types:** inference tests (`expect-type`) for route names, metadata and the `onComplete` result.
-6. **Package:** size-limit, publint and attw on the packed tarball.
+6. **Package:** size-limit, publint and attw on the packed tarball (`bun run package:check`).
 
 CI runs on GitHub-hosted runners: npm trusted publishing requires them.
 
@@ -370,9 +412,15 @@ Still unverified, and required before 1.0 in the browser lane:
 3. AWS chunked uploads with trailing checksums (not used by cloudrop's browser path).
 
 The test bucket's lifecycle includes R2's default "abort incomplete multipart uploads after 7 days" rule (read with
-an account OAuth token on 2026-11-15). Bucket-scoped object tokens cannot read CORS or lifecycle (`403`), so
-`checkBucket()` needs an account API token with R2 admin read, and reports "unknown" rather than "missing" without
-one.
+an account OAuth token on 2026-11-15). Bucket-scoped object tokens cannot read CORS or lifecycle (`403`, measured
+for both by the M2 live lane), so `checkBucket()` needs an account API token with R2 admin read, and reports
+"unknown" rather than "missing" without one. With such a token, R2's answers to `GetBucketCors` and
+`GetBucketLifecycleConfiguration` are unmeasured, both for a configured bucket and for one without a configuration;
+the driver follows S3's documented `NoSuchCORSConfiguration` and `NoSuchLifecycleConfiguration` codes and treats any
+other `404` as a retryable `STORAGE_ERROR`.
+
+Also unmeasured: how the server's parallel storage calls (a `CreateMultipartUpload` for each large file of an
+`/upload` call, up to 100 files, and `deleteMany` 16 at a time) fit Cloudflare Workers' subrequest limits. No parallelism cap is tuned for Workers yet.
 
 ## 13. Release
 
