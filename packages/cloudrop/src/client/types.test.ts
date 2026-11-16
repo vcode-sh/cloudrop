@@ -14,6 +14,8 @@ import {
   type RouteResult,
   type SingleTicket,
   type UploadedFile,
+  type UploadJob,
+  type UploadResult,
 } from "../client.ts";
 import { createCloudrop } from "../server/cloudrop.ts";
 import { allowAnyone, route } from "../server/route.ts";
@@ -75,6 +77,14 @@ describe("cloudrop/client types", () => {
     >();
     const { upload } = client;
     upload("notes", file);
+
+    expectTypeOf(client.start("notes", file)).toEqualTypeOf<UploadJob<null>>();
+    expectTypeOf(client.start("avatar", [file], { metadata: { albumId: "a" } })).toEqualTypeOf<
+      UploadJob<{ url: string | null; at: string }>
+    >();
+    // @ts-expect-error: avatar's schema requires metadata in start() too.
+    client.start("avatar", [file]);
+    expectTypeOf(client.upload("notes", [file])).toEqualTypeOf<Promise<UploadResult<null>>>();
 
     expectTypeOf<MultipartTicket["id"]>().toEqualTypeOf<string>();
     expectTypeOf<AbortResponse["id"]>().toEqualTypeOf<string>();

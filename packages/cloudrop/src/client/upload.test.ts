@@ -123,6 +123,17 @@ describe("upload", () => {
       message: 'Pass the file as a File, such as one from <input type="file">.',
     },
     {
+      name: "an object without a numeric length",
+      args: ["notes", { length: "1" }],
+      message: 'Pass the file as a File, such as one from <input type="file">.',
+    },
+    {
+      name: "a list holding something else",
+      args: ["notes", [note(1), "x"]],
+      message: 'Pass the files as File objects, such as input.files from <input type="file" multiple>.',
+    },
+    { name: "an empty list", args: ["notes", []], message: "Pass at least one file to upload." },
+    {
       name: "options that are not an object",
       args: ["notes", note(1), "fast"],
       message: "Pass the upload options as an object, such as { metadata, signal }.",

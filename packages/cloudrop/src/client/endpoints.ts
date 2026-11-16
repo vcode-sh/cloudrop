@@ -11,7 +11,7 @@ import type {
   SingleTicket,
   UploadRequest,
 } from "../protocol/types.ts";
-import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTicket } from "./answers.ts";
+import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
 import { aborted, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
@@ -21,8 +21,13 @@ export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;
 export type Ticket = SingleTicket | MultipartTicket;
 
 export interface Endpoints {
-  /** POST /upload for one file; a rejected ticket becomes its error. */
-  start(route: string, file: File, metadata: unknown, signal: AbortSignal): Promise<Result<Ticket>>;
+  /** POST /upload for every file at once: one entry per file, in order; a rejected file is its error. */
+  start(
+    route: string,
+    files: readonly File[],
+    metadata: unknown,
+    signal: AbortSignal,
+  ): Promise<Result<(Ticket | CloudropError)[]>>;
   /** POST /sign { token }: a new URL for a single PUT. */
   signSingle(token: string, signal: AbortSignal): Promise<Result<SignedRequest>>;
   /** POST /sign { token, parts }: one URL per asked part, nothing else. */
@@ -90,16 +95,16 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
   }
 
   return {
-    async start(route, file, metadata, signal) {
+    async start(route, files, metadata, signal) {
       // JSON.stringify leaves out a metadata of undefined, as UploadRequest's optional field allows.
       const request: UploadRequest = {
         route,
-        files: [{ name: file.name, size: file.size, type: file.type }],
+        files: files.map(({ name, size, type }) => ({ name, size, type })),
         metadata,
       };
-      const answer = await post("upload", request, { signal }, (json) => readTicket(json, file));
+      const answer = await post("upload", request, { signal }, (json) => readTickets(json, files));
       if (answer.error) return answer;
-      return "kind" in answer.data ? ok(answer.data) : fail(toError(answer.data));
+      return ok(answer.data.map((ticket) => ("kind" in ticket ? ticket : toError(ticket))));
     },
     signSingle: (token, signal) => post("sign", { token }, { signal }, readSignedRequest),
     signParts: (token, parts, signal) =>

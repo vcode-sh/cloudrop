@@ -1,12 +1,16 @@
 // The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
 
+import { isList } from "./client/arguments.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
+import { startJob } from "./client/job.ts";
 import { createPool } from "./client/pool.ts";
 import { createPut } from "./client/transport.ts";
-import { type UploadContext, uploadFile } from "./client/upload.ts";
-import { configError, type Result } from "./errors.ts";
+import type { FileOutcome, UploadJob, UploadResult } from "./client/types.ts";
+import type { UploadContext } from "./client/upload.ts";
+import { configError, fail, ok, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
 
+export type { FileHandle, FileOutcome, FileStatus, UploadJob, UploadResult } from "./client/types.ts";
 export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
 // The wire types of the four endpoints, and the route inference types a client user annotates with (InferableCloudrop,
 // RouteMetadata, RouteName, RouteResult; S4, ruling M3-H13), which the root entry exports too.
@@ -58,11 +62,33 @@ export type UploadArguments<TMetadata> = undefined extends TMetadata
   : [options: UploadOptions<TMetadata> & { metadata: TMetadata }];
 
 export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop> {
+  /** Sends one file or several through one /upload; each file then runs on its own through the client's pool. */
+  start<TName extends RouteName<TCloudrop>>(
+    route: TName,
+    files: File | ArrayLike<File>,
+    ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>
+  ): UploadJob<RouteResult<TCloudrop, TName>>;
+  // The list overload comes first: ReturnType and Parameters read the last one, the single file of earlier versions.
+  /** Uploads several files, such as input.files, and resolves with an outcome per file once all have settled. */
+  upload<TName extends RouteName<TCloudrop>>(
+    route: TName,
+    files: ArrayLike<File>,
+    ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>
+  ): Promise<UploadResult<RouteResult<TCloudrop, TName>>>;
+  /** Uploads one file and resolves with the route's result or the error. */
   upload<TName extends RouteName<TCloudrop>>(
     route: TName,
     file: File,
     ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>
   ): Promise<Result<CompleteResponse<RouteResult<TCloudrop, TName>>>>;
+}
+
+/** A one-file job's result as that file's Result (ruling P5). */
+function oneFile(result: UploadResult<unknown>): Result<CompleteResponse<unknown>> {
+  if (result.error) return fail(result.error);
+  // No error: the job's one file ended done.
+  const [outcome] = result.data.files as [FileOutcome<unknown> & { status: "done" }];
+  return ok(outcome.result);
 }
 
 /** A path such as /api/cloudrop, or an absolute http(s) URL ending in one; no trailing slash, query or fragment (S17). */
@@ -96,13 +122,21 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     pool: createPool(concurrency),
     nextRank: () => ++rank,
   };
+  // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them
+  // at run time: the casts below give the route's result type to what the server sent.
+  function upload(
+    route: unknown,
+    files: unknown,
+    options?: unknown,
+  ): Promise<UploadResult<unknown> | Result<CompleteResponse<unknown>>> {
+    const { done } = startJob(context, route, files, options);
+    // Anything that is not a list goes the one-file way, so a wrong argument keeps the message it had.
+    return isList(files) ? done : done.then(oneFile);
+  }
+  // No `this`: `const { upload } = createCloudropClient()` works (S2).
   return {
-    // No `this`: `const { upload } = createCloudropClient()` works (S2).
-    upload: (route, file, ...rest) =>
-      // The server's types reach the client through `import type` only, so the wire answer cannot be checked against
-      // them at run time.
-      uploadFile(context, route, file, rest[0]) as Promise<
-        Result<CompleteResponse<RouteResult<TCloudrop, typeof route>>>
-      >,
+    start: (route, files, ...rest) =>
+      startJob(context, route, files, rest[0]) as UploadJob<RouteResult<TCloudrop, typeof route>>,
+    upload: upload as CloudropClient<TCloudrop>["upload"],
   };
 }

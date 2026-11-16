@@ -85,12 +85,20 @@ function readError(value: unknown): ErrorBody | null {
   return Array.isArray(parts) && parts.every(isCount) ? { ...body, parts } : body;
 }
 
-/** The one ticket of a one-file /upload: a single or multipart ticket, or the error body of a rejected file. */
-export function readTicket(json: unknown, file: File): Ticket | ErrorBody | null {
-  if (!isPlainObject(json) || !Array.isArray(json.files) || json.files.length !== 1) return null;
-  const [ticket] = json.files;
-  if (isSingle(ticket) || isMultipart(ticket, file.size)) return ticket;
-  return isPlainObject(ticket) && ticket.kind === "rejected" ? readError(ticket.error) : null;
+function readFileTicket(value: unknown, size: number): Ticket | ErrorBody | null {
+  if (isSingle(value) || isMultipart(value, size)) return value;
+  return isPlainObject(value) && value.kind === "rejected" ? readError(value.error) : null;
+}
+
+/**
+ * The tickets of /upload, one per file in the order sent: a single or multipart ticket, or the error body of a rejected
+ * file. One that cannot be read makes the whole answer unreadable.
+ */
+export function readTickets(json: unknown, files: readonly File[]): (Ticket | ErrorBody)[] | null {
+  if (!isPlainObject(json) || !Array.isArray(json.files) || json.files.length !== files.length) return null;
+  const answers: unknown[] = json.files;
+  const tickets = files.map((file, index) => readFileTicket(answers[index], file.size));
+  return tickets.every((ticket) => ticket !== null) ? tickets : null;
 }
 
 /** `{ put }` of /sign for a single PUT. */

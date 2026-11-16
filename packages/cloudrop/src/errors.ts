@@ -42,6 +42,8 @@ export interface CloudropErrorOptions {
   storageCode?: string;
   /** PARTS_MISSING: the part numbers to upload again. */
   parts?: readonly number[];
+  /** The file of a job this error belongs to. */
+  file?: { id: string; name: string };
   cause?: unknown;
 }
 
@@ -57,6 +59,8 @@ export class CloudropError extends Error {
    * besides `code`, `message` and `retryable` that reaches the client. Undefined for every other code.
    */
   readonly parts: readonly number[] | undefined;
+  /** The file of a job this error belongs to; undefined for an error of the whole job or of the server. */
+  readonly file: { id: string; name: string } | undefined;
 
   constructor(code: CloudropErrorCode, message: string, options: CloudropErrorOptions = {}) {
     super(message, { cause: options.cause });
@@ -66,6 +70,7 @@ export class CloudropError extends Error {
     this.status = options.status;
     this.storageCode = options.storageCode;
     this.parts = options.parts;
+    this.file = options.file;
   }
 }
 

@@ -1,14 +1,13 @@
-// One file from start to finish: /upload, the bytes as one PUT or as parts, /complete with up to two repair rounds,
-// and an ending without success (a cancel or a failure) that tells the server unless a /complete may have finished
-// the file (decisions S13 to S15, ruling S-18).
+// One file's bytes and its /complete: the bytes as one PUT or as parts, each PUT holding a slot of the client's pool,
+// then /complete with up to two repair rounds (decisions S13, S14). file-run.ts decides how the file ends.
 
 import { fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
 import { sizeOfPart } from "../plan.ts";
 import type { CompleteResponse, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import { aborted } from "./failures.ts";
+import type { Entry } from "./file-run.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
 import { withRetry } from "./retry.ts";
@@ -26,46 +25,6 @@ export interface UploadContext {
   nextRank(): number;
 }
 
-interface Arguments {
-  route: string;
-  file: File;
-  metadata: unknown;
-  signal: AbortSignal;
-}
-
-function encodesAsJson(value: unknown): boolean {
-  try {
-    JSON.stringify(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** What plain JavaScript can get wrong, refused before any request (S17, ruling S-2). */
-function readArguments(route: unknown, file: unknown, options: unknown): Result<Arguments> {
-  const refuse = (message: string) => fail(invalidInput(message));
-  if (typeof route !== "string" || route === "") {
-    return refuse('Name the upload route as text, such as upload("avatar", file).');
-  }
-  if (!(file instanceof File)) return refuse('Pass the file as a File, such as one from <input type="file">.');
-  if (options !== undefined && !isPlainObject(options)) {
-    return refuse("Pass the upload options as an object, such as { metadata, signal }.");
-  }
-  // A signal per call, not one module-level object: the package declares sideEffects: false.
-  const { metadata, signal = new AbortController().signal } = options ?? {};
-  if (!(signal instanceof AbortSignal)) {
-    return refuse("options.signal must be an AbortSignal, such as new AbortController().signal.");
-  }
-  // Retrying cannot fix a BigInt or a cycle, so it is the caller's mistake, not a network failure.
-  if (!encodesAsJson(metadata)) {
-    return refuse(
-      "options.metadata must be JSON data, such as objects, strings and numbers: it holds a value JSON cannot encode, such as a BigInt or a circular reference.",
-    );
-  }
-  return ok({ route, file, metadata, signal });
-}
-
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
   if (ticket.kind === "single") return file;
   const start = (partNumber - 1) * ticket.partSize;
@@ -74,12 +33,18 @@ function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
 
 interface Upload {
   ticket: Ticket;
-  file: File;
-  rank: number;
-  signal: AbortSignal;
+  entry: Entry;
 }
 
-function senderFor(context: UploadContext, { ticket, file, rank, signal }: Upload): PartSender {
+/** The file moves to `status` and the job hears of it at once. */
+function moveTo(entry: Entry, status: "uploading" | "completing"): void {
+  entry.status = status;
+  entry.changed(true);
+}
+
+function senderFor(context: UploadContext, { ticket, entry }: Upload): PartSender {
+  const { file, rank } = entry;
+  const { signal } = entry.cancel;
   // A slot is held for the PUT alone: it is free again before a retry's wait (spec §4.4). A part still waiting for one
   // when the file is cancelled or has failed never starts; a PUT already sent finishes (spec §6.2).
   const put = async (target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome> => {
@@ -87,6 +52,8 @@ function senderFor(context: UploadContext, { ticket, file, rank, signal }: Uploa
     try {
       // `stop` may also fire between the grant and this line: the slot goes back unused (audit I1).
       if (release === null || stop.aborted) return { kind: "aborted", error: aborted() };
+      // Never from paused or a settled status (audit I1); a repair after PARTS_MISSING turns completing back.
+      if (entry.status === "queued" || entry.status === "completing") moveTo(entry, "uploading");
       return await context.put(target, bodyOf(ticket, file, partNumber), signal, () => {});
     } finally {
       release?.();
@@ -114,8 +81,8 @@ interface Sent {
   mayBeComplete: boolean;
 }
 
-async function sendAndComplete(context: UploadContext, upload: Upload): Promise<Sent> {
-  const { ticket, signal } = upload;
+export async function sendAndComplete(context: UploadContext, upload: Upload): Promise<Sent> {
+  const { ticket, entry } = upload;
   const sender = senderFor(context, upload);
   let parts = Array.from({ length: ticket.kind === "single" ? 1 : ticket.partCount }, (_, index) => index + 1);
   let mayBeComplete = false;
@@ -133,44 +100,10 @@ async function sendAndComplete(context: UploadContext, upload: Upload): Promise<
   for (let round = 0; ; round++) {
     const sent = await sendParts(sender, parts);
     if (sent.error) return { result: fail(sent.error), mayBeComplete };
-    const done = await withRetry(complete, signal);
+    moveTo(entry, "completing");
+    const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
     if (!missing?.length || round === REPAIR_ROUNDS) return { result: done, mayBeComplete };
     parts = [...missing];
   }
-}
-
-export async function uploadFile(
-  context: UploadContext,
-  route: unknown,
-  file: unknown,
-  options: unknown,
-): Promise<Result<CompleteResponse<unknown>>> {
-  const args = readArguments(route, file, options);
-  if (args.error) return args;
-  const { signal } = args.data;
-  if (signal.aborted) return fail(aborted());
-  const rank = context.nextRank();
-  const started = await withRetry(
-    () => context.endpoints.start(args.data.route, args.data.file, args.data.metadata, signal),
-    signal,
-  );
-  if (started.error) return fail(signal.aborted ? aborted() : started.error);
-  const { result, mayBeComplete } = await sendAndComplete(context, {
-    ticket: started.data,
-    file: args.data.file,
-    rank,
-    signal,
-  });
-  // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
-  if (!result.error) return result;
-  const ending = signal.aborted ? fail(aborted()) : result;
-  // A /complete that may have succeeded: keep the file rather than delete a recorded one (M3-H15, M3-H16).
-  if (mayBeComplete) return ending;
-  // Otherwise /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
-  const cleanup = context.endpoints.abort(started.data.token);
-  // A failure is answered at once and its /abort finishes in the background: abort() never rejects, so nothing is
-  // left unhandled. A cancel waits for it, so the caller knows the server was told.
-  if (signal.aborted) await cleanup;
-  return ending;
 }

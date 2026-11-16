@@ -4,10 +4,12 @@
 // fixture, and the fetch rules of S8.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CloudropError } from "../errors.ts";
 import { MiB } from "../rules.ts";
+import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { files } from "../testing/upload-fixture.ts";
-import { createEndpoints } from "./endpoints.ts";
+import { createEndpoints, type Endpoints } from "./endpoints.ts";
 import { withRetry } from "./retry.ts";
 
 const unreadable = (status: number) =>
@@ -17,12 +19,20 @@ const png = new File([new Uint8Array(10)], "a.png", { type: "image/png" });
 // One byte past 8 MiB would do; five keep the last part clearly distinct from the first.
 const twoParts = new File([new Uint8Array(8 * MiB + 5)], "video.bin", { type: "application/octet-stream" });
 
+const notes = route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone });
+
 function setup(options: { fault?: Fault } = {}) {
-  const fixture = clientFixture({ files }, { multipartThreshold: "8MB", ...options });
+  const fixture = clientFixture({ files, notes }, { multipartThreshold: "8MB", ...options });
   return { fixture, endpoints: createEndpoints(fixture.basePath, fixture.fetch) };
 }
 
 const live = () => new AbortController().signal;
+
+/** The token of a one-file /upload's ticket, for the calls that follow it. */
+async function startOne(endpoints: Endpoints, file: File): Promise<string> {
+  const [ticket] = (await endpoints.start("files", [file], undefined, live())).data ?? [];
+  return ticket instanceof CloudropError ? "" : (ticket?.token ?? "");
+}
 const page = (status: number) =>
   new Response("<html>Bad gateway</html>", { status, headers: { "content-type": "text/html" } });
 const errorOf = (result: { error: { code: string; message: string; retryable: boolean } | null }) => ({
@@ -39,27 +49,58 @@ afterEach(() => {
 describe("start", () => {
   it("reads a single-PUT ticket from /upload", async () => {
     const { endpoints } = setup();
-    const { data } = await endpoints.start("files", png, undefined, live());
-    expect(data).toEqual(
+    const { data } = await endpoints.start("files", [png], undefined, live());
+    expect(data).toEqual([
       expect.objectContaining({
         kind: "single",
         id: expect.any(String),
         put: expect.objectContaining({ headers: expect.objectContaining({ "if-none-match": "*" }) }),
       }),
-    );
+    ]);
   });
 
   it("reads a multipart ticket and its first URLs", async () => {
     const { endpoints } = setup();
-    const { data } = await endpoints.start("files", twoParts, undefined, live());
-    expect(data).toEqual(
+    const { data } = await endpoints.start("files", [twoParts], undefined, live());
+    expect(data).toEqual([
       expect.objectContaining({
         kind: "multipart",
         partSize: 8_388_608,
         partCount: 2,
         parts: [expect.objectContaining({ partNumber: 1 }), expect.objectContaining({ partNumber: 2 })],
       }),
-    );
+    ]);
+  });
+
+  it("answers one entry per file, in order, with a rejected file as its error", async () => {
+    const { endpoints } = setup();
+    const text = (size: number) => new File([new Uint8Array(size)], "note.txt", { type: "text/plain" });
+    const { data } = await endpoints.start("notes", [text(16), text(17)], undefined, live());
+    expect({ data, rejected: data?.[1] instanceof CloudropError }).toEqual({
+      data: [
+        expect.objectContaining({ kind: "single" }),
+        expect.objectContaining({
+          code: "FILE_TOO_LARGE",
+          message: "This file is over the 16 bytes limit. Pick a smaller file.",
+          retryable: false,
+        }),
+      ],
+      rejected: true,
+    });
+  });
+
+  it.each([
+    { name: "one ticket for two files", tickets: (all: unknown[]) => all.slice(0, 1) },
+    { name: "three tickets for two files", tickets: (all: unknown[]) => [...all, all[0]] },
+  ])("refuses an answer whose tickets do not match the files: $name", async ({ tickets }) => {
+    const { endpoints } = setup({
+      fault: async ({ init, forward }) => {
+        const answer = await (await forward(init)).json();
+        return Response.json({ files: tickets(answer.files) });
+      },
+    });
+    const result = await endpoints.start("files", [png, png], undefined, live());
+    expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
   it.each([
@@ -67,14 +108,14 @@ describe("start", () => {
     { name: "does not retry an unreadable client error", status: 404, retryable: false },
   ])("$name", async ({ status, retryable }) => {
     const { endpoints } = setup({ fault: () => page(status) });
-    const result = await endpoints.start("files", png, undefined, live());
+    const result = await endpoints.start("files", [png], undefined, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(status), retryable });
   });
 
   it("refuses an error answer of another shape", async () => {
     // A gateway's own JSON error: it has an `error`, but not cloudrop's.
     const { endpoints } = setup({ fault: () => Response.json({ error: { message: "Bad gateway" } }, { status: 502 }) });
-    const result = await endpoints.start("files", png, undefined, live());
+    const result = await endpoints.start("files", [png], undefined, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(502), retryable: true });
   });
 
@@ -87,21 +128,21 @@ describe("start", () => {
       headers: { "retry-after": "2" },
     });
     const { fixture, endpoints } = setup({ fault: ({ nth }) => (nth === 1 ? rateLimited : undefined) });
-    const result = withRetry(() => endpoints.start("files", png, undefined, live()), live());
+    const result = withRetry(() => endpoints.start("files", [png], undefined, live()), live());
     await vi.advanceTimersByTimeAsync(1999);
     const before = [...fixture.requests];
     await vi.advanceTimersByTimeAsync(1);
-    expect({ before, after: fixture.requests, kind: (await result).data?.kind }).toEqual({
+    expect({ before, after: fixture.requests, tickets: (await result).data }).toEqual({
       before: ["POST /upload"],
       after: ["POST /upload", "POST /upload"],
-      kind: "single",
+      tickets: [expect.objectContaining({ kind: "single" })],
     });
   });
 
   it("reports a proxy that stays rate-limited as a busy server, not a wrong basePath", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const { fixture, endpoints } = setup({ fault: () => page(429) });
-    const result = await withRetry(() => endpoints.start("files", png, undefined, live()), live());
+    const result = await withRetry(() => endpoints.start("files", [png], undefined, live()), live());
     expect({ error: errorOf(result), requests: fixture.requests.length }).toEqual({
       error: { code: "RATE_LIMITED", message: "The upload server is busy. Try again in a moment.", retryable: true },
       requests: 6,
@@ -110,7 +151,7 @@ describe("start", () => {
 
   it("refuses JSON of another shape", async () => {
     const { endpoints } = setup({ fault: () => Response.json({ files: [] }) });
-    const result = await endpoints.start("files", png, undefined, live());
+    const result = await endpoints.start("files", [png], undefined, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
@@ -123,7 +164,7 @@ describe("start", () => {
         return Response.json(answer);
       },
     });
-    const result = await endpoints.start("files", twoParts, undefined, live());
+    const result = await endpoints.start("files", [twoParts], undefined, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
@@ -133,7 +174,7 @@ describe("start", () => {
         throw new TypeError("Failed to fetch");
       },
     });
-    const result = await endpoints.start("files", png, undefined, live());
+    const result = await endpoints.start("files", [png], undefined, live());
     expect(errorOf(result)).toEqual({
       code: "NETWORK_ERROR",
       message: "The upload server could not be reached. Check the connection, then try again.",
@@ -145,7 +186,7 @@ describe("start", () => {
     const { endpoints } = setup();
     const controller = new AbortController();
     controller.abort();
-    const result = await endpoints.start("files", png, undefined, controller.signal);
+    const result = await endpoints.start("files", [png], undefined, controller.signal);
     expect(errorOf(result)).toEqual({
       code: "ABORTED",
       message: "The upload was cancelled. Start it again to upload the file.",
@@ -161,7 +202,7 @@ describe("start", () => {
         return undefined;
       },
     });
-    await endpoints.start("files", png, undefined, live());
+    await endpoints.start("files", [png], undefined, live());
     expect(
       sent.map((init) => ({
         method: init.method,
@@ -191,8 +232,7 @@ describe("signParts", () => {
     const { endpoints } = setup({
       fault: ({ label, init, forward }) => (label === "POST /sign" ? firstPartOnly(forward(init)) : undefined),
     });
-    const { data: ticket } = await endpoints.start("files", twoParts, undefined, live());
-    const result = await endpoints.signParts(ticket?.token ?? "", [1, 2], live());
+    const result = await endpoints.signParts(await startOne(endpoints, twoParts), [1, 2], live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 });
@@ -236,8 +276,7 @@ describe("abort", () => {
 describe("complete", () => {
   it("keeps the part numbers PARTS_MISSING names", async () => {
     const { endpoints } = setup();
-    const { data: ticket } = await endpoints.start("files", twoParts, undefined, live());
-    const { error } = await endpoints.complete(ticket?.token ?? "");
+    const { error } = await endpoints.complete(await startOne(endpoints, twoParts));
     expect({ code: error?.code, message: error?.message, parts: error?.parts }).toEqual({
       code: "PARTS_MISSING",
       message: "2 of 2 parts are missing or have the wrong size. Upload them again, then complete the upload.",
