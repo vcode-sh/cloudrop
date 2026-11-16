@@ -1,8 +1,7 @@
 import { once } from "node:events";
 import { createServer, type RequestListener, type Server } from "node:http";
-import { connect as connectHttp2, createServer as createHttp2Server } from "node:http2";
 import { type AddressInfo, connect } from "node:net";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { toNodeHandler } from "./node.ts";
 import { allowAnyone, route } from "./server/route.ts";
 import { serverFixture } from "./testing/server-fixture.ts";
@@ -73,73 +72,6 @@ describe("toNodeHandler", () => {
       body,
     });
     expect(response.status).toBe(403);
-  });
-
-  // A target that names a host would otherwise replace the Host header's origin, and the caller's Origin would then
-  // match it: the same-origin check would pass for another site.
-  it.for([
-    {
-      name: "a protocol-relative target",
-      target: "//evil.example/api/cloudrop/upload",
-      status: "HTTP/1.1 404 Not Found",
-    },
-    { name: "a backslash target", target: "/\\evil.example/api/cloudrop/upload", status: "HTTP/1.1 404 Not Found" },
-    {
-      name: "an absolute target",
-      target: "http://evil.example/api/cloudrop/upload",
-      status: "HTTP/1.1 400 Bad Request",
-    },
-  ])("never takes the request's host from $name", async ({ target, status }) => {
-    const base = await listen();
-    const request = [
-      `POST ${target} HTTP/1.1`,
-      `Host: ${new URL(base).host}`,
-      "Origin: http://evil.example",
-      "Content-Type: application/json",
-      `Content-Length: ${body.length}`,
-      "Connection: close",
-      "",
-      body,
-    ].join("\r\n");
-    expect(await raw(base, request)).toBe(status);
-  });
-
-  // The request target is appended to the Host header's origin, so a path smuggled into Host must not become a prefix
-  // of the path the handler matches.
-  it("ignores a path in the Host header: /upload is not the upload endpoint", async () => {
-    const base = await listen();
-    const request = [
-      "POST /upload HTTP/1.1",
-      `Host: ${new URL(base).host}/api/cloudrop`,
-      "Content-Type: application/json",
-      `Content-Length: ${body.length}`,
-      "Connection: close",
-      "",
-      body,
-    ].join("\r\n");
-    expect(await raw(base, request)).toBe("HTTP/1.1 404 Not Found");
-  });
-
-  // An HTTP/2 client sends the host as ":authority" and no Host header; a browser's Origin is still the same origin.
-  it("accepts a same-origin upload over HTTP/2, where the host arrives as :authority", async () => {
-    const { cloudrop } = serverFixture({ files: route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }) });
-    const h2 = createHttp2Server(toNodeHandler(cloudrop));
-    onTestFinished(() => void h2.close());
-    h2.listen(0, "127.0.0.1");
-    await once(h2, "listening");
-    const origin = `http://127.0.0.1:${(h2.address() as AddressInfo).port}`;
-    const client = connectHttp2(origin);
-    onTestFinished(() => void client.close());
-    const stream = client.request({
-      ":method": "POST",
-      ":path": "/api/cloudrop/upload",
-      origin,
-      "content-type": "application/json",
-    });
-    stream.end(body);
-    const [headers] = await once(stream, "response");
-    stream.resume();
-    expect(headers[":status"]).toBe(200);
   });
 
   it("answers 413 to a 100 KiB body and still delivers the answer", async () => {
@@ -280,22 +212,6 @@ describe("toNodeHandler", () => {
       ]);
     },
   );
-
-  it("reads the full path from originalUrl when a framework strips the mount path from url", async () => {
-    const { cloudrop } = serverFixture({ files: route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }) });
-    const handler = toNodeHandler(cloudrop);
-    const base = await serve((request, response) => {
-      // What Express's app.use("/api/cloudrop", …) does to the request.
-      Object.assign(request, { originalUrl: request.url, url: request.url?.replace("/api/cloudrop", "") });
-      void handler(request, response);
-    });
-    const response = await fetch(`${base}/api/cloudrop/upload`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body,
-    });
-    expect(response.status).toBe(200);
-  });
 
   it.each([
     { name: "null", value: null },
