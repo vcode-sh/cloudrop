@@ -4,7 +4,7 @@
 
 import type { CloudropErrorCode } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
-import { countParts } from "../plan.ts";
+import { countParts } from "../part-size.ts";
 import type {
   CompleteResponse,
   ErrorBody,

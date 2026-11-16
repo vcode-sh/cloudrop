@@ -3,7 +3,7 @@
 // the file ends.
 
 import { fail, ok, type Result } from "../errors.ts";
-import { sizeOfPart } from "../plan.ts";
+import { sizeOfPart } from "../part-size.ts";
 import type { CompleteResponse, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";

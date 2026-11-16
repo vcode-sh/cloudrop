@@ -1,4 +1,7 @@
+import { countParts, sizeOfPart } from "./part-size.ts";
 import { MiB, type StorageRules } from "./rules.ts";
+
+export { countParts, sizeOfPart };
 
 export type MultipartPlan = {
   kind: "multipart";
@@ -24,18 +27,6 @@ function assertStorable(size: number, rules: StorageRules): void {
   if (size > rules.maxObjectSize) {
     throw new RangeError(`File size ${size} exceeds the storage limit of ${rules.maxObjectSize} bytes.`);
   }
-}
-
-/** How many parts of `partSize` bytes a file of `size` bytes needs. */
-export const countParts = (size: number, partSize: number): number => Math.ceil(size / partSize);
-
-/**
- * The size of part `partNumber` (from 1): `partSize` for every part but the last, which holds the rest. Equal parts
- * satisfy R2's equal-part rule by construction (spec §5.1).
- */
-export function sizeOfPart(size: number, partSize: number, partNumber: number): number {
-  const count = countParts(size, partSize);
-  return partNumber < count ? partSize : size - (count - 1) * partSize;
 }
 
 /**
