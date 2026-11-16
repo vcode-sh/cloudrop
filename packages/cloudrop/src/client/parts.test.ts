@@ -12,6 +12,7 @@ import {
   bucketUnreachable,
   linkRefused,
   signatureMismatch,
+  storageBusy,
   storageDown,
   unreadableAnswer,
 } from "./failures.ts";
@@ -191,6 +192,32 @@ describe("sendParts", () => {
       code: "UPLOAD_REJECTED",
       firstFour: [1, 2, 3, 4],
       afterFive: [],
+    });
+  });
+
+  it("stops retrying the other parts once one has failed for good", async () => {
+    // Part 1 is told to wait 20 s before each retry; part 2's refusal fails the file, which must not wait for part 1.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sender, log } = double({
+      first: [signed(1, "ticket"), signed(2, "ticket")],
+      put: (partNumber) =>
+        partNumber === 1
+          ? { kind: "retry", error: storageBusy(), retryAfterMs: 20_000 }
+          : { kind: "rejected", error: signatureMismatch() },
+    });
+    let answered = false;
+    const result = sendParts(sender, [1, 2]).then((done) => {
+      answered = true;
+      return done;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const answeredAtOnce = answered;
+    // Lets a part that is still retrying spend its budget, so its extra PUTs show in the log.
+    await vi.runAllTimersAsync();
+    expect({ answeredAtOnce, code: (await result).error?.code, puts: log.puts }).toEqual({
+      answeredAtOnce: true,
+      code: "UPLOAD_REJECTED",
+      puts: [1, 2],
     });
   });
 

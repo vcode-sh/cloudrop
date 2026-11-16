@@ -1,5 +1,6 @@
 // Sends the parts of one multipart upload: four at a time, signing the parts the ticket did not cover lazily, renewing
-// URLs that expire, retrying within one budget and stopping on cancel (decisions S11, S12; spec §6.1, §6.2).
+// URLs that expire, retrying within one budget, and stopping on a cancel or once one part has failed the file
+// (decisions S11, S12; spec §6.1, §6.2).
 
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { PARTS_PER_SIGN, type SignedPart, type SignedRequest } from "../protocol/types.ts";
@@ -34,6 +35,10 @@ interface Run {
   urls: Map<number, SignedRequest>;
   /** The /sign call that workers reaching unsigned parts share. */
   batch: Promise<CloudropError | null> | null;
+  /** The first part failure that fails the file. */
+  failure: CloudropError | null;
+  /** Fires on a cancel or once the file has failed, so a part waiting to retry stops at once. */
+  stop: AbortController;
 }
 
 const expiresSoon = (target: SignedRequest): boolean => Date.parse(target.expiresAt) - Date.now() < RENEW_MARGIN_MS;
@@ -91,14 +96,17 @@ async function urlFor(run: Run, partNumber: number, renew: boolean): Promise<Res
   return ok(part);
 }
 
+/** Why no new attempt may start: a cancel, or another part that failed the file (its error is the call's). */
+const stopped = (run: Run): CloudropError | null => (run.sender.signal.aborted ? aborted() : run.failure);
+
 async function sendPart(run: Run, partNumber: number): Promise<CloudropError | null> {
   let renew = false;
   let renewed = false;
   for (let attempt = 1; ; attempt++) {
-    if (run.sender.signal.aborted) return aborted();
+    if (stopped(run)) return stopped(run);
     const target = await urlFor(run, partNumber, renew);
-    // urlFor may have waited for a /sign; the upload may have been cancelled meanwhile.
-    if (run.sender.signal.aborted) return aborted();
+    // urlFor may have waited for a /sign; the upload may have been cancelled or have failed meanwhile.
+    if (stopped(run)) return stopped(run);
     const outcome = target.error ? signFailure(target.error) : await run.sender.put(target.data, partNumber);
     const step = nextStep(outcome, attempt, renewed);
     if (step.kind === "done") return null;
@@ -106,7 +114,7 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
     // A renewal whose /sign failed is still owed: the next attempt must not reuse the refused URL.
     renew = step.renew || (renew && target.error !== null);
     renewed ||= step.renew;
-    await pause(step.waitMs, run.sender.signal);
+    await pause(step.waitMs, run.stop.signal);
   }
 }
 
@@ -117,18 +125,24 @@ export async function sendParts(sender: PartSender, partNumbers: readonly number
     partNumbers,
     urls: new Map(sender.first.map((part) => [part.partNumber, part])),
     batch: null,
+    failure: null,
+    stop: new AbortController(),
   };
+  const cancel = () => run.stop.abort();
+  sender.signal.addEventListener("abort", cancel, { once: true });
   const queue = [...partNumbers];
-  let failure: CloudropError | null = null;
-  // The first part that fails for good stops new parts; parts in flight finish (spec §6.2).
+  // The first part that fails for good stops new parts and new attempts; requests already sent finish (spec §6.2).
   const worker = async (): Promise<void> => {
-    for (let next = queue.shift(); next !== undefined && failure === null; next = queue.shift()) {
-      // Read before `failure ??=`: `failure ??= await sendPart(…)` would test `failure` before the await and let a
+    for (let next = queue.shift(); next !== undefined && run.failure === null; next = queue.shift()) {
+      // Read before `run.failure ??=`: `run.failure ??= await sendPart(…)` would test it before the await and let a
       // later success overwrite another worker's failure with null.
       const error = await sendPart(run, next);
-      failure ??= error;
+      run.failure ??= error;
+      if (run.failure) run.stop.abort();
     }
   };
   await Promise.all(Array.from({ length: Math.min(PARTS_IN_FLIGHT, queue.length) }, worker));
-  return failure ? fail(failure) : ok(undefined);
+  // The caller's signal may outlive this call: drop the listener that holds the run.
+  sender.signal.removeEventListener("abort", cancel);
+  return run.failure ? fail(run.failure) : ok(undefined);
 }

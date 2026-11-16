@@ -140,10 +140,13 @@ otherwise.
 
 - **Decision:** at most 4 parts of a file in flight. Parts the ticket carried no URL for are signed when a worker
   reaches them, up to 20 per `/sign` (`PARTS_PER_SIGN`), and other workers wait on that call. The first part that
-  fails for good fails the call; parts in flight finish and no new part starts.
-- **Why:** spec §6.1 and §6.2; 8 parallel parts on one key were not throttled on R2 (spike Q9).
+  fails for good fails the call: requests already sent finish, but no new part and no new attempt of another part
+  starts, and a part waiting to retry stops waiting.
+- **Why:** spec §6.1 and §6.2; 8 parallel parts on one key were not throttled on R2 (spike Q9). Once the file has
+  failed, a part retrying with `Retry-After` would otherwise hold the answer for up to about 100 s (M3-S9) and send
+  bytes nobody will complete (final review, Minor 5).
 - **If wrong:** a large file uploads more slowly than the shared pool of the scheduler plan will allow.
-- **Status:** in force (`6fd5f14`).
+- **Status:** in force (`6fd5f14`; the stop after a failure added in the slice's final fix round).
 - **Visible in:** `client/parts.ts` (`PARTS_IN_FLIGHT`, `signAhead`, `sendParts`).
 
 ### M3-S13: at most two `PARTS_MISSING` repair rounds
