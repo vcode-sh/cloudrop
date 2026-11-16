@@ -1,9 +1,10 @@
 // Contract: decisions S4 (the entry's only values are createCloudropClient and CloudropError), S17 (a base path the
-// handler cannot be mounted at is a configuration error) and S18 (the default fetch is looked up on each request and
-// never called as a method of another object). Oracle: S17's message and the public surface listed in S4.
+// handler cannot be mounted at, or a fetch option that is not a function, is a configuration error; null options are
+// none, as for createCloudrop) and S18 (the default fetch is looked up on each request and never called as a method of
+// another object). Oracle: S17's messages and the public surface listed in S4.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient } from "./client.ts";
+import { type ClientOptions, createCloudropClient } from "./client.ts";
 
 const basePathMessage =
   'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.';
@@ -40,6 +41,29 @@ describe("createCloudropClient", () => {
       );
     },
   );
+
+  it("treats null options as none, as createCloudrop does", async () => {
+    // Plain JavaScript such as createCloudropClient(settings.cloudrop ?? null).
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", (url: string) => {
+      urls.push(url);
+      return Promise.resolve(Response.json({ files: [] }));
+    });
+    const client = createCloudropClient(null as unknown as ClientOptions);
+    await client.upload("notes", note());
+    expect(urls).toEqual(["/api/cloudrop/upload"]);
+  });
+
+  it("refuses a fetch option that is not a function", () => {
+    expect(() => createCloudropClient({ fetch: "fetch" } as unknown as ClientOptions)).toThrow(
+      expect.objectContaining({
+        name: "CloudropError",
+        code: "INVALID_CONFIG",
+        message: "The fetch option must be a function.",
+      }),
+    );
+  });
 
   it("calls the global fetch at request time, not as a method", async () => {
     // A fetch captured at creation would fail on the relative URL and retry; no backoff makes that a failed assertion.

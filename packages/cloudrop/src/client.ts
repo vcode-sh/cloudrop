@@ -67,12 +67,14 @@ const BASE_PATH = /^(?:https?:\/\/[^/?#\s]+)?(?:\/[^/?#\s]+)+$/;
 export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: ClientOptions = {},
 ): CloudropClient<TCloudrop> {
-  const { basePath = "/api/cloudrop", fetch } = options;
+  // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
+  const { basePath = "/api/cloudrop", fetch } = options ?? {};
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError(
       'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
     );
   }
+  if (fetch !== undefined && typeof fetch !== "function") throw configError("The fetch option must be a function.");
   if (typeof (fetch ?? globalThis.fetch) !== "function") {
     throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
   }

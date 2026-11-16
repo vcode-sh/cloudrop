@@ -216,12 +216,14 @@ otherwise.
 - **Decision:** `upload` returns `INVALID_INPUT` before any request when the route is not a non-empty string, the file
   is not a `File`, the options are not an object or the signal is not an `AbortSignal` (and, since M3-S28, when the
   metadata cannot be encoded as JSON). `createCloudropClient` throws `INVALID_CONFIG` when `basePath` is not a path such
-  as `/api/cloudrop` or an absolute `http(s)` URL (no trailing slash, query or fragment; default `/api/cloudrop`) or
-  when no `fetch` exists.
+  as `/api/cloudrop` or an absolute `http(s)` URL (no trailing slash, query or fragment; default `/api/cloudrop`), when
+  a `fetch` option is given but is not a function ("The fetch option must be a function."), or when no `fetch` exists.
+  `null` options count as none, as `createCloudrop` reads its own (`readConfig`, `server/config.ts`).
 - **Why:** plain JavaScript callers get every one of these wrong; a configuration mistake fails at construction, as
   `createCloudrop` does.
 - **If wrong:** a `basePath` with a query string, which some proxies need, is refused.
-- **Status:** in force (`bc06db2`).
+- **Status:** in force (`bc06db2`; `null` options and the `fetch` option's own message added in the slice's final fix
+  round, after the final review's Minor 6).
 - **Visible in:** `client.ts` (`BASE_PATH`, `createCloudropClient`), `client/upload.ts` (`readArguments`).
 
 ### M3-S18: the default `fetch`
