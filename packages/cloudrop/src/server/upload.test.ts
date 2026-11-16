@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MultipartTicket, SingleTicket } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
-import { albumSchema, files, NOW, png, upload } from "../testing/upload-fixture.ts";
-import { route, unauthorized } from "./route.ts";
+import { avatar, files, NOW, png, upload } from "../testing/upload-fixture.ts";
 
 const NOW_SECONDS = 1_794_744_000;
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -16,29 +15,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const avatar = route({
-  accept: ["image/png", "image/jpeg"],
-  maxSize: "1MB",
-  maxFiles: 2,
-  metadata: albumSchema,
-  authorize: ({ request, metadata }) =>
-    request.headers.get("x-user")
-      ? { userId: request.headers.get("x-user") as string, albumId: metadata.albumId }
-      : unauthorized(),
-  prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}`,
-});
-
 describe("POST /upload: a single PUT ticket", () => {
   it("signs exactly the headers the bucket must store, with no Content-Length, and a token bound to the file", async () => {
     const fixture = serverFixture({ avatar });
     const { status, body } = await upload(fixture, { route: "avatar", files: [png()], metadata: { albumId: "a1" } });
     const ticket = body.files[0] as SingleTicket;
     expect(status).toBe(200);
-    expect(ticket.fileId).toMatch(ULID);
+    expect(ticket.id).toMatch(ULID);
     expect(ticket).toEqual({
       kind: "single",
-      fileId: ticket.fileId,
-      key: `users/42/a1/${ticket.fileId}.png`,
+      id: ticket.id,
+      key: `users/42/a1/${ticket.id}.png`,
       token: ticket.token,
       expiresAt: "2026-11-16T12:00:00.000Z",
       put: {
@@ -47,7 +34,7 @@ describe("POST /upload: a single PUT ticket", () => {
           "content-type": "image/png",
           "content-disposition": "inline; filename=\"me.png\"; filename*=UTF-8''me.png",
           "if-none-match": "*",
-          "x-amz-meta-cloudrop-id": ticket.fileId,
+          "x-amz-meta-cloudrop-id": ticket.id,
         },
         expiresAt: "2026-11-15T12:15:00.000Z",
       },
@@ -55,7 +42,7 @@ describe("POST /upload: a single PUT ticket", () => {
     expect(tokenPayload(ticket.token)).toEqual({
       v: 1,
       route: "avatar",
-      fileId: ticket.fileId,
+      id: ticket.id,
       key: ticket.key,
       name: "me.png",
       size: 1024,
@@ -93,7 +80,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, uploadId: tokenPayload(ticket.token).uploadId }).toEqual({
-      key: `${ticket.fileId}.txt`,
+      key: `${ticket.id}.txt`,
       uploadId: undefined,
     });
   });
@@ -107,7 +94,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, headers: ticket.put.headers }).toMatchObject({
-      key: `${ticket.fileId}.svg`,
+      key: `${ticket.id}.svg`,
       headers: {
         "content-type": "image/svg+xml",
         "content-disposition": "attachment; filename=\"logo.svg\"; filename*=UTF-8''logo.svg",

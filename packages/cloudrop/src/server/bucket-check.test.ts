@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError, fail } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
+import { storageError } from "../storage/storage-error.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { allowAnyone, route } from "./route.ts";
 
@@ -80,12 +81,42 @@ describe("api.checkBucket", () => {
     expect([report.data?.cors.status, report.data?.lifecycle.status]).toEqual(["unknown", "unknown"]);
   });
 
-  it("fails, instead of reporting unknown, when a setting cannot be read for another reason than denial", async () => {
-    const down = new CloudropError("STORAGE_UNREACHABLE", "Could not reach the storage service.", { retryable: true });
-    const fixture = withStorage({ getBucketCors: async () => fail(down) });
+  // Wrangler's local R2 answers both reads with 501 NotImplemented (measured 2026-11-16, wrangler 4.162.0).
+  it("reports unknown when the storage does not implement the settings reads", async () => {
+    const notImplemented = (request: string) =>
+      fail(
+        storageError(501, `<Error><Code>NotImplemented</Code><Message>${request} not implemented</Message></Error>`),
+      );
+    const fixture = withStorage({
+      getBucketCors: async () => notImplemented("GetBucketCors"),
+      getBucketLifecycle: async () => notImplemented("GetBucketLifecycleConfiguration"),
+    });
+    const report = await fixture.cloudrop.api.checkBucket({ origins: ["https://app.example.com"] });
+    expect([report.data?.cors, report.data?.lifecycle]).toEqual([
+      {
+        status: "unknown",
+        message:
+          "This storage service cannot report the bucket's CORS rules. Check them where the bucket is configured (for R2, the dashboard).",
+      },
+      {
+        status: "unknown",
+        message:
+          "This storage service cannot report the bucket's lifecycle rules. Check them where the bucket is configured (for R2, the dashboard).",
+      },
+    ]);
+  });
+
+  it.for<{ name: string; error: CloudropError }>([
+    {
+      name: "the storage is unreachable",
+      error: new CloudropError("STORAGE_UNREACHABLE", "Could not reach the storage service.", { retryable: true }),
+    },
+    { name: "the storage fails with 500", error: storageError(500, "<Error><Code>InternalError</Code></Error>") },
+  ])("fails, instead of reporting unknown, when $name", async ({ error }) => {
+    const fixture = withStorage({ getBucketCors: async () => fail(error) });
     expect(await fixture.cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })).toEqual({
       data: null,
-      error: down,
+      error,
     });
   });
 

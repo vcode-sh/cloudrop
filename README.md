@@ -67,8 +67,12 @@ http.createServer(toNodeHandler(cloudrop));
 app.use("/api/cloudrop", toNodeHandler(cloudrop));
 ```
 
-`toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and answers `400` to a request
-target that is not a path, such as the absolute form `POST http://host/api/cloudrop/upload`.
+`toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and the scheme from the connection,
+never from `X-Forwarded-*` or `:scheme`. It answers `400` when that host is missing, sent twice, malformed (userinfo, a
+path, an invalid port) or different in `host` and `:authority`, rather than guess one such as `localhost`, since the
+origin decides the same-origin check. It also answers `400` to a request target that is not a path, such as the
+absolute form `POST http://host/api/cloudrop/upload`: browsers send that form only to proxies, and accepting it would
+let the target choose the origin. A hand-built request without `rawHeaders` is read from `headers` alone.
 
 ### Origins
 
@@ -103,7 +107,8 @@ sees (for up to 16 origins).
 `deleteMany`, `copy`, `deletePrefix` (a folder prefix ending in `/`, emptied and listed again to prove it) and
 `checkBucket`. `checkBucket({ origins })` reports CORS for browser uploads, the abort-incomplete lifecycle rule and
 private routes on a public bucket. An R2 object token may not read bucket settings, so those checks come back
-`unknown`; with an admin read token, R2's answers have not been measured yet. In development
+`unknown`, as do settings the storage cannot report at all (Wrangler's local R2 answers `501 NotImplemented`); with
+an admin read token, R2's answers have not been measured yet. In development
 (`NODE_ENV=development`) the first request runs it once and logs each problem.
 
 ### Not done yet

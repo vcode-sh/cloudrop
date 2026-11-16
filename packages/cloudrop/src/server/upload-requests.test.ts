@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError } from "../errors.ts";
-import type { FileTicket, SingleTicket, UploadResponse } from "../protocol/types.ts";
+import type { FileTicket, SingleTicket } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
+import { avatar, files, NOW, png, upload } from "../testing/upload-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
-import { allowAnyone, route, unauthorized } from "./route.ts";
-import type { StandardSchema } from "./schema.ts";
-
-const NOW = new Date("2026-11-15T12:00:00Z");
+import { allowAnyone, route } from "./route.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -16,43 +14,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-
-const albumSchema: StandardSchema<{ albumId: string }> = {
-  "~standard": {
-    version: 1,
-    vendor: "test",
-    validate: (value) => {
-      const albumId = (value as { albumId?: unknown } | null)?.albumId;
-      return typeof albumId === "string"
-        ? { value: { albumId } }
-        : { issues: [{ message: "Expected a string", path: ["albumId"] }] };
-    },
-  },
-};
-
-const avatar = route({
-  accept: ["image/png", "image/jpeg"],
-  maxSize: "1MB",
-  maxFiles: 2,
-  metadata: albumSchema,
-  authorize: ({ request, metadata }) =>
-    request.headers.get("x-user")
-      ? { userId: request.headers.get("x-user") as string, albumId: metadata.albumId }
-      : unauthorized(),
-  prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}`,
-});
-const files = route({ accept: "*/*", maxSize: "100GB", authorize: allowAnyone });
-
-const signedIn = { "x-user": "42" };
-const png = (size = 1024, name = "me.png") => ({ name, size, type: "image/png" });
-
-async function upload(fixture: ReturnType<typeof serverFixture>, body: unknown, headers = signedIn) {
-  const response = await fixture.post("upload", body, headers);
-  return {
-    status: response.status,
-    body: (await response.json()) as UploadResponse & { error?: { code: string; message: string } },
-  };
-}
 
 describe("POST /upload: policy", () => {
   it("accepts a file of exactly maxSize and refuses one byte more, per file", async () => {
@@ -232,7 +193,7 @@ describe("POST /upload: keys", () => {
     const decomposed = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => "cafe\u0301" });
     const { body } = await upload(serverFixture({ files: decomposed }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
-    expect(ticket.key).toBe(`café/${ticket.fileId}.png`);
+    expect(ticket.key).toBe(`café/${ticket.id}.png`);
   });
 
   it.for([
@@ -242,7 +203,7 @@ describe("POST /upload: keys", () => {
     const rooted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => prefix });
     const { body } = await upload(serverFixture({ files: rooted }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
-    expect(ticket.key).toBe(`${folder}${ticket.fileId}.png`);
+    expect(ticket.key).toBe(`${folder}${ticket.id}.png`);
   });
 
   it.for<{ name: string; prefix: unknown; log: string }>([

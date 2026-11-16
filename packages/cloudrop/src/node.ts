@@ -16,8 +16,11 @@ export interface NodeRequest extends AsyncIterable<Uint8Array> {
   /** Express and Connect move the mount path out of `url` into this. */
   originalUrl?: string;
   headers: Record<string, string | string[] | undefined>;
-  /** Names and values in the order they arrived; the only place a second Host header still shows. */
-  rawHeaders: string[];
+  /**
+   * Names and values in the order they arrived; the only place a second Host header still shows. Node always sets it;
+   * a hand-built request without it is read from `headers` alone.
+   */
+  rawHeaders?: string[];
   socket: object;
 }
 
@@ -76,7 +79,7 @@ function hostOrigin(scheme: string, value: string | string[] | undefined): strin
 // (Line comments: the build keeps doc blocks in the published file, and these functions are private.)
 function requestOrigin(request: NodeRequest, scheme: string): string | null {
   // rawHeaders alternates names and values.
-  const hosts = request.rawHeaders.filter((name, index) => index % 2 === 0 && name.toLowerCase() === "host");
+  const hosts = (request.rawHeaders ?? []).filter((name, index) => index % 2 === 0 && name.toLowerCase() === "host");
   if (hosts.length > 1) return null;
   const { host, ":authority": authority } = request.headers;
   const named = [host, authority].filter((value) => value !== undefined);

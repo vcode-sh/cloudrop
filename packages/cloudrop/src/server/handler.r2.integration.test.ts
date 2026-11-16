@@ -88,7 +88,7 @@ describe("upload protocol on live R2", () => {
       size: 1000,
       type: "image/png",
       disposition: "inline; filename=\"zdj_cie 1.png\"; filename*=UTF-8''zdj%C4%99cie%201.png",
-      metadata: { "cloudrop-id": ticket.fileId },
+      metadata: { "cloudrop-id": ticket.id },
     });
     const link = await cloudrop.api.getUrl(ticket.key, { expiresIn: 300, download: "photo.png" });
     expect(link.error).toBeNull();

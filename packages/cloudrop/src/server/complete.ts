@@ -56,7 +56,7 @@ async function verifyObject(
     );
   }
   // Another writer's object: never delete it.
-  if (object.metadata["cloudrop-id"] !== token.fileId) {
+  if (object.metadata["cloudrop-id"] !== token.id) {
     await release(config, token);
     return fail(
       new CloudropError("VERIFICATION_FAILED", "Another file is stored under this upload's key. Start a new upload."),
@@ -72,7 +72,7 @@ async function verifyObject(
 async function completedBefore(config: ServerConfig, token: MultipartToken): Promise<Result<void>> {
   const head = await config.storage.head(token.key);
   if (head.error) return fail(storageFailure(head.error, config.logger));
-  if (head.data?.metadata["cloudrop-id"] === token.fileId && head.data.size === token.size) return ok(undefined);
+  if (head.data?.metadata["cloudrop-id"] === token.id && head.data.size === token.size) return ok(undefined);
   return fail(new CloudropError("NO_SUCH_UPLOAD", "This upload was aborted or has expired. Start it again."));
 }
 
@@ -109,7 +109,7 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     // The parts and ETags were listed a moment ago, so a stale one is a part uploaded again in between. The upload
     // stays open: a retry lists the parts again.
     logger.error(
-      `cloudrop: a part of file ${token.fileId} on route "${token.route}" changed while its upload was being completed.`,
+      `cloudrop: a part of file ${token.id} on route "${token.route}" changed while its upload was being completed.`,
       completed.error,
     );
     return fail(partChanged());
@@ -122,7 +122,7 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     const aborted = await storage.abortMultipart(token.key, token.uploadId);
     if (aborted.error) {
       logger.error(
-        `cloudrop: could not abort the collided upload of file ${token.fileId} on route "${token.route}".`,
+        `cloudrop: could not abort the collided upload of file ${token.id} on route "${token.route}".`,
         aborted.error,
       );
     }
@@ -146,7 +146,7 @@ export async function handleComplete({ request, body, config }: EndpointInput): 
   }
   if (stored.error) return stored;
   const file: UploadedFile = {
-    id: token.fileId,
+    id: token.id,
     key: token.key,
     name: token.name,
     size: token.size,

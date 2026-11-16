@@ -42,7 +42,7 @@ export interface SignedPart extends SignedRequest {
 }
 
 interface TicketFields {
-  fileId: string;
+  id: string;
   key: string;
   /** Present it to `/sign`, `/complete` and `/abort`. */
   token: string;
@@ -111,7 +111,7 @@ export interface AbortRequest {
 }
 
 export interface AbortResponse {
-  fileId: string;
+  id: string;
 }
 
 export interface ErrorBody {

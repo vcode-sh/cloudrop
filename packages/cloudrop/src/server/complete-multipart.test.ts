@@ -34,7 +34,7 @@ describe("POST /complete: multipart", () => {
     expect((await fixture.storage.head(ticket.key)).data).toMatchObject({
       size: 8 * MiB + 5,
       type: "application/octet-stream",
-      metadata: { "cloudrop-id": ticket.fileId },
+      metadata: { "cloudrop-id": ticket.id },
     });
     expect((await fixture.storage.getRange(ticket.key, 8 * MiB, 8 * MiB + 4)).data).toEqual(partTwo);
   });
@@ -59,7 +59,7 @@ describe("POST /complete: multipart", () => {
     await fixture.send(ticket.parts[1] as SignedPart, partTwo);
     const first = await complete(fixture, ticket.token);
     const retried = await complete(fixture, ticket.token);
-    expect([first.status, retried.status, retried.body.file.id]).toEqual([200, 200, ticket.fileId]);
+    expect([first.status, retried.status, retried.body.file.id]).toEqual([200, 200, ticket.id]);
   });
 
   it("answers 410 NO_SUCH_UPLOAD for an aborted upload", async () => {
@@ -95,9 +95,9 @@ describe("POST /complete: multipart", () => {
     const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
     const ticket = await fixture.multipart("files", { name: "a.bin", size: 5, type: "application/octet-stream" });
     await fixture.send(ticket.parts[0] as SignedPart, new Uint8Array(5));
-    await fixture.storage.put(ticket.key, "hello", { metadata: { "cloudrop-id": ticket.fileId } });
+    await fixture.storage.put(ticket.key, "hello", { metadata: { "cloudrop-id": ticket.id } });
     const completed = await complete(fixture, ticket.token);
-    expect([completed.status, completed.body.file?.id, aborted]).toEqual([200, ticket.fileId, []]);
+    expect([completed.status, completed.body.file?.id, aborted]).toEqual([200, ticket.id, []]);
   });
 
   it("keeps the upload and its reservation when the object that refused completion cannot be read", async () => {

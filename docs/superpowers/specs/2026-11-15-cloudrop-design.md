@@ -133,8 +133,12 @@ export const cloudrop = createCloudrop({
   and TanStack Start mount it in one line; `toNodeHandler` bridges Node `http` and `http2`. `toNextHandler` returns
   `GET`, `POST` and `OPTIONS`; `OPTIONS` answers the CORS preflight of `trustedOrigins`. Both adapters take any
   `{ handler }`, so `cloudrop/next` and `cloudrop/node` import no server code.
-- `toNodeHandler` builds the request URL from the origin of `Host` (HTTP/2: `:authority`) and the request target. A
-  target that is not a path, such as the absolute form `POST http://host/api/cloudrop/upload`, answers `400`.
+- `toNodeHandler` builds the request URL from the origin of `Host` (HTTP/2: `:authority`), the connection's scheme
+  and the request target. That origin decides the same-origin check, so no host is invented (no `localhost`
+  fallback): a missing, duplicated (RFC 9112 §3.2) or malformed host, or a `host` naming another origin than
+  `:authority` (RFC 9113 §8.3.1), answers `400`. A target that is not a path, such as the absolute form
+  `POST http://host/api/cloudrop/upload`, answers `400` too: browsers send that form only to proxies, and accepting it
+  would let the target choose the origin. `rawHeaders`, which shows a second Host, is read when the request has it.
 - `onComplete` runs inside the client's `/complete` request and its return value reaches the client, typed. Delivery
   is at-least-once with a stable `file.id`; the docs say so. The 1.1 adapters make it exactly-once.
 - `createCloudrop` warns about private routes on a bucket with a public domain. In development
@@ -173,7 +177,7 @@ The server decides; the client cannot.
 ### 5.2 Upload token
 
 - An HMAC-SHA256 signed, base64url token carrying
-  `{ v, route, fileId, key, name, size, type, uploadId?, partSize?, owner, metadata, exp }`. `owner` is the JSON of
+  `{ v, route, id, key, name, size, type, uploadId?, partSize?, owner, metadata, exp }`. `owner` is the JSON of
   `authorize`'s result and `metadata` the JSON of the schema's output, each at most 2 KiB: `/complete` takes only the
   token, and `onComplete` needs both. The token is signed, not encrypted, so it never carries a secret.
 - Every call after `/upload` must present it. The server ignores any key, size or upload ID that is not in the token,
@@ -199,7 +203,7 @@ The server decides; the client cannot.
 
 - Single PUTs carry a signed `If-None-Match: *`. A retried PUT that gets `412` means the first one landed; `/complete`
   confirms it.
-- Every object carries `x-amz-meta-cloudrop-id` (the token's `fileId`). A retried `/complete` whose multipart upload
+- Every object carries `x-amz-meta-cloudrop-id` (the token's `id`). A retried `/complete` whose multipart upload
   no longer exists succeeds only after a `HEAD` shows the object with the matching ID and size.
 - Multiple files in one `/upload` call share one round trip: a small file costs three requests (init, PUT, complete).
 - A part uploaded again while `/complete` runs makes the listed ETag stale (`InvalidPart`). That answers a retryable
@@ -346,7 +350,7 @@ by `file.id`.
 | `delete(key)`, `deleteMany(keys)` | Any number of keys, one DeleteObject request per key, 16 at a time, with per-key results `{ deleted, failed[] }`. |
 | `copy(from, to)` | Server-side; `UploadPartCopy` above the storage's single-PUT limit (4.995 GiB on `r2()`, 5 GiB on `s3()`). |
 | `deletePrefix(prefix)` | A folder prefix ending in `/`, so `users/4/` never matches `users/42/`; a prefix no key can start with (a leading slash, a dot segment, a control character) is `INVALID_INPUT`. Deletes page by page (one request per key, through `deleteMany`), re-lists to prove nothing remains, returns `{ deleted, verifiedAt }`. Fails, never loops, when deleted keys reappear or writers keep adding keys (10,000 pages). For erasure requests. |
-| `checkBucket({ origins })` | Report on CORS for the origins (default `trustedOrigins`: `PUT` and the signed headers allowed, `ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. Each check is `ok`, `problem` or `unknown` (credentials that may not read the setting, or no origin to check). |
+| `checkBucket({ origins })` | Report on CORS for the origins (default `trustedOrigins`: `PUT` and the signed headers allowed, `ETag` exposed), the abort-incomplete lifecycle rule and public-domain conflicts. Each check is `ok`, `problem` or `unknown` (credentials that may not read the setting, a storage that does not implement the read, such as Wrangler's `501`, or no origin to check); any other storage failure fails the call. |
 
 ## 10. Lessons carried over from earlier implementations
 

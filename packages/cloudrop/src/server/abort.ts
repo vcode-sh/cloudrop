@@ -24,11 +24,11 @@ export async function handleAbort({ body, config }: EndpointInput): Promise<Resu
   // writer's) is deleted while the token is valid, and kept, with every reservation, once it has expired.
   const head = await storage.head(token.key);
   if (head.error) return fail(storageFailure(head.error, logger));
-  if (head.data?.metadata["cloudrop-id"] === token.fileId) {
-    if (nowSeconds() >= token.exp) return ok({ fileId: token.fileId });
+  if (head.data?.metadata["cloudrop-id"] === token.id) {
+    if (nowSeconds() >= token.exp) return ok({ id: token.id });
     const removed = await storage.delete(token.key);
     if (removed.error) return fail(storageFailure(removed.error, logger));
   }
   await runOnAbort(config.plugins, [abortContext(token, "aborted")], logger);
-  return ok({ fileId: token.fileId });
+  return ok({ id: token.id });
 }

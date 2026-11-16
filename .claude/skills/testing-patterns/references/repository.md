@@ -46,7 +46,9 @@ live lane a verbose report (both checked 2026-11-15).
 - Shared test infrastructure lives in `src/testing/`: `fake-r2.ts` (its modules under `fake-r2/`),
   `storage-contract.ts` (its case groups under `storage-contract/`), `server-fixture.ts` (a cloudrop server on the
   fake, called through `cloudrop.handler`) and `driver-fixture.ts` (an S3 driver over the fake or a stubbed `fetch`,
-  for the driver's unit tests).
+  for the driver's unit tests). Per-area setup sits beside them: `handler-fixture.ts`, `upload-fixture.ts`,
+  `complete-fixture.ts` and `presets-fixture.ts` build routes, bodies and calls for the handler, `/upload`, `/complete`
+  and `r2()`/`s3()` tests. They build inputs only; every expected value stays in the tests.
 
 ## Unit lane
 

@@ -7,7 +7,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 export interface UploadTokenPayload {
   v: 1;
   route: string;
-  fileId: string;
+  id: string;
   key: string;
   name: string;
   size: number;

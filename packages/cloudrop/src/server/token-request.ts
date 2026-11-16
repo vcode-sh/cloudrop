@@ -36,7 +36,7 @@ export async function readTokenRequest(
 
 /** The onAbort context for a token's file. */
 export function abortContext(token: UploadTokenPayload, reason: AbortContext["reason"]): AbortContext {
-  const { fileId: id, key, name, size, type } = token;
+  const { id, key, name, size, type } = token;
   return {
     route: token.route,
     file: { id, key, name, size, type },

@@ -6,9 +6,16 @@
 
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { connect as connectHttp2, createServer as createHttp2Server, type OutgoingHttpHeaders } from "node:http2";
+import {
+  connect as connectHttp2,
+  createSecureServer as createHttp2SecureServer,
+  createServer as createHttp2Server,
+  type OutgoingHttpHeaders,
+  type SecureClientSessionOptions,
+} from "node:http2";
 import { createServer as createHttpsServer } from "node:https";
 import { type AddressInfo, connect, type Server, type Socket } from "node:net";
+import { Readable } from "node:stream";
 import { connect as connectTls } from "node:tls";
 import { beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { toNodeHandler } from "./node.ts";
@@ -178,27 +185,60 @@ describe("toNodeHandler's request URL over HTTP/1.1", () => {
   });
 });
 
-// TLS-PSK needs no certificate, so the encrypted socket is real and nothing is written to disk.
-it("takes the https scheme from an encrypted socket", async () => {
-  const psk = new Uint8Array(32).fill(7);
-  const tls = { ciphers: "PSK-AES128-GCM-SHA256", maxVersion: "TLSv1.2" } as const;
-  const port = await serveOnce(createHttpsServer({ ...tls, pskCallback: () => psk }, seen));
-  const socket = connectTls({
-    ...tls,
-    port,
-    host: "127.0.0.1",
-    pskCallback: () => ({ psk, identity: "cloudrop" }),
-    checkServerIdentity: () => undefined,
-  });
-  await once(socket, "secureConnect");
-  expect(await exchange(socket, request("/api/cloudrop/upload", ["app.example:443"]))).toBe(
-    "200 https://app.example /api/cloudrop/upload",
+// Real Node requests always carry rawHeaders; a hand-built one (a test shim, a plain-JavaScript wrapper) may not.
+it("reads a hand-built request without rawHeaders by its Host header", async () => {
+  const answer: string[] = [];
+  await seen(
+    Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/api/cloudrop/upload",
+      headers: { host: APP },
+      socket: {},
+    }),
+    {
+      headersSent: false,
+      writeHead: (status) => answer.push(String(status)),
+      end: (body) => answer.push(new TextDecoder().decode(body)),
+    },
   );
+  expect(answer.join(" ")).toBe("200 http://app.example /api/cloudrop/upload");
+});
+
+// TLS-PSK needs no certificate, so the encrypted socket is real and nothing is written to disk.
+const psk = new Uint8Array(32).fill(7);
+const tls = { ciphers: "PSK-AES128-GCM-SHA256", maxVersion: "TLSv1.2" } as const;
+const tlsClient = {
+  ...tls,
+  pskCallback: () => ({ psk, identity: "cloudrop" }),
+  checkServerIdentity: () => undefined,
+} as const;
+
+describe("toNodeHandler's scheme over TLS", () => {
+  it("takes the https scheme from an encrypted socket", async () => {
+    const port = await serveOnce(createHttpsServer({ ...tls, pskCallback: () => psk }, seen));
+    const socket = connectTls({ ...tlsClient, port, host: "127.0.0.1" });
+    await once(socket, "secureConnect");
+    expect(await exchange(socket, request("/api/cloudrop/upload", ["app.example:443"]))).toBe(
+      "200 https://app.example /api/cloudrop/upload",
+    );
+  });
+
+  // Over HTTP/2 the request's socket is Node's proxy over the stream, not the TLS socket itself.
+  it("takes the https scheme from an encrypted HTTP/2 session", async () => {
+    const port = await serveOnce(createHttp2SecureServer({ ...tls, pskCallback: () => psk }, seen));
+    expect(await sendHttp2(`https://127.0.0.1:${port}`, { ":authority": "app.example:443" }, tlsClient)).toBe(
+      "200 https://app.example /api/cloudrop/upload",
+    );
+  });
 });
 
 /** Sends one HTTP/2 request and answers "200 <origin> <path>" or the refusal's status. */
-async function sendHttp2(port: number, headers: OutgoingHttpHeaders): Promise<string> {
-  const client = connectHttp2(`http://127.0.0.1:${port}`);
+async function sendHttp2(
+  url: string,
+  headers: OutgoingHttpHeaders,
+  options: SecureClientSessionOptions = {},
+): Promise<string> {
+  const client = connectHttp2(url, options);
   onTestFinished(() => void client.close());
   const stream = client.request({ ":path": "/api/cloudrop/upload", ...headers });
   stream.end();
@@ -222,12 +262,23 @@ describe("toNodeHandler's request URL over HTTP/2", () => {
       answer: "200 http://app.example /api/cloudrop/upload",
     },
     {
+      name: "the same origin spelled differently in :authority and host",
+      headers: { ":authority": APP, host: "APP.example:80" },
+      answer: "200 http://app.example /api/cloudrop/upload",
+    },
+    // :scheme is the client's claim; only an encrypted connection makes the origin https.
+    {
+      name: "a client-sent :scheme of https on an unencrypted connection",
+      headers: { ":authority": APP, ":scheme": "https" },
+      answer: "200 http://app.example /api/cloudrop/upload",
+    },
+    {
       name: "another host in host than in :authority",
       headers: { ":authority": APP, host: "proxy.example" },
       answer: "400",
     },
   ])("reads $name", async ({ headers, answer }) => {
     const port = await serveOnce(createHttp2Server(seen));
-    expect(await sendHttp2(port, headers)).toBe(answer);
+    expect(await sendHttp2(`http://127.0.0.1:${port}`, headers)).toBe(answer);
   });
 });
