@@ -119,6 +119,8 @@ describe("type inference for the client", () => {
   });
 
   it("gives the client the resolved value when the result type is a promise", () => {
+    // Explicit generics: inferring from an async onComplete already unwraps Awaitable<TResult>, so TResult would be
+    // { id: string } and the row would pass without route()'s Awaited. Only a TResult that is a promise proves it.
     const resolves = route<object, undefined, Promise<{ id: string }>>({
       accept: "*/*",
       maxSize: 1,

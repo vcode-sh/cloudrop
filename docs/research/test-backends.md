@@ -6,8 +6,10 @@ is changed to match. One section per backend: behaviour, evidence, date.
 
 ## Real R2 (live lane)
 
-Lane: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts`, run by `bun run test:live`. Driver: the public
-`r2()` preset, configured from the environment. Bucket: the owner's R2 test bucket, under `live-test/cloudrop-<hex>/`.
+Lanes: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts` (the storage contract) and
+`packages/cloudrop/src/server/handler.r2.integration.test.ts` (the upload protocol through `cloudrop.handler`), both run
+by `bun run test:live`. Driver: the public `r2()` preset, configured from the environment. Bucket: the owner's R2 test
+bucket, each lane file under its own `live-test/cloudrop-<hex>/`.
 
 **Date:** 2026-11-15, two runs (about 30 MiB uploaded and 15 s each), then a third run after the copy guard was added
 (16 s).
@@ -28,16 +30,36 @@ cases). R2 declares no gap.
 | `x-amz-copy-source-if-match` with HEAD's quoted ETag is honoured on `CopyObject` and on `UploadPartCopy`: a matching ETag copies, and a source overwritten after HEAD answers `412`, which the driver reports as a retryable `STORAGE_ERROR` (third run) | "fails a single copy cleanly…", "fails a copy in ranged parts cleanly…"; the two ordinary copy cases send the same header and pass |
 
 The unsigned-metadata row is the only difference from the fake found so far (below). Teardown deleted everything: a separate
-read-only listing of `live-test/` after both runs returned 0 objects and 0 multipart uploads.
+read-only listing of `live-test/` after the first two runs returned 0 objects and 0 multipart uploads.
+
+**M2 run, 2026-11-16** (about 17 s): 31 cases in two files, all pass, none skipped: 26 contract cases (the two
+presigned-GET cases are new) and 5 upload-protocol cases. A read-only listing afterwards found 0 objects and 0 open
+multipart uploads under `live-test/`.
+
+| Behaviour | Evidence |
+|---|---|
+| A presigned GET carrying `response-content-disposition` serves the object with exactly that `Content-Disposition` | "serves a presigned GET with the download name signed into it"; the server lane's single-upload case |
+| A presigned PUT signed by `/upload` with `content-type`, `content-disposition`, `if-none-match: *` and `x-amz-meta-cloudrop-id`, sent with exactly those headers, stores the type, the disposition (`filename*` for a Polish name) and `cloudrop-id` | server lane, "uploads a single file…" |
+| `/complete` answers `PARTS_MISSING` with the absent part, `/sign` renews it, and a completion retried after R2 forgot the upload succeeds by HEAD | server lane, "resumes a multipart upload…" |
+| `/abort` aborts a multipart upload: ListParts then answers `NoSuchUpload` | server lane, "aborts a multipart upload on R2" |
+| An Object Read & Write token is denied `GetBucketLifecycleConfiguration` as it is `GetBucketCors`, so `checkBucket()` reports both as `unknown` | server lane, "reports bucket settings an object token may not read as unknown" |
+
+Not measured on R2: the answers to those two reads for a token that may read them, both for a configured bucket and
+for one without a configuration. `checkBucket()` follows S3's documented `NoSuchCORSConfiguration` and
+`NoSuchLifecycleConfiguration` codes there.
+
+The upload protocol runs only here and on the fake. RustFS and Wrangler run the storage contract; their server lanes
+are deferred to M3.
 
 ## RustFS (container lane)
 
-Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run by `scripts/test-rustfs.sh`
-(`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label `cloudrop.test`, removed by a
-`trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
+Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run by `bun run test:rustfs`, which
+calls `scripts/test-rustfs.sh` (`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label
+`cloudrop.test`, removed by a `trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
 
-**Date:** 2026-11-15. **Result:** 21 of 24 contract cases pass, 3 skip on declared gaps (19 of 22 before the copy-guard
-cases were added). The suite takes about 1 s.
+**Date:** 2026-11-15, re-run 2026-11-16. **Result:** 23 of 26 contract cases pass, 3 skip on declared gaps (21 of 24
+before the two presigned-GET cases, 19 of 22 before the copy-guard cases). The suite takes about 1 s. A presigned GET
+with `response-content-disposition` is honoured as on R2.
 
 | Behaviour | Measured answer |
 |---|---|
@@ -57,14 +79,14 @@ why they are a declared gap, not a driver bug: the driver maps whatever the back
 
 ## Wrangler local R2 (Miniflare lane)
 
-Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, run by `scripts/test-wrangler.sh`
-(the pinned `wrangler@4.162.0` devDependency, worker fixture in `packages/cloudrop/fixtures/wrangler/`, port 18787 or
-`CLOUDROP_WRANGLER_PORT`, state in `fixtures/wrangler/.state`, stopped and wiped by a `trap`). The endpoint is
+Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, run by `bun run test:wrangler`,
+which calls `scripts/test-wrangler.sh` (the pinned `wrangler@4.162.0` devDependency, worker fixture in
+`packages/cloudrop/fixtures/wrangler/`, port 18787 or `CLOUDROP_WRANGLER_PORT`, state in `fixtures/wrangler/.state`, stopped and wiped by a `trap`). The endpoint is
 `http://127.0.0.1:<port>/cdn-cgi/local/r2/s3` (experimental, `local_dev.experimental_s3_credentials`). Driver:
 `createS3Driver` with `R2_RULES`, region `auto`, path-style bucket `contract`.
 
-**Date:** 2026-11-15. **Result:** 16 of 24 contract cases pass, 8 skip on declared gaps (16 of 22 and 6 skips before the
-copy guard). The suite takes under 1 s.
+**Date:** 2026-11-15, re-run 2026-11-16. **Result:** 17 of 26 contract cases pass, 9 skip on declared gaps (16 of 24
+and 8 skips before the presigned-GET cases, 16 of 22 and 6 skips before the copy guard). The suite takes under 1 s.
 
 | Behaviour | Measured answer |
 |---|---|
@@ -79,6 +101,7 @@ copy guard). The suite takes under 1 s.
 | `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
 | Completing a finished upload again | `404 NoSuchUpload` as R2. No gap |
 | `x-amz-copy-source-if-match` | Honoured on `CopyObject` (a changed source answers `412`). An `UploadPartCopy` carrying it answers `501 NotImplemented`; the same request without the header succeeds (measured by sending the parts without it). Gap `copyPartPrecondition`: both multipart-copy cases skip |
+| Presigned GET with `response-content-disposition` | `200` with the body but **no** `Content-Disposition`: the override is ignored (R2 and RustFS apply it). Gap `responseOverrides` |
 
 Wrangler is therefore a check of the equal-part rule and presigned SigV4 only; resume by ListParts, checksums and
 multipart copy are covered by RustFS and real R2.
@@ -100,3 +123,8 @@ Rules the fake models on S3's documented behaviour that were **not measured on R
 - An `x-amz-copy-source-range` that is malformed, reversed or past the source's end answers `400 InvalidArgument`.
 - A reversed range on GET (`bytes=5-2`) answers `416 InvalidRange`.
 - A query sent with `+` where `%20` was signed (or the reverse) fails the signature: S3 reads `+` as a literal plus.
+
+Bucket settings (2026-11-15): without the `bucketConfig` option the fake answers `GetBucketCors` and
+`GetBucketLifecycleConfiguration` with `403 AccessDenied`, as R2 does for an object token (measured for both by the live
+lane). With it, the fake serves the given XML, or `404 NoSuchCORSConfiguration` / `NoSuchLifecycleConfiguration` for a
+missing entry, as S3 documents. `response-content-disposition` on a GET is applied, as on R2 and RustFS.
