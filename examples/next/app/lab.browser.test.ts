@@ -2,7 +2,7 @@
 // scripts/test-browser-live.ts (R2). The oracle is the request sequence the client's contract promises for each case
 // (decisions S10 to S12, S14): the page must show exactly those requests, and never a signed URL. The progress rows
 // read the job's snapshot through the page's bars (spec §6).
-import { expect, type Page, test } from "@playwright/test";
+import { type CDPSession, expect, type Page, test } from "@playwright/test";
 
 const MIB = 1024 * 1024;
 const TWENTY_MIB = 20_971_520;
@@ -35,24 +35,23 @@ function requestRows(page: Page): Promise<string[][]> {
 }
 
 /** Each file of the job as [name, status], in the order the page shows them. */
-function fileRows(page: Page): Promise<string[][]> {
+function fileRows(page: Page): Promise<[name: string, status: string][]> {
   return page
     .getByRole("table", { name: "Files" })
     .locator("tbody tr")
     .evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "")))
-    .then((rows) => rows.map((cells) => [cells[0] ?? "", cells[5] ?? ""]));
+    .then((rows) => rows.map((cells): [string, string] => [cells[0] ?? "", cells[5] ?? ""]));
 }
 
-/** Uploads at 4 MiB/s, so a 20 MiB file takes about five seconds and its bar has time to move. */
-async function throttleUploads(page: Page): Promise<void> {
+/** Chromium's network at 4 MiB/s up, so a 20 MiB file takes about five seconds and its bar has time to move. */
+const THROTTLED = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 4 * MIB };
+
+/** Throttles uploads; the session it returns changes the network conditions later. */
+async function throttleUploads(page: Page): Promise<CDPSession> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
-  await cdp.send("Network.emulateNetworkConditions", {
-    offline: false,
-    latency: 0,
-    downloadThroughput: -1,
-    uploadThroughput: 4 * MIB,
-  });
+  await cdp.send("Network.emulateNetworkConditions", THROTTLED);
+  return cdp;
 }
 
 /** The value of the file's bar every 100 ms until the run's status line says how it ended, and once more after. */
@@ -255,3 +254,63 @@ test("three files in one job", async ({ page }) => {
   await expect(summaryValue(page, "Size of the 3 files")).toHaveText("26215424 (25.0 MiB)");
   await expectNoSignedUrl(page);
 });
+
+test("going offline pauses an upload and coming back online completes it", async ({ page }) => {
+  await signIn(page);
+  const cdp = await throttleUploads(page);
+  await page.getByRole("button", { name: "20 MiB", exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const bar = page.getByRole("progressbar", { name: "Progress of random-20-MiB.bin" });
+  await expect.poll(() => bar.evaluate((element: HTMLProgressElement) => element.value)).toBeGreaterThan(0);
+
+  // Chromium's emulated offline sets navigator.onLine and fires the page's `offline` event, which the client hears.
+  await cdp.send("Network.emulateNetworkConditions", { ...THROTTLED, offline: true });
+
+  await expect.poll(() => fileRows(page)).toEqual([["random-20-MiB.bin", "paused"]]);
+  await expect(summaryValue(page, "PUTs in flight")).toHaveText("0");
+  await cdp.send("Network.emulateNetworkConditions", { ...THROTTLED, uploadThroughput: -1 });
+  await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+  expect(await fileRows(page)).toEqual([["random-20-MiB.bin", "done"]]);
+  // The client's pause cancelled the PUTs in flight; online sent each part again, and each was stored once.
+  expect(await requestRows(page)).toEqual([
+    ["/upload", "200", ""],
+    ["PUT part 1", "cancelled", ""],
+    ["PUT part 2", "cancelled", ""],
+    ["PUT part 3", "cancelled", ""],
+    ["PUT part 1", "200", "resumed"],
+    ["PUT part 2", "200", "resumed"],
+    ["PUT part 3", "200", "resumed"],
+    ["/complete", "200", ""],
+  ]);
+  await expect(summaryValue(page, "Sent to the bucket")).toHaveText("20971520 (20.0 MiB)");
+});
+
+/** The names of the files the page shows as done, in the order they were added. */
+const doneFiles = async (page: Page): Promise<string[]> =>
+  (await fileRows(page)).filter(([, status]) => status === "done").map(([name]) => name);
+
+for (const { order, puts, first } of [
+  {
+    order: "smallest-first",
+    puts: ["PUT part 1", "PUT single", "PUT part 2", "PUT part 3"],
+    first: "random-1-KiB.bin",
+  },
+  { order: "added", puts: ["PUT part 1", "PUT part 2", "PUT part 3", "PUT single"], first: "random-20-MiB.bin" },
+]) {
+  test(`with one connection and order ${order}, ${first} completes first`, async ({ page }) => {
+    await signIn(page);
+    await page.getByLabel("Connections", { exact: true }).selectOption("1");
+    await page.getByLabel("Order", { exact: true }).selectOption(order);
+    // Every PUT waits a second, far longer than a /complete: the file whose last PUT is answered first completes first.
+    await page.getByLabel(/Delay every bucket PUT by/).fill("1000");
+    for (const size of ["20 MiB", "1 KiB"]) await page.getByRole("button", { name: size, exact: true }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+
+    await expect.poll(() => doneFiles(page), { timeout: 20_000 }).not.toEqual([]);
+    expect(await doneFiles(page)).toEqual([first]);
+    await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+    const rows = await requestRows(page);
+    expect(rows.map(([kind]) => kind).filter((kind) => kind?.startsWith("PUT"))).toEqual(puts);
+    await expect(summaryValue(page, "Peak PUTs in flight")).toHaveText("1");
+  });
+}

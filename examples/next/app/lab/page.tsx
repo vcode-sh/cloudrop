@@ -1,6 +1,6 @@
 "use client";
 
-import { createCloudropClient, type RouteResult, type UploadJob } from "cloudrop/client";
+import { type ClientOptions, createCloudropClient, type RouteResult, type UploadJob } from "cloudrop/client";
 import { useRef, useState } from "react";
 // A type import: the server module, and the secret it reads, stay out of the browser bundle.
 import type { cloudrop } from "../../lib/cloudrop";
@@ -15,12 +15,18 @@ import { annotate, type Run } from "./run-report";
 import { RunSummary } from "./run-summary";
 import { SetupStrip } from "./setup-strip";
 
-/** The client's concurrency: how many bucket PUTs it sends at once, across all its files. The default. */
-const CONNECTIONS = 4;
+type Concurrency = NonNullable<ClientOptions["concurrency"]>;
+type Order = NonNullable<ClientOptions["order"]>;
+
+/** The choices for the client's concurrency: how many bucket PUTs it sends at once, across all its files. */
+const CONCURRENCY_CHOICES: readonly Concurrency[] = ["auto", 1, 2, 4, 8, 16];
+const ORDER_CHOICES: readonly Order[] = ["added", "smallest-first"];
 
 export default function LabPage() {
   const [files, setFiles] = useState<readonly File[]>([]);
   const [putsWithFetch, setPutsWithFetch] = useState(false);
+  const [concurrency, setConcurrency] = useState<Concurrency>("auto");
+  const [order, setOrder] = useState<Order>("added");
   const [records, setRecords] = useState<readonly RequestRecord[]>([]);
   const [job, setJob] = useState<UploadJob<RouteResult<typeof cloudrop, "files">> | null>(null);
   const [run, setRun] = useState<Run | null>(null);
@@ -30,6 +36,8 @@ export default function LabPage() {
   const cancel = useRef<AbortController | null>(null);
   const running = run !== null && run.endMs === null;
   const rows = annotate(records);
+  // Started by the lab's XMLHttpRequest or fetch and not ended yet, the lab's injected delay included.
+  const putsInFlight = records.filter((record) => record.isBucketPut && record.status === null).length;
 
   function updateFaults(next: Faults) {
     faultsNow.current = next;
@@ -54,7 +62,7 @@ export default function LabPage() {
     const uninstall = putsWithFetch ? [] : [installLabFetch(journal, faultSwitch), installLabXhr(journal, faultSwitch)];
     const fetch = putsWithFetch ? createLabFetch(journal, faultSwitch, window.fetch.bind(window)) : undefined;
     // A client per run, so each run's file ids and log start afresh; creating one costs nothing.
-    const client = createCloudropClient<typeof cloudrop>({ concurrency: CONNECTIONS, fetch });
+    const client = createCloudropClient<typeof cloudrop>({ concurrency, order, fetch });
     const controller = new AbortController();
     cancel.current = controller;
     const size = chosen.reduce((sum, file) => sum + file.size, 0);
@@ -105,6 +113,36 @@ export default function LabPage() {
           bytes count only once the bucket answers, so a bar moves a part at a time.
         </p>
         <div className={styles.row}>
+          <label htmlFor="connections">Connections</label>
+          <select
+            id="connections"
+            value={concurrency}
+            disabled={running}
+            onChange={(event) => setConcurrency(event.target.value === "auto" ? "auto" : Number(event.target.value))}
+          >
+            {CONCURRENCY_CHOICES.map((choice) => (
+              <option key={choice}>{choice}</option>
+            ))}
+          </select>
+          <label htmlFor="order">Order</label>
+          <select
+            id="order"
+            value={order}
+            disabled={running}
+            onChange={(event) => setOrder(event.target.value === "added" ? "added" : "smallest-first")}
+          >
+            {ORDER_CHOICES.map((choice) => (
+              <option key={choice}>{choice}</option>
+            ))}
+          </select>
+        </div>
+        <p className={styles.muted}>
+          Connections is the most bucket PUTs the client sends at once across its files, never more than 4 parts of one
+          file. Auto, the default, starts at 4, adds one every 2 s while the bytes sent per second rise by 10 % or more
+          and PUTs wait, up to 8, and halves after a network error, a stalled PUT or a busy bucket. Order chooses which
+          waiting PUT goes next: the files in the order they were added, or the smallest file first.
+        </p>
+        <div className={styles.row}>
           <button type="button" disabled={files.length === 0 || running} onClick={() => upload(files)}>
             Upload
           </button>
@@ -118,7 +156,15 @@ export default function LabPage() {
             Cancel
           </button>
         </div>
-        {job && <FileRows job={job} connections={CONNECTIONS} />}
+        {job && (
+          <>
+            <dl className={styles.summary}>
+              <dt>PUTs in flight</dt>
+              <dd>{putsInFlight}</dd>
+            </dl>
+            <FileRows job={job} />
+          </>
+        )}
         <RequestTable rows={rows} />
         <p className={styles.muted}>
           The lab records requests only while a run is going. A failed file tells the server with /abort in the

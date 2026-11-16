@@ -57,14 +57,10 @@ function FileRow({ file, handle }: { file: FileSnapshot<unknown>; handle: FileHa
 }
 
 /** The job's snapshot: a row per file in the order they were passed, and the totals. */
-export function FileRows<R>({ job, connections }: { job: UploadJob<R>; connections: number }) {
+export function FileRows<R>({ job }: { job: UploadJob<R> }) {
   const { files, totals } = useSyncExternalStore(job.subscribe, job.getSnapshot);
   return (
     <>
-      <p>
-        Connections: {connections}. The client sends at most this many bucket PUTs at once across its files, and at most
-        4 parts of one file.
-      </p>
       <table className={styles.table}>
         <caption>Files</caption>
         <thead>

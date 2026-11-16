@@ -23,8 +23,12 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
     override send(body?: Document | XMLHttpRequestBodyInit | null) {
       if (this.#method !== "PUT") return super.send(body);
       const record = journal.start(this.#url, "PUT", body);
-      // The client's transport sets the on… properties; these listeners only watch.
-      this.addEventListener("load", () => journal.end(record, this.status));
+      // The client's transport sets the on… properties; these listeners only watch. An answer is logged on
+      // readystatechange, which comes before load: the client's onload can start the next PUT before a load listener
+      // runs, and with one connection the log would show two PUTs in flight. Status 0 is an error or an abort.
+      this.addEventListener("readystatechange", () => {
+        if (this.readyState === RealXhr.DONE && this.status !== 0) journal.end(record, this.status);
+      });
       this.addEventListener("error", () => journal.end(record, "network error"));
       this.addEventListener("abort", () => journal.end(record, "cancelled"));
       const delayMs = faults.delayMs();

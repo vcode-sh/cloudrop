@@ -111,7 +111,13 @@ rule it already has):
   visitors where it stores files.
 - **Files:** choose several with the file input, or add 1 KiB, 5 MiB, 20 MiB or 100 MiB of random bytes made in the
   browser, as often as you like. **Upload** sends the whole list as one job, `client.start("files", files, { signal })`:
-  one `/upload`, then each file through the client's pool of 4 connections.
+  one `/upload`, then each file through the client's pool of connections.
+- **Connections and order:** each run creates its client with the chosen `concurrency` and `order`. **Connections**
+  is `auto` (the default: starts at 4, adds one every 2 s while the bytes sent per second rise by 10 % or more and
+  PUTs wait, up to 8, and halves after a network error, a stalled PUT or a busy bucket) or a fixed 1, 2, 4, 8 or 16;
+  a file never has more than 4 parts in flight. **Order** is `added` or `smallest-first`, which sends the smallest
+  file's waiting PUTs first. The client does not publish its pool size, so **PUTs in flight** counts the bucket PUTs
+  the lab's wrappers have started and not yet seen end, the injected delay included.
 - **Transport:** for the length of a run the lab wraps `window.fetch`, recording the calls to `/api/cloudrop/` and
   passing anything else through, and `window.XMLHttpRequest`, recording the bucket PUTs, which the client sends with
   XMLHttpRequest in a browser so that the bars move while bytes leave. When the run ends both are put back. **Send PUTs
@@ -119,7 +125,9 @@ rule it already has):
   everything through it, and a PUT's bytes count only once the bucket answers, so a bar moves a part at a time.
 - **Progress:** a row per file from the job's snapshot (`useSyncExternalStore(job.subscribe, job.getSnapshot)`): its
   bar, bytes sent, speed, time left and status, with Pause, Resume and Cancel for that file, and a row of totals. The
-  job's own **Pause**, **Resume** and **Cancel** act on every file; Cancel aborts the job's signal.
+  job's own **Pause**, **Resume** and **Cancel** act on every file; Cancel aborts the job's signal. When the browser
+  goes offline the client pauses the files that are queued or uploading, which then show `paused`, and resumes them
+  when it is back online; a job started offline pauses at once.
 - **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it
   again), answer the next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so
   a 100 MiB file shows four parts in flight, and Pause has PUTs to stop), and drop the answer of the next `/complete`
@@ -148,11 +156,14 @@ The numbers come from one browser on one network: they show how the client behav
 `app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file
 chosen twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload
 as three parts, a dropped bucket PUT as renewed and retried, a cancel during a delay as nothing sent, a paused file
-resumed with each part stored once, and three files in one job, and that no signed URL reaches the page. Two rows
-throttle uploads to 4 MiB/s through Chromium's DevTools protocol and sample a bar every 100 ms: through
-XMLHttpRequest it rises in small steps to the file's size; with PUTs sent through fetch it moves a part at a time. Run
-them from the repository root; install the shell once from this directory with
-`bunx playwright install --only-shell chromium`.
+resumed with each part stored once, and three files in one job, and that no signed URL reaches the page. Three rows
+throttle uploads to 4 MiB/s through Chromium's DevTools protocol. Two sample a bar every 100 ms: through
+XMLHttpRequest it rises in small steps to the file's size; with PUTs sent through fetch it moves a part at a time. The
+third sets the emulated network offline during a 20 MiB upload: the page's `offline` event pauses the file with no PUT
+in flight, and back online each part is sent again and the file completes. Two more rows upload a 20 MiB file and then
+a 1 KiB file with one connection and every PUT delayed by a second: with `smallest-first` the 1 KiB file completes
+first, with `added` the 20 MiB file does. Run them from the repository root; install the shell once from this
+directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves
