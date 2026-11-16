@@ -14,6 +14,8 @@ import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { gate, noSuchUpload, persistFixture, threeParts, unreachable } from "../testing/persist-fixture.ts";
 
 const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
+/** More store requests than any row here makes: every one of them fails. */
+const EVERY_REQUEST = 1000;
 const THREE_PARTS = ["POST /upload", "PUT part 1", "PUT part 2", "PUT part 3", "POST /complete"];
 
 beforeEach(() => {
@@ -77,12 +79,15 @@ describe("a retry's new ticket", () => {
     await setup.drained();
     const outcome = data?.files[0];
 
+    const [first, second] = setup.issued;
+
     expect({
       failed: error?.code,
       sent: sent(),
-      newKey: outcome?.status === "done" && outcome.result.file.key !== setup.issued[0]?.key,
+      key: outcome?.status === "done" ? outcome.result.file.key : outcome?.error.code,
       stored: setup.db.stored(),
-    }).toEqual({ failed: "NO_SUCH_UPLOAD", sent: THREE_PARTS, newKey: true, stored: {} });
+    }).toEqual({ failed: "NO_SUCH_UPLOAD", sent: THREE_PARTS, key: second?.key, stored: {} });
+    expect(second?.key).not.toBe(first?.key);
   });
 });
 
@@ -115,7 +120,7 @@ describe("upload() persists too (audit I5)", () => {
 
 describe("the store never changes what an upload sends (spec §3.2)", () => {
   it.each([
-    { name: "every store request fails", breakStore: (db: Setup["db"]) => db.failNext("UnknownError", 1000) },
+    { name: "every store request fails", breakStore: (db: Setup["db"]) => db.failNext("UnknownError", EVERY_REQUEST) },
     {
       name: "opening the database throws (an opaque-origin frame)",
       breakStore: (db: Setup["db"]) =>

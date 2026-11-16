@@ -171,7 +171,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     pool: createPool(concurrency),
     order,
     nextRank: () => ++rank,
-    // Read when a page hides, by when `context` exists.
+    // Called only when the page hides, after `context` below exists.
     leftovers: createLeftovers((held) => drop(context, held)),
     keepFailed: true,
     records: createRecords(persist),

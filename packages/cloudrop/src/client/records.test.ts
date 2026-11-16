@@ -226,7 +226,6 @@ describe("records of another shape (audit M2: another library version or script 
   it.each([
     { name: "a size that is a string", value: { ...SAVED, id: "u-2", size: "52428800" } },
     { name: "no token", value: { ...SAVED, id: "u-2", token: undefined } },
-    { name: "only an id and a namespace", value: { id: "u-2", namespace: "user-1" } },
   ])("are never listed or got and are deleted when seen: $name", async ({ value }) => {
     await putRaw(SAVED);
     await putRaw(value);

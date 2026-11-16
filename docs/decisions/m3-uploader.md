@@ -1117,13 +1117,16 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 
 - **Decision:** R4, as audit C2 and I2 amend it. The lock is `cloudrop:upload:<id>`, requested with
   `ifAvailable: true`, once per ticket, and held for as long as the page keeps the ticket alive: until the file ends
-  done or aborted, its `/abort` is sent, a retry's new ticket replaces it, or the page unloads. A failed file of
+  done or aborted, its `/abort` is answered (not merely sent: the Task 4 review's I-1), a retry's new ticket replaces
+  it, or the page unloads. A failed file of
   `start()` keeps it, so a same-ticket retry needs no second request, which Web Locks would refuse to the page that
   holds it. Without `navigator.locks`, and with persistence off, nothing is locked.
 - **Why:** `ifAvailable` never queues behind another tab, which would leave a job waiting with no status to show. A
   lock released when a run settled would let `resume()` in this page or another finish the upload while the failed
   entry still holds a live token, whose later `/abort` (pagehide, cancel, the job's signal) would delete the finished
-  object (audit C2). The prefix keeps the name apart from an app's own locks.
+  object (audit C2). For the same reason the lock outlives the `/abort` request: let go when it was sent, another tab
+  could find it free, take it and complete the upload before the server applies the `/abort`, which would then delete
+  the finished object. The record is deleted at once. The prefix keeps the name apart from an app's own locks.
 - **If wrong:** a failed file left on a page keeps another tab from resuming it until that page cancels it, retries
   it or closes; `UPLOAD_IN_USE` says so (`M3-U69`).
 - **Status:** in force for tickets from `/upload` (resume plan task 4; how the lock is taken, `M3-U81`); `resume()`'s
@@ -1251,7 +1254,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 
 - **Decision:** audit I5. `upload()` saves and locks a multipart ticket as `start()` does. The record is deleted and
   the lock let go wherever the page gives the ticket up (`letGo` in `client/persist.ts`): the file ends done; its
-  `/abort` is sent (a cancel, a failure of `upload()`, `abort()` or the job's signal on a failed file, pagehide); a
+  `/abort` is sent (a cancel, a failure of `upload()`, `abort()` or the job's signal on a failed file, pagehide; the
+  lock then goes once the `/abort` is answered, `M3-U73`); a
   cancel, or `abort()` of a failed file, when a `/complete` may have finished it; a retry's new ticket. A failed file
   of `start()` keeps both for `retry()`. A failure of `upload()` that a `/complete` may have finished keeps its record,
   so that a later `resume()` can settle it with `/complete`, and lets the lock go: the page has no handle to send it

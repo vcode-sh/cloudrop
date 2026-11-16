@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
+import type { Fault } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import {
@@ -20,6 +21,7 @@ import {
   threeParts,
   unreachable,
 } from "../testing/persist-fixture.ts";
+import { MAX_ATTEMPTS } from "./retry.ts";
 
 const NOW = Date.parse("2026-11-16T12:00:00.000Z");
 /** The longest namespace ruling M3-U79 allows. */
@@ -151,8 +153,8 @@ describe("the record and the lock go when the page gives the ticket up", () => {
   });
 
   /** A start() job whose one file failed: its part 2 was refused, so it holds its ticket for retry(). */
-  async function failedFile() {
-    const setup = persistFixture({ fault: (call) => (call.label === "PUT part 2" ? refused() : undefined) });
+  async function failedFile(fault: Fault = () => undefined) {
+    const setup = persistFixture({ fault: (call) => (call.label === "PUT part 2" ? refused() : fault(call)) });
     const job = setup.client.start("files", threeParts());
     const { error } = await job.done;
     await setup.drained();
@@ -161,15 +163,60 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     return { ...setup, job, id, kept };
   }
 
-  it("a failed file keeps both (C2); abort() of it then sends /abort and lets both go", async () => {
-    const { job, id, kept, from, drained, db, locks } = await failedFile();
+  it("a failed file keeps both (C2); abort() of it deletes the record and lets the lock go once /abort answers", async () => {
+    // Until the server has aborted the upload, another tab that took the lock could complete it, and this /abort,
+    // with a live token, would then delete the finished object.
+    const answer = gate((call) => call.label === "POST /abort");
+    const { job, id, kept, from, drained, db, locks } = await failedFile(answer.fault);
     const sent = from();
     job.files[0]?.abort();
+    await answer.reached;
+    await drained();
+    const whileAborting = { stored: db.stored(), locks: locks.held() };
+    answer.open();
     await drained();
 
-    expect({ kept, sent: sent(), stored: db.stored(), locks: locks.held() }).toEqual({
+    expect({ kept, whileAborting, sent: sent(), stored: db.stored(), locks: locks.held() }).toEqual({
       kept: { code: "UPLOAD_REJECTED", stored: [id], locks: [lockOf(id)] },
+      whileAborting: { stored: {}, locks: [lockOf(id)] },
       sent: ["POST /abort"],
+      stored: {},
+      locks: [],
+    });
+  });
+
+  it("a retry with the same ticket keeps the record and the lock, asking for neither again (C2)", async () => {
+    // A busy bucket on every attempt of part 2's first run: STORAGE_ERROR, which the same ticket can still fix.
+    const held = gate((call) => call.label === "PUT part 2" && call.nth === MAX_ATTEMPTS + 1);
+    const setup = persistFixture({
+      fault: (call) =>
+        call.label === "PUT part 2" && call.nth <= MAX_ATTEMPTS
+          ? errorResponse(500, "InternalError", "We encountered an internal error.")
+          : held.fault(call),
+    });
+    const job = setup.client.start("files", threeParts());
+    const { error } = await job.done;
+    const retried = job.retry();
+    await held.reached;
+    await setup.drained();
+    const id = setup.issued[0]?.id;
+    const whileRetried = { stored: Object.keys(setup.db.stored()), locks: setup.locks.held() };
+    held.open();
+    const { data } = await retried;
+    await setup.drained();
+
+    expect({
+      failed: error?.code,
+      tickets: setup.issued.length,
+      whileRetried,
+      status: data?.files[0]?.status,
+      stored: setup.db.stored(),
+      locks: setup.locks.held(),
+    }).toEqual({
+      failed: "STORAGE_ERROR",
+      tickets: 1,
+      whileRetried: { stored: [id], locks: [lockOf(id)] },
+      status: "done",
       stored: {},
       locks: [],
     });

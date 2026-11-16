@@ -1,6 +1,7 @@
 // A client on the fake bucket with a fake IndexedDB and a fake navigator.locks, for the tests of what a page keeps of
-// a multipart upload (client/persist.ts). It records every ticket /upload answered and every hash computed, so that
-// `drained()` can wait for a record still being made from its file's hash. Never shipped.
+// a multipart upload (client/persist.ts). It records every ticket /upload answered, every hash computed and every
+// request let through, so that `drained()` can wait for a record still being made from its file's hash and for a lock
+// let go when an /abort is answered. Never shipped.
 
 import { createHash } from "node:crypto";
 import { vi } from "vitest";
@@ -101,13 +102,14 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
   vi.stubGlobal("navigator", { locks: locks.locks });
   const subtle = crypto.subtle;
   const digest = subtle.digest.bind(subtle);
-  const hashes: Promise<unknown>[] = [];
+  // Every hash started and every request the fault let through, for drained().
+  const pending: Promise<unknown>[] = [];
   let hashedFiles = 0;
   vi.spyOn(subtle, "digest").mockImplementation((algorithm, data) => {
     const isFile = (data as ArrayBuffer).byteLength === EDGES;
     if (isFile) hashedFiles += 1;
     const answer = (isFile ? hash?.() : undefined) ?? digest(algorithm, data);
-    hashes.push(answer);
+    pending.push(answer);
     return answer;
   });
   const issued: Issued[] = [];
@@ -116,13 +118,20 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
     {
       multipartThreshold: "8MB",
       fault: async (call) => {
-        if (call.label !== "POST /upload") return fault(call);
-        const answer = (await fault(call)) ?? (await call.forward(call.init));
-        issued.push(...((await answer.clone().json()).files ?? []));
+        let answer = await fault(call);
+        if (!answer) {
+          const forwarded = call.forward(call.init);
+          pending.push(forwarded);
+          answer = await forwarded;
+        }
+        if (call.label === "POST /upload") issued.push(...((await answer.clone().json()).files ?? []));
         return answer;
       },
     },
   );
+  // Each multipart ticket of a persisting client hashes its file exactly once (audit C1, M3-U80).
+  const persisting = options?.persist !== false && !noIndexedDb;
+  const expectedHashes = () => (persisting ? issued.filter((ticket) => ticket.kind === "multipart").length : 0);
   const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options });
   return {
     db,
@@ -137,11 +146,16 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
       const start = fixture.requests.length;
       return () => fixture.requests.slice(start);
     },
-    /** Resolves once every hash computed so far has settled and the store has gone quiet after it. */
+    /**
+     * Resolves once every multipart ticket's file has been hashed (counted, so a slow file read cannot slip past),
+     * every hash and every request the fault let through has settled, and the store has gone quiet after them. A
+     * request a fault holds is not waited for.
+     */
     async drained() {
-      for (let seen = -1; seen !== hashes.length; ) {
-        seen = hashes.length;
-        await Promise.allSettled(hashes);
+      while (hashedFiles < expectedHashes()) await db.settled();
+      for (let seen = -1; seen !== pending.length; ) {
+        seen = pending.length;
+        await Promise.allSettled(pending);
         await db.settled();
       }
     },

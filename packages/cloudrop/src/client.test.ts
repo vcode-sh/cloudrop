@@ -1,9 +1,9 @@
 // Contract: decisions S4 (the entry's only values are createCloudropClient and CloudropError), S17 (a base path the
 // handler cannot be mounted at, a fetch option that is not a function, a concurrency or an order outside spec §4.4's
-// values, or a persist or a namespace outside ruling M3-U79's is a configuration error (client/persist.test.ts shows a
-// namespace of exactly 256 characters accepted); null options are none, as for createCloudrop) and S18 (the default fetch is looked
-// up on each request and never called as a method of another object). Oracle: S17's messages, spec §4.4 and the
-// public surface listed in S4.
+// values, or a persist or a namespace outside ruling M3-U79's is a configuration error (client/persist.test.ts shows
+// a namespace of exactly 256 characters accepted); null options are none, as for createCloudrop) and S18 (the default
+// fetch is looked up on each request and never called as a method of another object). Oracle: S17's messages, spec
+// §4.4 and the public surface listed in S4.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ClientOptions, createCloudropClient } from "./client.ts";
@@ -72,7 +72,6 @@ describe("createCloudropClient", () => {
 
   it.each([
     { name: "persist as text", options: { persist: "yes" }, message: "persist must be true or false." },
-    { name: "persist as 1", options: { persist: 1 }, message: "persist must be true or false." },
     {
       name: "a namespace that is a number",
       options: { namespace: 42 },

@@ -119,11 +119,16 @@ export function resumeFile(entry: Entry): void {
   entry.wake?.();
 }
 
-/** Sends the /abort that frees `upload`'s parts and deletes its own object, once, and gives its ticket up. */
+/**
+ * Sends the /abort that frees `upload`'s parts and deletes its own object, once, and gives its ticket up. The record
+ * goes at once; the lock only once the server has answered: another tab that took it sooner could complete the upload,
+ * and this /abort, with a live token, would then delete the finished object (M3-U73).
+ */
 export function drop(context: UploadContext, upload: Upload): Promise<void> {
   upload.dropped = true;
-  letGo(context, upload);
-  return context.endpoints.abort(upload.ticket.token);
+  const answered = context.endpoints.abort(upload.ticket.token);
+  letGo(context, upload, answered);
+  return answered;
 }
 
 /**

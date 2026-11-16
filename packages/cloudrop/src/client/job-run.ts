@@ -103,7 +103,7 @@ async function runEntry(
     // A file cancelled meanwhile ends as cancelled: it holds no ticket the server must be told about.
     return settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : ticket, entry));
   }
-  entry.upload = uploadOf(job.context, job.args, entry, ticket);
+  entry.upload = uploadOf(job, entry, ticket);
   await job.runUpload(entry.upload);
 }
 
