@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MultipartTicket, SingleTicket } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
-import { albumSchema, files, NOW, png, upload } from "../testing/upload-fixture.ts";
-import { route, unauthorized } from "./route.ts";
+import { avatar, files, NOW, png, upload } from "../testing/upload-fixture.ts";
 
 const NOW_SECONDS = 1_794_744_000;
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -14,18 +13,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
-});
-
-const avatar = route({
-  accept: ["image/png", "image/jpeg"],
-  maxSize: "1MB",
-  maxFiles: 2,
-  metadata: albumSchema,
-  authorize: ({ request, metadata }) =>
-    request.headers.get("x-user")
-      ? { userId: request.headers.get("x-user") as string, albumId: metadata.albumId }
-      : unauthorized(),
-  prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}`,
 });
 
 describe("POST /upload: a single PUT ticket", () => {
