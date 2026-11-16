@@ -9,7 +9,7 @@ function sizeText(bytes: number): string {
   return bytes >= MIB ? `${bytes} (${(bytes / MIB).toFixed(1)} MiB)` : `${bytes} (${(bytes / 1024).toFixed(1)} KiB)`;
 }
 
-/** The numbers of a finished run, the sentence that tells it, and upload()'s result. */
+/** The numbers of a finished run, the sentence that tells it, and the job's result. */
 export function RunSummary({ rows, run }: { rows: readonly LogRow[]; run: Run }) {
   const { endMs, result } = run;
   if (endMs === null || result === null) return <p role="status">Uploading…</p>;
@@ -18,14 +18,14 @@ export function RunSummary({ rows, run }: { rows: readonly LogRow[]; run: Run })
   const bucketHost = rows.find((row) => row.record.isBucketPut)?.record.host;
   const entries: [string, string][] = [
     ["Total time", seconds(summary.totalMs)],
-    ["File size", sizeText(summary.fileSize)],
+    [summary.files === 1 ? "File size" : `Size of the ${summary.files} files`, sizeText(summary.size)],
     ["Sent to the bucket", sizeText(summary.sentBytes)],
-    ["Throughput (end to end, /upload to /complete)", throughputText(summary)],
+    ["Throughput (end to end, /upload to the last answer)", throughputText(summary)],
     ["PUT requests started", String(summary.putsStarted)],
     ["PUT requests answered", String(summary.putsAnswered)],
     ["Retries", String(summary.retries)],
     ["Renewals", String(summary.renewals)],
-    ["Peak parts in flight", String(summary.peakInFlight)],
+    ["Peak PUTs in flight", String(summary.peakInFlight)],
     ["Bucket host", bucketHost ?? "none: no bucket request"],
   ];
 

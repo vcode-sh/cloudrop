@@ -1,22 +1,24 @@
 // Everything the lab says about a run, read from the request log: the notes per row, the summary and the sentence
 // under it.
-import type { CompleteResponse, Result, RouteResult } from "cloudrop/client";
+import type { CloudropError, RouteResult, UploadResult } from "cloudrop/client";
 import type { cloudrop } from "../../lib/cloudrop";
 import type { RequestRecord } from "./lab-fetch";
 
-type UploadResult = Result<CompleteResponse<RouteResult<typeof cloudrop, "files">>>;
+export type JobResult = UploadResult<RouteResult<typeof cloudrop, "files">>;
 
 export interface Run {
-  fileSize: number;
+  /** How many files the job sends, and their bytes together. */
+  files: number;
+  size: number;
   startMs: number;
-  /** When upload() returned; null while it runs. */
+  /** When the job's `done` settled; null while it runs. */
   endMs: number | null;
-  result: UploadResult | null;
+  result: JobResult | null;
 }
 
 export interface LogRow {
   record: RequestRecord;
-  /** "retry", "renewal", "already stored" and the injected faults, joined. */
+  /** "retry", "renewal", "resumed", "already stored" and the injected faults, joined. */
   note: string;
 }
 
@@ -29,23 +31,28 @@ const alreadyStored = (record: RequestRecord): boolean => record.isBucketPut && 
 export const requestFailed = (record: RequestRecord): boolean =>
   typeof record.status === "number" ? record.status >= 300 && !alreadyStored(record) : record.status !== null;
 
+/** What a request is beside its file's earlier attempt at it, `before`; `target` is what a /sign asks for. */
+function repeatLabel(before: RequestRecord | undefined, target: string | null): string | null {
+  if (target !== null) {
+    const of = target === "the PUT" ? "" : ` of ${target}`;
+    return `${before && requestFailed(before) ? "retry" : "renewal"}${of}`;
+  }
+  if (before === undefined) return null;
+  return before.status === "cancelled" ? "resumed" : "retry";
+}
+
 /**
- * A request of a kind already sent is a retry. A /sign renews a URL, unless the last /sign for the same URL failed: then
- * it is that renewal's retry. This example's /upload ticket signs every part (the route's 100 MB limit, binary as in
- * cloudrop, is 13 parts of 8 MiB; a ticket signs up to 20), so the client asks /sign only to replace a URL.
+ * A request its file already sent is a retry, or, when the earlier one was cancelled by a pause, resumed. A /sign
+ * renews a URL, unless the file's last /sign for the same URL failed: then it is that renewal's retry. This example's
+ * /upload ticket signs every part (the route's 100 MB limit, binary as in cloudrop, is 13 parts of 8 MiB; a ticket
+ * signs up to 20), so the client asks /sign only to replace a URL.
  */
 export function annotate(records: readonly RequestRecord[]): LogRow[] {
-  const seen = new Set<string>();
-  const signFailed = new Map<string, boolean>();
+  const last = new Map<string, RequestRecord>();
   return records.map((record) => {
-    let label: string | null = seen.has(record.kind) ? "retry" : null;
-    const target = record.signedFor;
-    if (target !== null) {
-      const of = target === "the PUT" ? "" : ` of ${target}`;
-      label = `${signFailed.get(target) ? "retry" : "renewal"}${of}`;
-      signFailed.set(target, requestFailed(record));
-    }
-    seen.add(record.kind);
+    const request = `${record.kind} ${record.signedFor} ${record.subject}`;
+    const label = repeatLabel(last.get(request), record.signedFor);
+    last.set(request, record);
     const notes = [label, alreadyStored(record) ? "already stored" : null, ...record.injected];
     return { record, note: notes.filter((note) => note !== null).join("; ") };
   });
@@ -73,15 +80,17 @@ function peakInFlight(records: readonly RequestRecord[]): number {
 interface Summary {
   totalMs: number;
   completed: boolean;
-  fileSize: number;
+  files: number;
+  size: number;
   /** Body bytes of the PUTs the bucket answered. A PUT cancelled or failed before an answer may have sent nothing. */
   sentBytes: number;
-  /** File size over the whole upload() call; null when not completed or under 1 MiB. */
+  /** The files' size over the whole job; null when not completed or under 1 MiB. */
   mibPerSecond: number | null;
   putsStarted: number;
   putsAnswered: number;
   retries: number;
   renewals: number;
+  resumed: number;
   peakInFlight: number;
 }
 
@@ -92,24 +101,27 @@ export function summarize(rows: readonly LogRow[], run: Run & { endMs: number })
   const totalMs = run.endMs - run.startMs;
   const completed = run.result !== null && run.result.error === null;
   // Under 1 MiB the time is mostly round trips to the server and the bucket, not bytes moving.
-  const measurable = completed && run.fileSize >= MIB && totalMs > 0;
+  const measurable = completed && run.size >= MIB && totalMs > 0;
+  const noted = (label: string) => rows.filter((row) => row.note.startsWith(label)).length;
   return {
     totalMs,
     completed,
-    fileSize: run.fileSize,
+    files: run.files,
+    size: run.size,
     sentBytes: answered.reduce((sum, record) => sum + record.bytes, 0),
-    mibPerSecond: measurable ? run.fileSize / MIB / (totalMs / 1000) : null,
+    mibPerSecond: measurable ? run.size / MIB / (totalMs / 1000) : null,
     putsStarted: puts.length,
     putsAnswered: answered.length,
-    retries: rows.filter((row) => row.note.startsWith("retry")).length,
-    renewals: rows.filter((row) => row.note.startsWith("renewal")).length,
+    retries: noted("retry"),
+    renewals: noted("renewal"),
+    resumed: noted("resumed"),
     peakInFlight: peakInFlight(records),
   };
 }
 
 export const seconds = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-/** End to end, binary as cloudrop's sizes are: the file size over the time from /upload to /complete's answer. */
+/** End to end, binary as cloudrop's sizes are: the files' size over the time from /upload to the last answer. */
 export function throughputText({ completed, mibPerSecond }: Summary): string {
   if (!completed) return "none: not completed";
   if (mibPerSecond === null) return "not shown: under 1 MiB the time is mostly round trips";
@@ -132,23 +144,26 @@ function sendingClause({ putsStarted, putsAnswered, peakInFlight }: Summary): st
   return `${started}${atOnce}, ${answeredText(putsStarted, putsAnswered)}`;
 }
 
-/** "part 2 was retried once after a network error", one clause per request kind that was sent again. */
+/** "part 2 was retried once after a network error", one clause per request of a file that was retried. */
 function retryClauses(rows: readonly LogRow[]): string[] {
-  const byKind = Map.groupBy(
+  const byRequest = Map.groupBy(
     rows.filter((row) => row.record.kind !== "/sign"),
-    (row) => row.record.kind,
+    ({ record }) => `${record.kind} ${record.subject}`,
   );
-  return [...byKind].flatMap(([kind, attempts]) => {
-    if (attempts.length < 2) return [];
+  return [...byRequest.values()].flatMap((attempts) => {
+    const retries = attempts.filter((row) => row.note.startsWith("retry"));
+    const [first] = retries;
+    if (!first) return [];
     const reasons = new Set(
       attempts
         .map(({ record }) => record)
         .filter((record) => requestFailed(record) && record.status !== "cancelled")
         .map(({ status }) => (status === "network error" ? "a network error" : `HTTP ${status}`)),
     );
+    const { kind } = first.record;
     const subject = kind === "PUT single" ? "the PUT" : kind.replace("PUT ", "");
     const after = reasons.size > 0 ? ` after ${[...reasons].join(" and ")}` : "";
-    return [`${subject} was retried ${times(attempts.length - 1)}${after}`];
+    return [`${subject} was retried ${times(retries.length)}${after}`];
   });
 }
 
@@ -156,7 +171,11 @@ function endingClause(rows: readonly LogRow[], run: Run & { endMs: number }, sum
   const took = seconds(summary.totalMs);
   const error = run.result?.error;
   if (!error) return `completed in ${took}${summary.mibPerSecond === null ? "" : ` at ${throughputText(summary)}`}`;
-  const ended = error.code === "ABORTED" ? `cancelled after ${took}` : `failed with ${error.code} after ${took}`;
+  const files = run.result?.data?.files ?? [];
+  const done = files.filter((file) => file.status === "done").length;
+  // The job's error is its first file that did not end done; with several files, say how many did.
+  const some = files.length > 1 ? `${done} of ${files.length} files done, then ` : "";
+  const ended = `${some}${error.code === "ABORTED" ? "cancelled" : `failed with ${error.code}`} after ${took}`;
   if (rows.some((row) => row.record.kind === "/abort")) return `${ended}; the client told the server with /abort`;
   const completeUnanswered = rows.some(
     ({ record }) => record.kind === "/complete" && (record.status === "network error" || Number(record.status) >= 500),
@@ -167,19 +186,27 @@ function endingClause(rows: readonly LogRow[], run: Run & { endMs: number }, sum
 /** The run in one plain sentence, built from the log. */
 export function describeRun(rows: readonly LogRow[], run: Run & { endMs: number }): string {
   const summary = summarize(rows, run);
-  const { renewals: count } = summary;
+  const { renewals: count, resumed } = summary;
   const renewals = count > 0 ? [`renewed ${count === 1 ? "one URL" : `${count} URLs`} through /sign`] : [];
-  const clauses = [sendingClause(summary), ...retryClauses(rows), ...renewals, endingClause(rows, run, summary)];
+  const resumes = resumed > 0 ? [`sent ${resumed === 1 ? "one PUT" : `${resumed} PUTs`} again after a pause`] : [];
+  const clauses = [
+    sendingClause(summary),
+    ...retryClauses(rows),
+    ...renewals,
+    ...resumes,
+    endingClause(rows, run, summary),
+  ];
   return `${clauses.join("; ")}.`;
 }
 
-/** The `{ data, error }` result as the page shows it: the key and the route's result, or the error's public fields. */
-export function resultJson(result: UploadResult): string {
-  const shown = result.error
-    ? {
-        data: null,
-        error: { code: result.error.code, message: result.error.message, retryable: result.error.retryable },
-      }
-    : { data: { key: result.data.file.key, result: result.data.data }, error: null };
-  return JSON.stringify(shown, null, 2);
+const publicFields = ({ code, message, retryable }: CloudropError) => ({ code, message, retryable });
+
+/** The job's `{ data, error }` as the page shows it: per file its key and result, or the error's public fields. */
+export function resultJson({ data, error }: JobResult): string {
+  const files = data?.files.map((file) =>
+    file.status === "done"
+      ? { id: file.id, name: file.name, status: file.status, key: file.result.file.key, result: file.result.data }
+      : { id: file.id, name: file.name, status: file.status, error: publicFields(file.error) },
+  );
+  return JSON.stringify({ data: files ? { files } : null, error: error ? publicFields(error) : null }, null, 2);
 }

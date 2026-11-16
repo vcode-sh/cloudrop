@@ -106,3 +106,7 @@ html:has(.lab) {
   padding: 0.5rem;
   overflow-x: auto;
 }
+
+.progress {
+  width: 8rem;
+}
