@@ -6,6 +6,7 @@ import { CloudropError, fail } from "../errors.ts";
 import { type Arguments, readArguments } from "./arguments.ts";
 import { aborted, withFile } from "./failures.ts";
 import { type Entry, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
+import { watchConnectivity } from "./lifecycle.ts";
 import { createMeter, createProgress } from "./progress.ts";
 import { withRetry } from "./retry.ts";
 import { createStore } from "./store.ts";
@@ -64,11 +65,43 @@ function outcomeOf({ id, file, status, result, error }: Entry): FileOutcome<unkn
   return { id, name, status: status === "aborted" ? "aborted" : "failed", error: error as CloudropError };
 }
 
+/** Brackets each run of a file: `begin` when it starts, `finish` when it ends. */
+interface Runs {
+  begin(): void;
+  finish(): void;
+}
+
+/**
+ * Counts the files of the job that run: the page's connectivity is watched from the first run's start to the last
+ * one's end. Offline pauses every file that can pause; online resumes only those it paused (Q6, Q17).
+ */
+function watchedRuns(entries: readonly Entry[]): Runs {
+  let running = 0;
+  let unwatch = () => {};
+  const offline = () => {
+    for (const entry of entries) pauseFile(entry, true);
+  };
+  const online = () => {
+    for (const entry of entries) if (entry.networkPaused) resumeFile(entry);
+  };
+  return {
+    begin: () => {
+      running += 1;
+      if (running === 1) unwatch = watchConnectivity(offline, online);
+    },
+    finish: () => {
+      running -= 1;
+      if (running === 0) unwatch();
+    },
+  };
+}
+
 async function run(
   context: UploadContext,
   { route, files, metadata }: Arguments,
   entries: readonly Entry[],
   signal: AbortSignal,
+  runs: Runs,
 ): Promise<UploadResult<unknown>> {
   const started = await withRetry(() => context.endpoints.start(route, files, metadata, signal), signal);
   if (started.error) {
@@ -87,7 +120,10 @@ async function run(
       const ticket = started.data[index];
       if (ticket instanceof CloudropError) settle(entry, "failed", withFile(ticket, entry));
       // readTickets answered one ticket per file, so `ticket` is never undefined here.
-      else if (ticket) await runFile(context, entry, ticket);
+      else if (ticket) {
+        runs.begin();
+        await runFile(context, entry, ticket).finally(runs.finish);
+      }
     }),
   );
   const data = { files: entries.map(outcomeOf) };
@@ -113,6 +149,7 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
       cancel: new AbortController(),
       pass: null,
       wake: null,
+      networkPaused: false,
       landed: new Set(),
       // Only called once the job runs, after the store below exists.
       changed: (urgent) => store.changed(urgent),
@@ -135,7 +172,9 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     // The caller's signal may outlive the job: drop the listener that holds it.
-    done = run(context, args.data, entries, job.signal).finally(() => signal.removeEventListener("abort", abort));
+    done = run(context, args.data, entries, job.signal, watchedRuns(entries)).finally(() =>
+      signal.removeEventListener("abort", abort),
+    );
   }
   return {
     files: entries.map((entry) => ({
@@ -147,7 +186,9 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
     })),
     done,
     abort,
-    pause: () => entries.forEach(pauseFile),
+    pause: () => {
+      for (const entry of entries) pauseFile(entry);
+    },
     resume: () => entries.forEach(resumeFile),
     // Taken from the store as they are: neither needs `this`.
     subscribe: store.subscribe,

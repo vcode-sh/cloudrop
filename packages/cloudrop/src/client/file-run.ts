@@ -29,6 +29,8 @@ export interface Entry {
   pass: AbortController | null;
   /** Ends the wait of a paused file: resume() and a cancel call it. */
   wake: (() => void) | null;
+  /** Paused by the page going offline, so going online resumes it; the caller's pause() or resume() clears it (Q6). */
+  networkPaused: boolean;
   /** The part numbers the bucket stored (1 for a single PUT): a new pass sends only the others. */
   readonly landed: Set<number>;
   /** Tells the job something changed; `urgent` for a status change. */
@@ -42,9 +44,14 @@ export function settle(entry: Entry, status: "failed" | "aborted", error: Cloudr
   entry.changed(true);
 }
 
-/** Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling M3-U4). */
-export function pauseFile(entry: Entry): void {
+/**
+ * Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling M3-U4). `byNetwork` marks a
+ * pause by the page going offline; the caller's pause of a file already paused makes the pause the caller's (Q6).
+ */
+export function pauseFile(entry: Entry, byNetwork = false): void {
+  if (entry.status === "paused" && !byNetwork) entry.networkPaused = false;
   if (entry.status !== "queued" && entry.status !== "uploading") return;
+  entry.networkPaused = byNetwork;
   entry.status = "paused";
   entry.changed(true);
   entry.pass?.abort();
@@ -53,6 +60,7 @@ export function pauseFile(entry: Entry): void {
 /** Queues a paused file's parts that have not landed again. */
 export function resumeFile(entry: Entry): void {
   if (entry.status !== "paused") return;
+  entry.networkPaused = false;
   entry.status = "queued";
   entry.changed(true);
   entry.wake?.();
