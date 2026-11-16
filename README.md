@@ -220,7 +220,8 @@ const { data, error } = await job.done;
   (`status: "done"` with its `result`, or `"failed"` or `"aborted"` with its `error`), and `error` is the error of the
   first file, in the order passed, that did not end done. Unlike other results, `data` stays when some files failed;
   it is null only when nothing started: wrong arguments, or `/upload` refused the whole job (such as
-  `TOO_MANY_FILES`). An error that belongs to one file carries `error.file` (`{ id, name }`).
+  `TOO_MANY_FILES`). An error that belongs to one file carries `error.file` (`{ id, name }`). A value typed
+  `File | File[]` fits neither `upload()` signature: pass it to `start()` and await `start(...).done`.
 - One client shares `concurrency` slots between all its uploads; each bucket `PUT` holds one, files added earlier go
   first, and one file has at most four parts in flight. Calls to your server take no slot.
 - In a browser, bucket `PUT`s go through `XMLHttpRequest`, which reports bytes while they are sent. Passing `fetch`

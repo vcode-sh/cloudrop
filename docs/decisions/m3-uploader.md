@@ -161,13 +161,14 @@ otherwise.
   whole job (`TOO_MANY_FILES` among others). `data.files` holds a `FileOutcome` per file: `done` with its `result`, or
   `failed`/`aborted` with its `error`. `CloudropError` gains an optional `file: { id, name }`, set on every error that
   belongs to one file. A job refused for its arguments has the same handles over no files: the calls do nothing and
-  its snapshot is empty (`R5-3`).
+  its snapshot is empty (`R5-3`). When `/upload` fails, a file cancelled on its own meanwhile ends `aborted` with its
+  own `ABORTED` error and `error.file`; the others end `failed` with the job's error, which stays the result's.
 - **Why:** owner decision 2026-11-16 (spec §2.2). `UploadResult` departs from `Result<T>`, where `data` is null
   whenever `error` is set, on purpose: a partial failure must not hide the files that succeeded. It keeps the
   `{ data, error }` shape, so `if (error)` still works.
 - **If wrong:** a caller that treats every `error` as "nothing happened" misses the files that succeeded; the type's
   doc comment and the README say so. `error.file` is a new public field (a minor semver change).
-- **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`). Supersedes `M3-S1`; spec §1 says so.
+- **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`, `5cc63e5`). Supersedes `M3-S1`; spec §1 says so.
 - **Visible in:** `client/job.ts`, `client/types.ts`, `errors.ts` (`CloudropError.file`), `client/failures.ts`
   (`withFile`), `client/job.test.ts`.
 
@@ -181,11 +182,15 @@ otherwise.
   `bytes = size` (`R5-2`). `progress` is `bytes / size`; an empty file's is 0 before done and 1 once done. `speed` is
   an exponentially weighted average with a 3 s time constant, restarted when a file starts or resumes sending, and 0
   unless the file is uploading. `eta` is the bytes left over the speed, null while the speed is 0. Totals: see
-  `M3-U17`.
+  `M3-U17`. A cancelled file shows `aborted` at once; its `/abort` is sent after that, and `done` still waits for the
+  server's answer.
 - **Why:** spec §2.1, §4.2 and §4.3. The throttle keeps a page from rendering on every progress event; an immediate
   status change keeps buttons and labels correct.
 - **If wrong:** a page that renders on every listener call still renders up to ten times a second per job.
-- **Status:** in force (`d75c21a`, `07f235b`).
+- **Known cost:** job-level `pause()`, `resume()` and a refused `/upload` publish once per file, each publish building
+  a snapshot of every file (a 500-file job: 500 publishes of 500 file snapshots, synchronously). Unmeasured; plan B
+  measures it and coalesces urgent publishes if it shows.
+- **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`).
 - **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job.ts` (`fileSnapshot`, `snapshotOf`),
   `client/types.ts` (`FileSnapshot`, `JobSnapshot`), `client/job-snapshot.test.ts`.
 
