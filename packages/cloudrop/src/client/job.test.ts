@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type FileOutcome } from "../client.ts";
 import { allowAnyone, route, unauthorized } from "../server/route.ts";
-import { clientFixture, type Fault } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, type FaultCall } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 
 const notes = route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone });
@@ -19,16 +19,17 @@ const members = route({
 });
 
 /**
- * `fault` answers every request but /abort, which is forwarded: its settling is kept in `seen.aborted`, and
- * `seen.abortsAnswered` counts the answers that arrived.
+ * `fault` answers every request but /abort, which is forwarded: its settling is kept in `seen.aborted`,
+ * `seen.abortsAnswered` counts the answers that arrived and `seen.abortTokens` holds the tokens sent.
  */
 function setup(fault: Fault = () => undefined) {
-  const seen = { aborted: Promise.resolve(), abortsAnswered: 0 };
+  const seen = { aborted: Promise.resolve(), abortsAnswered: 0, abortTokens: [] as string[] };
   const fixture = clientFixture(
     { notes, pairs, members },
     {
       fault: (call) => {
         if (call.label !== "POST /abort") return fault(call);
+        seen.abortTokens.push(JSON.parse(call.init.body as string).token);
         const answer = call.forward(call.init).then((response) => {
           seen.abortsAnswered++;
           return response;
@@ -53,6 +54,25 @@ const view = (outcome: FileOutcome<unknown>) =>
     : { id: outcome.id, status: outcome.status, code: outcome.error.code, file: outcome.error.file };
 
 const count = (requests: string[], label: string) => requests.filter((request) => request === label).length;
+
+/** /upload held until `release()`, then answered by `answer` (the server's own answer by default); `seen` on arrival. */
+function heldUpload(answer: (call: FaultCall) => Promise<Response> = (call) => call.forward(call.init)) {
+  let arrived = () => {};
+  let release = () => {};
+  const seen = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  const open = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fault: Fault = async (call) => {
+    if (call.label !== "POST /upload") return undefined;
+    arrived();
+    await open;
+    return answer(call);
+  };
+  return { seen, release, fault };
+}
 
 beforeEach(() => {
   // Every backoff wait becomes 0 ms.
@@ -202,6 +222,58 @@ describe("start", () => {
         { id: "3", status: "done", file: ["c.txt", 7] },
       ],
       error: { code: "ABORTED", file: { id: "2", name: "b.txt" } },
+    });
+  });
+
+  it("cancels one file while /upload is in flight: the /abort goes for its ticket, the others upload", async () => {
+    let tickets: string[] = [];
+    const upload = heldUpload(async (call) => {
+      const answer = await call.forward(call.init);
+      tickets = (await answer.clone().json()).files.map((ticket: { token: string }) => ticket.token);
+      return answer;
+    });
+    const { seen, client } = setup(upload.fault);
+    const job = client.start("notes", three());
+    await upload.seen;
+    job.files[1]?.abort();
+    upload.release();
+    const { data, error } = await job.done;
+    expect({
+      files: data?.files.map(view),
+      error: { code: error?.code, file: error?.file },
+      aborted: seen.abortTokens,
+    }).toEqual({
+      files: [
+        { id: "1", status: "done", file: ["a.txt", 5] },
+        { id: "2", status: "aborted", code: "ABORTED", file: { id: "2", name: "b.txt" } },
+        { id: "3", status: "done", file: ["c.txt", 7] },
+      ],
+      error: { code: "ABORTED", file: { id: "2", name: "b.txt" } },
+      aborted: [tickets[1]],
+    });
+  });
+
+  it("reports a file cancelled during an /upload that then fails as aborted, and keeps the job's error", async () => {
+    const upload = heldUpload();
+    // members refuses a request without x-user: /upload answers UNAUTHORIZED once released.
+    const { client } = setup(upload.fault);
+    const job = client.start("members", three());
+    await upload.seen;
+    job.files[1]?.abort();
+    upload.release();
+    const { data, error } = await job.done;
+    expect({
+      data,
+      error: { code: error?.code, file: error?.file },
+      files: job.getSnapshot().files.map((file) => [file.status, file.error?.code, file.error?.file]),
+    }).toEqual({
+      data: null,
+      error: { code: "UNAUTHORIZED", file: undefined },
+      files: [
+        ["failed", "UNAUTHORIZED", undefined],
+        ["aborted", "ABORTED", { id: "2", name: "b.txt" }],
+        ["failed", "UNAUTHORIZED", undefined],
+      ],
     });
   });
 

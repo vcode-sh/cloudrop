@@ -74,7 +74,11 @@ async function run(
   if (started.error) {
     // The whole job's error, so no file of its own.
     const error = signal.aborted ? aborted() : started.error;
-    for (const entry of entries) settle(entry, signal.aborted ? "aborted" : "failed", error);
+    for (const entry of entries) {
+      // A file cancelled on its own meanwhile ends as cancelled, with its own error (ruling M3-U10).
+      const own = entry.cancel.signal.aborted && !signal.aborted;
+      settle(entry, entry.cancel.signal.aborted ? "aborted" : "failed", own ? withFile(aborted(), entry) : error);
+    }
     return fail(error);
   }
   // Every file at once: the pool decides who sends.

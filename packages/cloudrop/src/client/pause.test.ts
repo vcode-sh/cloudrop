@@ -195,6 +195,29 @@ describe("pause and resume", () => {
     });
   });
 
+  it("fails a file paused before /upload answered when /upload fails, and sends nothing", async () => {
+    const answer = gate();
+    const { xhr, client } = setup({
+      fault: async ({ label }) => {
+        if (label !== "POST /upload") return undefined;
+        await answer.hold();
+        const error = { code: "UNAUTHORIZED", message: "Sign in to upload files.", retryable: false };
+        return Response.json({ error }, { status: 401 });
+      },
+    });
+    const job = client.start("files", [fileOf(1000, "a.bin"), fileOf(1000, "b.bin")]);
+    await answer.seen;
+    job.files[0]?.pause();
+    answer.release();
+    const { data, error } = await job.done;
+    expect({ data, code: error?.code, statuses: statuses(job), sent: xhr.sent }).toEqual({
+      data: null,
+      code: "UNAUTHORIZED",
+      statuses: ["failed", "failed"],
+      sent: [],
+    });
+  });
+
   it("sends nothing for a file paused while it waits for the pool, though a slot frees at once", async () => {
     const { xhr, client } = setup({ hold: true, concurrency: 1 });
     const job = client.start("files", [fileOf(1000, "first.bin"), fileOf(1000, "second.bin")]);
@@ -273,7 +296,7 @@ describe("pause and resume", () => {
 });
 
 describe("abort of a paused file", () => {
-  it("ends it aborted once the server has answered its /abort", async () => {
+  it("shows it aborted at once and settles done once the server has answered its /abort", async () => {
     const abortCall = gate();
     const { fixture, xhr, client } = setup({
       hold: true,
@@ -296,13 +319,13 @@ describe("abort of a paused file", () => {
     await abortCall.seen;
     // A `done` that did not wait for /abort has settled by now.
     await everyMicrotask();
-    const beforeAnswer = settled;
+    // The page shows the cancel at once, though `done` waits for the server.
+    const beforeAnswer = { settled, status: fileAt(job, 0)?.status };
     abortCall.release();
     const { error } = await done;
-    expect({ beforeAnswer, code: error?.code, status: fileAt(job, 0)?.status, last: fixture.requests.at(-1) }).toEqual({
-      beforeAnswer: false,
+    expect({ beforeAnswer, code: error?.code, last: fixture.requests.at(-1) }).toEqual({
+      beforeAnswer: { settled: false, status: "aborted" },
       code: "ABORTED",
-      status: "aborted",
       last: "POST /abort",
     });
   });

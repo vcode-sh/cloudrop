@@ -61,15 +61,15 @@ export function resumeFile(entry: Entry): void {
 /** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */
 async function end(context: UploadContext, { ticket, entry, mayBeComplete }: Upload, error: CloudropError) {
   const cancelled = entry.cancel.signal.aborted;
+  // The status settles first, so a page shows a cancel at once rather than when the server answers (ruling M3-U11).
+  settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : error, entry));
   // A /complete that may have succeeded keeps the file rather than delete a recorded one (M3-H15, M3-H16). Otherwise
   // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
-  if (!mayBeComplete) {
-    const cleanup = context.endpoints.abort(ticket.token);
-    // A failure settles at once and its /abort finishes in the background: abort() never rejects, so nothing is left
-    // unhandled. A cancel waits for it, so the caller knows the server was told.
-    if (cancelled) await cleanup;
-  }
-  settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : error, entry));
+  if (mayBeComplete) return;
+  const cleanup = context.endpoints.abort(ticket.token);
+  // A failure's /abort finishes in the background: abort() never rejects, so nothing is left unhandled. A cancel waits
+  // for it, and `done` with it, so the caller knows the server was told.
+  if (cancelled) await cleanup;
 }
 
 /**
