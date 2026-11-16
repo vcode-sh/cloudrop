@@ -4,10 +4,9 @@
 import { fromEnv } from "../env.ts";
 import { configError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
-import { formatBytes } from "../storage/validate.ts";
-import { isAcceptEntry } from "./accept.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
+import { isFunction, readRoute } from "./route-config.ts";
 import { parseSize, type Size } from "./size.ts";
 import { importTokenKeys, type TokenKeys } from "./token.ts";
 
@@ -59,12 +58,8 @@ export const ROUTE_NAME: RegExp = /^[A-Za-z0-9_-]{1,64}$/;
 // No "." or ".." segment: the URL parser resolves them away, so the handler would never match a request.
 const BASE_PATH = /^(\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+$/;
 const MIN_SECRET_LENGTH = 32;
-const MAX_FILES_LIMIT = 100;
-const DEFAULT_MAX_FILES = 10;
 
 const PLUGIN_HOOKS = ["beforeUpload", "afterVerify", "onAbort", "extendRoute"] as const;
-
-const isFunction = (value: unknown): boolean => typeof value === "function";
 
 function readSecrets(secret: unknown): [string, ...string[]] {
   const secrets = secret === undefined ? [fromEnv("CLOUDROP_SECRET")].filter(Boolean) : [secret].flat();
@@ -100,59 +95,15 @@ function readOrigins(origins: unknown): Set<string> {
   return new Set(list);
 }
 
-function readRoute(name: string, route: Route, storage: StorageDriver): RouteConfig {
-  const where = `Route "${name}"`;
-  const definition = (route as Partial<Route> | null)?.definition;
-  if (typeof definition !== "object" || definition === null) {
-    throw configError(`${where} is not a route. Wrap its options in route({ ... }).`);
-  }
-  if (!isFunction(definition.authorize)) {
-    throw configError(`${where} needs authorize. Use authorize: allowAnyone for a route anyone may upload to.`);
-  }
-  const accept = [definition.accept].flat();
-  if (accept.length === 0 || !accept.every((entry) => typeof entry === "string" && isAcceptEntry(entry))) {
-    throw configError(`${where}: accept takes MIME types in lower case, such as "image/png", "image/*" or "*/*".`);
-  }
-  const maxSize = parseSize(definition.maxSize);
-  const limit = storage.rules.maxObjectSize;
-  if (maxSize === null || maxSize < 1 || maxSize > limit) {
-    throw configError(`${where}: maxSize must be between 1 byte and ${formatBytes(limit)}, such as 5242880 or "5MB".`);
-  }
-  const maxFiles = definition.maxFiles ?? DEFAULT_MAX_FILES;
-  if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_FILES_LIMIT) {
-    throw configError(`${where}: maxFiles must be a whole number from 1 to ${MAX_FILES_LIMIT}.`);
-  }
-  if (definition.metadata !== undefined && !isFunction(definition.metadata?.["~standard"]?.validate)) {
-    throw configError(`${where}: metadata must be a Standard Schema, such as a zod, valibot or arktype schema.`);
-  }
-  for (const option of ["prefix", "key", "onComplete"] as const) {
-    if (definition[option] !== undefined && !isFunction(definition[option])) {
-      throw configError(`${where}: ${option} must be a function.`);
-    }
-  }
-  if (definition.prefix && definition.key) {
-    throw configError(`${where}: pass prefix or key, not both. key builds the whole key; prefix only its folder.`);
-  }
-  const visibility = definition.visibility ?? (storage.publicUrl ? "public" : "private");
-  if (visibility !== "public" && visibility !== "private") {
-    throw configError(`${where}: visibility must be "public" or "private".`);
-  }
-  if (visibility === "public" && !storage.publicUrl) {
-    throw configError(
-      `${where} is public, but the storage has no publicUrl. Pass publicUrl to the storage preset, or make the route private.`,
-    );
-  }
-  return { name, definition, accept, maxSize, maxFiles, visibility };
-}
-
-export function readConfig<TRoutes extends Record<string, Route>>(given: CloudropOptions<TRoutes>): ServerConfig {
-  const options: Partial<CloudropOptions<TRoutes>> = given ?? {};
-  const { storage, routes: givenRoutes } = options;
+function readStorage(storage: StorageDriver | undefined): StorageDriver {
   if (!storage || !isFunction(storage.presignPut) || !Number.isSafeInteger(storage.rules?.maxObjectSize)) {
     throw configError("Pass storage to createCloudrop: r2({ bucket }) or s3({ ... }).");
   }
-  const entries =
-    typeof givenRoutes === "object" && !Array.isArray(givenRoutes) ? Object.entries(givenRoutes ?? {}) : [];
+  return storage;
+}
+
+function readRouteEntries(routes: unknown): [string, Route][] {
+  const entries = typeof routes === "object" && !Array.isArray(routes) ? Object.entries(routes ?? {}) : [];
   if (entries.length === 0) throw configError("Pass at least one route: routes: { avatar: route({ ... }) }.");
   const badName = entries.find(([name]) => !ROUTE_NAME.test(name));
   if (badName) {
@@ -160,16 +111,27 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
       `Route name ${JSON.stringify(badName[0].slice(0, 64))} may use only letters, digits, - and _ (at most 64), such as avatar or post-image.`,
     );
   }
-  const basePath = options.basePath ?? "/api/cloudrop";
+  return entries;
+}
+
+function readBasePath(given: unknown): string {
+  const basePath = given ?? "/api/cloudrop";
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError('basePath must be a path such as "/api/cloudrop": a leading slash, no trailing slash, no query.');
   }
-  const multipartThreshold =
-    options.multipartThreshold === undefined ? undefined : parseSize(options.multipartThreshold);
+  return basePath;
+}
+
+function readThreshold(threshold: Size | undefined): number | undefined {
+  const multipartThreshold = threshold === undefined ? undefined : parseSize(threshold);
   if (multipartThreshold === null) {
     throw configError('multipartThreshold must be a whole number of bytes or a size such as "64MB".');
   }
-  const plugins = options.plugins ?? [];
+  return multipartThreshold;
+}
+
+function readPlugins(given: readonly CloudropPlugin[] | undefined): readonly CloudropPlugin[] {
+  const plugins = given ?? [];
   if (!Array.isArray(plugins)) throw configError("plugins must be a list, such as plugins: [limits()].");
   const ids = plugins.map((plugin) => plugin?.id);
   if (!ids.every((id) => typeof id === "string" && id !== "") || new Set(ids).size !== ids.length) {
@@ -186,17 +148,23 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
       );
     }
   }
-  const logger = options.logger ?? console;
+  return plugins;
+}
+
+function readLogger(given: Logger | undefined): Logger {
+  const logger = given ?? console;
   // The handler reports every failure through the logger; a missing method would make it throw instead of answering.
   if (typeof logger?.error !== "function" || typeof logger.warn !== "function") {
     throw configError(
       "logger needs error(message, error) and warn(message) methods, such as console or a pino logger.",
     );
   }
-  const tokenKeys = importTokenKeys(readSecrets(options.secret));
-  const trustedOrigins = readOrigins(options.trustedOrigins);
-  const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
-  // Plugins and the logger hear about a configuration only once every check above has passed.
+  return logger;
+}
+
+/** Plugins and the logger hear about a configuration only once every check has passed. */
+function announce(config: ServerConfig): void {
+  const { routes, plugins, storage, logger } = config;
   for (const route of routes.values()) {
     for (const plugin of plugins) plugin.server?.extendRoute?.({ name: route.name, definition: route.definition });
     if (route.visibility === "private" && storage.publicUrl) {
@@ -205,16 +173,23 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
       );
     }
   }
-  return {
-    storage,
-    routes,
-    tokenKeys,
-    basePath,
-    trustedOrigins,
-    multipartThreshold,
-    plugins,
-    logger,
-  };
+}
+
+export function readConfig<TRoutes extends Record<string, Route>>(given: CloudropOptions<TRoutes>): ServerConfig {
+  const options: Partial<CloudropOptions<TRoutes>> = given ?? {};
+  // Each reader throws on its own option's mistake, in this order; announce runs only once all of them have passed.
+  const storage = readStorage(options.storage);
+  const entries = readRouteEntries(options.routes);
+  const basePath = readBasePath(options.basePath);
+  const multipartThreshold = readThreshold(options.multipartThreshold);
+  const plugins = readPlugins(options.plugins);
+  const logger = readLogger(options.logger);
+  const tokenKeys = importTokenKeys(readSecrets(options.secret));
+  const trustedOrigins = readOrigins(options.trustedOrigins);
+  const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
+  const config = { storage, routes, tokenKeys, basePath, trustedOrigins, multipartThreshold, plugins, logger };
+  announce(config);
+  return config;
 }
 
 /** What every endpoint receives: the request (for authorize and hooks), its parsed JSON body and the configuration. */
