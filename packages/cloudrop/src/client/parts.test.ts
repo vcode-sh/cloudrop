@@ -7,8 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { SignedPart } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
-import { aborted, bucketUnreachable, linkRefused, signatureMismatch, storageDown } from "./failures.ts";
+import {
+  aborted,
+  bucketUnreachable,
+  linkRefused,
+  signatureMismatch,
+  storageDown,
+  unreadableAnswer,
+} from "./failures.ts";
 import { nextStep, type PartSender, sendParts } from "./parts.ts";
+import { waitAtLeast } from "./retry.ts";
 
 const HOUR_MS = 3_600_000;
 
@@ -27,8 +35,8 @@ const opaque = (): BucketOutcome => ({ kind: "opaque", error: bucketUnreachable(
 
 interface DoubleOptions {
   first: SignedPart[];
-  /** The answer to the `nth` PUT of `partNumber`, decided when it starts; stored by default. */
-  put?: (partNumber: number, nth: number) => BucketOutcome;
+  /** The answer to the `nth` PUT of `partNumber` to `url`, decided when it starts; stored by default. */
+  put?: (partNumber: number, nth: number, url: string) => BucketOutcome;
   /** The answer to a /sign call; by default a fresh URL for each asked part. */
   sign?: (partNumbers: readonly number[]) => Result<SignedPart[]>;
   signal?: AbortSignal;
@@ -53,7 +61,7 @@ function double({ first, put = () => stored, sign, signal = new AbortController(
       attempts.set(partNumber, nth);
       log.calls.push(`put ${partNumber} via ${target.url}`);
       log.puts.push(partNumber);
-      const outcome = put(partNumber, nth);
+      const outcome = put(partNumber, nth, target.url);
       inFlight++;
       log.peak = Math.max(log.peak, inFlight);
       await Promise.resolve();
@@ -123,6 +131,52 @@ describe("sendParts", () => {
     expect({ result, signs: log.signs }).toEqual({ result: ok(undefined), signs: [[1]] });
   });
 
+  it("renews again when the renewal /sign fails", async () => {
+    // A transient /sign failure must not use up the part's one renewal: the next attempt would reuse the refused URL.
+    let calls = 0;
+    const { sender, log } = double({
+      first: [signed(1, "ticket")],
+      put: (_, __, url) => (url === "ticket" ? { kind: "expired", error: linkRefused(), retryAfterMs: 0 } : stored),
+      sign: (partNumbers) =>
+        ++calls === 1
+          ? fail(new CloudropError("SERVER_ERROR", "Try again.", { retryable: true }))
+          : ok(partNumbers.map((n) => signed(n, "renewed"))),
+    });
+    const result = await sendParts(sender, [1]);
+    expect({ result, calls: log.calls }).toEqual({
+      result: ok(undefined),
+      calls: ["put 1 via ticket", "sign 1", "sign 1", "put 1 via renewed"],
+    });
+  });
+
+  it("waits for a /sign answer's Retry-After before signing again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let calls = 0;
+    const { sender, log } = double({
+      first: range(1, 20).map((n) => signed(n, "ticket")),
+      sign: (partNumbers) =>
+        ++calls === 1
+          ? fail(waitAtLeast(new CloudropError("SERVER_ERROR", "Try again.", { retryable: true }), 2000))
+          : ok(partNumbers.map((n) => signed(n, "renewed"))),
+    });
+    const result = sendParts(sender, range(1, 21));
+    await vi.advanceTimersByTimeAsync(1999);
+    const before = log.calls.includes("put 21 via renewed");
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ before, after: log.calls.includes("put 21 via renewed"), result: await result }).toEqual({
+      before: false,
+      after: true,
+      result: ok(undefined),
+    });
+  });
+
+  it("fails a part a /sign answer keeps leaving out", async () => {
+    // answers.ts refuses such an answer; this guards the loop in case a sign() ever skips that check.
+    const { sender, log } = double({ first: [], sign: () => ok([]) });
+    const result = await sendParts(sender, [1]);
+    expect({ result, signs: log.signs }).toEqual({ result: fail(unreadableAnswer(200)), signs: [[1], [1]] });
+  });
+
   it("stops starting parts after one fails for good, and lets the others finish", async () => {
     // Guards `failure ??= await sendPart(…)`: it reads `failure` before the await, so part 5's success, assigned after
     // it, would overwrite part 2's failure and the call would succeed.
@@ -185,6 +239,12 @@ describe("nextStep", () => {
     vi.spyOn(Math, "random").mockReturnValue(1);
     const expired: BucketOutcome = { kind: "expired", error: linkRefused(), retryAfterMs: 0 };
     expect(nextStep(expired, 1, false)).toEqual({ kind: "again", renew: true, waitMs: 0 });
+  });
+
+  it("waits before retrying an opaque failure with a new URL", () => {
+    // Often a network outage: retrying at once would spend the budget before the connection is back.
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    expect(nextStep(opaque(), 1, false)).toEqual({ kind: "again", renew: true, waitMs: 500 });
   });
 
   it("fails a part whose renewed URL is refused as expired", () => {

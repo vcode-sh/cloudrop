@@ -1,6 +1,6 @@
 // Contract: decisions S16 (every server answer is validated; one that cannot be read is SERVER_ERROR, retryable from
-// 500 on and for a 429, ruling S-4), S9 (a Retry-After is waited at least) and S8 (endpoint POSTs send JSON with the
-// page's credentials). Oracle: the server's real answers through the client fixture, and the fetch rules of S8.
+// 500 on; a proxy's 429 page is a retryable RATE_LIMITED, rulings S-4 and S-7), S9 (a Retry-After is waited at least)
+// and S8 (endpoint POSTs send JSON with the page's credentials). Oracle: the server's real answers through the client fixture, and the fetch rules of S8.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
@@ -94,6 +94,16 @@ describe("start", () => {
       before: ["POST /upload"],
       after: ["POST /upload", "POST /upload"],
       kind: "single",
+    });
+  });
+
+  it("reports a proxy that stays rate-limited as a busy server, not a wrong basePath", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { fixture, endpoints } = setup({ fault: () => page(429) });
+    const result = await withRetry(() => endpoints.start("files", png, undefined, live()), live());
+    expect({ error: errorOf(result), requests: fixture.requests.length }).toEqual({
+      error: { code: "RATE_LIMITED", message: "The upload server is busy. Try again in a moment.", retryable: true },
+      requests: 6,
     });
   });
 

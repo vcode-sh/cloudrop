@@ -25,6 +25,9 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
 // Kept beside the error rather than as a field of CloudropError, which is public and would promise it.
 const retryAfters = new WeakMap<CloudropError, number>();
 
+/** The Retry-After recorded for `error`'s answer, 0 when none. */
+export const retryAfterOf = (error: CloudropError): number => retryAfters.get(error) ?? 0;
+
 /** Records that `error`'s request must not be tried again before `retryAfterMs` (its answer's Retry-After). */
 export function waitAtLeast(error: CloudropError, retryAfterMs: number): CloudropError {
   retryAfters.set(error, retryAfterMs);
@@ -56,6 +59,6 @@ export async function withRetry<T>(run: () => Promise<Result<T>>, signal: AbortS
     const result = await run();
     const { error } = result;
     if (!error?.retryable || attempt === MAX_ATTEMPTS) return result;
-    await pause(retryDelay(attempt, retryAfters.get(error)), signal);
+    await pause(retryDelay(attempt, retryAfterOf(error)), signal);
   }
 }

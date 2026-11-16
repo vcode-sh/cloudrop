@@ -5,7 +5,7 @@ import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { PARTS_PER_SIGN, type SignedPart, type SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import { aborted, unreadableAnswer } from "./failures.ts";
-import { MAX_ATTEMPTS, pause, retryDelay } from "./retry.ts";
+import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay } from "./retry.ts";
 
 /** At most this many parts of one file in flight (spec §6.1). */
 export const PARTS_IN_FLIGHT: number = 4;
@@ -41,7 +41,7 @@ const expiresSoon = (target: SignedRequest): boolean => Date.parse(target.expire
 /** A /sign failure, seen as the outcome of a part's attempt so one budget covers both. */
 function signFailure(error: CloudropError): BucketOutcome {
   if (error.code === "ABORTED") return { kind: "aborted", error };
-  return error.retryable ? { kind: "retry", error, retryAfterMs: 0 } : { kind: "rejected", error };
+  return error.retryable ? { kind: "retry", error, retryAfterMs: retryAfterOf(error) } : { kind: "rejected", error };
 }
 
 /** What to do after an attempt: `attempt` is its number, `renewed` whether this part's URL was already renewed. */
@@ -74,8 +74,10 @@ function signAhead(run: Run, partNumber: number): Promise<CloudropError | null> 
 
 async function urlFor(run: Run, partNumber: number, renew: boolean): Promise<Result<SignedRequest>> {
   let known = run.urls.get(partNumber);
-  // A batch that did not include this part (another worker started it) is followed by one that does.
-  while (known === undefined) {
+  // A batch that did not include this part (another worker started it) is followed by one that does. A third pass
+  // would mean a /sign answer that leaves the part out, which answers.ts refuses: stop rather than spin.
+  for (let pass = 1; known === undefined; pass++) {
+    if (pass > 2) return fail(unreadableAnswer(200));
     const error = await signAhead(run, partNumber);
     if (error) return fail(error);
     known = run.urls.get(partNumber);
@@ -101,7 +103,8 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
     const step = nextStep(outcome, attempt, renewed);
     if (step.kind === "done") return null;
     if (step.kind === "fail") return step.error;
-    renew = step.renew;
+    // A renewal whose /sign failed is still owed: the next attempt must not reuse the refused URL.
+    renew = step.renew || (renew && target.error !== null);
     renewed ||= step.renew;
     await pause(step.waitMs, run.sender.signal);
   }

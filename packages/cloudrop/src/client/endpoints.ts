@@ -12,7 +12,7 @@ import type {
   UploadRequest,
 } from "../protocol/types.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTicket } from "./answers.ts";
-import { aborted, serverUnreachable, unreadableAnswer } from "./failures.ts";
+import { aborted, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
@@ -45,6 +45,9 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** A non-2xx answer without cloudrop's error body. A 429 page says the cause is load, not a wrong basePath (S-7). */
+const refusal = (status: number): CloudropError => (status === 429 ? serverBusy() : unreadableAnswer(status));
+
 const toError = (body: ErrorBody): CloudropError =>
   new CloudropError(body.code, body.message, { retryable: body.retryable, parts: body.parts });
 
@@ -75,7 +78,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     const json = parseJson(text);
     if (!response.ok) {
       const body = readErrorBody(json);
-      const error = body ? toError(body) : unreadableAnswer(response.status);
+      const error = body ? toError(body) : refusal(response.status);
       return fail(waitAtLeast(error, parseRetryAfter(response.headers.get("retry-after"))));
     }
     const data = read(json);
