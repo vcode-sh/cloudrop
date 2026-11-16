@@ -42,8 +42,8 @@ measurements" below; its sections are §1 RustFS, §2 Wrangler, §3 Next.js, §4
 answers of 2026-11-16 are `M3-O1` to `M3-O4`, the hardening phase's rulings `M3-H<n>`. Three of those rulings scope
 this plan: `M3-H13` (what "all wire types" in M3-O1 covers, S4), `M3-H14` (the example creates the server when its
 module loads, S21) and `M3-H15` (the five decisions of the plan audit,
-[`2026-11-16-m3-vertical-slice.audit.md`](2026-11-16-m3-vertical-slice.audit.md)). If an id here does not resolve when
-the plan executes, report it rather than renumber it.
+[`2026-11-16-m3-vertical-slice.audit.md`](2026-11-16-m3-vertical-slice.audit.md)), whose item 2 `M3-H16` amends
+(S14). If an id here does not resolve when the plan executes, report it rather than renumber it.
 
 ## Before Task 1
 
@@ -253,18 +253,24 @@ changed a decision after that, the decision says so; the audit's five decisions 
   carried by `ErrorBody.parts`, `protocol/types.ts:121-122`); the client re-sends exactly those parts and completes
   again, at most 2 repair rounds (3 `/complete` answers), then returns the `PARTS_MISSING` error. The spec gives no
   bound (§6.3, last item); a bound is needed so a part that never lands cannot loop.
-- **S14 Cancellation (corrected by the plan audit, C-1; the keep rule ruled in M3-H15).** `options.signal` reaches
-  every `fetch` except `/complete` and `/abort`, and every backoff pause. A signal already aborted at the call starts no
-  request. A cancel stops the upload before the next request starts; `/complete` runs without the signal, because the
-  server may finish it (and run `onComplete`) after the browser gave up waiting, and `/abort` with a live token would
-  then delete a recorded file (ruling M2-X1, `server/abort.ts:23-31`). After a cancel the client returns `ABORTED` and
-  sends one `POST /abort { token }` (bounded by 10 s, answer ignored) unless the last `/complete` got no answer: then
-  the file may be complete, and it is kept, never deleted. A `/complete` that succeeds is returned as a success even
-  when the signal fired meanwhile. Cancelling during `/upload` loses the token: the multipart upload (if any) waits for
-  the lifecycle rule and a plugin's reservation for its expiry (M2-X27). A single PUT cancelled after its bytes reached
-  the bucket may land after `/abort`'s HEAD; that object is an orphan the lifecycle rule does not remove (the 1.1
-  adapters close it). Cost of keeping the file (M3-H15): an object the user believes cancelled stays until the app
-  deletes it.
+- **S14 Cancellation (corrected by the plan audit, C-1; the keep rule ruled in M3-H15, amended by M3-H16).**
+  `options.signal` reaches every `fetch` except `/complete` and `/abort`, and every backoff pause. A signal already
+  aborted at the call starts no request. A cancel stops the upload before the next request starts; `/complete` runs
+  without the signal, because the server may finish it (and run `onComplete`) after the browser gave up waiting, and
+  `/abort` with a live token would then delete a recorded file (ruling M2-X1, `server/abort.ts:23-31`). After a cancel
+  the client returns `ABORTED` and sends one `POST /abort { token }` (bounded by 10 s, answer ignored) unless any
+  `/complete` attempt of this upload may have completed the file: one that got no answer (`NETWORK_ERROR`) or answered
+  `SERVER_ERROR`, which the handler sends after verifying the object and keeping it (`unfinished()`,
+  `server/complete.ts:17-23`) and which a proxy's unreadable page becomes (S16). Then the file is kept, never deleted.
+  The flag is sticky across attempts: `/complete` is repeatable (`server/complete.ts:17`), so a later refusal says
+  nothing about an earlier attempt that may have finished (M3-H16). A `/complete` that succeeds is returned as a success
+  even when the signal fired meanwhile. A cancel during `/complete` returns once that request answers: it runs to its
+  end so that its answer, not the cancel, decides whether the file is kept, and a server that never answers holds the
+  cancelled `upload()` until the browser drops the connection. Cancelling during `/upload` loses the token: the
+  multipart upload (if any) waits for the lifecycle rule and a plugin's reservation for its expiry (M2-X27). A single
+  PUT cancelled after its bytes reached the bucket may land after `/abort`'s HEAD; that object is an orphan the
+  lifecycle rule does not remove (the 1.1 adapters close it). Cost of keeping the file (M3-H15, M3-H16): an object the
+  user believes cancelled stays until the app deletes it.
 - **S15 No `/abort` after a failure (owner, accepted 2026-11-16).** A file that fails for any reason other than
   cancellation is left to the lifecycle rule: after a `/complete` attempt the object may be verified and `onComplete`
   may have run (`server/complete.ts:147-170`), and `/abort` would delete it. The resume plan owns re-trying a failed
@@ -445,7 +451,7 @@ test infrastructure, like `server-fixture.ts`, and is not an entry.
 | Bytes of one part sent under another part's URL | parts cut with the server's `sizeOfPart`; the bucket refuses another length (spike Q1) | upload › "uploads a multipart file…" (bytes on both sides of the boundary) |
 | A wrong server answer making `upload()` reject | every answer validated (S16) | endpoints › non-JSON, wrong-shape and short `/sign` rows |
 | Endless retries or repairs | 6 attempts (S9), 2 repair rounds (S13) | retry › "gives up after 6 attempts"; upload-failures › "gives up after two repair rounds" |
-| A cancelled upload left open, or a completed one deleted by a late cancel | `/abort` only when no `/complete` may have succeeded; `/complete` runs without the signal (S14) | upload-failures › cancel rows and the three /complete cancel rows |
+| A cancelled upload left open, or a completed one deleted by a late cancel | `/abort` only when no `/complete` attempt may have succeeded; `/complete` runs without the signal (S14) | upload-failures › cancel rows and the four /complete cancel rows |
 | A route result typed `unknown` for the quickstart's inline routes | `NoInfer` on `route()` (S3, Task 7 step 1) | types › "types an inline route without onComplete as null, as the quickstart writes routes" |
 | Server code in the browser bundle | Biome import rule (S19); budget (S20) | Task 7 fault probe; `bun run package:check` |
 | The upload secret in the browser bundle | `import type` of the server; no `NEXT_PUBLIC_` prefix (S21) | Task 8 step 3, the `.next/static` check |
@@ -1046,7 +1052,7 @@ function senderFor(context: UploadContext, ticket: Ticket, file: File, signal: A
 
 interface Sent {
   result: Result<CompleteResponse<unknown>>;
-  /** The last /complete got no answer, so the server may have completed the file: a cancel keeps it. */
+  /** Some /complete got no answer or a SERVER_ERROR, so the server may have completed the file: a cancel keeps it. */
   mayBeComplete: boolean;
 }
 
@@ -1057,7 +1063,8 @@ async function sendAndComplete(context: UploadContext, ticket: Ticket, file: Fil
   // Without the signal: the server may finish a /complete (and run onComplete) after the browser stopped waiting (S14).
   const complete = async (): Promise<Result<CompleteResponse<unknown>>> => {
     const done = await context.endpoints.complete(ticket.token);
-    mayBeComplete = done.error?.code === "NETWORK_ERROR";
+    // Sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
+    mayBeComplete ||= done.error?.code === "NETWORK_ERROR" || done.error?.code === "SERVER_ERROR";
     return done;
   };
   for (let round = 0; ; round++) {
@@ -1086,14 +1093,16 @@ export async function uploadFile(
   const { result, mayBeComplete } = await sendAndComplete(context, started.data, file as File, signal);
   // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
   if (!result.error || !signal.aborted) return result;
-  // A /complete that got no answer may have succeeded: keep the file rather than delete a recorded one (M3-H15).
+  // A /complete that may have succeeded: keep the file rather than delete a recorded one (M3-H15, M3-H16).
   if (!mayBeComplete) await context.endpoints.abort(started.data.token);
   return fail(aborted());
 }
 ```
 
 `withRetry` checks the signal before each attempt and in its pause (Task 3), so a cancel during the backoff after an
-answered `/complete` error still ends in `/abort`; a cancel during a `/complete` that then succeeds returns the success.
+answered `/complete` error the server sends before it completes the file (`RATE_LIMITED`, `STORAGE_ERROR`,
+`PARTS_MISSING`, `NOT_UPLOADED`) still ends in `/abort`, unless an earlier attempt set `mayBeComplete`; a cancel during
+a `/complete` that then succeeds returns the success.
 
 `argumentProblem(route, file, options): string | null` narrows `route` and `file` with type guards instead of the casts
 above if that reads cleaner (the reviewer decides; behaviour is the same). Messages:
@@ -1145,15 +1154,17 @@ named in S10, built by `fault` exactly as the fake sends them, `testing/fake-r2/
 | cancels a multipart upload and tells the server | `fault` aborts the controller at the first `PUT part 1` | ends with `POST /abort` | `ABORTED`; `fixture.server.fake.pendingUploads()` is 0 |
 | keeps a file whose /complete finished while the upload was cancelled | `POST /complete`: forward, abort the controller, return the forwarded answer | upload, PUT, complete; no `/abort` | success with the route's `data`; `fixture.server.storage.head(key)` finds the object |
 | keeps a file whose /complete answer was lost to a cancel | `POST /complete`: forward, abort the controller, then throw `TypeError` | upload, PUT, complete; no `/abort` | `ABORTED`; the object exists |
-| cleans up after a cancel during a /complete the server refused | first `POST /complete`: abort the controller, answer 503 `SERVER_ERROR` retryable without forwarding | upload, PUT, complete, abort | `ABORTED`; `head(key)` is `null` |
+| cleans up after a cancel during a /complete the server refused | first `POST /complete`: abort the controller, answer 503 `{ error: { code: "RATE_LIMITED", message: "The storage service is busy. Try again in a moment.", retryable: true } }` without forwarding (`storageFailure`, `server/http.ts:15`, `:77-80`) | upload, PUT, complete, abort | `ABORTED`; `head(key)` is `null` |
+| keeps a file an earlier /complete may have finished after a later one was refused | first `POST /complete`: forward, then answer 500 `{ error: { code: "SERVER_ERROR", message: "The file was uploaded, but the server could not finish processing it. Try again in a moment.", retryable: true } }` instead (`unfinished()`, `server/complete.ts:18-23`, `server/http.ts:36`); second: abort the controller, answer the 503 `RATE_LIMITED` body of the row above without forwarding | upload, PUT, complete, complete; no `/abort` | `ABORTED`; the object exists |
 | starts nothing for a signal that has already fired | aborted signal | none | `ABORTED` |
 | reports an unreachable server after six tries | every `POST /upload` throws `TypeError` | six `POST /upload` | `NETWORK_ERROR`, `serverUnreachable()` message, retryable |
 
 Every failure row asserts `{ code, message, retryable }` with `toEqual` against the literal from `failures.ts` or the
 server's message: an exact message cannot contain a URL or a token.
 
-The three `/complete` cancel rows (contract: S14 as corrected; oracle: the stored object and the request list, from the
-real handler on the fake; bug caught: the signal reaching `/complete`, or `/abort` after an unanswered `/complete`)
+The four `/complete` cancel rows (contract: S14 as corrected and M3-H16; oracle: the stored object and the request
+list, from the real handler on the fake; bug caught: the signal reaching `/complete`, `/abort` after an unanswered
+`/complete`, or `/abort` when only the last of several `/complete` attempts was a refusal)
 upload a small `albums` file as the first `upload.test.ts` row does (one `PUT object`, an `onComplete` that returns
 data); `key` is the ticket's key, read from the forwarded `/upload` answer.
 
@@ -1169,14 +1180,15 @@ data); `key` is the ticket's key, read from the forwarded `/upload` answer.
 - [ ] **Step 1:** Write the three test files; run: fail (modules missing).
 - [ ] **Step 2:** Implement `upload.ts` and `client.ts`.
 - [ ] **Step 3:** Run: `upload.test.ts` 6 rows (8 tests with the three-input row as `it.each`),
-  `upload-failures.test.ts` 12, `client.test.ts` 4 rows (8 tests with `it.each` inputs); write what Vitest reports.
+  `upload-failures.test.ts` 13, `client.test.ts` 4 rows (8 tests with `it.each` inputs); write what Vitest reports.
   Measure with `--reporter=verbose`; the multipart rows move 8 MiB and may pass 50 ms; any row over 250 ms states why
   in a comment.
 - [ ] **Step 4:** Fault probes: `REPAIR_ROUNDS = 0` ("re-sends the parts…" fails); drop the `!result.error ||` guard
   ("keeps a file whose /complete finished…" fails: an `/abort` appears and the object is gone); pass `signal` to
   `endpoints.complete` again (the same row fails); drop the `!mayBeComplete` condition ("keeps a file whose /complete
-  answer was lost…" fails); send `metadata: null` when absent (last `upload.test.ts` row fails); add
-  `export const probe = 1;` to `client.ts` (the surface row fails). Restore each.
+  answer was lost…" fails); write `=` for `||=` in the `complete` closure, or drop its `SERVER_ERROR` test ("keeps a
+  file an earlier /complete may have finished…" fails both times); send `metadata: null` when absent (last
+  `upload.test.ts` row fails); add `export const probe = 1;` to `client.ts` (the surface row fails). Restore each.
 - [ ] **Step 5:** Gates; complexity check; `wc -l` of every new file under the caps.
 - [ ] **Step 6:** Commit `feat(client): add createCloudropClient and upload()`.
 
@@ -1603,7 +1615,7 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
   - S9 (retry budget), S10 (bucket answers), S11 (renewal), S13 (repair rounds), S15 (no `/abort` after a failure),
     S22 (local backends; Wrangler's multipart `/complete`);
   - S14 as corrected by the audit (C-1): `/complete` runs without the signal, and after a cancel the file is kept when
-    the last `/complete` got no answer (cite M3-H15 for the ruling);
+    any `/complete` attempt got no answer or answered `SERVER_ERROR` (cite M3-H15 and M3-H16 for the ruling);
   - S20 with the size-limit split (I-3): the three existing budgets carry `disablePlugins: ["@size-limit/esbuild"]`
     and count summed files; only the client entry is bundled;
   - the `NoInfer` return type of `route()` (I-2, ruled in M3-H15), as its own entry (number 27, the next one this plan
@@ -1622,7 +1634,7 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
   `withImportedChunks("client.js")` (the entry and every chunk it imports) contains `signToken`, `presignPut` or
   `storageError` (`grep -l`), and the size budget holds; the three existing budgets measure what they measured before
   the esbuild plugin was installed.
-- A cancel never deletes a file whose `/complete` may have succeeded (the three `/complete` cancel rows), and an inline
+- A cancel never deletes a file whose `/complete` may have succeeded (the four `/complete` cancel rows), and an inline
   route without `onComplete` types the client's result as `null` (the `server/types.test.ts` row).
 - The example runs from its README against RustFS without credentials; `examples/next/tsconfig.json` is unchanged by
   `next build`; `.next/static` does not contain the secret; the README says a build without secrets fails; the browser
@@ -1672,11 +1684,11 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
 | `cloudrop/client` in the browser bundle unmeasured | U6; Task 8 step 3 (fallback and stop kept) |
 | Split server files; `checkBucket` and Node adapter changes | Before Task 1; S6; citations throughout; S22 |
 
-### Coverage of the plan audit (2026-11-16, rulings M3-H13 to M3-H15)
+### Coverage of the plan audit (2026-11-16, rulings M3-H13 to M3-H16)
 
 | Finding | Where it landed |
 |---|---|
-| C-1 a cancel during `/complete` deletes a recorded file | S14 (replaced); Task 3 `withRetry` rule and its new row; Task 4 `Endpoints.complete` without signal, endpoint rules; Task 6 `Sent`, `sendAndComplete`, `uploadFile`, three `upload-failures` rows, step 3 count 12, step 4 probes; threat table; Task 11 steps 2 and 3; Definition of done |
+| C-1 a cancel during `/complete` deletes a recorded file | S14 (replaced); Task 3 `withRetry` rule and its new row; Task 4 `Endpoints.complete` without signal, endpoint rules; Task 6 `Sent`, `sendAndComplete`, `uploadFile`, three `upload-failures` rows (four since M3-H16), step 3 count 12 (13 since M3-H16), step 4 probes; threat table; Task 11 steps 2 and 3; Definition of done |
 | I-1 the four inference types | S4 (31 names); Task 6 export block; Task 7 type row and step 3; Definition of done; Task 11 step 2 |
 | I-2 `unknown` for an inline route | S3; Task 7 **Files**, step 1 (`NoInfer`, new `server/types.test.ts` row), inline routes in the type tests, step 7 count; file map; threat table; Task 11 step 3 |
 | I-3 the esbuild plugin bundles every check | S20; U8 settled; Task 7 steps 5 and 6; Definition of done; Task 11 step 3 |
@@ -1684,6 +1696,7 @@ deletes the prefix with `cloudrop.api.deletePrefix("<prefix>/")` and prints the 
 | M-1 to M-14, X-1 | Task 1 step 3 and **Files** (M-1); Task 3 **Files** (M-2); "Before Task 1" and Task 8 citations (M-3); S19, U7, Biome override (M-4); Task 4 `abort` (M-5); `sendPart` and Task 5 probes (M-6); Task 5 row (M-7); "Before Task 1", S22, Task 8 README (M-8); Task 8 `app/page.tsx` (M-9); Task 8 **Files**, step 5, Global constraints (M-10); Task 8 `setup-rustfs.ts` item 6, Task 9 script (M-11); Task 9 **Files** (M-12); Task 10 step 3 (M-13); Task 11 steps 2 and 3 (M-14); threat table (X-1) |
 | X-2 counts | "Before Task 1" (N = 896); Task 3 step 3 (+1 row); Task 6 step 3; Task 7 step 7 |
 | X-6 unverified | U7, U8 settled; U15 added; Task 9 CI note |
+| Re-review N-1 to N-3 (the keep rule looked only at the last `/complete`; a cancel's wait; row 3's status) | Ruled in M3-H16: S14; Task 6 `Sent`, the `complete` closure, the note after `uploadFile`, row 3 (503 `RATE_LIMITED`), the new row, step 3 count 13, step 4 probe; threat table; Task 11 step 3; Definition of done; "Not settled here" |
 | Owner decisions 1 to 5 | Ruled in M3-H15: S4, S14, S21 and the Task 8 README line, Task 7 step 1, Task 10 step 1; removed from "Not settled here" |
 
 ### Placeholder scan
@@ -1717,7 +1730,8 @@ TypeScript 6 fallback. Nothing is open. Settled since the plan audit:
 
 - **The edge of "all wire types" (S4):** ruled in M3-H13; the 31 names, with the four route inference types, in
   M3-H15.
-- **A cancel after a `/complete` that may have succeeded (S14):** the file is kept, never deleted (M3-H15).
+- **A cancel after a `/complete` that may have succeeded (S14):** the file is kept, never deleted (M3-H15), when any
+  attempt may have succeeded, not only the last (M3-H16).
 - **The build needs the settings (S21):** stands, with a README line for builds without secrets (M3-H14, M3-H15).
 - **The I-2 server type fix:** part of this slice, Task 7 step 1 (M3-H15).
 - **Task 10's prerequisites:** the test bucket and its CORS rule `cloudrop-browser-tests` for `http://localhost:5173`

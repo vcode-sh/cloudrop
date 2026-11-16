@@ -2,7 +2,7 @@
 
 Decisions of the hardening phase between M2 and the M3 slice (2026-11-16). `M3-O<n>` are the owner's answers to the
 questions the M2 reviews and the M3 plan left open. `M3-H<n>` are the controller's rulings, numbered as in the phase's
-ledger (H1 to H9, H11 and H13 to H15), plus `M3-H10` and `M3-H12` for behaviour that lanes N and I built and their
+ledger (H1 to H9, H11 and H13 to H16), plus `M3-H10` and `M3-H12` for behaviour that lanes N and I built and their
 reviews accepted.
 
 ## Owner decisions
@@ -203,7 +203,8 @@ reviews accepted.
   (`docs/superpowers/plans/2026-11-16-m3-vertical-slice.audit.md`, "Owner decisions") are taken as it recommends:
   1. `cloudrop/client` exports 31 names: the plan's 27 and the four route inference types (follows M3-O1 and M3-H13).
   2. After a cancel whose last `/complete` got no answer, the client keeps the file and never deletes it: it sends no
-     `/abort` and returns `ABORTED`. `/complete` runs without the caller's signal.
+     `/abort` and returns `ABORTED`. `/complete` runs without the caller's signal. Amended by M3-H16: any `/complete`
+     attempt, not only the last, and a `SERVER_ERROR` answer counts as well as no answer.
   3. S21 stands (M3-H14), with one README line: a build without secrets (a Docker build stage with secrets only at run
      time) must pass them as build secrets or fails with `INVALID_CONFIG`.
   4. The server type fix of the audit's I-2 (`NoInfer` on `route()`'s return type, so an inline route without
@@ -215,5 +216,27 @@ reviews accepted.
   be destroyed, and any live token can delete its own object (`server/abort.ts`).
 - **If wrong:** an object orphaned after an uncertain cancel stays until the app deletes it; one more public type
   export if the owner wanted fewer.
-- **Status:** decided; taken under M3-O4. The M3 plan (S4, S14, S21, Task 7 step 1, Task 10 step 1) carries it out.
+- **Status:** amended by M3-H16 (item 2); taken under M3-O4. The M3 plan (S4, S14, S21, Task 7 step 1, Task 10 step 1)
+  carries it out.
 - **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md`.
+
+### M3-H16: a cancel keeps the file when any `/complete` attempt may have completed it
+
+- **Decision:** Amends item 2 of M3-H15. After a cancel the client keeps the file, sends no `/abort` and returns
+  `ABORTED` when any `/complete` attempt of the upload may have completed it: an attempt that got no answer
+  (`NETWORK_ERROR`) or answered `SERVER_ERROR`. The flag is sticky across the attempts `withRetry` makes and across
+  repair rounds; a later answer never clears it. The client sends `/abort` after a cancel only when no attempt set it,
+  for example after a 503 `RATE_LIMITED` the server answers before it completes the file.
+- **Why:** `/complete` is repeatable: a second call after a completed one verifies the object again and reruns
+  `afterVerify` and `onComplete` (`server/complete.ts:17-23`). So the last attempt alone cannot tell whether an
+  earlier one finished: attempt 1 completes the file and records it, its answer is lost, attempt 2 answers
+  `SERVER_ERROR` because `onComplete` throws on the duplicate row, the user cancels in the backoff, and `/abort` with
+  the live token deletes the recorded object (`server/abort.ts:23-31`). The handler sends `SERVER_ERROR` (500,
+  `server/http.ts:36`) from `/complete` only after the object is verified and kept, and the client reads a proxy's
+  unreadable 502 or 504 as `SERVER_ERROR` too, where the server may have finished behind the proxy. A recorded file
+  must never be deleted by a cancel.
+- **If wrong:** an object stays in the bucket after a cancel that really did not complete, until the app deletes it or
+  the token expires.
+- **Status:** decided; controller ruling H16 on the M3 plan's re-review (N-1). The M3 plan (S14, Task 6) carries it out.
+- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S14, Task 6 `sendAndComplete` and the
+  `upload-failures` rows).
