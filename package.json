@@ -7,12 +7,16 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "biome check .",
+    "check": "biome check . && bun scripts/check-file-size.ts",
     "fix": "biome check --write .",
     "typecheck": "bun run --filter cloudrop typecheck",
     "test": "bun run --filter cloudrop test",
     "test:live": "bun scripts/test-live-r2.ts",
-    "build": "bun run --filter cloudrop build"
+    "test:rustfs": "scripts/test-rustfs.sh",
+    "test:wrangler": "scripts/test-wrangler.sh",
+    "build": "bun run --filter cloudrop build",
+    "package:check": "bun run --filter cloudrop package:check",
+    "verify": "bun run check && bun run typecheck && bun run test && bun run build && bun run package:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8"
