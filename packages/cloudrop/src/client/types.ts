@@ -67,7 +67,14 @@ export interface FileHandle {
   /** The client's sequence number as text ("1", "2", …): unique per client, stable for the job's life. */
   readonly id: string;
   readonly name: string;
-  /** Cancels this file only: its requests stop, the server is told, and it ends aborted. */
+  /**
+   * Stops a queued or uploading file's requests and keeps what it sent: the parts that landed stay, and its bytes stay
+   * as counted. A file that is completing or has settled ignores it.
+   */
+  pause(): void;
+  /** Sends a paused file's parts that have not landed; a single PUT starts again. Other files ignore it. */
+  resume(): void;
+  /** Cancels this file only, paused or not: its requests stop, the server is told, and it ends aborted. */
   abort(): void;
 }
 
@@ -79,6 +86,10 @@ export interface UploadJob<R> {
   readonly done: Promise<UploadResult<R>>;
   /** Cancels every file, as the signal does. */
   abort(): void;
+  /** Pauses every file that is queued or uploading, as FileHandle.pause does. */
+  pause(): void;
+  /** Resumes every paused file. */
+  resume(): void;
   /**
    * Calls `listener` when the snapshot changes: at once on a status change, at most every 100 ms while bytes flow, and
    * every second while a file uploads. Returns the unsubscribe. Needs no `this`, as `useSyncExternalStore` calls it.

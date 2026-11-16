@@ -1,5 +1,6 @@
-// One file's bytes and its /complete: the bytes as one PUT or as parts, each PUT holding a slot of the client's pool,
-// then /complete with up to two repair rounds (decisions S13, S14). file-run.ts decides how the file ends.
+// One pass of a file: the bytes that have not landed as one PUT or as parts, each PUT holding a slot of the client's
+// pool, then /complete with up to two repair rounds (decisions S13, S14). file-run.ts runs the passes and decides how
+// the file ends.
 
 import { fail, ok, type Result } from "../errors.ts";
 import { sizeOfPart } from "../plan.ts";
@@ -31,20 +32,26 @@ function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
   return file.slice(start, start + sizeOfPart(file.size, ticket.partSize, partNumber));
 }
 
-interface Upload {
-  ticket: Ticket;
-  entry: Entry;
+/** A file's upload across its passes. */
+export interface Upload {
+  readonly ticket: Ticket;
+  readonly entry: Entry;
+  /** Some /complete got no answer or a SERVER_ERROR, so the server may have completed the file: a cancel keeps it. */
+  mayBeComplete: boolean;
+  /** The PARTS_MISSING repair rounds started so far. */
+  repairs: number;
 }
 
-/** The file moves to `status` and the job hears of it at once. */
+/** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
 function moveTo(entry: Entry, status: "uploading" | "completing"): void {
+  if (status === "uploading") entry.meter.restart(Date.now());
   entry.status = status;
   entry.changed(true);
 }
 
-function senderFor(context: UploadContext, { ticket, entry }: Upload): PartSender {
+/** Sends through `signal`, the pass's: a pause or a cancel aborts the PUTs and /sign calls in flight. */
+function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: AbortSignal): PartSender {
   const { file, rank } = entry;
-  const { signal } = entry.cancel;
   // A slot is held for the PUT alone: it is free again before a retry's wait (spec §4.4). A part still waiting for one
   // when the file is cancelled or has failed never starts; a PUT already sent finishes (spec §6.2).
   const put = async (target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome> => {
@@ -52,19 +59,17 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload): PartSende
     try {
       // `stop` may also fire between the grant and this line: the slot goes back unused (audit I1).
       if (release === null || stop.aborted) return { kind: "aborted", error: aborted() };
-      // Never from paused or a settled status (audit I1); a repair after PARTS_MISSING turns completing back.
-      if (entry.status === "queued" || entry.status === "completing") {
-        // The speed starts from 0 whenever the file starts sending again.
-        entry.meter.restart(Date.now());
-        moveTo(entry, "uploading");
-      }
+      // Never from paused or a settled status (audit I1): those abort the pass, and `stop` with it.
+      if (entry.status === "queued") moveTo(entry, "uploading");
       const body = bodyOf(ticket, file, partNumber);
-      return await context.put(target, body, signal, (sent) => {
+      const outcome = await context.put(target, body, signal, (sent) => {
         const added = entry.progress.sent(partNumber, sent, body.size);
         if (added === 0) return;
         entry.meter.add(added, Date.now());
         entry.changed(false);
       });
+      if (outcome.kind === "stored") entry.landed.add(partNumber);
+      return outcome;
     } finally {
       release?.();
     }
@@ -85,35 +90,39 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload): PartSende
   return { signal, first: [{ partNumber: 1, ...ticket.put }], put, sign };
 }
 
-interface Sent {
-  result: Result<CompleteResponse<unknown>>;
-  /** Some /complete got no answer or a SERVER_ERROR, so the server may have completed the file: a cancel keeps it. */
-  mayBeComplete: boolean;
-}
-
-export async function sendAndComplete(context: UploadContext, upload: Upload): Promise<Sent> {
+/** Sends the parts that have not landed and completes the file. ABORTED when `signal` (the pass's) fired first. */
+export async function sendAndComplete(
+  context: UploadContext,
+  upload: Upload,
+  signal: AbortSignal,
+): Promise<Result<CompleteResponse<unknown>>> {
   const { ticket, entry } = upload;
-  const sender = senderFor(context, upload);
-  let parts = Array.from({ length: ticket.kind === "single" ? 1 : ticket.partCount }, (_, index) => index + 1);
-  let mayBeComplete = false;
+  const sender = senderFor(context, upload, signal);
+  const partNumbers = Array.from({ length: ticket.kind === "single" ? 1 : ticket.partCount }, (_, index) => index + 1);
   // Without the signal: the server may finish a /complete (and run onComplete) after the browser stopped waiting (S14).
   const complete = async (): Promise<Result<CompleteResponse<unknown>>> => {
     const done = await context.endpoints.complete(ticket.token);
     const code = done.error?.code;
     // PARTS_MISSING clears the doubt wherever it arrives: the server sends it only while the multipart upload is still
     // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9).
-    if (code === "PARTS_MISSING") mayBeComplete = false;
+    if (code === "PARTS_MISSING") upload.mayBeComplete = false;
     // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
-    else mayBeComplete ||= code === "NETWORK_ERROR" || code === "SERVER_ERROR";
+    else upload.mayBeComplete ||= code === "NETWORK_ERROR" || code === "SERVER_ERROR";
     return done;
   };
-  for (let round = 0; ; round++) {
-    const sent = await sendParts(sender, parts);
-    if (sent.error) return { result: fail(sent.error), mayBeComplete };
+  for (;;) {
+    const unsent = partNumbers.filter((partNumber) => !entry.landed.has(partNumber));
+    const sent = await sendParts(sender, unsent);
+    if (sent.error) return fail(sent.error);
+    // Paused after the last part landed: /complete waits for the next pass, which sends nothing first.
+    if (signal.aborted) return fail(aborted());
     moveTo(entry, "completing");
     const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
-    if (!missing?.length || round === REPAIR_ROUNDS) return { result: done, mayBeComplete };
-    parts = [...missing];
+    if (!missing?.length || upload.repairs === REPAIR_ROUNDS) return done;
+    upload.repairs++;
+    for (const partNumber of missing) entry.landed.delete(partNumber);
+    // Uploading again at once, so a pause applies to the repair (ruling P4).
+    moveTo(entry, "uploading");
   }
 }

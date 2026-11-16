@@ -5,7 +5,7 @@
 import { CloudropError, fail } from "../errors.ts";
 import { type Arguments, readArguments } from "./arguments.ts";
 import { aborted, withFile } from "./failures.ts";
-import { type Entry, runFile, settle } from "./file-run.ts";
+import { type Entry, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
 import { createMeter, createProgress } from "./progress.ts";
 import { withRetry } from "./retry.ts";
 import { createStore } from "./store.ts";
@@ -107,6 +107,9 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
       progress: createProgress(),
       meter: createMeter(Date.now()),
       cancel: new AbortController(),
+      pass: null,
+      wake: null,
+      landed: new Set(),
       // Only called once the job runs, after the store below exists.
       changed: (urgent) => store.changed(urgent),
     };
@@ -117,7 +120,10 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
   );
   // Taken from the store as they are: neither needs `this`.
   const snapshot = { subscribe: store.subscribe, getSnapshot: store.get };
-  if (args.error) return { files: [], done: Promise.resolve(args), abort: () => {}, ...snapshot };
+  const nothing = () => {};
+  if (args.error) {
+    return { files: [], done: Promise.resolve(args), abort: nothing, pause: nothing, resume: nothing, ...snapshot };
+  }
   // The caller's signal and job.abort() both cancel every file.
   const job = new AbortController();
   job.signal.addEventListener("abort", () => {
@@ -130,9 +136,17 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
   // The caller's signal may outlive the job: drop the listener that holds it.
   const done = run(context, args.data, entries, job.signal).finally(() => signal.removeEventListener("abort", abort));
   return {
-    files: entries.map(({ id, file, cancel }) => ({ id, name: file.name, abort: () => cancel.abort() })),
+    files: entries.map((entry) => ({
+      id: entry.id,
+      name: entry.file.name,
+      pause: () => pauseFile(entry),
+      resume: () => resumeFile(entry),
+      abort: () => entry.cancel.abort(),
+    })),
     done,
     abort,
+    pause: () => entries.forEach(pauseFile),
+    resume: () => entries.forEach(resumeFile),
     ...snapshot,
   };
 }
