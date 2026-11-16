@@ -6,6 +6,7 @@ import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
 import type { Ticket } from "./endpoints.ts";
 import { aborted, withFile } from "./failures.ts";
+import type { Meter, Progress } from "./progress.ts";
 import type { FileStatus } from "./types.ts";
 import { sendAndComplete, type UploadContext } from "./upload.ts";
 
@@ -18,6 +19,10 @@ export interface Entry {
   status: FileStatus;
   result: CompleteResponse<unknown> | null;
   error: CloudropError | null;
+  /** The bytes sent so far. */
+  readonly progress: Progress;
+  /** How fast they are sent. */
+  readonly meter: Meter;
   /** Fires on abort() of the file or the job, and when the job's signal fires. */
   readonly cancel: AbortController;
   /** Tells the job something changed; `urgent` for a status change. */

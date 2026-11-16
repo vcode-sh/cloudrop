@@ -10,7 +10,15 @@ import type { UploadContext } from "./client/upload.ts";
 import { configError, fail, ok, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
 
-export type { FileHandle, FileOutcome, FileStatus, UploadJob, UploadResult } from "./client/types.ts";
+export type {
+  FileHandle,
+  FileOutcome,
+  FileSnapshot,
+  FileStatus,
+  JobSnapshot,
+  UploadJob,
+  UploadResult,
+} from "./client/types.ts";
 export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
 // The wire types of the four endpoints, and the route inference types a client user annotates with (InferableCloudrop,
 // RouteMetadata, RouteName, RouteResult; S4, ruling M3-H13), which the root entry exports too.

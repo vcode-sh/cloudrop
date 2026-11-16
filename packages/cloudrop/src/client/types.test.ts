@@ -85,6 +85,10 @@ describe("cloudrop/client types", () => {
     // @ts-expect-error: avatar's schema requires metadata in start() too.
     client.start("avatar", [file]);
     expectTypeOf(client.upload("notes", [file])).toEqualTypeOf<Promise<UploadResult<null>>>();
+    const snapshot = client.start("avatar", [file], { metadata: { albumId: "a" } }).getSnapshot();
+    expectTypeOf(snapshot.files[0]?.result).toEqualTypeOf<
+      CompleteResponse<RouteResult<typeof cloudrop, "avatar">> | null | undefined
+    >();
 
     expectTypeOf<MultipartTicket["id"]>().toEqualTypeOf<string>();
     expectTypeOf<AbortResponse["id"]>().toEqualTypeOf<string>();

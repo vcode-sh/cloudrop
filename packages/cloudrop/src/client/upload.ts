@@ -53,8 +53,18 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload): PartSende
       // `stop` may also fire between the grant and this line: the slot goes back unused (audit I1).
       if (release === null || stop.aborted) return { kind: "aborted", error: aborted() };
       // Never from paused or a settled status (audit I1); a repair after PARTS_MISSING turns completing back.
-      if (entry.status === "queued" || entry.status === "completing") moveTo(entry, "uploading");
-      return await context.put(target, bodyOf(ticket, file, partNumber), signal, () => {});
+      if (entry.status === "queued" || entry.status === "completing") {
+        // The speed starts from 0 whenever the file starts sending again.
+        entry.meter.restart(Date.now());
+        moveTo(entry, "uploading");
+      }
+      const body = bodyOf(ticket, file, partNumber);
+      return await context.put(target, body, signal, (sent) => {
+        const added = entry.progress.sent(partNumber, sent, body.size);
+        if (added === 0) return;
+        entry.meter.add(added, Date.now());
+        entry.changed(false);
+      });
     } finally {
       release?.();
     }
