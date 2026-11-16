@@ -46,6 +46,8 @@
                       "**/next.*",
                       "**/node",
                       "**/node.*",
+                      "..",
+                      "../",
                       "cloudrop"
                     ],
                     "message": "cloudrop/client must not import storage, server or test code, nor another entry that pulls them in. Import from errors, input, plan or protocol."
