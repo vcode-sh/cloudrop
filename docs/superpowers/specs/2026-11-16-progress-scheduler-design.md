@@ -185,11 +185,13 @@ progress event (`α = 1 − e^(−Δt/3 s)`), decaying towards 0 when no bytes a
 
 Owner decision 2026-11-16: a failed file keeps what it sent so `retry()` can reuse it.
 
-- A file that fails no longer sends `/abort` at once (the background `/abort` of `M3-S15`). Its parts and token are
-  kept until the first of: `abort()` on the file or job (then keep-or-abort applies), `pagehide` (`/abort` with
-  `keepalive`, only when no `/complete` may have succeeded), or the token's expiry, after which the bucket's lifecycle
-  rule removes unfinished multipart uploads. A single-PUT object left by a failed file whose page closed without
-  `pagehide` firing stays in the bucket; the decision entry states that cost.
+- A file of a `start()` job that fails no longer sends `/abort` at once (the background `/abort` of `M3-S15`). A file
+  sent through `upload()` keeps that background `/abort`: `upload()` returns no handle, so nothing could retry it
+  (owner-confirmed 2026-11-16, `M3-U29`). A `start()` file's parts and token are kept until the first of: `abort()`
+  on the file or job (then keep-or-abort applies), `pagehide` (`/abort` with `keepalive`, only when no `/complete` may
+  have succeeded), or the token's expiry, after which the bucket's lifecycle rule removes unfinished multipart
+  uploads. A single-PUT object left by a failed file whose page closed without `pagehide` firing stays in the bucket;
+  the decision entry states that cost.
 - `retry()` on a failed file:
   1. if a `/complete` may have succeeded, it calls `/complete` again first (idempotent); a success ends the file done;
   2. else, with a valid token, it re-sends the parts that have not landed and completes (`PARTS_MISSING` repair covers
@@ -199,6 +201,11 @@ Owner decision 2026-11-16: a failed file keeps what it sent so `retry()` can reu
 - `retry()` on a done or aborted file does nothing; on a queued, uploading or paused file it does nothing.
 
 ## 5. Part size (plan B, task 1, a measurement before any change)
+
+Outcome (`M3-U40`): files of 256 MiB or more start at 16 MiB parts, smaller files keep 8 MiB. Measured on live R2 on
+2026-11-16 (`docs/research/r2-spike-findings.md`, "Part size, 2026-11-16"), 16 MiB against 8 MiB parts was 26 % and
+14 % faster in Node and 56 % and 21 % faster in the browser at 4 and 8 PUTs at a time; 32 MiB was no better than 16.
+The text below is the plan as approved.
 
 Measured 2026-11-16: one 8 MiB PUT reaches about 17 MiB/s, one 64 MiB PUT about 37 MiB/s (TCP ramp-up over a ~130 ms
 round trip). Plan B measures on live R2, from Node and from a browser through `/lab`: part sizes 8, 16 and 32 MiB ×
@@ -223,8 +230,9 @@ recorded and nothing changes.
 
 ## 7. Size, decisions, docs
 
-- Bundle: the `cloudrop/client` budget is set from the measured size after plan A and again after plan B, at most
-  about 7.5 kB gzip (owner decision 2026-11-16); spec §1's "client plus React under about 8 kB" becomes about 10 kB.
+- Bundle: the `cloudrop/client` budget is set from the measured size after plan A and again after plan B. The
+  ceiling is 9.0 kB gzip for the rest of M3 (owner decision 2026-11-16, `M3-U43`, raised from 7.5 kB); spec §1's
+  "client plus React under about 8 kB" becomes about 11 kB.
 - Decision entries in `docs/decisions/m3-uploader.md`, series `M3-U` (registered in the README and in `AGENTS.md`):
   `UploadResult` and `error.file`; the snapshot contract; fetch versus XHR; the pool and its defaults; the failed-file
   rule amending `M3-S15`; the budget; the part-size outcome.
@@ -245,4 +253,6 @@ called for it, then docs.
 - Whether `job.files[i]` handles are also available by id (`job.file(id)`); decided in plan A by what the example
   needs.
 - The exact pool numbers (2 s window, 10 % rise, cap 8) are starting points; plan B may tune them on the R2
-  measurement, with a decision entry.
+  measurement, with a decision entry. Settled in plan B (`M3-U41`): kept, with a start at 4. Six connections beat 4 by
+  18 to 62 % in the part-size runs, but that was one machine on a 10 GbE LAN with one file; the automatic pool can
+  reach 6 within a few seconds where more connections help, and a slow or shared link never pays for them.

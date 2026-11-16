@@ -16,7 +16,7 @@ uses one of these prefixes instead.
 | `M2-X<n>` | Rulings made while executing M2 (owner, controller and review rulings), numbered 1 to 41 in the execution ledger. `M2-P<n>` are four rulings the ledger gave no number. | [m2-execution-rulings.md](m2-execution-rulings.md) |
 | `M3-O<n>` | The owner's decisions of the hardening phase before the M3 slice. `M3-H<n>` are the controller's rulings of the same phase, numbered as in its ledger. | [m3-hardening.md](m3-hardening.md) |
 | `M3-S<n>` | The M3 vertical slice (`cloudrop/client`, the Next.js example, the browser lanes): the plan's decisions S1 to S27 under their own numbers, then the controller's execution rulings from 28 upward. | [m3-slice.md](m3-slice.md) |
-| `M3-U<n>` | The M3 uploader (progress, the shared pool, several files per job, pause and resume): plan A's rulings P1 to P9 as `M3-U1` to `M3-U9`, the design's decisions from 10, then execution rulings from 14 upward. | [m3-uploader.md](m3-uploader.md) |
+| `M3-U<n>` | The M3 uploader (progress, the shared pool, several files per job, pause and resume, automatic concurrency, stalls, offline, retry): plan A's rulings P1 to P9 as `M3-U1` to `M3-U9`, the design's decisions from 10, plan A's execution rulings 14 to 22, plan B's rulings Q1 to Q17 as `M3-U23` to `M3-U39`, then plan B's outcomes and execution rulings from 40 upward. | [m3-uploader.md](m3-uploader.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 
@@ -33,6 +33,9 @@ Reading older text:
   ledger id they carry, `M3-S18` records `S-8`, and the rest of that list changed no behaviour or public contract.
 - In the M3 progress plan A and its audit, a bare `P<n>` is `M3-U<n>`. Its execution notes name rulings `R1`, `R5-1`,
   `R6-1` and so on; the entries in [m3-uploader.md](m3-uploader.md) from `M3-U14` upward name the ones they record.
+- In the M3 progress plan B and its audit, a bare `Q<n>` is `M3-U<n + 22>` (`Q1` is `M3-U23`, `Q17` is `M3-U39`). Its
+  execution notes name rulings such as `task 2 R1` and `task 4 ruling 1`; the entries from `M3-U40` upward name the
+  ones they record.
 - `T10-1`, `X-3` and similar names are finding ids in `docs/superpowers/plans/2026-11-15-m2-server.audit.md`.
 
 ## Authority

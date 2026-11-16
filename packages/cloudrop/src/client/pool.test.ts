@@ -1,6 +1,6 @@
 // Contract: spec §4.4 and ruling M3-U9: a client's connection slots, granted lower rank first (element by element,
 // equal ranks in arrival order), given up by a cancelled waiter, and freed once however often a release is called.
-// An automatic pool (plan B, rulings Q1 to Q3) starts at 4, adds one slot when a 2 s window's bytes per millisecond
+// An automatic pool (rulings M3-U23 to M3-U25) starts at 4, adds one slot when a 2 s window's bytes per millisecond
 // rose by 10 % over the previous window's while work waits, up to 8, and halves once per window on slowDown.
 // Oracle: the orders and counts those rules give, worked by hand.
 

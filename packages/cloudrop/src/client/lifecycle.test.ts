@@ -1,7 +1,7 @@
-// Contract: spec §4.6 and plan B's rulings Q6 and Q17 through the real client in a browser (the XHR transport): the
-// page's `offline` pauses every queued and uploading file and aborts its PUTs; `online` resumes only the files `offline`
-// paused, so a file the caller paused stays paused; a job that starts while the page is offline pauses its files at
-// once; the job listens only while a file runs; where the global has no addEventListener, nothing pauses.
+// Contract: spec §4.6 and rulings M3-U28 and M3-U39 through the real client in a browser (the XHR transport): the
+// page's `offline` pauses every queued and uploading file and aborts its PUTs; `online` resumes only the files
+// `offline` paused, so a file the caller paused stays paused; a job that starts while the page is offline pauses its
+// files at once; the job listens only while a file runs; where the global has no addEventListener, nothing pauses.
 // Oracle: the statuses the snapshot shows, the requests the fake XHR saw, and the listeners the stubbed global holds.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,7 +74,7 @@ describe("offline and online", () => {
     });
   });
 
-  it("resumes on online only the files offline paused and the caller did not pause (Q6)", async () => {
+  it("resumes on online only the files offline paused and the caller did not pause (M3-U28)", async () => {
     const { xhr, client } = setup(3);
     const connectivity = pageEvents();
     const job = client.start("files", [fileOf("a.bin"), fileOf("b.bin"), fileOf("c.bin")]);

@@ -202,9 +202,9 @@ describe("createPut with a fetch option", () => {
   });
 });
 
-// Contract: spec §4.6 and ruling Q5: a PUT that stalls is given up and reported as the network-error outcome, so the
-// caller retries it; a caller's cancel stays a cancel, and a settled PUT leaves no timer behind. Oracle: 30 s without
-// progress for XHR; for fetch, 30 s plus the body at 100 KiB/s (1 MiB: 30 000 + 10 240 ms).
+// Contract: spec §4.6 and ruling M3-U27: a PUT that stalls is given up and reported as the network-error outcome, so
+// the caller retries it; a caller's cancel stays a cancel, and a settled PUT leaves no timer behind. Oracle: 30 s
+// without progress for XHR; for fetch, 30 s plus the body at 100 KiB/s (1 MiB: 30 000 + 10 240 ms).
 describe("a stalled PUT", () => {
   const opaque = { kind: "opaque", error: withCode("NETWORK_ERROR"), retryAfterMs: 0 };
   const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

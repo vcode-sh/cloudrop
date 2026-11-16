@@ -15,9 +15,9 @@ export type PutObject = (
   onBytes: (sent: number) => void,
 ) => Promise<BucketOutcome>;
 
-// A stall is the network-error outcome (ruling Q5, spec §4.6): the PUT is given up, costs one attempt and is sent again.
-// An answer that comes more than 30 s after the body was sent, or an XHR the browser queues behind its per-host
-// connection limit, counts as a stall too.
+// A stall is the network-error outcome (ruling M3-U27, spec §4.6): the PUT is given up, costs one attempt and is sent
+// again. An answer that comes more than 30 s after the body was sent, or an XHR the browser queues behind its per-host
+// connection limit, counts as a stall too (ruling M3-U47).
 /** How long an XHR may go without a progress event; with fetch, the time a PUT gets on top of its bytes. */
 const STALL_MS = 30_000;
 /** 100 KiB/s: the slowest upload a fetch PUT, which reports no progress, is given time for. */

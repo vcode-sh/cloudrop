@@ -1,6 +1,6 @@
 // The connection slots one client shares between all its uploads (spec §4.4). A slot is held by one bucket PUT;
 // calls to the upload server take none. An automatic pool sizes itself from the bytes the bucket accepts: it weighs a
-// window of at least 2 s whenever it is used, never on a timer, so an idle client holds none (plan B, ruling Q1).
+// window of at least 2 s whenever it is used, never on a timer, so an idle client holds none (ruling M3-U23).
 
 /** Gives the slot back. Calling it more than once frees one slot. */
 export type Release = () => void;
@@ -12,7 +12,7 @@ export interface Pool {
   /** Bytes the bucket accepted; an automatic pool grows on them. */
   sent(bytes: number): void;
   /** A network error, a stall or a 429/503: an automatic pool halves (at least 1) and does not grow in the next
-   * window (rulings Q2, Q3). */
+   * window (rulings M3-U24, M3-U25). */
   slowDown(): void;
 }
 
@@ -46,7 +46,7 @@ export function createPool(size: number | "auto", now: () => number = () => Date
   let windowStart = 0;
   let windowBytes = 0;
   let lastRate = 0;
-  // Set by slowDown until its window closes (ruling Q2).
+  // Set by slowDown until its window closes (ruling M3-U24).
   let hold = false;
 
   const restart = (rate: number) => {
