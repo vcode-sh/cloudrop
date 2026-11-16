@@ -485,6 +485,99 @@ What this means for cloudrop:
   `TypeError: Failed to fetch` before any byte is sent (inferred from that control and the Fetch standard; not tried
   from a page). The client sends no checksum today.
 
+## Part size, 2026-11-16
+
+Measured 2026-11-16, 20:31:47–20:42:50 UTC, on the same test bucket and the same machine (10 GbE LAN, Node 24.22.2,
+Chromium 159.0.8154.6 headless shell driven by Playwright 1.65.1). It answers plan B task 1: should `src/plan.ts`
+start large files at a part larger than 8 MiB?
+
+**Method.** Each run uploads a fresh 256 MiB random file as a real multipart upload through the `r2` driver:
+`createMultipart`, `presignPart` for every part (signed `content-length`, no checksum), the part PUTs, then
+`completeMultipart` with the ETags, a `head` that checks the size, and a `delete`. The matrix is part size 8, 16 and
+32 MiB × concurrency 4, 6 and 8: a pool of that many workers, each taking the next part when its PUT finishes. Every
+round visits the nine combinations in a different order (forward, then two shuffles), so drift in the network spreads
+over all of them. Three rounds per combination, and the whole matrix ran twice, Node first and then the browser each
+time: **n = 6 per cell and runtime**. The number is MiB/s over the part PUTs alone (first PUT start to last PUT end), so
+it shows what part size and parallelism change; `createMultipart`, presigning and
+`completeMultipart` added 0.5–1.2 s per upload in Node, whatever the part size.
+
+- **Node:** `fetch` (undici) with `Uint8Array` slices of one buffer.
+- **Browser:** a blank page served on `http://localhost:5173`; Node creates the upload and presigns, the page PUTs
+  `Blob.slice` parts with `fetch`, reads each `ETag` from the answer (the CORS rule exposes it) and times itself with
+  `performance.now()`. Building the random Blob is not timed. `nextHopProtocol` is empty for these cross-origin
+  requests (no `Timing-Allow-Origin`), so the HTTP version Chromium used is not known.
+
+**Round trip the same day** (signed `HEAD` of a missing key on a warm connection, median of 7, Node): 140 and 119 ms
+around the first Node matrix, 183 and 116 ms around the second.
+
+**Node, part PUTs, MiB/s** (median of 6, min–max):
+
+| Part | Concurrency 4 | Concurrency 6 | Concurrency 8 |
+|---|---|---|---|
+| 8 MiB | 60.5 (47.6–69.3) | 71.5 (21.5–100.9) | 108.0 (23.2–111.6) |
+| 16 MiB | 76.3 (61.7–87.6) | 102.4 (94.8–120.3) | 122.7 (105.8–153.4) |
+| 32 MiB | 75.1 (64.7–131.8) | 101.5 (22.6–126.5) | 116.5 (78.5–161.4) |
+
+**Browser (headless Chromium), part PUTs, MiB/s** (median of 6, min–max):
+
+| Part | Concurrency 4 | Concurrency 6 | Concurrency 8 |
+|---|---|---|---|
+| 8 MiB | 44.5 (21.2–63.9) | 72.0 (20.0–105.6) | 73.8 (67.8–101.9) |
+| 16 MiB | 69.5 (20.6–87.6) | 99.2 (85.2–115.4) | 89.3 (68.8–105.8) |
+| 32 MiB | 75.8 (66.9–91.0) | 102.8 (94.0–123.3) | 102.5 (22.8–136.8) |
+
+Against 8 MiB parts at the same concurrency (medians):
+
+| | Node, c4 | Node, c8 | Browser, c4 | Browser, c8 |
+|---|---|---|---|---|
+| 16 MiB, both matrices | +26 % | +14 % | +56 % | +21 % |
+| 16 MiB, first matrix only | +28 % | +9 % | +51 % | +36 % |
+| 16 MiB, second matrix only | +42 % | +17 % | +68 % | +18 % |
+| 32 MiB, both matrices | +24 % | +8 % | +71 % | +39 % |
+| 32 MiB, first matrix only | +8 % | +17 % | +83 % | +36 % |
+
+What the numbers say:
+
+- 8 MiB parts at concurrency 4 are the slowest cell in both runtimes (Node 60, browser 45 MiB/s): each part spends
+  much of its life in TCP ramp-up over a ~120–180 ms round trip, as spec §5 expected from one 8 MiB PUT reaching
+  ~17 MiB/s.
+- **16 MiB passes the rule** (at least 15 % faster at concurrency 4 and not slower at 8, in Node and in the browser) in
+  both matrices separately and together.
+- 32 MiB is not better than 16 MiB: Node is level at concurrency 4 (75 vs 76) and slower at 8 (117 vs 123); the browser
+  gains 9 % at 4. It also failed the rule in the first matrix alone (Node +8 % at 4), and it halves the parallelism a
+  file can use and doubles what a retried part re-sends.
+- More parallelism helps more than larger parts beyond 16 MiB: Node reaches 108–123 MiB/s at concurrency 8 with any
+  part size. In the browser, concurrency 6 is as fast as 8 or faster for 16 and 32 MiB parts.
+- **Stalls.** 9 of the 108 uploads (5 Node, 4 browser, every part size) took 11.1–12.8 s instead of 2–5 s. The browser
+  half records the slowest part: in each of its four, one part took 10.4–11.2 s and then succeeded with 200. These are
+  the 20–23 MiB/s minimums above. Only whole-part times were recorded, so whether those parts sent nothing or trickled
+  for ten seconds is not known. A stall watchdog shorter than about 10 s would have cut them and re-sent the part.
+
+**Recommendation: change the planner.** In `planParts` (`packages/cloudrop/src/plan.ts`), start at **16 MiB for files
+of 256 MiB or more** and keep 8 MiB below:
+`let partSize = Math.max(size >= 256 * MiB ? 16 * MiB : FIRST_PART_SIZE, rules.minPartSize);`. Doubling for the part
+limit stays as it is (on R2 it now starts above 16 MiB × 10,000 = 156.25 GiB instead of 78.1 GiB), and so do the
+64 MiB multipart threshold and equal parts. Files from 64 to 256 MiB were not measured, so they keep 8 MiB. No change to
+the client's default concurrency of 4 follows from this, but concurrency 6 was 18–62 % faster than 4 for every part
+size in both runtimes, which is evidence for Task 2's automatic sizing.
+
+**Cleanup proof.** Each script registered every key and upload id before the request that could create it, aborted
+every upload it had not completed, and deleted every key, also on failure and on SIGINT, SIGTERM or SIGHUP. Each
+upload was deleted right after its `head`, so at most one 256 MiB object existed at a time. All four runs exited 0 with
+nothing left to abort or delete, and a separate process re-listed the four prefixes afterwards (`ListObjectsV2` through
+the driver and a signed `ListMultipartUploads`), 20:42:50 UTC:
+
+```
+live-test/cloudrop-54389fbd186ae09971fd09c77f17734a/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (browser, first)
+live-test/cloudrop-7daf92ed9208256bdab4e067f8ffbad4/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (browser, second)
+live-test/cloudrop-a687ddccb2a506d4102b645dc8bac9e2/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (Node, second)
+live-test/cloudrop-f95ac80715849f69414523982edbed51/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (Node, first)
+```
+
+108 uploads, 27 GiB of part bodies in total. No bucket setting or CORS rule was read or written. The scripts were
+one-off scratch code outside the repository; they printed numbers only, through `createRedactor`, and never a URL,
+upload id or storage answer.
+
 ## Not verified
 
 - **Checksum headers from a browser:** measured in
