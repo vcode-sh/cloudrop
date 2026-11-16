@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "biome check .",
+    "check": "biome check . && bun scripts/check-file-size.ts",
     "fix": "biome check --write .",
     "typecheck": "bun run --filter cloudrop typecheck",
     "test": "bun run --filter cloudrop test",
