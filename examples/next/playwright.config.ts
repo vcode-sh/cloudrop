@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Run through scripts/test-browser.sh: it exports the settings that `next build` and the test's own `storage` need.
+// Run through scripts/test-browser.sh (RustFS) or scripts/test-browser-live.ts (R2): they export the settings that
+// `next build` and the test's own `storage` need.
 export default defineConfig({
   testDir: "app",
   testMatch: "**/*.browser.test.ts",

@@ -16,6 +16,7 @@
     "test:rustfs": "scripts/test-rustfs.sh",
     "test:wrangler": "scripts/test-wrangler.sh",
     "test:browser": "scripts/test-browser.sh",
+    "test:browser:live": "bun scripts/test-browser-live.ts",
     "build": "bun run --filter cloudrop build",
     "package:check": "bun run --filter cloudrop package:check",
     "verify": "bun run check && bun run typecheck && bun run test && bun run build && bun run --filter cloudrop-example-next typecheck && bun run package:check"

@@ -7,7 +7,10 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { storage } from "../lib/cloudrop";
 
 const prefix = process.env.CLOUDROP_EXAMPLE_PREFIX;
-if (!prefix) throw new Error("CLOUDROP_EXAMPLE_PREFIX is not set. Run this test through scripts/test-browser.sh.");
+if (!prefix)
+  throw new Error(
+    "CLOUDROP_EXAMPLE_PREFIX is not set. Run this test through `bun run test:browser` or `bun run test:browser:live`.",
+  );
 
 const MIB = 1024 * 1024;
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";

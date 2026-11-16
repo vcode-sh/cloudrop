@@ -37,8 +37,8 @@ CRC64NVME `ae8b14860a799888`.
 | 4 | Part-size rules | (a) equal parts + smaller last: OK. (b) last part **larger**: rejected. (c) unequal middle part: rejected. (d) non-last part < 5 MiB: rejected. **All four checks happen at Complete**; every UploadPart returned 200. Codes: (b)/(c) `400 InvalidPart` "All non-trailing parts must have the same length."; (d) `400 EntityTooSmall`. After a failed Complete the upload **survives**: re-uploading the bad part and completing again → 200 | The planner must fix one part size up front and keep the last part ≤ it. A planner bug is only detected at Complete, but it is recoverable on the same upload id |
 | 5 | Checksums | CRC32C/CRC64NVME sent as a **signed header** on PUT or UploadPart: a wrong value → `400 BadDigest`, a correct one is echoed. The same value as a **query parameter** is **ignored** (wrong value → 200, not stored). Every write gets a server-computed CRC64NVME by default. Wrong checksums at Complete (part XML values, full-object header) are **not enforced**: R2 returns its own computed value. ListParts shows `ChecksumCRC32C` only for parts sent with one. `GetObjectAttributes` → `501 NotImplemented` | Integrity per part works, but only as a header, so it needs CORS `AllowedHeaders`. Verify whole-object integrity on the server by comparing the `x-amz-checksum-*` that Complete/HEAD returns with the client's value; never rely on R2 rejecting a wrong Complete |
 | 6 | SDK/aws4fetch presigners | SDK 3.1169.0 `WHEN_SUPPORTED` embeds `x-amz-sdk-checksum-algorithm=CRC32&x-amz-checksum-crc32=AAAAAA==` (CRC of an empty body) in the URL. A plain browser PUT still **succeeds** on R2, because R2 ignores query checksums (Q5). `WHEN_REQUIRED` adds nothing. The SDK presigner **does not sign `content-type`** by default (Q16: `SignedHeaders=content-length;host`; a different Content-Type → 200 and is stored). `signableHeaders` fixes that. aws4fetch signs only `host` unless `allHeaders: true` | Do not depend on SDK defaults. Use an explicit signer (aws4fetch with `allHeaders`, or our own) that signs exactly `content-length`, `content-type` and any checksum/conditional headers. With the SDK, pass `signableHeaders` and use `WHEN_REQUIRED` |
-| 7 | Expiry | Expired → `403 ExpiredRequest` (PUT and GET). `X-Amz-Expires=604800` accepted, `604801` → `400 InvalidArgument`. `X-Amz-Date` 30 min in the future → `403 RequestTimeTooSkewed`. CORS headers on the expired response: **BLOCKED** (no CORS rule for the test origin, so absence proves nothing) | Cap expiry at 604800 s. Treat an opaque browser failure as "maybe expired, re-sign once". Keep signing clocks in sync |
-| 8 | CORS | `GetBucketCors` → `403 AccessDenied` for this token, so the policy is not directly readable. Preflights show a rule allowing only `GET, HEAD` + header `range` from the public origin (MaxAge 3600). Every PUT preflight → `403` "CORS not configured for this bucket". **Browser upload questions BLOCKED.** The required JSON is below | The owner must apply a CORS rule before any browser test. The library docs must ship the exact policy (methods, allowed headers incl. checksums, `ExposeHeaders: ETag`) |
+| 7 | Expiry | Expired → `403 ExpiredRequest` (PUT and GET). `X-Amz-Expires=604800` accepted, `604801` → `400 InvalidArgument`. `X-Amz-Date` 30 min in the future → `403 RequestTimeTooSkewed`. CORS headers on the expired response: **BLOCKED** (no CORS rule for the test origin, so absence proves nothing); since measured: none, the browser gets an opaque failure ([Browser, 2026-11-16](#browser-2026-11-16)) | Cap expiry at 604800 s. Treat an opaque browser failure as "maybe expired, re-sign once". Keep signing clocks in sync |
+| 8 | CORS | `GetBucketCors` → `403 AccessDenied` for this token, so the policy is not directly readable. Preflights show a rule allowing only `GET, HEAD` + header `range` from the public origin (MaxAge 3600). Every PUT preflight → `403` "CORS not configured for this bucket". **Browser upload questions BLOCKED.** The required JSON is below; since measured with the owner's rule: [Browser, 2026-11-16](#browser-2026-11-16) | The owner must apply a CORS rule before any browser test. The library docs must ship the exact policy (methods, allowed headers incl. checksums, `ExposeHeaders: ETag`) |
 | 9 | Rate limits | 8 concurrent UploadPart on one key: all 200, twice. 5 sequential PutObject to one key in ~1 s: all 200, twice. 5 **concurrent** PutObject to one key: one `429` per run, S3 code **`ServiceUnavailable`** ("Reduce your concurrent request rate for the same object.") | Parallel parts are safe at 8. Same-key writes collide on concurrency, not on a 1/s rate. Classify 429 as retryable by status, not by `TooManyRequests` code |
 | 10 | ListParts | Fields per part: `ETag`, `LastModified`, `PartNumber`, `Size`, plus `ChecksumCRC32C` when the part was sent with one. No CRC64NVME, even though UploadPart returned one. `max-parts=3` paginates with `IsTruncated`/`NextPartNumberMarker`. After Complete → `404 NoSuchUpload` | Server-verified completion via ListParts works (size per part). Pagination needs handling above 1000 parts. ListParts cannot be used to inspect a completed upload |
 | 11 | Complete retry, metadata | A retried Complete after success → `404 NoSuchUpload`; Abort after Complete → 204. HEAD shows the `x-amz-meta-cloudrop-id` and Content-Type set at Create, `x-amz-mp-parts-count: 8`, ETag `"<md5-of-md5s>-8"` (matches our computation) | Complete is not idempotent: treat `NoSuchUpload` on a retried Complete as "check HEAD; if the object matches, it succeeded". Metadata set at Create is reliable |
@@ -240,7 +240,8 @@ Docs: "Expiry: Timeout from 1 second to 7 days (604,800 seconds)" ([presigned]).
 | `X-Amz-Date` 30 min in the future | 403 `RequestTimeTooSkewed` |
 
 The missing CORS headers on the expired response cannot be attributed to expiry: a *valid* PUT from the same origin
-also had none, because the bucket has no rule for that origin (Q8). **BLOCKED** until CORS is configured. The error
+also had none, because the bucket has no rule for that origin (Q8). **BLOCKED** until CORS is configured; settled in
+[Browser, 2026-11-16](#browser-2026-11-16): with a matching rule the expired 403 still has no CORS headers. The error
 message says "less than 604800", but exactly 604800 was accepted.
 
 ### Q8. CORS
@@ -264,7 +265,8 @@ message says "less than 604800", but exactly 604800 was accepted.
 The error text "CORS not configured for this bucket" is returned even though a rule exists. It means "no rule matched".
 
 **BLOCKED:** browser presigned PUT, browser presigned UploadPart, reading `ETag` from JavaScript, CORS on expired URLs,
-and whether checksum headers pass a preflight. The owner would need to add this rule to the test bucket and **keep the
+and whether checksum headers pass a preflight. All but the last were measured on 2026-11-16 after the owner added a
+rule: [Browser, 2026-11-16](#browser-2026-11-16). The owner would need to add this rule to the test bucket and **keep the
 existing public-origin GET/HEAD rule**, because setting CORS replaces the whole policy. It uses the S3 PutBucketCors
 JSON shape from [cors]:
 
@@ -392,12 +394,37 @@ copied object were not inspected.
 | CORS error text | — | "CORS not configured for this bucket" even when a (non-matching) rule exists |
 | Versioning | not documented | Writes return `x-amz-version-id` (and `x-amz-copy-source-version-id` on copy) |
 
+## Browser, 2026-11-16
+
+Measured 2026-11-16 (about 10:30–10:36 UTC) on the same test bucket, after the owner added the CORS rule
+`cloudrop-browser-tests` (2026-11-15) and confirmed from the dashboard on 2026-11-16 that it allows `PUT` from
+`http://localhost:5173` with `content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id` and
+exposes `ETag`. The Object Read & Write token still cannot read it (`GetBucketCors` → `403 AccessDenied`, as in Q8).
+Browser: Chromium 159.0.8154.6, headless shell, driven by Playwright 1.65.1. Origin `http://localhost:5173`. Every
+object went under a `live-test/cloudrop-<random hex>/` prefix and was deleted; the deletion's count matched what was
+written.
+
+| Row | What was done | Result |
+|---|---|---|
+| U10: single PUT | `bun run test:browser:live`: the Next.js example on `r2()` uploads `hello.txt` (14 bytes, `text/plain`) with cloudrop's client | **Works.** One PUT without `partNumber`; HEAD size 14, type `text/plain`; the bytes read back equal. The browser's own `Content-Length` matched the signed one |
+| U1: multipart from a page | The same lane uploads a 20 MiB file as parts of 8, 8 and 4 MiB (`Blob.slice`) | **Works.** Three `UploadPart` PUTs, Complete succeeds, size 20,971,520, the bytes around both part boundaries read back equal. A second test uploads the same on-disk file twice (two keys) |
+| U2: CORS on an expired URL | A PUT from the page, with the headers the server signs for a single PUT, to a URL presigned with `expiresIn: 1`, sent 2 s later | **Opaque.** The preflight answers `204` with `access-control-allow-origin`; the PUT's answer carries no CORS headers, so Chromium blocks it (`corsError: MissingAllowOriginHeader`, `net::ERR_FAILED`) and `fetch` rejects with `TypeError: Failed to fetch`. Status and body are unreadable from the page. The same request outside a browser, with `Origin: http://localhost:5173`: `403 ExpiredRequest`, no `access-control-*` header, nothing stored |
+| U3: `ETag` from JavaScript | A PUT from the page to a fresh URL with the same headers | **Readable:** status 200, `response.headers.get("etag")` non-null; the answer exposes `ETag, x-amz-checksum-crc32c, x-amz-checksum-crc64nvme` |
+
+What this means for cloudrop:
+
+- U2 matches R2's documentation and differs from both local backends (RustFS and Wrangler answer an expired URL with a
+  readable 403). On R2 the client therefore takes S10's **opaque** row: renew the URL once, wait, retry. Task 5's unit
+  test "renews once after an opaque failure" covers that row; neither local backend can produce it.
+- The lane also showed that an exported, empty `CLOUDROP_S3_ENDPOINT` wins over `.env.local` (U14): a second run with
+  an `examples/next/.env.local` pointing at a dead S3 endpoint still passed on R2 and deleted 4 objects.
+- Repeat U1 and U10 with `CLOUDROP_R2_ENV_FILE=<file> bun run test:browser:live`. U2 and U3 were measured once by a
+  script that was deleted afterwards.
+
 ## Not verified
 
-- **Anything in a real browser.** No browser was driven: the bucket has no CORS rule for a test origin (Q8 BLOCKED).
-  This includes reading `ETag` from JS, preflights for checksum headers, CORS on expired responses, and whether the
-  browser's own `Content-Length` and `fetch` framing match a signed length. Fetch forbids setting Content-Length, so it
-  should match.
+- **Checksum headers from a browser** (`x-amz-checksum-crc32c` on a PUT or part): neither the preflight nor the upload
+  was tried. The browser rows above sent no checksum header.
 - aws-chunked / `STREAMING-UNSIGNED-PAYLOAD-TRAILER` uploads (open item 4). Only plain `Transfer-Encoding: chunked` was
   tried (Q17).
 - Bucket lifecycle rules (not read; `GetBucketLifecycleConfiguration` not attempted) and the default 7-day multipart
