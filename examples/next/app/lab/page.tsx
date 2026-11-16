@@ -5,16 +5,24 @@ import { useRef, useState } from "react";
 // A type import: the server module, and the secret it reads, stay out of the browser bundle.
 import type { cloudrop } from "../../lib/cloudrop";
 import { FaultPanel, type Faults, NO_FAULTS } from "./fault-panel";
-import { FileRows } from "./file-rows";
+import { FileRows, type Retry } from "./file-rows";
 import { FileSource } from "./file-source";
 import styles from "./lab.module.css";
-import { createJournal, createLabFetch, type FaultSwitch, installLabFetch, type RequestRecord } from "./lab-fetch";
+import {
+  createJournal,
+  createLabFetch,
+  type FaultSwitch,
+  installLabFetch,
+  type Journal,
+  type RequestRecord,
+} from "./lab-fetch";
 import { installLabXhr } from "./lab-xhr";
 import { RequestTable } from "./request-table";
-import { annotate, type Run } from "./run-report";
+import { annotate, type JobResult, type Run, withOutcome } from "./run-report";
 import { RunSummary } from "./run-summary";
 import { SetupStrip } from "./setup-strip";
 
+type FileResult = RouteResult<typeof cloudrop, "files">;
 type Concurrency = NonNullable<ClientOptions["concurrency"]>;
 type Order = NonNullable<ClientOptions["order"]>;
 
@@ -28,12 +36,14 @@ export default function LabPage() {
   const [concurrency, setConcurrency] = useState<Concurrency>("auto");
   const [order, setOrder] = useState<Order>("added");
   const [records, setRecords] = useState<readonly RequestRecord[]>([]);
-  const [job, setJob] = useState<UploadJob<RouteResult<typeof cloudrop, "files">> | null>(null);
+  const [job, setJob] = useState<UploadJob<FileResult> | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [faults, setFaults] = useState<Faults>(NO_FAULTS);
   // The wrappers read the faults while an upload runs, between renders: the ref always holds the latest.
   const faultsNow = useRef<Faults>(NO_FAULTS);
   const cancel = useRef<AbortController | null>(null);
+  // The job's log, kept for its retries; `wrap` is false when the client sends through the lab's fetch option.
+  const recorder = useRef<{ journal: Journal; wrap: boolean } | null>(null);
   const running = run !== null && run.endMs === null;
   const rows = annotate(records);
   // Started by the lab's XMLHttpRequest or fetch and not ended yet, the lab's injected delay included.
@@ -51,33 +61,58 @@ export default function LabPage() {
       updateFaults({ ...faultsNow.current, [fault]: false });
       return true;
     },
+    on: (fault) => faultsNow.current[fault],
   };
 
-  async function upload(chosen: readonly File[]) {
+  /** Shows `run` as going, records the requests of `work` in the job's log, then shows the result it settles with. */
+  async function record(run: Run, work: () => Promise<JobResult>) {
+    if (!recorder.current) return;
+    const { journal, wrap } = recorder.current;
+    // By default the lab wraps the browser's fetch and XMLHttpRequest while the job runs, and the client sends bucket
+    // PUTs through XMLHttpRequest, which reports bytes as they leave. With a fetch option the client sends everything
+    // through it, and a PUT's bytes count only once the bucket answers (spec §4.1).
+    const uninstall = wrap ? [installLabFetch(journal, faultSwitch), installLabXhr(journal, faultSwitch)] : [];
+    setRun(run);
+    try {
+      const result = await work();
+      setRun({ ...run, endMs: performance.now(), result });
+    } finally {
+      for (const remove of uninstall) remove();
+    }
+  }
+
+  function upload(chosen: readonly File[]) {
     const log: RequestRecord[] = [];
     const journal = createJournal(log, () => setRecords([...log]));
-    // By default the lab wraps the browser's fetch and XMLHttpRequest for the length of the run, and the client sends
-    // bucket PUTs through XMLHttpRequest, which reports bytes as they leave. With a fetch option the client sends
-    // everything through it, and a PUT's bytes count only once the bucket answers (spec §4.1).
-    const uninstall = putsWithFetch ? [] : [installLabFetch(journal, faultSwitch), installLabXhr(journal, faultSwitch)];
+    recorder.current = { journal, wrap: !putsWithFetch };
     const fetch = putsWithFetch ? createLabFetch(journal, faultSwitch, window.fetch.bind(window)) : undefined;
     // A client per run, so each run's file ids and log start afresh; creating one costs nothing.
     const client = createCloudropClient<typeof cloudrop>({ concurrency, order, fetch });
     const controller = new AbortController();
     cancel.current = controller;
     const size = chosen.reduce((sum, file) => sum + file.size, 0);
-    const startMs = performance.now();
     setRecords([]);
-    setRun({ files: chosen.length, size, startMs, endMs: null, result: null });
-    try {
+    const run = { files: chosen.length, size, startMs: performance.now(), endMs: null, result: null, retried: false };
+    return record(run, () => {
       const started = client.start("files", chosen, { signal: controller.signal });
       setJob(started);
-      const result = await started.done;
-      setRun({ files: chosen.length, size, startMs, endMs: performance.now(), result });
-    } finally {
-      for (const remove of uninstall) remove();
-    }
+      return started.done;
+    });
   }
+
+  // Retry adds its requests to the job's log and its outcome to the run; it waits for a run or retry to end.
+  const last = running ? null : run;
+  const result = last?.result;
+  const retry: Retry<FileResult> | null =
+    job && last && result
+      ? {
+          job: () => record({ ...last, endMs: null, retried: true }, () => job.retry()),
+          file: (handle) =>
+            record({ ...last, endMs: null, retried: true }, async () =>
+              withOutcome(result, await handle.retry(), job.files),
+            ),
+        }
+      : null;
 
   return (
     <main className={styles.lab}>
@@ -162,13 +197,13 @@ export default function LabPage() {
               <dt>PUTs in flight</dt>
               <dd>{putsInFlight}</dd>
             </dl>
-            <FileRows job={job} />
+            <FileRows job={job} retry={retry} />
           </>
         )}
         <RequestTable rows={rows} />
         <p className={styles.muted}>
-          The lab records requests only while a run is going. A failed file tells the server with /abort in the
-          background; if that request has to be sent again after the run ended, the retry is not in the table.
+          The lab records requests only while a run or a retry is going: a request the client sends after that, such as
+          an /abort it has to send again, is not in the table.
         </p>
       </section>
       {run && <RunSummary rows={rows} run={run} />}

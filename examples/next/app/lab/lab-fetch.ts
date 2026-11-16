@@ -21,19 +21,42 @@ export interface RequestRecord {
   status: number | "network error" | "cancelled" | null;
   startMs: number;
   endMs: number | null;
-  /** The size of the request body. */
+  /** The size of the request body; 0 when the lab answered in the bucket's place, which sends nothing. */
   bytes: number;
   /** The faults the lab injected into this request, in words. */
   injected: string[];
 }
 
 export type OneShotFault = "bucketNetworkError" | "endpoint503" | "dropComplete";
+/** Faults that hit every matching request while ticked. */
+export type HeldFault = "part2NetworkError" | "bucket400";
 
 export interface FaultSwitch {
   /** Every bucket PUT waits this long before it is sent; 0 for none. */
   delayMs(): number;
   /** True once if `fault` is ticked, which unticks it. */
   take(fault: OneShotFault): boolean;
+  /** True while `fault` is ticked. */
+  on(fault: HeldFault): boolean;
+}
+
+/** What a bucket sends for a request it will never accept: an S3 error body, readable through its CORS rule. */
+export const REFUSAL = { status: 400, body: "<Error><Code>InvalidArgument</Code></Error>" } as const;
+
+/**
+ * The bucket fault ticked for this PUT, noted in its record: a network error, the lab's 400 in the bucket's place, or
+ * none. A held fault that applies leaves the one-shot network error ticked for the next PUT.
+ */
+export function bucketFault(record: RequestRecord, faults: FaultSwitch): "network error" | "refused" | null {
+  const partTwo = record.kind === "PUT part 2" && faults.on("part2NetworkError");
+  if (partTwo || faults.take("bucketNetworkError")) {
+    record.injected.push("injected network error");
+    return "network error";
+  }
+  if (!faults.on("bucket400")) return null;
+  record.injected.push("injected 400");
+  record.bytes = 0;
+  return "refused";
 }
 
 export interface Journal {
@@ -138,9 +161,10 @@ async function sendWithFaults(
     record.injected.push(`delayed ${delayMs} ms`);
     await delay(delayMs, init.signal);
   }
-  if (record.isBucketPut && faults.take("bucketNetworkError")) {
-    record.injected.push("injected network error");
-    throw networkError();
+  const fault = record.isBucketPut ? bucketFault(record, faults) : null;
+  if (fault === "network error") throw networkError();
+  if (fault === "refused") {
+    return new Response(REFUSAL.body, { status: REFUSAL.status, headers: { "content-type": "application/xml" } });
   }
   if ((record.kind === "/upload" || record.kind === "/sign") && faults.take("endpoint503")) {
     record.injected.push("injected 503");

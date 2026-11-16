@@ -112,58 +112,71 @@ rule it already has):
 - **Files:** choose several with the file input, or add 1 KiB, 5 MiB, 20 MiB or 100 MiB of random bytes made in the
   browser, as often as you like. **Upload** sends the whole list as one job, `client.start("files", files, { signal })`:
   one `/upload`, then each file through the client's pool of connections.
-- **Connections and order:** each run creates its client with the chosen `concurrency` and `order`. **Connections**
-  is `auto` (the default: starts at 4, adds one every 2 s while the bytes sent per second rise by 10 % or more and
-  PUTs wait, up to 8, and halves after a network error, a stalled PUT or a busy bucket) or a fixed 1, 2, 4, 8 or 16;
-  a file never has more than 4 parts in flight. **Order** is `added` or `smallest-first`, which sends the smallest
-  file's waiting PUTs first. The client does not publish its pool size, so **PUTs in flight** counts the bucket PUTs
-  the lab's wrappers have started and not yet seen end, the injected delay included.
-- **Transport:** for the length of a run the lab wraps `window.fetch`, recording the calls to `/api/cloudrop/` and
-  passing anything else through, and `window.XMLHttpRequest`, recording the bucket PUTs, which the client sends with
-  XMLHttpRequest in a browser so that the bars move while bytes leave. When the run ends both are put back. **Send PUTs
-  with fetch** instead passes the lab's fetch as the client's `fetch` option and wraps nothing: the client then sends
-  everything through it, and a PUT's bytes count only once the bucket answers, so a bar moves a part at a time.
+- **Connections and order:** each run creates its client with the chosen `concurrency` and `order`. **Connections** is
+  `auto` (the default: starts at 4, adds one every 2 s while the bytes sent per second rise by 10 % or more and PUTs
+  wait, up to 8, and halves after a network error, a stalled PUT or a busy bucket) or a fixed 1, 2, 4, 8 or 16; a file
+  never has more than 4 parts in flight. **Order** is `added` or `smallest-first`, which sends the smallest file's
+  waiting PUTs first. The client does not publish its pool size, so **PUTs in flight** counts the bucket PUTs the lab's
+  wrappers have started and not yet seen end, the injected delay included.
+- **Transport:** for the length of a run or a retry the lab wraps `window.fetch`, recording the calls to
+  `/api/cloudrop/` and passing anything else through, and `window.XMLHttpRequest`, recording the bucket PUTs, which the
+  client sends with XMLHttpRequest in a browser so that the bars move while bytes leave. When it ends both are put back.
+  **Send PUTs with fetch** instead passes the lab's fetch as the client's `fetch` option and wraps nothing: the client
+  then sends everything through it, and a PUT's bytes count only once the bucket answers, so a bar moves a part at a
+  time.
 - **Progress:** a row per file from the job's snapshot (`useSyncExternalStore(job.subscribe, job.getSnapshot)`): its
   bar, bytes sent, speed, time left and status, with Pause, Resume and Cancel for that file, and a row of totals. The
   job's own **Pause**, **Resume** and **Cancel** act on every file; Cancel aborts the job's signal. When the browser
-  goes offline the client pauses the files that are queued or uploading, which then show `paused`, and resumes them
-  when it is back online; a job started offline pauses at once.
-- **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it
-  again), answer the next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so
-  a 100 MiB file shows four parts in flight, and Pause has PUTs to stop), and drop the answer of the next `/complete`
-  (the client retries it, and from then on a cancel or failure keeps the file). Each line on the page names the
-  decision behind the behaviour.
+  goes offline the client pauses the files that are queued or uploading, which then show `paused`, and resumes them when
+  it is back online; a job started offline pauses at once.
+- **Retry:** once a run has ended, **Retry** in a failed file's row calls that handle's `retry()`, and **Retry** in the
+  totals row calls `job.retry()`. A failed file keeps its ticket and the parts that landed, so a retry sends only the
+  missing parts and `/complete`; after an error the ticket cannot fix (`UPLOAD_REJECTED`, `UPLOAD_EXPIRED`,
+  `INVALID_TOKEN`, `VERIFICATION_FAILED`) or once the ticket expired, it asks `/upload` for a new ticket and a new key,
+  and the file's bytes start again from 0. The retry's requests join the same table and the summary shows the files'
+  latest outcomes, with the time counted from Upload.
+- **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it again),
+  answer the next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so a 100 MiB
+  file shows four parts in flight, and Pause has PUTs to stop), and drop the answer of the next `/complete` (the client
+  retries it, and from then on a cancel or failure keeps the file). The network error, the 503 and the dropped answer
+  untick themselves after one hit. Two more hold until unticked, to fail a file for Retry: every PUT of part 2 gets a
+  network error (the client renews its URL once and makes 6 attempts, up to about 15 s of waits, then the file fails
+  with `NETWORK_ERROR` and keeps its ticket), and the lab answers every bucket PUT with 400 in the bucket's place,
+  sending nothing (the file fails at once with `UPLOAD_REJECTED`, which needs a new ticket). Each line on the page names
+  the decision behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
-  `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause
-  and injected faults, and a bar on a shared timeline. The log keeps only the request's kind, the bucket host, the
-  part number, status, times and body size: never a URL, header or token, so no presigned URL reaches the page.
-  Requests are recorded only while a run is going: a failed file's background `/abort` that has to be sent again after
-  the run ended is not in the table.
+  `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
+  `/upload` for a new ticket and injected faults, and a bar on a shared timeline. The log keeps only the request's kind,
+  the bucket host, the part number, status, times and body size: never a URL, header or token, so no presigned URL
+  reaches the page. Requests are recorded only while a run or a retry is going: an `/abort` the client has to send again
+  after that is not in the table.
 - **Summary:** total time, the files' size, the bytes of the PUTs the bucket answered, end-to-end throughput in MiB/s
-  (not shown under 1 MiB, where round trips dominate), PUT requests started and answered, retries, renewals, peak PUTs
-  in flight, the job's `{ data, error }` with an outcome per file, and one sentence that tells the run.
+  (not shown under 1 MiB, where round trips dominate, or after a retry), PUT requests started and answered, retries,
+  renewals, peak PUTs in flight, the job's `{ data, error }` with an outcome per file, and one sentence that tells the
+  run.
 
 Against RustFS, start the container and run `bun run setup:rustfs` and `bun run dev` as in "Run with RustFS" above, then
 open `/lab`. Against R2, set the variables from "Run with R2"; the bucket's CORS rule must allow
-`http://localhost:5173`, or every bucket PUT shows as a network error. Against Wrangler, only the 1 KiB and 5 MiB
-files work: the 20 and 100 MiB files go in parts, and their `/complete` fails with `STORAGE_ERROR` (see "Run with
-Wrangler").
+`http://localhost:5173`, or every bucket PUT shows as a network error. Against Wrangler, only the 1 KiB and 5 MiB files
+work: the 20 and 100 MiB files go in parts, and their `/complete` fails with `STORAGE_ERROR` (see "Run with Wrangler").
 
 The numbers come from one browser on one network: they show how the client behaves, not a benchmark of the storage.
 
 ## The browser tests
 
-`app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file
-chosen twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload
-as three parts, a dropped bucket PUT as renewed and retried, a cancel during a delay as nothing sent, a paused file
-resumed with each part stored once, and three files in one job, and that no signed URL reaches the page. Three rows
-throttle uploads to 4 MiB/s through Chromium's DevTools protocol. Two sample a bar every 100 ms: through
-XMLHttpRequest it rises in small steps to the file's size; with PUTs sent through fetch it moves a part at a time. The
-third sets the emulated network offline during a 20 MiB upload: the page's `offline` event pauses the file with no PUT
-in flight, and back online each part is sent again and the file completes. Two more rows upload a 20 MiB file and then
-a 1 KiB file with one connection and every PUT delayed by a second: with `smallest-first` the 1 KiB file completes
-first, with `added` the 20 MiB file does. Run them from the repository root; install the shell once from this
-directory with `bunx playwright install --only-shell chromium`.
+`app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file chosen
+twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
+parts, a dropped bucket PUT as renewed and retried, a cancel during a delay as nothing sent, a paused file resumed with
+each part stored once, and three files in one job, and that no signed URL reaches the page. Three rows throttle uploads
+to 4 MiB/s through Chromium's DevTools protocol. Two sample a bar every 100 ms: through XMLHttpRequest it rises in small
+steps to the file's size; with PUTs sent through fetch it moves a part at a time. The third sets the emulated network
+offline during a 20 MiB upload: the page's `offline` event pauses the file with no PUT in flight, and back online each
+part is sent again and the file completes. Two more rows upload a 20 MiB file and then a 1 KiB file with one connection
+and every PUT delayed by a second: with `smallest-first` the 1 KiB file completes first, with `added` the 20 MiB file
+does. Two rows retry a failed file: a 20 MiB file whose part 2 fails until the budget runs out is retried with its
+ticket, so the table shows no new `/upload` and only part 2 and `/complete` sent again; a 1 KiB file refused with 400 is
+retried with a new ticket, through a second `/upload`. Run them from the repository root; install the shell once from
+this directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves

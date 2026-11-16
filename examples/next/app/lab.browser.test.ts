@@ -312,5 +312,68 @@ for (const { order, puts, first } of [
     const rows = await requestRows(page);
     expect(rows.map(([kind]) => kind).filter((kind) => kind?.startsWith("PUT"))).toEqual(puts);
     await expect(summaryValue(page, "Peak PUTs in flight")).toHaveText("1");
+    // Four PUTs one after another, each delayed a second: the run took seconds, measured to its last answer.
+    await expect(summaryValue(page, "Total time")).toHaveText(/^\d+\.\d s$/);
   });
 }
+
+test("a file whose part 2 kept failing is retried with its ticket, sending part 2 alone", async ({ page }) => {
+  // Part 2's six attempts wait up to 0.5 + 1 + 2 + 4 + 8 s between them (M3-S9) before the file fails.
+  test.setTimeout(60_000);
+  await signIn(page);
+  const fault = page.getByLabel("Fail every PUT of part 2 with a network error while ticked");
+  await fault.check();
+  await page.getByRole("button", { name: "20 MiB", exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("failed with NETWORK_ERROR", { timeout: 30_000 });
+  const failed = await requestRows(page);
+  expect(failed).toEqual([
+    ["/upload", "200", ""],
+    ["PUT part 1", "200", ""],
+    ["PUT part 2", "network error", "injected network error"],
+    ["PUT part 3", "200", ""],
+    ["/sign", "200", "renewal of part 2"],
+    ...Array(5).fill(["PUT part 2", "network error", "retry; injected network error"]),
+  ]);
+  await fault.uncheck();
+
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+
+  await expect(page.getByRole("status")).toHaveText(
+    /^Started 9 PUTs \(at most 3 at a time\), 3 got an answer; part 2 was retried 6 times after a network error; renewed one URL through \/sign; completed after Retry, [\d.]+ m?s after Upload\.$/,
+  );
+  // The same ticket: no new /upload, and the parts that landed are not sent again.
+  expect((await requestRows(page)).slice(failed.length)).toEqual([
+    ["PUT part 2", "200", "retry"],
+    ["/complete", "200", ""],
+  ]);
+  expect(await fileRows(page)).toEqual([["random-20-MiB.bin", "done"]]);
+  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"error": null');
+  await expectNoSignedUrl(page);
+});
+
+test("a file the bucket refused is retried with a new ticket", async ({ page }) => {
+  await signIn(page);
+  const fault = page.getByLabel("Refuse every bucket PUT with 400 while ticked");
+  await fault.check();
+  await page.getByRole("button", { name: "1 KiB", exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("failed with UPLOAD_REJECTED");
+  await fault.uncheck();
+
+  await page.getByRole("button", { name: "Retry random-1-KiB.bin", exact: true }).click();
+
+  await expect(page.getByRole("status")).toContainText("completed after Retry");
+  // UPLOAD_REJECTED needs a new ticket (M3-U31): a new /upload, and the file's PUT under its new key.
+  expect(await requestRows(page)).toEqual([
+    ["/upload", "200", ""],
+    ["PUT single", "400", "injected 400"],
+    ["/upload", "200", "new ticket"],
+    ["PUT single", "200", ""],
+    ["/complete", "200", ""],
+  ]);
+  expect(await fileRows(page)).toEqual([["random-1-KiB.bin", "done"]]);
+  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"error": null');
+  // The lab answered the 400 itself, so only the second PUT sent bytes.
+  await expect(summaryValue(page, "Sent to the bucket")).toHaveText("1024 (1.0 KiB)");
+});

@@ -20,7 +20,13 @@ function Bar({ label, bytes, size, progress }: { label: string; bytes: number; s
   );
 }
 
-function FileRow({ file, handle }: { file: FileSnapshot<unknown>; handle: FileHandle }) {
+/** What Retry does for the job and for one file; null while a run or a retry is going, which Retry waits for. */
+export interface Retry<R> {
+  job(): void;
+  file(handle: FileHandle<R>): void;
+}
+
+function FileRow<R>({ file, handle, retry }: { file: FileSnapshot<R>; handle: FileHandle<R>; retry: Retry<R> | null }) {
   const { name, status } = file;
   const settled = status === "done" || status === "failed" || status === "aborted";
   return (
@@ -51,13 +57,21 @@ function FileRow({ file, handle }: { file: FileSnapshot<unknown>; handle: FileHa
         <button type="button" aria-label={`Cancel ${name}`} disabled={settled} onClick={handle.abort}>
           Cancel
         </button>
+        <button
+          type="button"
+          aria-label={`Retry ${name}`}
+          disabled={retry === null || status !== "failed"}
+          onClick={() => retry?.file(handle)}
+        >
+          Retry
+        </button>
       </td>
     </tr>
   );
 }
 
-/** The job's snapshot: a row per file in the order they were passed, and the totals. */
-export function FileRows<R>({ job }: { job: UploadJob<R> }) {
+/** The job's snapshot: a row per file in the order they were passed, and the totals with the job's Retry. */
+export function FileRows<R>({ job, retry }: { job: UploadJob<R>; retry: Retry<R> | null }) {
   const { files, totals } = useSyncExternalStore(job.subscribe, job.getSnapshot);
   return (
     <>
@@ -77,7 +91,7 @@ export function FileRows<R>({ job }: { job: UploadJob<R> }) {
         <tbody>
           {files.map((file, index) => (
             // job.files and snapshot.files are both in the order the files were passed (ruling M3-U1).
-            <FileRow key={file.id} file={file} handle={job.files[index] as FileHandle} />
+            <FileRow key={file.id} file={file} handle={job.files[index] as FileHandle<R>} retry={retry} />
           ))}
         </tbody>
         <tfoot>
@@ -94,7 +108,11 @@ export function FileRows<R>({ job }: { job: UploadJob<R> }) {
             <td>
               {totals.done} of {totals.count} done, {totals.failed} failed, {totals.aborted} aborted
             </td>
-            <td />
+            <td>
+              <button type="button" disabled={retry === null || totals.failed === 0} onClick={() => retry?.job()}>
+                Retry
+              </button>
+            </td>
           </tr>
         </tfoot>
       </table>

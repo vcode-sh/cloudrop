@@ -1,7 +1,7 @@
-// The XMLHttpRequest the lab installs for the length of a run: it records each bucket PUT the client sends and injects
-// the bucket faults ticked on the page. cloudrop/client reads window.XMLHttpRequest on every PUT, so no library option
-// is needed (spec §6).
-import type { FaultSwitch, Journal } from "./lab-fetch";
+// The XMLHttpRequest the lab installs while a run or a retry goes: it records each bucket PUT the client sends and
+// injects the bucket faults ticked on the page. cloudrop/client reads window.XMLHttpRequest on every PUT, so no library
+// option is needed (spec §6).
+import { bucketFault, type FaultSwitch, type Journal, REFUSAL, type RequestRecord } from "./lab-fetch";
 
 /** Makes window.XMLHttpRequest record and fault bucket PUTs, until the returned function puts the browser's back. */
 export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void {
@@ -11,8 +11,26 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
   class LabXhr extends RealXhr {
     #method = "";
     #url = "";
-    /** The injected delay or network error still to come; null once the request is really sent. */
+    /** The injected delay, network error or refusal still to come; null once the request is really sent. */
     #pending: ReturnType<typeof setTimeout> | null = null;
+    /** True once the lab answered with its refusal in the bucket's place: the getters below then return it. */
+    #refused = false;
+
+    override get readyState() {
+      return this.#refused ? RealXhr.DONE : super.readyState;
+    }
+
+    override get status() {
+      return this.#refused ? REFUSAL.status : super.status;
+    }
+
+    override get responseText() {
+      return this.#refused ? REFUSAL.body : super.responseText;
+    }
+
+    override getResponseHeader(name: string) {
+      return this.#refused ? null : super.getResponseHeader(name);
+    }
 
     override open(method: string, url: string | URL, async = true, username?: string | null, password?: string | null) {
       this.#method = method;
@@ -32,19 +50,21 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
       this.addEventListener("error", () => journal.end(record, "network error"));
       this.addEventListener("abort", () => journal.end(record, "cancelled"));
       const delayMs = faults.delayMs();
-      if (delayMs === 0) return this.#sendOrFail(record.injected, body);
+      if (delayMs === 0) return this.#sendOrFail(record, body);
       record.injected.push(`delayed ${delayMs} ms`);
-      this.#pending = setTimeout(() => this.#sendOrFail(record.injected, body), delayMs);
+      this.#pending = setTimeout(() => this.#sendOrFail(record, body), delayMs);
     }
 
-    #sendOrFail(injected: string[], body?: Document | XMLHttpRequestBodyInit | null) {
+    #sendOrFail(record: RequestRecord, body?: Document | XMLHttpRequestBodyInit | null) {
       this.#pending = null;
-      if (!faults.take("bucketNetworkError")) return super.send(body);
-      injected.push("injected network error");
-      // A real network error arrives after send() returns, never inside it.
+      const fault = bucketFault(record, faults);
+      if (fault === null) return super.send(body);
+      // A real answer or network error arrives after send() returns, never inside it.
       this.#pending = setTimeout(() => {
         this.#pending = null;
-        this.dispatchEvent(new ProgressEvent("error"));
+        if (fault === "network error") return this.dispatchEvent(new ProgressEvent("error"));
+        this.#refused = true;
+        for (const type of ["readystatechange", "load", "loadend"]) this.dispatchEvent(new ProgressEvent(type));
       });
     }
 
