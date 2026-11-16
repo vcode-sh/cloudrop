@@ -1,0 +1,92 @@
+// The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
+
+import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
+import { type UploadContext, uploadFile } from "./client/upload.ts";
+import { configError, type Result } from "./errors.ts";
+import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
+
+export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
+// The wire types of the four endpoints, and the route inference types a client user annotates with (InferableCloudrop,
+// RouteMetadata, RouteName, RouteResult; S4, ruling M3-H13), which the root entry exports too.
+export type {
+  AbortRequest,
+  AbortResponse,
+  CompleteRequest,
+  CompleteResponse,
+  Endpoint,
+  ErrorBody,
+  ErrorResponse,
+  FileDescriptor,
+  FileTicket,
+  InferableCloudrop,
+  MultipartTicket,
+  RejectedFile,
+  RouteMetadata,
+  RouteName,
+  RouteResult,
+  SignedPart,
+  SignedRequest,
+  SignRequest,
+  SignResponse,
+  SingleTicket,
+  UploadedFile,
+  UploadRequest,
+  UploadResponse,
+} from "./protocol/types.ts";
+
+export interface ClientOptions {
+  /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */
+  basePath?: string;
+  /** Replaces the global fetch, for tests and runtimes that bring their own. */
+  fetch?: ClientFetch;
+}
+
+export interface UploadOptions<TMetadata = unknown> {
+  /** Validated by the route's schema on the server. */
+  metadata?: TMetadata;
+  /** Cancels the upload: requests stop, the server is told, and the result is ABORTED. */
+  signal?: AbortSignal;
+}
+
+/** The options argument is required when the route's metadata is. */
+export type UploadArguments<TMetadata> = undefined extends TMetadata
+  ? [options?: UploadOptions<TMetadata>]
+  : [options: UploadOptions<TMetadata> & { metadata: TMetadata }];
+
+export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop> {
+  upload<TName extends RouteName<TCloudrop>>(
+    route: TName,
+    file: File,
+    ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>
+  ): Promise<Result<CompleteResponse<RouteResult<TCloudrop, TName>>>>;
+}
+
+/** A path such as /api/cloudrop, or an absolute http(s) URL ending in one; no trailing slash, query or fragment (S17). */
+const BASE_PATH = /^(?:https?:\/\/[^/?#\s]+)?(?:\/[^/?#\s]+)+$/;
+
+export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
+  options: ClientOptions = {},
+): CloudropClient<TCloudrop> {
+  const { basePath = "/api/cloudrop", fetch } = options;
+  if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
+    throw configError(
+      'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
+    );
+  }
+  if (typeof (fetch ?? globalThis.fetch) !== "function") {
+    throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
+  }
+  // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
+  // invocation" when fetch runs as a method of another object (S18).
+  const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
+  const context: UploadContext = { endpoints: createEndpoints(basePath, send), fetch: send };
+  return {
+    // No `this`: `const { upload } = createCloudropClient()` works (S2).
+    upload: (route, file, ...rest) =>
+      // The server's types reach the client through `import type` only, so the wire answer cannot be checked against
+      // them at run time.
+      uploadFile(context, route, file, rest[0]) as Promise<
+        Result<CompleteResponse<RouteResult<TCloudrop, typeof route>>>
+      >,
+  };
+}
