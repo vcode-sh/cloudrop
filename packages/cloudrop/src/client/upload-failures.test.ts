@@ -112,12 +112,22 @@ describe("upload, when the bucket answers badly", () => {
   });
 
   it("fails a file whose bytes do not match the signature, once", async () => {
-    const { fixture, client } = setup(({ label, init, forward }) =>
-      label === "PUT object"
-        ? forward({ ...init, headers: { ...(init.headers as Record<string, string>), "content-type": "text/html" } })
-        : undefined,
-    );
+    let aborted = Promise.resolve();
+    const { fixture, client } = setup(({ label, init, forward }) => {
+      if (label === "PUT object") {
+        return forward({
+          ...init,
+          headers: { ...(init.headers as Record<string, string>), "content-type": "text/html" },
+        });
+      }
+      if (label !== "POST /abort") return undefined;
+      // Kept so the test ends only after the background /abort has settled.
+      const answer = forward(init);
+      aborted = answer.then(() => undefined);
+      return answer;
+    });
     const result = await client.upload("albums", pic(), { metadata });
+    await aborted;
     expect({ error: errorOf(result), requests: fixture.requests }).toEqual({
       error: {
         code: "UPLOAD_REJECTED",

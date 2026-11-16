@@ -221,6 +221,33 @@ describe("sendParts", () => {
     });
   });
 
+  it("wakes a part waiting to retry when the upload is cancelled", async () => {
+    // The wait listens to the run's own stop signal, which the caller's signal reaches only through sendParts.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const controller = new AbortController();
+    const { sender, log } = double({
+      first: [signed(1, "ticket")],
+      signal: controller.signal,
+      put: () => ({ kind: "retry", error: storageBusy(), retryAfterMs: 20_000 }),
+    });
+    let answered = false;
+    const result = sendParts(sender, [1]).then((done) => {
+      answered = true;
+      return done;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    const answeredAtOnce = answered;
+    // Lets a part that is still waiting run out its budget, so its extra PUTs show in the log.
+    await vi.runAllTimersAsync();
+    expect({ answeredAtOnce, code: (await result).error?.code, puts: log.puts }).toEqual({
+      answeredAtOnce: true,
+      code: "ABORTED",
+      puts: [1],
+    });
+  });
+
   it("gives up on a part after 6 attempts", async () => {
     const { sender, log } = double({
       first: [signed(1, "ticket")],
