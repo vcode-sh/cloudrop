@@ -219,6 +219,18 @@ describe("abort", () => {
     const endpoints = createEndpoints("/api/cloudrop", fetch);
     await expect(endpoints.abort("token")).resolves.toBeUndefined();
   });
+
+  it("sends /abort with keepalive, so a tab closed after a cancel or a failure still delivers it", async () => {
+    const sent: RequestInit[] = [];
+    const endpoints = createEndpoints("/api/cloudrop", (_, init) => {
+      sent.push(init);
+      return Promise.resolve(Response.json({ id: "x" }));
+    });
+    await endpoints.abort("token");
+    expect(sent.map((init) => ({ method: init.method, keepalive: init.keepalive }))).toEqual([
+      { method: "POST", keepalive: true },
+    ]);
+  });
 });
 
 describe("complete", () => {

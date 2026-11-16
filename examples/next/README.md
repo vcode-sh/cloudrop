@@ -74,9 +74,9 @@ CLOUDROP_S3_SECRET_ACCESS_KEY=cloudrop-local-secret
 No CORS rule is needed: Wrangler lets any `localhost` page upload. A file above 8 MB fails at the end with
 `STORAGE_ERROR: The storage service refused the request. Contact the site owner if this keeps happening.`: Wrangler's
 local R2 does not implement ListParts, which the server needs to verify a multipart upload (the server log says "The
-storage service does not support this request"). The parts stay in Wrangler's state; stop Wrangler and delete
-`packages/cloudrop/fixtures/wrangler/.state` to clear them. `api.checkBucket` there reports CORS and lifecycle as
-unknown: Wrangler cannot report bucket settings.
+storage service does not support this request"). The client then sends `/abort`, which removes the parts; if a run
+was interrupted before that, stop Wrangler and delete `packages/cloudrop/fixtures/wrangler/.state` to clear them.
+`api.checkBucket` there reports CORS and lifecycle as unknown: Wrangler cannot report bucket settings.
 
 Delete `.env.local` before switching back to RustFS: Bun loads it before `bun run setup:rustfs` runs, so the script
 would talk to Wrangler and keep the Wrangler settings.

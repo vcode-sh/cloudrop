@@ -1,5 +1,6 @@
 // One file from start to finish: /upload, the bytes as one PUT or as parts, /complete with up to two repair rounds,
-// and a cancel that tells the server unless a /complete may have finished the file (decisions S13 to S15).
+// and an ending without success (a cancel or a failure) that tells the server unless a /complete may have finished
+// the file (decisions S13 to S15, ruling S-18).
 
 import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
@@ -132,8 +133,14 @@ export async function uploadFile(
   if (started.error) return fail(signal.aborted ? aborted() : started.error);
   const { result, mayBeComplete } = await sendAndComplete(context, started.data, args.data.file, signal);
   // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
-  if (!result.error || !signal.aborted) return result;
+  if (!result.error) return result;
+  const ending = signal.aborted ? fail(aborted()) : result;
   // A /complete that may have succeeded: keep the file rather than delete a recorded one (M3-H15, M3-H16).
-  if (!mayBeComplete) await context.endpoints.abort(started.data.token);
-  return fail(aborted());
+  if (mayBeComplete) return ending;
+  // Otherwise /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
+  const cleanup = context.endpoints.abort(started.data.token);
+  // A failure is answered at once and its /abort finishes in the background: abort() never rejects, so nothing is
+  // left unhandled. A cancel waits for it, so the caller knows the server was told.
+  if (signal.aborted) await cleanup;
+  return ending;
 }

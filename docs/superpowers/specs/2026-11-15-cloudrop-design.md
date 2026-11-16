@@ -220,9 +220,10 @@ The server decides; the client cannot.
 
 ### 5.5 Abandoned uploads
 
-The client calls `/abort` when a user cancels (abort is free on R2). The client never sends `/abort` after a
-`/complete` that may have succeeded. It aborts a multipart upload and, while the token
-is valid, deletes the upload's own object (matched by `cloudrop-id`), even after `/complete`. An expired token only
+The client calls `/abort` when a user cancels and when a file fails after `/upload` (abort is free on R2; after a
+failure it runs in the background, M3-S15). The client never sends `/abort` after a `/complete` that may have
+succeeded. `/abort` aborts a multipart upload and, while the token is valid, deletes the upload's own object (matched
+by `cloudrop-id`), even after `/complete`. An expired token only
 aborts; it never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed,
 so that upload can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with
 `UNKNOWN_ROUTE`. Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle

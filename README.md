@@ -168,8 +168,9 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
 - Files up to the server's `multipartThreshold` (64 MiB by default) go in one `PUT`, larger ones in parts, four at a
   time, read with `Blob.slice`. A request is tried up to 6 times with backoff, honouring `Retry-After`; an expired
   upload URL is renewed once; parts that `/complete` reports missing are sent again, at most twice.
-- Cancelling through `options.signal` returns `ABORTED` and tells the server to clean up with `/abort`, except after a
-  `/complete` that may have succeeded: that file is kept, never deleted.
+- Cancelling through `options.signal` returns `ABORTED` and tells the server to clean up with `/abort`. A file that
+  fails after `/upload` is cleaned up the same way, in the background, so `upload()` answers the error at once. The
+  one exception is a file after a `/complete` that may have succeeded: it is kept, never deleted.
 - Endpoint requests send cookies (`credentials: "include"`), so `authorize` can read the session; uploads to the bucket
   send none.
 - Wire types (`UploadRequest`, `FileTicket`, `ErrorBody` and the rest) and the route inference types (`RouteName`,

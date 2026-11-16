@@ -29,7 +29,10 @@ export interface Endpoints {
   signParts(token: string, parts: readonly number[], signal: AbortSignal): Promise<Result<SignedPart[]>>;
   /** POST /complete { token }, without the caller's signal: a cancel must not cut off a /complete the server may finish. */
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
-  /** POST /abort { token }, once; never rejects, gives up after ABORT_TIMEOUT_MS (10 s); the answer ({ id }) is ignored. */
+  /**
+   * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects, gives up after
+   * ABORT_TIMEOUT_MS (10 s); the answer ({ id }) is ignored.
+   */
   abort(token: string): Promise<void>;
 }
 
@@ -56,7 +59,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
   async function post<T>(
     endpoint: Endpoint,
     body: unknown,
-    signal: AbortSignal | undefined,
+    { signal, keepalive }: { signal?: AbortSignal; keepalive?: boolean },
     read: (json: unknown) => T | null,
   ): Promise<Result<T>> {
     let response: Response;
@@ -69,6 +72,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
         body: JSON.stringify(body),
         credentials: "include",
         signal,
+        keepalive,
       });
       // A body cut off on the way counts as no answer: for /complete, the server may have finished.
       text = await response.text();
@@ -93,16 +97,18 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
         files: [{ name: file.name, size: file.size, type: file.type }],
         metadata,
       };
-      const answer = await post("upload", request, signal, (json) => readTicket(json, file));
+      const answer = await post("upload", request, { signal }, (json) => readTicket(json, file));
       if (answer.error) return answer;
       return "kind" in answer.data ? ok(answer.data) : fail(toError(answer.data));
     },
-    signSingle: (token, signal) => post("sign", { token }, signal, readSignedRequest),
-    signParts: (token, parts, signal) => post("sign", { token, parts }, signal, (json) => readSignedParts(json, parts)),
-    complete: (token) => post("complete", { token }, undefined, readCompleted),
+    signSingle: (token, signal) => post("sign", { token }, { signal }, readSignedRequest),
+    signParts: (token, parts, signal) =>
+      post("sign", { token, parts }, { signal }, (json) => readSignedParts(json, parts)),
+    complete: (token) => post("complete", { token }, {}, readCompleted),
     async abort(token) {
       try {
-        await post("abort", { token }, AbortSignal.timeout(ABORT_TIMEOUT_MS), () => true);
+        // The body is a token, far under the 64 KiB a browser allows keepalive requests.
+        await post("abort", { token }, { signal: AbortSignal.timeout(ABORT_TIMEOUT_MS), keepalive: true }, () => true);
       } catch {
         // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up.
       }

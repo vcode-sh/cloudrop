@@ -77,3 +77,30 @@ export function clientFixture<TRoutes extends Record<string, Route>>(
 
   return { server, fetch, basePath: BASE_PATH, requests };
 }
+
+// Answers the server and the bucket really send, for faults to return in place of the real answer.
+
+/** A part the bucket says it stored, though it never reached it. */
+export const lostPart = (): Response => new Response(null, { status: 200 });
+
+/** The server's answer when storage is rate-limited (storageFailure in server/http.ts). */
+export const storageBusy = (): Response =>
+  Response.json(
+    {
+      error: { code: "RATE_LIMITED", message: "The storage service is busy. Try again in a moment.", retryable: true },
+    },
+    { status: 503 },
+  );
+
+/** The server's answer after it verified and kept the object but could not finish (unfinished() in complete.ts). */
+export const unfinished = (): Response =>
+  Response.json(
+    {
+      error: {
+        code: "SERVER_ERROR",
+        message: "The file was uploaded, but the server could not finish processing it. Try again in a moment.",
+        retryable: true,
+      },
+    },
+    { status: 500 },
+  );

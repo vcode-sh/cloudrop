@@ -8,7 +8,14 @@ import { createCloudropClient } from "../client.ts";
 import type { Result } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { route, unauthorized } from "../server/route.ts";
-import { clientFixture, type Fault, type FaultCall } from "../testing/client-fixture.ts";
+import {
+  clientFixture,
+  type Fault,
+  type FaultCall,
+  lostPart,
+  storageBusy,
+  unfinished,
+} from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { albumSchema } from "../testing/upload-fixture.ts";
@@ -40,28 +47,6 @@ const errorOf = ({ error }: Result<unknown>) => ({
   retryable: error?.retryable,
 });
 const routeData = { owner: "42", bytes: 1000, albumId: "a1" };
-
-/** A part the bucket says it stored, though it never reached it. */
-const lostPart = () => new Response(null, { status: 200 });
-// The server's own answers (storageFailure and unfinished() in server/http.ts and server/complete.ts).
-const storageBusy = () =>
-  Response.json(
-    {
-      error: { code: "RATE_LIMITED", message: "The storage service is busy. Try again in a moment.", retryable: true },
-    },
-    { status: 503 },
-  );
-const unfinished = () =>
-  Response.json(
-    {
-      error: {
-        code: "SERVER_ERROR",
-        message: "The file was uploaded, but the server could not finish processing it. Try again in a moment.",
-        retryable: true,
-      },
-    },
-    { status: 500 },
-  );
 
 /** Answers POST /complete with `complete`, and remembers the ticket's key from the real /upload answer. */
 function atComplete(complete: (call: FaultCall) => Promise<Response | undefined> | Response | undefined) {
@@ -140,7 +125,8 @@ describe("upload, when the bucket answers badly", () => {
           "The storage service refused the file because its bytes do not match what the server signed. Pick the file again and start a new upload.",
         retryable: false,
       },
-      requests: ["POST /upload", "PUT object"],
+      // The bucket stored nothing, so the /abort that follows the failure (ruling S-18) deletes nothing.
+      requests: ["POST /upload", "PUT object", "POST /abort"],
     });
   });
 });

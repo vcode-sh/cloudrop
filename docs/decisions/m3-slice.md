@@ -176,15 +176,26 @@ otherwise.
 - **Visible in:** `client/upload.ts` (`complete`, `uploadFile`), `client/endpoints.ts` (`complete`, `abort`),
   `client/upload-failures.test.ts` (the four `/complete` cancel rows).
 
-### M3-S15: no `/abort` after a failure
+### M3-S15: `/abort` after a failure, unless a `/complete` may have finished the file
 
-- **Decision:** a file that fails for any reason other than a cancel is left to the bucket's lifecycle rule; the
-  client sends no `/abort`.
-- **Why:** after a `/complete` attempt the object may be verified and `onComplete` may have run, and `/abort` would
-  delete it. Re-trying a failed upload belongs to the resume plan.
-- **If wrong:** orphaned parts stay until the lifecycle rule runs (R2's default is 7 days).
-- **Status:** in force (`bc06db2`); owner accepted (M3-O4).
-- **Visible in:** `client/upload.ts` (`uploadFile`).
+- **Decision:** ledger ruling S-18. After `/upload` succeeded, a file that ends without success sends `/abort` exactly
+  when no `/complete` attempt may have finished it (the flag of M3-S14), for a failure as for a cancel. On a failure
+  `upload()` answers the original error at once and the `/abort` runs in the background; on a cancel `upload()` waits
+  for it (at most 10 s) and answers `ABORTED`. `/abort` is sent with `keepalive: true`, so a tab closed right after the
+  failure or cancel still delivers it. When a `/complete` may have finished the file, nothing is sent and the file is
+  kept. The route's `onAbort` therefore also runs after such a failure, not only after a cancel.
+- **Why:** the owner asked on 2026-11-16 for the approach that is best for performance, after the final review found
+  that a failed single `PUT` (every file under 64 MiB) left a complete object that no lifecycle rule removes and that
+  the app never recorded: the abort-incomplete-multipart rule only removes unfinished multipart uploads. The safety
+  argument is M3-S14's: with no `/complete` that may have succeeded, `/abort` deletes only this upload's own object
+  (`server/abort.ts`). Answering before `/abort` settles adds no latency to the failure; `/abort` never rejects
+  (`client/endpoints.ts`, `abort`), so the background request cannot surface as an unhandled rejection.
+- **If wrong:** a background request after a failure that the caller does not see, and an `onAbort` call an app may
+  not expect after a failure. A file kept because a `/complete` may have finished it still stays until the app
+  deletes it.
+- **Status:** in force; supersedes the first M3-S15 ("no `/abort` after a failure", `bc06db2`, owner accepted under
+  M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good.
+- **Visible in:** `client/upload.ts` (`uploadFile`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
 
@@ -260,7 +271,8 @@ otherwise.
   origin upload without a CORS rule, but every multipart `/complete` answers `502` with a non-retryable
   `STORAGE_ERROR` ("The storage service refused the request. Contact the site owner if this keeps happening."), because
   its ListParts answers `501 NotImplemented` and the driver maps 501 to a non-retryable error. The client returns that
-  error after one `/complete` and sends no `/abort` (M3-S15); the upload stays open in Wrangler's state.
+  error after one `/complete` and then sends `/abort` (M3-S15), which aborts the multipart upload: Wrangler implements
+  AbortMultipartUpload (measurements §2).
 - **If wrong:** a developer on Wrangler sees the generic message; only the server log says the storage does not
   support the request.
 - **Status:** in force (`15d4caa`); owner accepted (M3-O4).
