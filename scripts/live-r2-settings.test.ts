@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRedactor, exitCodeFor, explainMissing, parseSettingsFile } from "./live-r2-settings.ts";
+import { createRedactor, exitCodeFor, explainMissing, loadSettings, parseSettingsFile } from "./live-r2-settings.ts";
 
 // Fake values only: they merely have to look different from each other.
 const FAKE_SECRET = "FakeSecretValueAbc123";
@@ -46,6 +46,40 @@ describe("explainMissing", () => {
 
   it("points at the environment when no file was given", () => {
     expect(explainMissing(["CLOUDROP_R2_BUCKET"], undefined, "none")).toContain("CLOUDROP_R2_ENV_FILE");
+  });
+});
+
+describe("loadSettings", () => {
+  const FROM_ENV = {
+    CLOUDROP_R2_ACCOUNT_ID: "acct-env",
+    CLOUDROP_R2_BUCKET: "bucket-env",
+    CLOUDROP_R2_ACCESS_KEY_ID: "key-env",
+    CLOUDROP_R2_SECRET_ACCESS_KEY: "secret-env",
+  };
+  const failingRead = (code: string) => () => {
+    throw Object.assign(new Error(`cannot open: ${FAKE_SECRET}`), { code });
+  };
+
+  it("lets the file's values win over the environment's", () => {
+    const env = { ...FROM_ENV, CLOUDROP_R2_ENV_FILE: "/some/r2.env" };
+    expect(loadSettings(env, () => "BB_R2_BUCKET=bucket-file\n")).toEqual({
+      settings: { ...FROM_ENV, CLOUDROP_R2_BUCKET: "bucket-file" },
+    });
+  });
+
+  it("reports only the error code when the file exists but cannot be read", () => {
+    const env = { ...FROM_ENV, CLOUDROP_R2_ENV_FILE: "/some/r2.env" };
+    expect(loadSettings(env, failingRead("EACCES"))).toEqual({
+      problem: "Cannot read /some/r2.env (EACCES). Check its permissions.",
+    });
+  });
+
+  it("says a missing file does not exist when the environment lacks a setting", () => {
+    const env = { CLOUDROP_R2_BUCKET: "bucket-env", CLOUDROP_R2_ENV_FILE: "/missing/r2.env" };
+    expect(loadSettings(env, failingRead("ENOENT"))).toEqual({
+      problem:
+        "Missing R2 settings: CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID, CLOUDROP_R2_SECRET_ACCESS_KEY. /missing/r2.env (from CLOUDROP_R2_ENV_FILE) does not exist. Fix the path or export the variables.",
+    });
   });
 });
 

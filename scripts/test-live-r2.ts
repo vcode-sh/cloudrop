@@ -7,42 +7,14 @@ import { readFileSync } from "node:fs";
 import { constants } from "node:os";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import {
-  createRedactor,
-  exitCodeFor,
-  explainMissing,
-  type FileState,
-  parseSettingsFile,
-  VARIABLES,
-} from "./live-r2-settings.ts";
+import { createRedactor, exitCodeFor, loadSettings } from "./live-r2-settings.ts";
 
-const settings: Record<string, string> = {};
-for (const name of VARIABLES.values()) {
-  const value = process.env[name];
-  if (value) settings[name] = value;
-}
-const file = process.env.CLOUDROP_R2_ENV_FILE;
-let fileState: FileState = "none";
-if (file) {
-  try {
-    Object.assign(settings, parseSettingsFile(readFileSync(file, "utf8")));
-    fileState = "read";
-  } catch (error) {
-    // Only the error code is reported: a message could quote file content.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error(
-        `Cannot read ${file} (${(error as NodeJS.ErrnoException).code ?? "unknown error"}). Check its permissions.`,
-      );
-      process.exit(2);
-    }
-    fileState = "not-found";
-  }
-}
-const missing = [...VARIABLES.values()].filter((name) => !settings[name]);
-if (missing.length > 0) {
-  console.error(explainMissing(missing, file, fileState));
+const loaded = loadSettings(process.env, (path) => readFileSync(path, "utf8"));
+if (loaded.problem !== undefined) {
+  console.error(loaded.problem);
   process.exit(2);
 }
+const { settings } = loaded;
 
 const redactor = createRedactor(Object.values(settings));
 

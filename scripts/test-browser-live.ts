@@ -1,6 +1,6 @@
 // The browser lane on a real R2 bucket: `bun run test:browser:live`. Playwright builds and starts the Next.js example
 // on R2 and uploads from headless Chromium; afterwards this script deletes the run's prefix and prints how many objects
-// it held. Settings are read as scripts/test-live-r2.ts reads them and go only into the child's environment;
+// it held. Settings are loaded as scripts/test-live-r2.ts loads them and go only into the child's environment;
 // everything the child prints passes through the redactor.
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -9,42 +9,14 @@ import { constants } from "node:os";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createCloudrop, r2, route } from "../packages/cloudrop/src/index.ts";
-import {
-  createRedactor,
-  exitCodeFor,
-  explainMissing,
-  type FileState,
-  parseSettingsFile,
-  VARIABLES,
-} from "./live-r2-settings.ts";
+import { createRedactor, exitCodeFor, loadSettings } from "./live-r2-settings.ts";
 
-const settings: Record<string, string> = {};
-for (const name of VARIABLES.values()) {
-  const value = process.env[name];
-  if (value) settings[name] = value;
-}
-const file = process.env.CLOUDROP_R2_ENV_FILE;
-let fileState: FileState = "none";
-if (file) {
-  try {
-    Object.assign(settings, parseSettingsFile(readFileSync(file, "utf8")));
-    fileState = "read";
-  } catch (error) {
-    // Only the error code is reported: a message could quote file content.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error(
-        `Cannot read ${file} (${(error as NodeJS.ErrnoException).code ?? "unknown error"}). Check its permissions.`,
-      );
-      process.exit(2);
-    }
-    fileState = "not-found";
-  }
-}
-const missing = [...VARIABLES.values()].filter((name) => !settings[name]);
-if (missing.length > 0) {
-  console.error(explainMissing(missing, file, fileState));
+const loaded = loadSettings(process.env, (path) => readFileSync(path, "utf8"));
+if (loaded.problem !== undefined) {
+  console.error(loaded.problem);
   process.exit(2);
 }
+const { settings } = loaded;
 
 // The bucket's CORS rule names http://localhost:5173, so the example can serve nowhere else.
 const portFree = await new Promise<boolean>((resolve) => {

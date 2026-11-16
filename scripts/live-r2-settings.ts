@@ -1,4 +1,5 @@
-// Pure helpers of the live R2 lane script (scripts/test-live-r2.ts): reading the settings file and redacting output.
+// Pure helpers of the live R2 lane scripts (scripts/test-live-r2.ts, scripts/test-browser-live.ts): loading the
+// settings and redacting output.
 // Nothing here prints or returns a value that was read from the file except through the redactor's counterpart.
 
 // The file may use cloudrop's names or BB_R2_* ones; both map to the variables the lane and r2() read. BB_R2_* is
@@ -33,6 +34,38 @@ export function explainMissing(missing: string[], file: string | undefined, stat
     return `Missing R2 settings: ${names}. ${file} was read but does not define them. The file is read as literal NAME=value lines (no \`export\`, no spaces around \`=\`, no inline comments) with CLOUDROP_R2_* or BB_R2_* names.`;
   }
   return `Missing R2 settings: ${names}. Set CLOUDROP_R2_ENV_FILE to a file that defines them (CLOUDROP_R2_* or BB_R2_* names), or export them.`;
+}
+
+/**
+ * The lane's settings: the environment's values, overridden by the file that CLOUDROP_R2_ENV_FILE names. When a setting
+ * is missing or the file cannot be read, a message for the person running the lane instead; it names variables, the
+ * path and an error code, never a value.
+ */
+export function loadSettings(
+  env: Record<string, string | undefined>,
+  readFile: (path: string) => string,
+): { settings: Record<string, string>; problem?: undefined } | { problem: string } {
+  const settings: Record<string, string> = {};
+  for (const name of VARIABLES.values()) {
+    const value = env[name];
+    if (value) settings[name] = value;
+  }
+  const file = env.CLOUDROP_R2_ENV_FILE;
+  let fileState: FileState = "none";
+  if (file) {
+    try {
+      Object.assign(settings, parseSettingsFile(readFile(file)));
+      fileState = "read";
+    } catch (error) {
+      // Only the error code is reported: a message could quote file content.
+      const code = (error as { code?: string }).code;
+      if (code !== "ENOENT")
+        return { problem: `Cannot read ${file} (${code ?? "unknown error"}). Check its permissions.` };
+      fileState = "not-found";
+    }
+  }
+  const missing = [...VARIABLES.values()].filter((name) => !settings[name]);
+  return missing.length > 0 ? { problem: explainMissing(missing, file, fileState) } : { settings };
 }
 
 // Colour codes (CSI sequences) are removed first, so one in the middle of a value cannot hide it from the matching.
