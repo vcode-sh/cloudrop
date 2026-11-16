@@ -8,11 +8,48 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 
 - M0 (real-R2 spike) and M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite): done.
 - M2 (the server: `createCloudrop`, routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js
-  and Node adapters): done on this branch.
-- M3 (the upload engine and the browser client): next. Until it lands there is no client; the four endpoints are
-  described in the [design spec](docs/superpowers/specs/2026-11-15-cloudrop-design.md#5-upload-protocol).
+  and Node adapters): done.
+- M3 (the upload engine and the browser client): its first slice is done on this branch. `cloudrop/client` uploads one
+  file per call, as one `PUT` or in parts, with retries, URL renewal and cancel; the scheduler, progress, pause and
+  resume come in later M3 plans. React hooks (`useUpload`) arrive in M4.
 
 Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
+
+## Quickstart
+
+The five-line path from server to upload (the route's `authorize` is shown in full under [Server](#server)):
+
+```ts
+// lib/cloudrop.ts: the server
+export const cloudrop = createCloudrop({
+  storage: r2({ bucket: "media" }),
+  routes: { files: route({ accept: "image/*", maxSize: "5MB", authorize }) },
+});
+
+// app/api/cloudrop/[...all]/route.ts: the handler
+export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
+
+// the browser: the client's types come from the server's type, never its code
+const { upload } = createCloudropClient<typeof cloudrop>();
+const { data, error } = await upload("files", file);
+```
+
+`upload()` never rejects for an expected failure. Branch on `error.code`; show `error.message`, which says what to do
+next:
+
+```ts
+if (error) {
+  showError(error.message); // e.g. ABORTED after a cancel, UNAUTHORIZED, FILE_TOO_LARGE, NETWORK_ERROR
+} else {
+  console.log(data.file.key, data.data); // data.data is what the route's onComplete returned, null without one
+}
+```
+
+A working version of all three files, with a demo sign-in, runs against a local RustFS container without any
+credentials: [`examples/next`](examples/next/README.md).
+
+Requirements: Node.js 24 or newer on the server, a browser with `fetch` and `AbortSignal` for the client (the browser
+lane tests Chromium only), and TypeScript 5.4 or newer for cloudrop's types (`route()`'s return type uses `NoInfer`).
 
 ## Goals
 
@@ -112,10 +149,41 @@ private routes on a public bucket. An R2 object token may not read bucket settin
 an admin read token, R2's answers have not been measured yet. In development
 (`NODE_ENV=development`) the first request runs it once and logs each problem.
 
+## Client
+
+```ts
+"use client";
+import { createCloudropClient } from "cloudrop/client";
+import type { cloudrop } from "../lib/cloudrop"; // a type import: no server code or secret reaches the browser
+
+const client = createCloudropClient<typeof cloudrop>(); // options: basePath (default "/api/cloudrop"), fetch
+
+const controller = new AbortController();
+const { data, error } = await client.upload("avatar", file, { signal: controller.signal });
+```
+
+- `upload(route, file, options?)` sends one `File`. The route name, the metadata (`options.metadata`, required when
+  the route's schema requires it) and the result type (`data.data`, what `onComplete` returned) are inferred from
+  `typeof cloudrop`. `const { upload } = createCloudropClient()` works too.
+- Files up to the server's `multipartThreshold` (64 MiB by default) go in one `PUT`, larger ones in parts, four at a
+  time, read with `Blob.slice`. A request is tried up to 6 times with backoff, honouring `Retry-After`; an expired
+  upload URL is renewed once; parts that `/complete` reports missing are sent again, at most twice.
+- Cancelling through `options.signal` returns `ABORTED` and tells the server to clean up with `/abort`, except after a
+  `/complete` that may have succeeded: that file is kept, never deleted.
+- Endpoint requests send cookies (`credentials: "include"`), so `authorize` can read the session; uploads to the bucket
+  send none.
+- Wire types (`UploadRequest`, `FileTicket`, `ErrorBody` and the rest) and the route inference types (`RouteName`,
+  `RouteMetadata`, `RouteResult`, `InferableCloudrop`) are imported from `cloudrop/client`, never from `cloudrop`.
+
+The bucket needs a CORS rule for your page's origin; [`examples/next`](examples/next/README.md#what-any-bucket-needs)
+lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md).
+
 ### Not done yet
 
-- The upload protocol is tested on the in-process fake and on real R2; RustFS and Wrangler run only the storage
-  contract until M3.
+- The upload protocol is tested on the in-process fake, on real R2, and from Chromium through the example on RustFS
+  and on real R2. Wrangler runs only the storage contract and, in the example, single uploads: its local R2 does not
+  implement ListParts, so a multipart upload cannot complete there.
+- The client has no progress events, pause, resume after reload or shared upload queue yet, and no React hooks.
 - How the server's parallel storage calls fit Cloudflare Workers' subrequest limits is unmeasured.
 
 ## Development
@@ -126,6 +194,8 @@ bun run verify        # check, typecheck, test, build and package checks
 bun run test:rustfs   # storage contract on RustFS in Docker
 bun run test:wrangler # storage contract on Wrangler's local R2
 bun run test:live     # storage contract and upload protocol on real R2 (credentials: CLOUDROP_R2_ENV_FILE)
+bun run test:browser  # the example in Chromium's headless shell, uploading to RustFS in Docker
+bun run test:browser:live # the same on real R2 (credentials as test:live; CORS must allow localhost:5173)
 ```
 
 Background research: [`docs/research`](docs/research). Measured backend behaviour:

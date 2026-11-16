@@ -4,6 +4,10 @@ How each backend behaves under the storage contract (`packages/cloudrop/src/test
 it differs from the in-process fake R2. When a backend disagrees with the fake, the measured behaviour wins and the fake
 is changed to match. One section per backend: behaviour, evidence, date.
 
+A browser against RustFS (its CORS rule, preflight and readable `ETag`) and against Wrangler (any local origin allowed,
+and a multipart `/complete` that answers `502` because ListParts is not implemented) was measured separately:
+[2026-11-16-m3-slice-measurements.md](2026-11-16-m3-slice-measurements.md), §1 and §2.
+
 ## Real R2 (live lane)
 
 Lanes: `packages/cloudrop/src/storage/s3-driver.r2.integration.test.ts` (the storage contract) and
@@ -48,8 +52,9 @@ Not measured on R2: the answers to those two reads for a token that may read the
 for one without a configuration. `checkBucket()` follows S3's documented `NoSuchCORSConfiguration` and
 `NoSuchLifecycleConfiguration` codes there.
 
-The upload protocol runs only here and on the fake. RustFS and Wrangler run the storage contract; their server lanes
-are deferred to M3.
+The upload protocol's server lane runs only here and on the fake. RustFS and Wrangler run the storage contract; since
+the M3 slice the browser lane (`bun run test:browser`) also runs the upload protocol from Chromium through the Next.js
+example against RustFS, and `bun run test:browser:live` against R2. Wrangler has no protocol lane.
 
 ## RustFS (container lane)
 

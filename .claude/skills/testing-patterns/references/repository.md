@@ -15,6 +15,8 @@ never use Bun's built-in runner. Import `describe`, `test`, `expect`, `vi`, `bef
 | `bun run test:rustfs` | Contract lane against RustFS in Docker (`scripts/test-rustfs.sh`), with guaranteed teardown. |
 | `bun run test:wrangler` | Contract lane against Wrangler's local R2 endpoint (`scripts/test-wrangler.sh`), with guaranteed teardown. |
 | `bun run test:live` | Contract lane and upload-protocol lane (`src/server/handler.r2.integration.test.ts`) against a real R2 bucket; reads credentials from the file named by `CLOUDROP_R2_ENV_FILE`. |
+| `bun run test:browser` | Browser lane (`scripts/test-browser.sh`): Playwright runs `examples/next/app/*.browser.test.ts` in Chromium's headless shell against the example on a RustFS container (port 19100), with guaranteed teardown. Needs Docker and `bunx playwright install --only-shell chromium` in `examples/next`. |
+| `bun run test:browser:live` | The same browser tests on a real R2 bucket (`scripts/test-browser-live.ts`), credentials as `test:live`; the bucket's CORS rule must allow `http://localhost:5173`. |
 | `bun run verify` | Every gate in one command: check, typecheck, test, build and `bun run package:check` (publint, attw and size budgets on the built package). |
 | `bun run check`, `bun run typecheck` | Gates; `check` also caps file size and cognitive complexity. `typecheck` runs `tsc` twice: `tsconfig.json` (library source, no Node types) and `packages/cloudrop/tsconfig.test.json` (tests, configs and Node types). Vitest does not type-check. |
 
@@ -27,7 +29,8 @@ live lane a verbose report (both checked 2026-11-15).
 - **The lane is chosen by filename.** `packages/cloudrop/vitest.config.ts` defines two Vitest projects: `unit`
   (`src/**/*.test.ts` and the root `scripts/**/*.test.ts`, minus `*.integration.test.ts`) and `integration` (only
   `*.integration.test.ts`, longer timeouts for live services). `bun run test` runs `vitest run --project unit`, without `--passWithNoTests`, so an empty lane fails; backend lane
-  scripts select `--project integration`. See vitest.md.
+  scripts select `--project integration`. See vitest.md. `*.browser.test.ts` files are not Vitest's: they live in
+  `examples/next/app/` and run under Playwright (`examples/next/playwright.config.ts`) through the browser lane scripts.
 - **A lane whose service or credentials are missing fails, never skips.** Check the prerequisite in `beforeAll` and
   throw a message that names what to set (`CLOUDROP_R2_ENV_FILE`, "start Docker", …). A throwing `beforeAll` fails the
   file and the run.

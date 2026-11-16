@@ -100,6 +100,19 @@ rule it already has):
 ]
 ```
 
+## The browser tests
+
+`app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file
+chosen twice, from Chromium's headless shell. Run it from the repository root; install the shell once from this
+directory with `bunx playwright install --only-shell chromium`.
+
+- `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
+  serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves
+  any `.env.local` alone.
+- `bun run test:browser:live` runs the same tests on a real R2 bucket, with the credentials `bun run test:live` reads
+  (`CLOUDROP_R2_ENV_FILE`). The bucket's CORS rule must allow `http://localhost:5173`, as above. Everything it uploads
+  goes under a random `live-test/cloudrop-<hex>/` prefix, which it deletes at the end.
+
 ## What any bucket needs
 
 - A CORS rule like the one above: your page's origin, `PUT`, and the four headers cloudrop's signed uploads carry.

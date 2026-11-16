@@ -361,8 +361,9 @@ changed a decision after that, the decision says so; the audit's five decisions 
   `fetch` it could only report whole parts, and its shape would be decided twice); `createCloudropClient` is the only
   way in until M4 (spec §1 says it is "needed only to customize the client"; the hooks will wrap a default client);
   the internal constants (60 s renewal margin, S11; 2 repair rounds, S13; `Retry-After` capped at 20 s, S9) are not
-  public, each one number to change; the server's log line for a client code returned by a plugin keeps saying "an
-  error code cloudrop does not know" (`server/handler.ts:94`), reworded only if a plugin author is confused.
+  public, each one number to change; the server's log line for a client code returned by a plugin says, since
+  `5603f60`, that the code is one "the server cannot send, so the client got a generic 500" and asks for one of
+  cloudrop's server codes (`server/handler.ts:93-94`).
 
 Out of the slice, each owned by a later plan:
 
@@ -617,7 +618,7 @@ hand):
 |---|---|---|---|
 | waits up to 0.5 s after the first failure | attempt 1, random 0.5 | 250 | base off by a factor |
 | doubles the ceiling per failure | attempt 3, random 0.5 | 1000 | linear growth |
-| never waits longer than 20 s | attempt 7, random 0.5 | 10000 | uncapped ceiling (64 s · 0.5) |
+| never waits longer than 20 s | attempt 7, random 0.5 | 10000 | uncapped ceiling (32 s · 0.5 = 16 s) |
 | waits at least the answer's Retry-After | attempt 1, random 0, 3000 | 3000 | Retry-After ignored |
 | caps Retry-After at 20 s | attempt 1, random 0, 60000 | 20000 | a server can stall the client |
 | reads Retry-After seconds | `"3"` | 3000 | |

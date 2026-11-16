@@ -1,7 +1,8 @@
 # cloudrop: design
 
-Date: 2026-11-15. Status: approved design, updated with real-R2 spike results (§12) and with the decisions and
-measurements of M2, the server (2026-11-16).
+Date: 2026-11-15. Status: approved design, updated with real-R2 spike results (§12), with the decisions and
+measurements of M2, the server (2026-11-16), and with those of the M3 vertical slice, the first browser client
+(2026-11-16, `docs/decisions/m3-slice.md`).
 
 cloudrop is an MIT TypeScript library for fast, resumable, direct-to-bucket file uploads to Cloudflare R2 and
 S3-compatible storage. Background research: [`docs/research`](../../research).
@@ -66,11 +67,16 @@ One npm package, `cloudrop`, with subpath exports. One install and one version; 
 |---|---|---|
 | `cloudrop` | `createCloudrop`, `route`, `r2`, `s3`, `allowAnyone`, `unauthorized`, types, `CloudropError` | Node 24+, Bun, Deno, Workers |
 | `cloudrop/next`, `cloudrop/node` | `toNextHandler`, `toNodeHandler` | Server |
-| `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence; the wire types of the four endpoints | Browser, React Native |
+| `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence; wire and route inference types | Browser, React Native |
 | `cloudrop/react` | `useUpload`, `useDropzone` | React 18 and 19 (optional peer) |
 | `cloudrop/plugins` | `contentChecks`, `checksums`, `limits`, `images` (server halves) | Server |
 | `cloudrop/client/plugins` | Client halves of the same plugins | Browser |
 | `cloudrop/adapters/drizzle` | 1.1 | Server |
+
+`cloudrop/client` exports the wire types of the four endpoints and the route inference types `RouteName`,
+`RouteMetadata`, `RouteResult` and `InferableCloudrop` (M3-O1 as scoped by M3-H13; 31 names with
+`createCloudropClient`, `CloudropError` and the client's own types, M3-H15). Client code imports them from there, never
+from `cloudrop`.
 
 Internal modules, each testable on its own and reachable only through its interface:
 
@@ -214,7 +220,8 @@ The server decides; the client cannot.
 
 ### 5.5 Abandoned uploads
 
-The client calls `/abort` when a user cancels (abort is free on R2). It aborts a multipart upload and, while the token
+The client calls `/abort` when a user cancels (abort is free on R2). The client never sends `/abort` after a
+`/complete` that may have succeeded. It aborts a multipart upload and, while the token
 is valid, deletes the upload's own object (matched by `cloudrop-id`), even after `/complete`. An expired token only
 aborts; it never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed,
 so that upload can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with
@@ -253,6 +260,9 @@ refuses it, which deletes the object. The 1.1 database adapters close this windo
 A failing part does not abort its siblings. A file fails only when a part exhausts its attempts; `retry()` then sends
 only the missing parts.
 
+Beside `UPLOAD_REJECTED`, the client has two codes of its own, which the server never sends (M3-O3): `ABORTED`, when the
+caller's signal fired, and `NETWORK_ERROR`, retryable, when a request got no answer at all and its attempts ran out.
+
 ### 6.3 Resume after reload
 
 - Multipart uploads persist to IndexedDB by default:
@@ -276,7 +286,7 @@ only the missing parts.
   at most one part of progress per connection.
 - Optional `warnOnUnload`.
 - `await upload(files)` resolves to `{ data, error }`; it never rejects for expected failures and never surfaces a raw
-  storage error.
+  storage error. The M3 slice's `upload(route, file)` takes one file until the scheduler plan (M3-S1).
 
 ## 7. Security and verification
 
@@ -423,9 +433,11 @@ Evidence: [`docs/research/r2-spike-findings.md`](../../research/r2-spike-finding
 
 Still unverified, and required before 1.0 in the browser lane:
 
-1. Browser uploads end to end (presigned PUT and parts, reading `ETag`), and whether an expired URL's `403` carries CORS
-   headers. The test bucket gained an upload CORS rule for `http://localhost:5173` and `http://127.0.0.1:5173` on
-   2026-11-15 (rule id `cloudrop-browser-tests`); the M3 browser lane runs against it.
+1. Checksum headers from a browser: whether R2's CORS preflight and upload accept a signed `x-amz-checksum-crc32c` on
+   a `PUT` or a part. The rest of this item was measured on 2026-11-16 with the test bucket's CORS rule
+   `cloudrop-browser-tests` (`docs/research/r2-spike-findings.md`, "Browser, 2026-11-16"): Chromium uploads a single
+   `PUT` and three parts and reads `ETag`, and an expired URL's `403` carries no CORS headers, so the browser sees an
+   opaque failure, which the client renews once (M3-S10).
 2. More than 8 parallel parts on one key.
 3. AWS chunked uploads with trailing checksums (not used by cloudrop's browser path).
 

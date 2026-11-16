@@ -15,6 +15,7 @@ uses one of these prefixes instead.
 | `M2-D<n>` | The M2 plan's design decisions 1 to 32, as amended by the plan audit and by execution. | [m2-plan-decisions.md](m2-plan-decisions.md) |
 | `M2-X<n>` | Rulings made while executing M2 (owner, controller and review rulings), numbered 1 to 41 in the execution ledger. `M2-P<n>` are four rulings the ledger gave no number. | [m2-execution-rulings.md](m2-execution-rulings.md) |
 | `M3-O<n>` | The owner's decisions of the hardening phase before the M3 slice. `M3-H<n>` are the controller's rulings of the same phase, numbered as in its ledger. | [m3-hardening.md](m3-hardening.md) |
+| `M3-S<n>` | The M3 vertical slice (`cloudrop/client`, the Next.js example, the browser lanes): the plan's decisions S1 to S27 under their own numbers, then the controller's execution rulings from 28 upward. | [m3-slice.md](m3-slice.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 
@@ -24,6 +25,9 @@ Reading older text:
 - In the M2 plan, the M2 audit and the M2 reviews, a bare `D<n>` is `M2-D<n>`.
 - In the M2 execution ledger, the M2 reviews and the M3 plan before this index existed, a bare `R<n>` is `M2-X<n>`.
 - In the hardening ledger and its lane briefs, a bare `O<n>` is `M3-O<n>` and `H<n>` is `M3-H<n>`.
+- In the M3 slice plan, a bare `S<n>` is `M3-S<n>`. In the slice's execution ledger, `S-<n>` (with a hyphen) is a
+  controller ruling of a different list: the entries in [m3-slice.md](m3-slice.md) from `M3-S28` upward name the
+  ledger id they carry, `M3-S18` records `S-8`, and the rest of that list changed no behaviour or public contract.
 - `T10-1`, `X-3` and similar names are finding ids in `docs/superpowers/plans/2026-11-15-m2-server.audit.md`.
 
 ## Authority

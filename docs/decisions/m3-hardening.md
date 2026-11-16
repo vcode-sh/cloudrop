@@ -14,9 +14,9 @@ reviews accepted.
 - **Why:** M2-X38 took the wire types out of the root entry on the understanding that the client would export them; a
   third-party client or a test of the protocol needs them, and they already are the server's wire contract.
 - **If wrong:** every exported type is a semver promise; removing one after the first release is breaking.
-- **Status:** decided; upholds M2-X38 and overrules the plan's S4, which the plan revision rewrites. Scoped by M3-H13
+- **Status:** in force (`bc06db2`, `653f6a4`); upholds M2-X38 and overrules the plan's first S4. Scoped by M3-H13
   (what "all wire types" covers) and M3-H15 (the 31 names).
-- **Visible in:** `src/protocol/types.ts`, `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S4).
+- **Visible in:** `src/protocol/types.ts`, `src/client.ts`.
 
 ### M3-O2: the file id is `id` everywhere on the wire
 
@@ -37,8 +37,8 @@ reviews accepted.
 - **Why:** spec §6.2 names `UPLOAD_REJECTED`; a cancelled upload and a missing answer need codes a program can branch
   on.
 - **If wrong:** renaming a code after the first release is breaking.
-- **Status:** decided; the M3 plan's S5 and Task 2 carry it out.
-- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S5), `src/errors.ts` once Task 2 lands.
+- **Status:** in force (`eed1ce4`, `5603f60`); the M3 plan's S5 and Task 2 carried it out.
+- **Visible in:** `src/errors.ts` (`ClientErrorCode`), `src/server/http.ts` (`STATUS`, `hasKnownCode`).
 
 ### M3-O4: the M3 plan's other recommendations are accepted
 
@@ -180,8 +180,8 @@ reviews accepted.
   than types; `RequestHandler` is a server adapter type; users do not construct errors. The inference types are what
   client code annotates with, and the root entry already promises them.
 - **If wrong:** adding an export later is not breaking; removing one after the first release is.
-- **Status:** decided; scopes M3-O1. The M3 plan's S4 and Tasks 6 and 7 carry it out; M3-H15 fixes the count at 31.
-- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S4), `src/client.ts` once Task 6 lands.
+- **Status:** in force (`bc06db2`, `653f6a4`); scopes M3-O1. M3-H15 fixes the count at 31.
+- **Visible in:** `src/client.ts` (its export list), `dist/client.d.ts` once built.
 
 ### M3-H14: the example creates its server when the module loads
 
@@ -193,9 +193,9 @@ reviews accepted.
 - **If wrong:** the example's CI build needs dummy settings, and every app that follows the quickstart learns at its
   first CI build that the build needs them; the fix would then be a library change (deferring the setting checks to
   the first request).
-- **Status:** decided; the M3 plan's S21 and Tasks 8 to 10 carry it out. M3-H15 adds the README line for builds without
-  secrets.
-- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S21), `examples/next/` once Task 8 lands.
+- **Status:** in force (`15d4caa`); carried out by the M3 slice (M3-S21). M3-H15 adds the README line for builds
+  without secrets.
+- **Visible in:** `examples/next/lib/cloudrop.ts`, `examples/next/README.md` ("The build needs the settings").
 
 ### M3-H15: the M3 plan audit's five decisions
 
@@ -216,27 +216,33 @@ reviews accepted.
   be destroyed, and any live token can delete its own object (`server/abort.ts`).
 - **If wrong:** an object orphaned after an uncertain cancel stays until the app deletes it; one more public type
   export if the owner wanted fewer.
-- **Status:** amended by M3-H16 (item 2); taken under M3-O4. The M3 plan (S4, S14, S21, Task 7 step 1, Task 10 step 1)
-  carries it out.
-- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md`.
+- **Status:** in force; amended by M3-H16 (item 2); taken under M3-O4. Carried out by the M3 slice: item 1 in
+  `653f6a4`, item 2 in `bc06db2` (M3-S14), item 3 in `15d4caa`, item 4 in `653f6a4` (M3-S27), item 5 by the owner's
+  confirmation on 2026-11-16 before `738d2d8`.
+- **Visible in:** `docs/decisions/m3-slice.md`, `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md`.
 
 ### M3-H16: a cancel keeps the file when any `/complete` attempt may have completed it
 
 - **Decision:** Amends item 2 of M3-H15. After a cancel the client keeps the file, sends no `/abort` and returns
   `ABORTED` when any `/complete` attempt of the upload may have completed it: an attempt that got no answer
   (`NETWORK_ERROR`) or answered `SERVER_ERROR`. The flag is sticky across the attempts `withRetry` makes and across
-  repair rounds; a later answer never clears it. The client sends `/abort` after a cancel only when no attempt set it,
-  for example after a 503 `RATE_LIMITED` the server answers before it completes the file.
+  repair rounds, with one exception: a `PARTS_MISSING` answer clears it, because it proves that no attempt before it
+  completed the file (it comes only while the multipart upload is open, `server/complete.ts:82-102`; a completed one
+  answers through `completedBefore` instead). The client sends `/abort` after a cancel only when the flag is not set,
+  for example after a 503 `RATE_LIMITED` the server answers before it completes the file, or when a repair round is
+  cancelled after `PARTS_MISSING` (M3-S31).
 - **Why:** `/complete` is repeatable: a second call after a completed one verifies the object again and reruns
   `afterVerify` and `onComplete` (`server/complete.ts:17-23`). So the last attempt alone cannot tell whether an
   earlier one finished: attempt 1 completes the file and records it, its answer is lost, attempt 2 answers
   `SERVER_ERROR` because `onComplete` throws on the duplicate row, the user cancels in the backoff, and `/abort` with
-  the live token deletes the recorded object (`server/abort.ts:23-31`). The handler sends `SERVER_ERROR` (500,
-  `server/http.ts:36`) from `/complete` only after the object is verified and kept, and the client reads a proxy's
-  unreadable 502 or 504 as `SERVER_ERROR` too, where the server may have finished behind the proxy. A recorded file
-  must never be deleted by a cancel.
-- **If wrong:** an object stays in the bucket after a cancel that really did not complete, until the app deletes it or
-  the token expires.
-- **Status:** decided; controller ruling H16 on the M3 plan's re-review (N-1). The M3 plan (S14, Task 6) carries it out.
-- **Visible in:** `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md` (S14, Task 6 `sendAndComplete` and the
-  `upload-failures` rows).
+  the live token deletes the recorded object (`server/abort.ts:23-31`). The handler's retryable `SERVER_ERROR` from
+  `/complete` (`unfinished()`, 500, `server/http.ts:36`) means the object is verified and kept; its other
+  `SERVER_ERROR` answers (a throw caught at `server/handler.ts:99-102`) and a proxy's unreadable 502 or 504 may also
+  follow a completion, so every `SERVER_ERROR` counts. Counting the ones that follow no completion only keeps more
+  files. A recorded file must never be deleted by a cancel.
+- **If wrong:** an object stays in the bucket after a cancel that really did not complete, until the app deletes it;
+  once the token expires, `/abort` can no longer delete it either.
+- **Status:** in force (`bc06db2`, `cec31c9`); controller ruling H16 on the M3 plan's re-review (N-1). Amended by
+  M3-S31 (the `PARTS_MISSING` exception, worded here since plan re-review 2's D-1 to D-3).
+- **Visible in:** `src/client/upload.ts` (`sendAndComplete`, `uploadFile`), `src/client/upload-failures.test.ts` (the
+  four `/complete` cancel rows), M3-S14.

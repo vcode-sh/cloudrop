@@ -16,8 +16,8 @@ Load the matching skill from `.claude/skills/` before the work:
 
 - Write everything in English.
 - Decisions live in `docs/decisions/`, cited by series id: `M1-R`, `M1-C`, `M1-N`, `M2-D`, `M2-X`, `M2-P`, `M3-O`,
-  `M3-H` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry there in the same
-  change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
+  `M3-H`, `M3-S` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry there in
+  the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
 - `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`. The compiler enforces
   it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
   `src/node.ts` describes Node's request and response by hand for the same reason; `src/node.test.ts` proves real Node
@@ -28,7 +28,8 @@ Load the matching skill from `.claude/skills/` before the work:
 - Tests live next to the source (`foo.ts` beside `foo.test.ts`); there is no `test/` folder. Endpoint tests run the real
   handler on the fake R2 through `src/testing/server-fixture.ts`.
 - The lane is chosen by filename: `*.test.ts` is the unit lane (`bun run test`); `*.integration.test.ts` runs only
-  through its lane script and fails, never skips, when its service or credentials are missing.
+  through its lane script and fails, never skips, when its service or credentials are missing; `*.browser.test.ts` runs
+  through `bun run test:browser`, which needs Docker and Playwright's Chromium headless shell.
 - Public calls return `{ data, error }`. Error messages say what happened and what to do next; they never contain
   credentials, presigned URLs or raw storage responses. The handler answers every request, never throws, and sends a
   client only the error's code, message, `retryable` and part numbers; everything else goes to the logger.
@@ -45,3 +46,7 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run verify` for every change: check (Biome, file size, complexity), typecheck, test, build and package checks.
 - `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes.
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
+- `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
+  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`).
+  `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`
+  allows `http://localhost:5173` (owner-confirmed 2026-11-16).
