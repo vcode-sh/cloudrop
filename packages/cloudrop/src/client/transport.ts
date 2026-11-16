@@ -25,8 +25,6 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       signal.removeEventListener("abort", cancel);
       resolve(outcome);
     };
-    xhr.open("PUT", target.url);
-    for (const [name, value] of Object.entries(target.headers)) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (event) => onBytes(event.loaded);
     xhr.onload = () => {
       // 412: a retried create-only PUT whose first attempt already stored the object (spec §5.4).
@@ -43,9 +41,16 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
     xhr.onerror = lost;
     xhr.ontimeout = lost;
     xhr.onabort = lost;
+    try {
+      xhr.open("PUT", target.url);
+      for (const [name, value] of Object.entries(target.headers)) xhr.setRequestHeader(name, value);
+      // No cookies: XMLHttpRequest sends none cross-origin unless withCredentials is set, and it stays unset.
+      xhr.send(body);
+    } catch {
+      // A URL or header the browser refuses throws here, as fetch throws a TypeError for it: the same outcome.
+      return settle(unreachable(signal));
+    }
     signal.addEventListener("abort", cancel, { once: true });
-    // No cookies: XMLHttpRequest sends none cross-origin unless withCredentials is set, and it stays unset.
-    xhr.send(body);
   });
 
 /** XMLHttpRequest when there is one and no fetch option was passed; otherwise `send` (ruling M3-U6). */

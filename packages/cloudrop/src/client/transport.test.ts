@@ -28,6 +28,7 @@ async function setup({ fault, hold = false }: { fault?: Fault; hold?: boolean } 
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("a client with only basePath, in a browser", () => {
@@ -57,6 +58,36 @@ describe("a client with only basePath, in a browser", () => {
       requests: ["POST /upload", "PUT object", "POST /complete"],
       stored: bytes,
     });
+  });
+
+  it("settles a job whose XMLHttpRequest throws on send: that file fails, the other uploads", async () => {
+    // Every backoff wait becomes 0 ms.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const fixture = clientFixture({ files });
+    const xhr = fakeXhr(fixture.fetch);
+    const Base = xhr.XMLHttpRequest as new () => { send(body: Blob): void };
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      class extends Base {
+        override send(body: Blob) {
+          if (body.size === 6) throw new TypeError("Failed to execute 'send'.");
+          super.send(body);
+        }
+      },
+    );
+    vi.stubGlobal("fetch", fixture.fetch);
+    const client = createCloudropClient({ basePath: fixture.basePath });
+    const picked = [
+      new File(["alpha"], "a.txt", { type: "text/plain" }),
+      new File(["bravo!"], "b.txt", { type: "text/plain" }),
+    ];
+    const { data } = await client.start("files", picked).done;
+    expect(
+      data?.files.map((outcome) => [outcome.status, outcome.status === "done" ? null : outcome.error.code]),
+    ).toEqual([
+      ["done", null],
+      ["failed", "NETWORK_ERROR"],
+    ]);
   });
 });
 
@@ -113,6 +144,24 @@ describe("createPut through XMLHttpRequest", () => {
     const outcome = put(target, body, new AbortController().signal, onBytes);
     (await xhr.next()).fail();
     expect(await outcome).toEqual({ kind: "opaque", error: withCode("NETWORK_ERROR"), retryAfterMs: 0 });
+  });
+
+  it("reports an XMLHttpRequest that throws before sending as opaque, as fetch's throw is", async () => {
+    const { xhr, put, target, body, onBytes } = await setup();
+    // A browser's open() throws SyntaxError on a URL it cannot parse.
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      class extends (xhr.XMLHttpRequest as new () => object) {
+        open() {
+          throw new SyntaxError("The URL is invalid.");
+        }
+      },
+    );
+    expect(await put(target, body, new AbortController().signal, onBytes)).toEqual({
+      kind: "opaque",
+      error: withCode("NETWORK_ERROR"),
+      retryAfterMs: 0,
+    });
   });
 
   it("stops the request when the signal fires", async () => {
