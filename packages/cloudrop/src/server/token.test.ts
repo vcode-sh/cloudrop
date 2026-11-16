@@ -6,16 +6,16 @@ import { importTokenKey, signToken, type UploadTokenPayload, verifyToken } from 
 const CURRENT = "current-secret-0123456789abcdef0123";
 const PREVIOUS = "previous-secret-0123456789abcdef012";
 const BODY =
-  "eyJ2IjoxLCJyb3V0ZSI6ImF2YXRhciIsImZpbGVJZCI6IjAxSkNaNFczVDVROEY3WEtBSjBQOVMyVkhNIiwia2V5IjoidXNlcnMvNDIvMDFKQ1o0VzNUNVE4RjdYS0FKMFA5UzJWSE0ucG5nIiwibmFtZSI6Im1lLnBuZyIsInNpemUiOjEwMjQsInR5cGUiOiJpbWFnZS9wbmciLCJvd25lciI6eyJ1c2VySWQiOiI0MiJ9LCJtZXRhZGF0YSI6bnVsbCwiZXhwIjoxNzYzMjUxMjAwfQ";
-const SIGNED_WITH_CURRENT = `${BODY}.TjnJ9_yOS-wl8JbH2hG3eJ-cxKbCr3bxboTvaDByGh0`;
-const SIGNED_WITH_PREVIOUS = `${BODY}.McDwqT244iJxR43LUsqGbvLfZuPdfzdNvf97CSZ6eVo`;
+  "eyJ2IjoxLCJyb3V0ZSI6ImF2YXRhciIsImlkIjoiMDFKQ1o0VzNUNVE4RjdYS0FKMFA5UzJWSE0iLCJrZXkiOiJ1c2Vycy80Mi8wMUpDWjRXM1Q1UThGN1hLQUowUDlTMlZITS5wbmciLCJuYW1lIjoibWUucG5nIiwic2l6ZSI6MTAyNCwidHlwZSI6ImltYWdlL3BuZyIsIm93bmVyIjp7InVzZXJJZCI6IjQyIn0sIm1ldGFkYXRhIjpudWxsLCJleHAiOjE3NjMyNTEyMDB9";
+const SIGNED_WITH_CURRENT = `${BODY}.DP48bEjyJkinzTrJSeYEw9eFXwdlaazAQE1_HTO8Vd0`;
+const SIGNED_WITH_PREVIOUS = `${BODY}.vVLC3OQ-K70spuUj-fbSKD6w0VWUwMkcKRSx5iT4HSk`;
 // 2025-11-16T00:00:00Z.
 const EXP = 1_763_251_200;
 
 const payload: UploadTokenPayload = {
   v: 1,
   route: "avatar",
-  fileId: "01JCZ4W3T5Q8F7XKAJ0P9S2VHM",
+  id: "01JCZ4W3T5Q8F7XKAJ0P9S2VHM",
   key: "users/42/01JCZ4W3T5Q8F7XKAJ0P9S2VHM.png",
   name: "me.png",
   size: 1024,
@@ -72,7 +72,7 @@ describe("verifyToken", () => {
   });
 
   // A large payload with both 2 KiB JSON caps, a 1,024-byte key and a name of 255 control characters. Python's json
-  // and base64 give 9,111 characters; quoted keys and a multipart upload ID can make a longer token.
+  // and base64 give 9,106 characters; quoted keys and a multipart upload ID can make a longer token.
   const largest: UploadTokenPayload = {
     ...payload,
     key: `${"k".repeat(1020)}.bin`,
@@ -83,12 +83,12 @@ describe("verifyToken", () => {
 
   it("verifies a token beyond the former 8 KiB cap", async () => {
     const token = await signToken(largest, current);
-    expect(token).toHaveLength(9111);
+    expect(token).toHaveLength(9106);
     expect((await verifyToken(token, [current], EXP - 1)).data).toEqual(largest);
   });
 
   it("refuses a correctly signed token over 16 KiB before reading it", async () => {
-    // 17,066 characters, and the signature is valid: only the length check can refuse it.
+    // 17,060 characters, and the signature is valid: only the length check can refuse it.
     const token = await signToken({ ...largest, metadata: { albumId: "a".repeat(8000) } }, current);
     expect((await verifyToken(token, [current], EXP - 1)).error).toMatchObject(invalid);
   });
@@ -100,10 +100,10 @@ describe("verifyToken", () => {
     .replace(/=+$/, "");
 
   it.for<{ name: string; token: unknown }>([
-    { name: "a payload changed after signing", token: `${enlarged}.TjnJ9_yOS-wl8JbH2hG3eJ-cxKbCr3bxboTvaDByGh0` },
+    { name: "a payload changed after signing", token: `${enlarged}.DP48bEjyJkinzTrJSeYEw9eFXwdlaazAQE1_HTO8Vd0` },
     {
       name: "a signature with its first character changed",
-      token: `${BODY}.UjnJ9_yOS-wl8JbH2hG3eJ-cxKbCr3bxboTvaDByGh0`,
+      token: `${BODY}.EP48bEjyJkinzTrJSeYEw9eFXwdlaazAQE1_HTO8Vd0`,
     },
     // "0" and "1" differ only in the two bits base64 drops after 32 bytes: a byte comparison would accept this spelling.
     { name: "a second spelling of the same signature", token: `${SIGNED_WITH_CURRENT.slice(0, -1)}1` },
@@ -111,7 +111,7 @@ describe("verifyToken", () => {
     { name: "no signature", token: BODY },
     { name: "an empty signature", token: `${BODY}.` },
     { name: "a third part", token: `${SIGNED_WITH_CURRENT}.x` },
-    { name: "characters outside base64url", token: `${BODY}.TjnJ9/yOS+wl8JbH2hG3eJ-cxKbCr3bxboTvaDByGh0` },
+    { name: "characters outside base64url", token: `${BODY}.DP48bEjy+kinzTrJSeYEw9eFXwdlaazAQE1/HTO8Vd0` },
     // Correctly signed with CURRENT (Python's hmac), but not a JSON object: only a holder of the secret can make these.
     { name: "a correctly signed JSON null", token: "bnVsbA.UPMTeJK6Jo-ME4iVa1icIIfVPvbx_cyV5yNnU0CariQ" },
     {

@@ -38,7 +38,7 @@ export function objectOptions(token: UploadTokenPayload): {
   return {
     type: token.type,
     disposition: contentDisposition(token.type, token.name),
-    metadata: { "cloudrop-id": token.fileId },
+    metadata: { "cloudrop-id": token.id },
   };
 }
 

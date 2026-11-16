@@ -22,7 +22,7 @@ async function startFile(
   const { storage, logger } = config;
   const { signing } = await config.tokenKeys;
   const expiresAt = new Date(base.exp * 1000).toISOString();
-  const ticket = { fileId: base.fileId, key: base.key, expiresAt };
+  const ticket = { id: base.id, key: base.key, expiresAt };
   const rejected = (error: CloudropError): FileTicket => ({
     kind: "rejected",
     error: errorBody(storageFailure(error, logger)),
@@ -59,7 +59,7 @@ async function startFileSafely(
   try {
     return await startFile(config, base);
   } catch (error) {
-    config.logger.error(`cloudrop: could not start the upload of file ${base.fileId} on route "${base.route}".`, error);
+    config.logger.error(`cloudrop: could not start the upload of file ${base.id} on route "${base.route}".`, error);
     return { kind: "rejected", error: errorBody(serverError()) };
   }
 }
@@ -114,7 +114,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
         : startFileSafely(config, {
             v: 1,
             route: route.name,
-            fileId: file.id,
+            id: file.id,
             key: file.key,
             name: file.name,
             size: file.size,

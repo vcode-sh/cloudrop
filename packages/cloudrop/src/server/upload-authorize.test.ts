@@ -107,7 +107,7 @@ describe("POST /upload: authorization comes first", () => {
     const { body } = await upload(fixture, { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, owner: tokenPayload(ticket.token).owner }).toEqual({
-      key: `users/42/${ticket.fileId}.png`,
+      key: `users/42/${ticket.id}.png`,
       owner: { userId: "42" },
     });
   });

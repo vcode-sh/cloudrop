@@ -34,7 +34,7 @@ describe("POST /complete: single PUT", () => {
     expect(await complete(fixture, ticket.token)).toEqual({
       status: 200,
       body: {
-        file: { id: ticket.fileId, key: ticket.key, name: "hello.txt", size: 5, type: "text/plain", url: null },
+        file: { id: ticket.id, key: ticket.key, name: "hello.txt", size: 5, type: "text/plain", url: null },
         data: { stored: ticket.key, at: "2026-11-15T12:00:01.000Z" },
       },
     });
@@ -53,9 +53,7 @@ describe("POST /complete: single PUT", () => {
     const fixture = serverFixture({ shared }, { publicUrl: true });
     const ticket = await fixture.single("shared", TEXT);
     await fixture.send(ticket.put, hello);
-    expect((await complete(fixture, ticket.token)).body.file.url).toBe(
-      `${PUBLIC_URL}/team%20files/${ticket.fileId}.txt`,
-    );
+    expect((await complete(fixture, ticket.token)).body.file.url).toBe(`${PUBLIC_URL}/team%20files/${ticket.id}.txt`);
   });
 
   it("answers 409 NOT_UPLOADED before the bytes are there", async () => {
@@ -81,7 +79,7 @@ describe("POST /complete: single PUT", () => {
     await fixture.send(ticket.put, hello);
     const first = await complete(fixture, ticket.token);
     const second = await complete(fixture, ticket.token);
-    expect([first.body.data, second.body.data, second.body.file.id]).toEqual([1, 2, ticket.fileId]);
+    expect([first.body.data, second.body.data, second.body.file.id]).toEqual([1, 2, ticket.id]);
   });
 
   // A backend that did not enforce the signed headers (R2 does: spike rows 1 and 2) stored the wrong object under the
@@ -94,7 +92,7 @@ describe("POST /complete: single PUT", () => {
     const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
     const fixture = serverFixture({ files }, { plugins: [plugin] });
     const ticket = await fixture.single("files", TEXT);
-    await fixture.storage.put(ticket.key, body, { type, metadata: { "cloudrop-id": ticket.fileId } });
+    await fixture.storage.put(ticket.key, body, { type, metadata: { "cloudrop-id": ticket.id } });
     expect((await complete(fixture, ticket.token)).body.error).toEqual({
       code: "VERIFICATION_FAILED",
       message: "The uploaded file does not match what was declared, so it was discarded. Upload it again.",
@@ -108,7 +106,7 @@ describe("POST /complete: single PUT", () => {
     const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
     const fixture = serverFixture({ files }, { plugins: [plugin] });
     const ticket = await fixture.single("files", TEXT);
-    await fixture.storage.put(ticket.key, "<svg>", { type: "text/html", metadata: { "cloudrop-id": ticket.fileId } });
+    await fixture.storage.put(ticket.key, "<svg>", { type: "text/html", metadata: { "cloudrop-id": ticket.id } });
     // The network drops every DELETE the server sends; every other request reaches the bucket.
     const { fetch } = fixture.fake;
     fixture.fake.fetch = (input, init) =>

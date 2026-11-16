@@ -232,7 +232,7 @@ describe("POST /upload: keys", () => {
     const decomposed = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => "cafe\u0301" });
     const { body } = await upload(serverFixture({ files: decomposed }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
-    expect(ticket.key).toBe(`café/${ticket.fileId}.png`);
+    expect(ticket.key).toBe(`café/${ticket.id}.png`);
   });
 
   it.for([
@@ -242,7 +242,7 @@ describe("POST /upload: keys", () => {
     const rooted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => prefix });
     const { body } = await upload(serverFixture({ files: rooted }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
-    expect(ticket.key).toBe(`${folder}${ticket.fileId}.png`);
+    expect(ticket.key).toBe(`${folder}${ticket.id}.png`);
   });
 
   it.for<{ name: string; prefix: unknown; log: string }>([

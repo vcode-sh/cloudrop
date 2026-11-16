@@ -262,7 +262,7 @@ describe("readConfig defaults", () => {
   const payload = {
     v: 1,
     route: "files",
-    fileId: "f",
+    id: "f",
     key: "k",
     name: "n",
     size: 1,

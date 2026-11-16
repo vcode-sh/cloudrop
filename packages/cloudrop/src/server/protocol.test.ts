@@ -59,8 +59,8 @@ describe("upload protocol, end to end", () => {
     const done = await call<CompleteResponse>("complete", { token: ticket.token });
     expect(done.body).toEqual({
       file: {
-        id: ticket.fileId,
-        key: `users/42/${ticket.fileId}.png`,
+        id: ticket.id,
+        key: `users/42/${ticket.id}.png`,
         name: "pic.png",
         size: 1000,
         type: "image/png",

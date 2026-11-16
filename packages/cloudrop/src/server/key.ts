@@ -32,9 +32,9 @@ export function newFileId(): string {
 }
 
 /** The result is not validated; pass it through `normalizeKey` before storing it. */
-export function generatedKey(prefix: string, fileId: string, ext: string): string {
+export function generatedKey(prefix: string, id: string, ext: string): string {
   const folder = prefix.replace(/\/+$/, "");
-  return folder === "" ? `${fileId}${ext}` : `${folder}/${fileId}${ext}`;
+  return folder === "" ? `${id}${ext}` : `${folder}/${id}${ext}`;
 }
 
 /**

@@ -173,7 +173,7 @@ The server decides; the client cannot.
 ### 5.2 Upload token
 
 - An HMAC-SHA256 signed, base64url token carrying
-  `{ v, route, fileId, key, name, size, type, uploadId?, partSize?, owner, metadata, exp }`. `owner` is the JSON of
+  `{ v, route, id, key, name, size, type, uploadId?, partSize?, owner, metadata, exp }`. `owner` is the JSON of
   `authorize`'s result and `metadata` the JSON of the schema's output, each at most 2 KiB: `/complete` takes only the
   token, and `onComplete` needs both. The token is signed, not encrypted, so it never carries a secret.
 - Every call after `/upload` must present it. The server ignores any key, size or upload ID that is not in the token,
@@ -199,7 +199,7 @@ The server decides; the client cannot.
 
 - Single PUTs carry a signed `If-None-Match: *`. A retried PUT that gets `412` means the first one landed; `/complete`
   confirms it.
-- Every object carries `x-amz-meta-cloudrop-id` (the token's `fileId`). A retried `/complete` whose multipart upload
+- Every object carries `x-amz-meta-cloudrop-id` (the token's `id`). A retried `/complete` whose multipart upload
   no longer exists succeeds only after a `HEAD` shows the object with the matching ID and size.
 - Multiple files in one `/upload` call share one round trip: a small file costs three requests (init, PUT, complete).
 - A part uploaded again while `/complete` runs makes the listed ETag stale (`InvalidPart`). That answers a retryable

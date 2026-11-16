@@ -34,11 +34,11 @@ describe("POST /upload: a single PUT ticket", () => {
     const { status, body } = await upload(fixture, { route: "avatar", files: [png()], metadata: { albumId: "a1" } });
     const ticket = body.files[0] as SingleTicket;
     expect(status).toBe(200);
-    expect(ticket.fileId).toMatch(ULID);
+    expect(ticket.id).toMatch(ULID);
     expect(ticket).toEqual({
       kind: "single",
-      fileId: ticket.fileId,
-      key: `users/42/a1/${ticket.fileId}.png`,
+      id: ticket.id,
+      key: `users/42/a1/${ticket.id}.png`,
       token: ticket.token,
       expiresAt: "2026-11-16T12:00:00.000Z",
       put: {
@@ -47,7 +47,7 @@ describe("POST /upload: a single PUT ticket", () => {
           "content-type": "image/png",
           "content-disposition": "inline; filename=\"me.png\"; filename*=UTF-8''me.png",
           "if-none-match": "*",
-          "x-amz-meta-cloudrop-id": ticket.fileId,
+          "x-amz-meta-cloudrop-id": ticket.id,
         },
         expiresAt: "2026-11-15T12:15:00.000Z",
       },
@@ -55,7 +55,7 @@ describe("POST /upload: a single PUT ticket", () => {
     expect(tokenPayload(ticket.token)).toEqual({
       v: 1,
       route: "avatar",
-      fileId: ticket.fileId,
+      id: ticket.id,
       key: ticket.key,
       name: "me.png",
       size: 1024,
@@ -93,7 +93,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, uploadId: tokenPayload(ticket.token).uploadId }).toEqual({
-      key: `${ticket.fileId}.txt`,
+      key: `${ticket.id}.txt`,
       uploadId: undefined,
     });
   });
@@ -107,7 +107,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, headers: ticket.put.headers }).toMatchObject({
-      key: `${ticket.fileId}.svg`,
+      key: `${ticket.id}.svg`,
       headers: {
         "content-type": "image/svg+xml",
         "content-disposition": "attachment; filename=\"logo.svg\"; filename*=UTF-8''logo.svg",

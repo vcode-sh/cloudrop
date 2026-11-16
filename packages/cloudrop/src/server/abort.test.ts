@@ -33,13 +33,13 @@ describe("POST /abort", () => {
     const response = await fixture.post("abort", { token: ticket.token });
     expect({ status: response.status, body: await response.json(), pending: fixture.fake.pendingUploads() }).toEqual({
       status: 200,
-      body: { fileId: ticket.fileId },
+      body: { id: ticket.id },
       pending: 0,
     });
     expect(calls).toEqual([
       {
         route: "files",
-        file: { id: ticket.fileId, key: ticket.key, name: "big.bin", size: 9 * MiB, type: "application/octet-stream" },
+        file: { id: ticket.id, key: ticket.key, name: "big.bin", size: 9 * MiB, type: "application/octet-stream" },
         metadata: undefined,
         auth: { userId: "42" },
         reason: "aborted",
