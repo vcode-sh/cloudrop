@@ -6,18 +6,18 @@ import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import { sizeOfPart } from "../plan.ts";
 import type { CompleteResponse, SignedPart, SignedRequest } from "../protocol/types.ts";
-import { putObject } from "./bucket.ts";
-import type { ClientFetch, Endpoints, Ticket } from "./endpoints.ts";
+import type { Endpoints, Ticket } from "./endpoints.ts";
 import { aborted } from "./failures.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import { withRetry } from "./retry.ts";
+import type { PutObject } from "./transport.ts";
 
 /** /complete may answer PARTS_MISSING this many times before the file fails (S13). */
 const REPAIR_ROUNDS = 2;
 
 export interface UploadContext {
   endpoints: Endpoints;
-  fetch: ClientFetch;
+  put: PutObject;
 }
 
 interface Arguments {
@@ -68,7 +68,7 @@ function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
 
 function senderFor(context: UploadContext, ticket: Ticket, file: File, signal: AbortSignal): PartSender {
   const put = (target: SignedRequest, partNumber: number) =>
-    putObject(context.fetch, target, bodyOf(ticket, file, partNumber), signal);
+    context.put(target, bodyOf(ticket, file, partNumber), signal, () => {});
   if (ticket.kind === "multipart") {
     return {
       signal,

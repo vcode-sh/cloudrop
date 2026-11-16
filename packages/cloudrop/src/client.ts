@@ -1,6 +1,7 @@
 // The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
 
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
+import { createPut } from "./client/transport.ts";
 import { type UploadContext, uploadFile } from "./client/upload.ts";
 import { configError, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
@@ -81,7 +82,8 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
-  const context: UploadContext = { endpoints: createEndpoints(basePath, send), fetch: send };
+  // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling P6).
+  const context: UploadContext = { endpoints: createEndpoints(basePath, send), put: createPut(fetch, send) };
   return {
     // No `this`: `const { upload } = createCloudropClient()` works (S2).
     upload: (route, file, ...rest) =>

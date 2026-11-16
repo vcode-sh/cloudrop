@@ -26,12 +26,13 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
-  // Bundled and minified, the size an app ships (spec §1: client plus React ~8 kB): 4194 B + 10%, ruling S-10.
+  // Bundled and minified, the size an app ships (spec §1: client plus React ~8 kB). 7.5 kB is provisional during plan A
+  // (owner's ceiling, spec §7); Task 8 sets it from the measured size.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "4.7 kB",
+    limit: "7.5 kB",
   },
 ];

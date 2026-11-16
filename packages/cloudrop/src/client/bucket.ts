@@ -24,7 +24,8 @@ export type BucketOutcome =
   | { kind: "opaque" | "expired" | "retry"; error: CloudropError; retryAfterMs: number }
   | { kind: "rejected" | "aborted"; error: CloudropError };
 
-const STORAGE_CODE = /<Code>([A-Za-z]{1,64})<\/Code>/;
+/** The S3 error code in a storage answer's XML body. */
+export const STORAGE_CODE: RegExp = /<Code>([A-Za-z]{1,64})<\/Code>/;
 
 /** By status, as the server's driver classifies; the storage code only tells a bad signature from an expired URL. */
 export function classifyAnswer(status: number, storageCode: string | undefined, retryAfterMs: number): BucketOutcome {
@@ -41,6 +42,13 @@ export function classifyAnswer(status: number, storageCode: string | undefined, 
   return { kind: "rejected", error: uploadRejected(status) };
 }
 
+/** A PUT that got no readable answer: cancelled by the caller, or lost to the network or a refusal without CORS. */
+export function unreachable(signal: AbortSignal): BucketOutcome {
+  return signal.aborted
+    ? { kind: "aborted", error: aborted() }
+    : { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 };
+}
+
 /** Sends one presigned PUT with exactly the signed headers. Never rejects. */
 export async function putObject(
   fetch: ClientFetch,
@@ -55,9 +63,7 @@ export async function putObject(
   } catch {
     // Not only the network: R2 sends a refused URL (expired, bad signature) without CORS headers, which a browser shows
     // as a throw (r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16").
-    return signal.aborted
-      ? { kind: "aborted", error: aborted() }
-      : { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 };
+    return unreachable(signal);
   }
   // 412: a retried create-only PUT whose first attempt already stored the object (spec §5.4).
   if (response.ok || response.status === 412) {
