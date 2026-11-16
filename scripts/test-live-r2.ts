@@ -1,4 +1,4 @@
-// Runs the storage contract against a real R2 bucket: `bun run test:live`.
+// Runs the storage contract and the upload protocol against a real R2 bucket: `bun run test:live`.
 // Credentials come from the file named by CLOUDROP_R2_ENV_FILE (literal NAME=value lines, never run as shell) or, in CI,
 // from the environment. They go only into the child's environment. Everything the child prints passes through a
 // redactor, so neither the credentials, the account ID, the bucket nor a presigned URL reaches the terminal or a log.
@@ -55,6 +55,7 @@ const child = spawn(
     "--project",
     "integration",
     "src/storage/s3-driver.r2.integration.test.ts",
+    "src/server/handler.r2.integration.test.ts",
     ...process.argv.slice(2),
   ],
   {
@@ -74,7 +75,8 @@ const child = spawn(
 // the grace period, kills the group.
 const GRACE_MS = 30_000;
 let stopSignal: "SIGHUP" | "SIGINT" | "SIGTERM" | undefined;
-let runPrefix: string | undefined;
+// Each lane file writes under its own prefix; all of them are named if the run is stopped before teardown.
+const runPrefixes = new Set<string>();
 let forced = false;
 function signalChild(signal: NodeJS.Signals) {
   try {
@@ -88,7 +90,7 @@ function forceStop() {
   forced = true;
   signalChild("SIGKILL");
   console.error(
-    `Live R2 lane stopped before its teardown finished. Objects may remain under ${runPrefix ?? "live-test/cloudrop-<random hex>/"} in the bucket: delete that prefix.`,
+    `Live R2 lane stopped before its teardown finished. Objects may remain under ${runPrefixes.size > 0 ? [...runPrefixes].join(", ") : "live-test/cloudrop-<random hex>/"} in the bucket: delete those prefixes.`,
   );
   process.exit(128 + (constants.signals[stopSignal ?? "SIGTERM"] ?? 15));
 }
@@ -107,7 +109,7 @@ const relays = [
 const relayed = relays.map(async ([from, to]) => {
   for await (const line of createInterface({ input: from, crlfDelay: Number.POSITIVE_INFINITY })) {
     const safe = redactor.redact(line);
-    runPrefix = /live-test\/cloudrop-[0-9a-f]+\//.exec(safe)?.[0] ?? runPrefix;
+    for (const match of safe.matchAll(/live-test\/cloudrop-[0-9a-f]{32}\//g)) runPrefixes.add(match[0]);
     to.write(`${safe}\n`);
   }
 });
