@@ -77,7 +77,11 @@ export interface RouteOptions<TAuth extends object, TSchema extends StandardSche
   authorize: (context: AuthorizeContext<SchemaOutput<TSchema>>) => Awaitable<TAuth | Unauthorized>;
   /** Folder for generated keys `<prefix>/<ulid><ext>`. Sanitized like every key. */
   prefix?: (context: KeyContext<TAuth, SchemaOutput<TSchema>>) => string;
-  /** The whole key instead of `<prefix>/<ulid><ext>`; it must be unique. Sanitized like every key. */
+  /**
+   * The whole key instead of `<prefix>/<ulid><ext>`. Sanitized like every key. It must be unique: a rejected or
+   * aborted upload's object is deleted by key once a HEAD shows this upload's id, and the delete is not conditional,
+   * so another file stored under the same key between the two requests would be deleted.
+   */
   key?: (context: KeyContext<TAuth, SchemaOutput<TSchema>>) => string;
   /** "public" needs the storage's `publicUrl`. Default: "public" when the storage has one, otherwise "private". */
   visibility?: "public" | "private";
