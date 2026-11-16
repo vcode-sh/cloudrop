@@ -16,6 +16,8 @@ export interface NodeRequest extends AsyncIterable<Uint8Array> {
   /** Express and Connect move the mount path out of `url` into this. */
   originalUrl?: string;
   headers: Record<string, string | string[] | undefined>;
+  /** Names and values in the order they arrived; the only place a second Host header still shows. */
+  rawHeaders: string[];
   socket: object;
 }
 
@@ -61,14 +63,32 @@ async function readBody(request: NodeRequest): Promise<Uint8Array<ArrayBuffer>> 
   return body;
 }
 
+// The origin a Host or ":authority" value names, or null unless the value is just a host and an optional port.
+function hostOrigin(scheme: string, value: string | string[] | undefined): string | null {
+  // The URL parser would read userinfo as credentials and "/", "\", "?" or "#" as the start of a path.
+  if (typeof value !== "string" || /[@/\\?#]/.test(value)) return null;
+  return URL.parse(`${scheme}://${value}`)?.origin ?? null;
+}
+
+// The origin of the host the request names: Host, or HTTP/2's ":authority" pseudo-header. Null, so the request is
+// refused, when there is none, when Host is sent twice (RFC 9112 §3.2), when the two name different hosts (RFC 9113
+// §8.3.1), or when either is more than a host and port. No origin is invented for a request that names none.
+// (Line comments: the build keeps doc blocks in the published file, and these functions are private.)
+function requestOrigin(request: NodeRequest, scheme: string): string | null {
+  // rawHeaders alternates names and values.
+  const hosts = request.rawHeaders.filter((name, index) => index % 2 === 0 && name.toLowerCase() === "host");
+  if (hosts.length > 1) return null;
+  const { host, ":authority": authority } = request.headers;
+  const named = [host, authority].filter((value) => value !== undefined);
+  const origins = new Set(named.map((value) => hostOrigin(scheme, value)));
+  return origins.size === 1 ? ([...origins][0] ?? null) : null;
+}
+
 function toUrl(request: NodeRequest): URL {
   // No X-Forwarded-* header is trusted: behind a proxy, list the public origin in trustedOrigins instead.
   const scheme = "encrypted" in request.socket && request.socket.encrypted === true ? "https" : "http";
-  // HTTP/2 sends the host as the ":authority" pseudo-header and no Host header.
-  const host = [request.headers.host ?? request.headers[":authority"]].flat()[0] ?? "localhost";
-  // Only the origin of the host is kept: a path or credentials written there would otherwise become part of the URL
-  // the handler matches.
-  const base = URL.canParse(`${scheme}://${host}`) ? new URL(`${scheme}://${host}`).origin : `${scheme}://localhost`;
+  const base = requestOrigin(request, scheme);
+  if (base === null) throw new TypeError("The request names no single valid host.");
   const target = request.originalUrl ?? request.url ?? "/";
   // Only a path may follow the Host header's origin: "//other.host/…" or an absolute URL would replace that origin,
   // and a caller could then make any Origin look same-origin.
@@ -125,9 +145,10 @@ async function send(response: NodeResponse, answer: Response): Promise<void> {
 
 /**
  * Never rejects: Node ignores the listener's promise, so a rejection would be an unhandled rejection that stops the
- * process. Node accepts requests a fetch Request cannot hold (TRACE, an absolute URL with port 99999) and clients that
- * hang up mid-body; those get a 400, or nothing once the socket is gone. A handler that throws, or answers with
- * something that cannot be sent, gets the client a 500 and is logged to the console.
+ * process. Node accepts requests a fetch Request cannot hold (TRACE, an absolute URL with port 99999), requests that
+ * name no single valid host, and clients that hang up mid-body; those get a 400, or nothing once the socket is gone. A
+ * handler that throws, or answers with something that cannot be sent, gets the client a 500 and is logged to the
+ * console.
  */
 export function toNodeHandler(
   cloudrop: RequestHandler,
