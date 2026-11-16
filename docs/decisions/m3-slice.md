@@ -120,6 +120,10 @@ otherwise.
   answer: an expired URL's 403 carries no CORS headers, so Chromium blocks it and `fetch` rejects
   (`docs/research/r2-spike-findings.md`, "Browser, 2026-11-16", row U2, matching R2's CORS documentation). RustFS and
   Wrangler answer a readable 403, so on them the "expired" row runs; only unit tests and live R2 reach the opaque row.
+  Whether R2's other refusals (`403 SignatureDoesNotMatch`, a `400`) are readable from a page is unmeasured: the rows
+  that end in `UPLOAD_REJECTED` are proven on the fake and RustFS only. If R2 sends them without CORS headers too, a
+  browser sees them as opaque, and the file ends in a retryable `NETWORK_ERROR` after up to about 15 s of retries
+  (`r2-spike-findings.md`, "Not verified").
 - **If wrong:** a readable 403 that meant a permission problem costs one extra `/sign` before the file fails.
 - **Status:** in force (`b0690aa`, renewal in `6fd5f14`); owner accepted (M3-O4).
 - **Visible in:** `client/bucket.ts` (`classifyAnswer`, `putObject`), `client/failures.ts`.
@@ -146,7 +150,7 @@ otherwise.
   failed, a part retrying with `Retry-After` would otherwise hold the answer for up to about 100 s (M3-S9) and send
   bytes nobody will complete (final review, Minor 5).
 - **If wrong:** a large file uploads more slowly than the shared pool of the scheduler plan will allow.
-- **Status:** in force (`6fd5f14`; the stop after a failure added in the slice's final fix round).
+- **Status:** in force (`6fd5f14`; the stop after a failure in `7bf1d89`).
 - **Visible in:** `client/parts.ts` (`PARTS_IN_FLIGHT`, `signAhead`, `sendParts`).
 
 ### M3-S13: at most two `PARTS_MISSING` repair rounds
@@ -166,14 +170,16 @@ otherwise.
   completed the file: one that got no answer (`NETWORK_ERROR`) or answered `SERVER_ERROR`. Then the file is kept. The
   flag is sticky across attempts and repair rounds, except that a `PARTS_MISSING` answer clears it (M3-S31). A
   `/complete` that succeeds is returned as a success even when the signal fired meanwhile, and a cancel during
-  `/complete` returns once that request answers.
+  `/complete` returns once that request answers. A failure follows the same rule, with its `/abort` in the background
+  (M3-S15).
 - **Why:** the plan audit's C-1. The server may finish `/complete` and run `onComplete` after the browser stopped
   waiting, and `/abort` with a live token deletes the upload's own object (`server/abort.ts`, M2-X1). The keep rule is
   M3-H15 item 2 as amended by M3-H16.
 - **If wrong:** an object the user believes cancelled stays until the app deletes it; once the token expires,
   `/abort` cannot delete it either. A server that never answers `/complete` holds the cancelled `upload()` until the
   browser drops the connection. A cancel during `/upload` loses the token, so a multipart upload waits for the
-  lifecycle rule.
+  lifecycle rule. A single `PUT` cancelled after its bytes reached the bucket may land after `/abort`'s HEAD; that
+  object is an orphan the lifecycle rule does not remove (the 1.1 database adapters close this gap).
 - **Status:** in force (`bc06db2`, `cec31c9`). Spec §5.5 says the client never sends `/abort` after a `/complete` that
   may have succeeded.
 - **Visible in:** `client/upload.ts` (`complete`, `uploadFile`), `client/endpoints.ts` (`complete`, `abort`),
@@ -196,8 +202,8 @@ otherwise.
 - **If wrong:** a background request after a failure that the caller does not see, and an `onAbort` call an app may
   not expect after a failure. A file kept because a `/complete` may have finished it still stays until the app
   deletes it.
-- **Status:** in force; supersedes the first M3-S15 ("no `/abort` after a failure", `bc06db2`, owner accepted under
-  M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good.
+- **Status:** in force (`7ed3e60`); supersedes the first M3-S15 ("no `/abort` after a failure", `bc06db2`, owner
+  accepted under M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good.
 - **Visible in:** `client/upload.ts` (`uploadFile`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
@@ -207,7 +213,7 @@ otherwise.
   500 on. A non-2xx 429 without cloudrop's body is the exception (M3-S30).
 - **Why:** a wrong `basePath` or a proxy's HTML page must never make `upload()` reject or read garbage.
 - **If wrong:** a newer server that adds a required field to an answer is refused by an older client.
-- **Status:** in force (`6f533c8`).
+- **Status:** in force (`6f533c8`); amended by M3-S29 and M3-S30 (a proxy's 429 page).
 - **Visible in:** `client/answers.ts`, `client/endpoints.ts` (`post`, `refusal`), `client/failures.ts`
   (`unreadableAnswer`).
 
@@ -222,8 +228,7 @@ otherwise.
 - **Why:** plain JavaScript callers get every one of these wrong; a configuration mistake fails at construction, as
   `createCloudrop` does.
 - **If wrong:** a `basePath` with a query string, which some proxies need, is refused.
-- **Status:** in force (`bc06db2`; `null` options and the `fetch` option's own message added in the slice's final fix
-  round, after the final review's Minor 6).
+- **Status:** in force (`bc06db2`; `null` options and the `fetch` option's own message in `2cf2269`).
 - **Visible in:** `client.ts` (`BASE_PATH`, `createCloudropClient`), `client/upload.ts` (`readArguments`).
 
 ### M3-S18: the default `fetch`
@@ -371,8 +376,11 @@ otherwise.
   (`server/complete.ts`, `completeParts`); a completed upload answers ListParts with `NoSuchUpload`, which ends in
   success instead. No `PUT` runs while `/complete` runs, so no earlier attempt can have completed the file, and
   `/abort` deletes nothing recorded while it frees the parts at once (plan re-review 2, D-3).
-- **If wrong:** none found; a request a proxy holds and delivers after the repair `PUT`s would be the only exception,
-  and `/abort` returns before its delete when aborting an already completed upload fails (`server/abort.ts`).
+- **If wrong:** a recorded file is deleted. The one path found: a proxy holds an earlier `/complete` and delivers it
+  after the repair `PUT`s, it completes the file, and the user then cancels. The `/abort` that follows deletes the
+  recorded object: `abortMultipart` treats `NoSuchUpload` as success (`storage/s3/multipart.ts:115`), R2 answers an
+  abort after completion with `204` (spike Q11), and `server/abort.ts` then deletes the upload's own object while the
+  token is valid (`server/abort.test.ts:86`). Not considered a realistic threat.
 - **Status:** in force (`cec31c9`); amends M3-H16 and M3-S14.
 - **Visible in:** `client/upload.ts` (the `complete` closure), `client/upload-failures.test.ts`.
 

@@ -427,6 +427,11 @@ What this means for cloudrop:
 
 - **Checksum headers from a browser** (`x-amz-checksum-crc32c` on a PUT or part): neither the preflight nor the upload
   was tried. The browser rows above sent no checksum header.
+- **Whether a page can read R2's other refusals**: only the expired-URL `403` was tried from a browser (U2, opaque).
+  If `403 SignatureDoesNotMatch` or a `400` also comes without CORS headers, the client cannot tell it from a network
+  failure: it renews once, retries for up to about 15 s and answers a retryable `NETWORK_ERROR` instead of
+  `UPLOAD_REJECTED`. This is the next live browser measurement: one `PUT` from the page with a changed `content-type`
+  (as `upload-failures.test.ts` does on the fake) in a `test:browser:live` session.
 - aws-chunked / `STREAMING-UNSIGNED-PAYLOAD-TRAILER` uploads (open item 4). Only plain `Transfer-Encoding: chunked` was
   tried (Q17).
 - Bucket lifecycle rules (not read; `GetBucketLifecycleConfiguration` not attempted) and the default 7-day multipart

@@ -29,7 +29,10 @@ export const cloudrop = createCloudrop({
 // app/api/cloudrop/[...all]/route.ts: the handler
 export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 
-// the browser: the client's types come from the server's type, never its code
+// the browser: a type import, because a value import would pull the server, its storage driver and its secret
+// settings into the browser bundle
+import { createCloudropClient } from "cloudrop/client";
+import type { cloudrop } from "./lib/cloudrop";
 const { upload } = createCloudropClient<typeof cloudrop>();
 const { data, error } = await upload("files", file);
 ```
@@ -48,8 +51,9 @@ if (error) {
 A working version of all three files, with a demo sign-in, runs against a local RustFS container without any
 credentials: [`examples/next`](examples/next/README.md).
 
-Requirements: Node.js 24 or newer on the server, a browser with `fetch` and `AbortSignal` for the client (the browser
-lane tests Chromium only), and TypeScript 5.4 or newer for cloudrop's types (`route()`'s return type uses `NoInfer`).
+Requirements: Node.js 24+, Bun, Deno or Workers on the server, a browser with `fetch` and `AbortSignal` for the client
+(the browser lane tests Chromium only), and TypeScript 5.4 or newer for cloudrop's types (`route()`'s return type uses
+`NoInfer`).
 
 ## Goals
 
@@ -179,12 +183,20 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
 The bucket needs a CORS rule for your page's origin; [`examples/next`](examples/next/README.md#what-any-bucket-needs)
 lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md).
 
+Troubleshooting: when every upload ends in `NETWORK_ERROR` "The file could not be sent to the storage service. Check
+the connection" although the connection works, check the bucket's CORS rule first. A rule that misses the page's
+origin, or one of the headers cloudrop signs, blocks every `PUT`, and the browser shows it as a network failure only
+after the retry budget; the browser console names what was blocked, and `cloudrop.api.checkBucket({ origins })` checks
+the rule when the credentials may read it.
+
 ### Not done yet
 
 - The upload protocol is tested on the in-process fake, on real R2, and from Chromium through the example on RustFS
   and on real R2. Wrangler runs only the storage contract and, in the example, single uploads: its local R2 does not
   implement ListParts, so a multipart upload cannot complete there.
 - The client has no progress events, pause, resume after reload or shared upload queue yet, and no React hooks.
+- No stall detection yet: a request that never answers keeps `upload()` pending until the caller cancels it through
+  `options.signal`.
 - How the server's parallel storage calls fit Cloudflare Workers' subrequest limits is unmeasured.
 
 ## Development

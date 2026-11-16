@@ -236,7 +236,8 @@ reviews accepted.
   earlier one finished: attempt 1 completes the file and records it, its answer is lost, attempt 2 answers
   `SERVER_ERROR` because `onComplete` throws on the duplicate row, the user cancels in the backoff, and `/abort` with
   the live token deletes the recorded object (`server/abort.ts:23-31`). The handler's retryable `SERVER_ERROR` from
-  `/complete` (`unfinished()`, 500, `server/http.ts:36`) means the object is verified and kept; its other
+  `/complete` (`unfinished()` at `server/complete.ts:18-23`, status 500 at `server/http.ts:38`) means the object is
+  verified and kept; its other
   `SERVER_ERROR` answers (a throw caught at `server/handler.ts:99-102`) and a proxy's unreadable 502 or 504 may also
   follow a completion, so every `SERVER_ERROR` counts. Counting the ones that follow no completion only keeps more
   files. A recorded file must never be deleted by a cancel.

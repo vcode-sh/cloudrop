@@ -261,8 +261,9 @@ refuses it, which deletes the object. The 1.1 database adapters close this windo
 A failing part does not abort its siblings. A file fails only when a part exhausts its attempts; `retry()` then sends
 only the missing parts.
 
-Beside `UPLOAD_REJECTED`, the client has two codes of its own, which the server never sends (M3-O3): `ABORTED`, when the
-caller's signal fired, and `NETWORK_ERROR`, retryable, when a request got no answer at all and its attempts ran out.
+The client has three codes of its own, which the server never sends (M3-O3): `UPLOAD_REJECTED` (above), `ABORTED`,
+when the caller's signal fired, and `NETWORK_ERROR`, retryable, when a request got no answer at all and its attempts
+ran out.
 
 ### 6.3 Resume after reload
 
