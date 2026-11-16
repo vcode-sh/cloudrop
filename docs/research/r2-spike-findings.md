@@ -413,8 +413,9 @@ written.
 
 What this means for cloudrop:
 
-- U2 matches R2's documentation and differs from both local backends (RustFS and Wrangler answer an expired URL with a
-  readable 403). On R2 the client therefore takes S10's **opaque** row: renew the URL once, wait, retry. Task 5's unit
+- U2 matches R2's documentation ("R2 does not include CORS response headers on expired presigned URL responses",
+  [cors], last updated 2026-09-23, re-read 2026-11-16) and differs from both local backends (RustFS and Wrangler answer
+  an expired URL with a readable 403). On R2 the client therefore takes S10's **opaque** row: renew the URL once, wait, retry. Task 5's unit
   test "renews once after an opaque failure" covers that row; neither local backend can produce it.
 - The lane also showed that an exported, empty `CLOUDROP_S3_ENDPOINT` wins over `.env.local` (U14): a second run with
   an `examples/next/.env.local` pointing at a dead S3 endpoint still passed on R2 and deleted 4 objects.
