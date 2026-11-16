@@ -265,8 +265,9 @@ message says "less than 604800", but exactly 604800 was accepted.
 The error text "CORS not configured for this bucket" is returned even though a rule exists. It means "no rule matched".
 
 **BLOCKED:** browser presigned PUT, browser presigned UploadPart, reading `ETag` from JavaScript, CORS on expired URLs,
-and whether checksum headers pass a preflight. All but the last were measured on 2026-11-16 after the owner added a
-rule: [Browser, 2026-11-16](#browser-2026-11-16). The owner would need to add this rule to the test bucket and **keep the
+and whether checksum headers pass a preflight. All were measured on 2026-11-16 after the owner added a rule:
+[Browser, 2026-11-16](#browser-2026-11-16) and, for checksums,
+[Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16). The owner would need to add this rule to the test bucket and **keep the
 existing public-origin GET/HEAD rule**, because setting CORS replaces the whole policy. It uses the S3 PutBucketCors
 JSON shape from [cors]:
 
@@ -423,15 +424,71 @@ What this means for cloudrop:
 - Repeat U1 and U10 with `CLOUDROP_R2_ENV_FILE=<file> bun run test:browser:live`. U2 and U3 were measured once by a
   script that was deleted afterwards.
 
+## Browser refusals and checksums, 2026-11-16
+
+Measured 2026-11-16 (11:44:02–11:44:35 UTC) on the same test bucket and CORS rule as
+[Browser, 2026-11-16](#browser-2026-11-16). Chromium 159.0.8154.6 headless shell, driven by Playwright 1.65.1 under
+Bun 1.4.4. Method as in that section: a temporary script (deleted afterwards) routed `http://localhost:5173/` to a
+blank page and ran `fetch` from it with the presigned URL passed as a `page.evaluate` argument; no server and no port.
+The preflight was read from Chrome DevTools Protocol `Network` events (`type: Preflight`); a CORS failure from
+`Network.loadingFailed`'s `corsErrorStatus`. URLs came from `r2()`'s `presignPut` / `presignPart`, signed as the
+server signs them (single PUT: `content-type`, `content-disposition`, `if-none-match: *`, `x-amz-meta-cloudrop-id`,
+`content-length`; part: `content-length` only), except R4, which `presignPart` refuses to sign and was signed with
+`presignUrl` directly. Bodies were `Blob`s. "Outside" is the same request from Bun's `fetch` with
+`Origin: http://localhost:5173`, on its own key where the first request could have stored the object. Every object went
+under one `live-test/cloudrop-<32 hex>/` prefix; the multipart upload was aborted and `deletePrefix` deleted 3 objects,
+after which the prefix listed 0.
+
+| Row | Request from the page | `fetch` | Preflight | Outside the browser |
+|---|---|---|---|---|
+| R1 signature mismatch | single PUT presigned for `content-type: text/plain`, sent with `image/png` | **Rejected**, `TypeError: Failed to fetch` (`MissingAllowOriginHeader`, `net::ERR_FAILED`) | `204`, allows `content-disposition,content-type,if-none-match,x-amz-meta-cloudrop-id` | `403 SignatureDoesNotMatch`, no `access-control-allow-origin`; nothing stored (HEAD: absent, both keys) |
+| R2 precondition | single PUT, `if-none-match: *` signed and sent, key written first | **Resolved** `412`, body readable (`PreconditionFailed`), `ETag` null | `204` | `412 PreconditionFailed`, with `access-control-allow-origin` |
+| R3a part, signed length | `UploadPart` signed for 1024 bytes, sent 1023 | **Rejected**, as R1 | `204` | `403 SignatureDoesNotMatch`, no CORS header |
+| R3b part, unsigned type | `UploadPart` with `content-type: image/png` (a part URL does not sign it) | **Resolved** `200`, `ETag` readable | `204`, allows `content-type` | `200` |
+| R4a part number 10001 | `UploadPart` presigned with `partNumber=10001` | **Resolved** `400`, body readable (`InvalidArgument`), `ETag` null | `204` | `400 InvalidArgument`, with CORS header |
+| R4b expiry too long | `UploadPart` presigned with `X-Amz-Expires=604801` | **Rejected**, as R1 | `204` | `400 InvalidArgument`, no CORS header |
+| C1 checksum, single PUT | single PUT with `x-amz-checksum-crc32c` (correct) signed by `presignPut` | **Resolved** `200`, `ETag` readable; HEAD 14 B | `204`, allows `…,x-amz-checksum-crc32c,…` | `200` |
+| C2 checksum, part | `UploadPart` with `x-amz-checksum-crc32c` (correct) signed by `presignPart` | **Resolved** `200`, `ETag` readable; ListParts shows the part with `ChecksumCRC32C` | `204`, allows `x-amz-checksum-crc32c` | `200` |
+
+R3: R2 checks the signed `content-length` of a part (R3a); a part URL signs no `content-type`, so a changed type is not
+checked (R3b). The pattern across R1–R4: a request R2 refuses **before** it has authenticated the URL (bad signature,
+`X-Amz-Expires` over a week, and the expired URL of U2) is answered without CORS headers, so the page cannot read it; a
+refusal **after** authentication (`412`, the out-of-range part number) carries them and is readable.
+
+The CORS rule allows more than the brief that described it: a write-free control (outside-the-browser `OPTIONS` with
+`Access-Control-Request-Method: PUT`) answered `204` for `x-amz-checksum-crc32c` and `x-amz-checksum-crc64nvme`, and
+`403 Unauthorized` for `x-amz-checksum-sha256`, `x-amz-sdk-checksum-algorithm` and an arbitrary `x-f1-probe`. The rule
+in force therefore matches the Q8 JSON's `AllowedHeaders`, and U3 already saw its `ExposeHeaders`.
+
+What this means for cloudrop:
+
+- **Opaque refusals (R1, R3a, R4b).** `putObject` cannot read them and answers `opaque`
+  ([`client/bucket.ts:59`](../../packages/cloudrop/src/client/bucket.ts)): the client renews the URL once, retries
+  within its budget (6 attempts, up to about 15 s of jittered waiting, `client/retry.ts`) and ends with a retryable `NETWORK_ERROR`, not the
+  non-retryable `UPLOAD_REJECTED` that `classifyAnswer` gives a readable `403 SignatureDoesNotMatch`
+  ([`client/bucket.ts:33`](../../packages/cloudrop/src/client/bucket.ts)) and that the fake produces
+  (`upload-failures.test.ts`, "fails a file whose bytes do not match the signature, once"). On R2 that test's outcome
+  is unreachable from a browser. The same holds for any pre-authentication `400` (R4b).
+- **Readable refusals (R2, R4a).** The client classifies them as on the fake: the `412` counts as stored
+  (`bucket.test.ts`, "counts a second create-only PUT as stored"), and the `400` is a non-retryable `UPLOAD_REJECTED`
+  (`bucket.test.ts`, the `classifyAnswer` row "fails a corrupted body", same status). `cloudrop` never signs a part
+  number above 10,000 (`partNumberProblem`), so R4a stands only for "a post-authentication 400 is readable".
+- **Checksums.** With this bucket's rule, a signed `x-amz-checksum-crc32c` passes the preflight and uploads from a
+  browser, on a single PUT and on a part. A bucket owner who wants browser checksums must list `x-amz-checksum-crc32c`
+  (and `x-amz-checksum-crc64nvme` if used) in the rule's `AllowedHeaders`; a header missing from it fails the preflight
+  with `403`, which the page sees as `TypeError: Failed to fetch` before any byte is sent. The client sends no checksum
+  today.
+
 ## Not verified
 
-- **Checksum headers from a browser** (`x-amz-checksum-crc32c` on a PUT or part): neither the preflight nor the upload
-  was tried. The browser rows above sent no checksum header.
-- **Whether a page can read R2's other refusals**: only the expired-URL `403` was tried from a browser (U2, opaque).
-  If `403 SignatureDoesNotMatch` or a `400` also comes without CORS headers, the client cannot tell it from a network
-  failure: it renews once, retries for up to about 15 s and answers a retryable `NETWORK_ERROR` instead of
-  `UPLOAD_REJECTED`. This is the next live browser measurement: one `PUT` from the page with a changed `content-type`
-  (as `upload-failures.test.ts` does on the fake) in a `test:browser:live` session.
+- **Checksum headers from a browser:** measured in
+  [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16) for CRC32C only. A browser PUT with
+  `x-amz-checksum-crc64nvme`, and a **wrong** checksum value from a browser (whether its `400 BadDigest` is readable),
+  were not tried.
+- **Other refusals from a browser:** measured for `SignatureDoesNotMatch` (single PUT and part), `412`, and two `400
+  InvalidArgument` in [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16). Not tried from a
+  browser: `400 BadDigest`, `400 EntityTooSmall`/`InvalidPart` (Complete is server-side), `404 NoSuchUpload` on a part
+  of an aborted upload, and `429`.
 - aws-chunked / `STREAMING-UNSIGNED-PAYLOAD-TRAILER` uploads (open item 4). Only plain `Transfer-Encoding: chunked` was
   tried (Q17).
 - Bucket lifecycle rules (not read; `GetBucketLifecycleConfiguration` not attempted) and the default 7-day multipart
