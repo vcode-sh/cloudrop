@@ -96,8 +96,8 @@ Internal modules, each testable on its own and reachable only through its interf
    plugin hooks, `api.*` and the `store` interface (stateless by default).
 4. **`engine`**: a pure state machine, the part planner and the scheduler. No network, no DOM, deterministic under a
    fake clock.
-5. **`client`**: transports (XHR for upload progress, fetch elsewhere), persistence (memory, IndexedDB, opt-in OPFS),
-   optional Web Worker for hashing, sniffing and image work.
+5. **`client`**: transports (XHR for upload progress, fetch elsewhere), persistence (memory and IndexedDB; a copy into
+   OPFS is deferred to a later opt-in, §6.3), optional Web Worker for hashing, sniffing and image work.
 6. **`react`**: hooks over the client store via `useSyncExternalStore`.
 
 Metadata schemas use Standard Schema, so users bring zod, valibot or arktype and cloudrop depends on none.
@@ -264,9 +264,9 @@ refuses it, which deletes the object. The 1.1 database adapters close this windo
 A failing part does not abort its siblings. A file fails only when a part exhausts its attempts; `retry()` then sends
 only the missing parts.
 
-The client has three codes of its own, which the server never sends (M3-O3): `UPLOAD_REJECTED` (above), `ABORTED`,
-when the caller's signal fired, and `NETWORK_ERROR`, retryable, when a request got no answer at all and its attempts
-ran out.
+The client has four codes of its own, which the server never sends (M3-O3, `M3-U69`): `UPLOAD_REJECTED` (above),
+`ABORTED`, when the caller's signal fired, `NETWORK_ERROR`, retryable, when a request got no answer at all and its
+attempts ran out, and `UPLOAD_IN_USE`, when `resume()` finds the upload held by another tab or by this page (§6.3).
 
 ### 6.3 Resume after reload
 
@@ -422,7 +422,8 @@ Audits of two private production codebases informed these rules (findings kept o
    M3.
 3. **Chaos:** a fault-injecting proxy (dropped connections, 429, 503, latency, truncated responses, expired URLs). A
    run passes when every upload ends correct or with a clear error code.
-4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB and OPFS, offline and online, CORS.
+4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB (an OPFS copy is deferred to a later
+   opt-in, §6.3), offline and online, CORS.
 5. **Types:** inference tests (`expect-type`) for route names, metadata and the `onComplete` result.
 6. **Package:** publint and attw on the packed tarball, size-limit on the built entries (`bun run package:check`).
 

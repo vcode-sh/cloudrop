@@ -12,8 +12,8 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 - M3 (the upload engine and the browser client): the first slice and both progress plans are done on this branch.
   `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with retries, URL renewal, a
   connection pool shared by the client that sizes itself, progress, speed and time left, pause, resume, cancel and
-  retry per file, and recovery from stalled requests and lost connectivity. Resume after a reload comes next. React
-  hooks (`useUpload`) arrive in M4.
+  retry per file, recovery from stalled requests and lost connectivity, and resume after a reload. React hooks
+  (`useUpload`) arrive in M4.
 
 Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
 
@@ -185,6 +185,10 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
   `upload()` that fails after `/upload` is cleaned up the same way, in the background, so `upload()` answers the error
   at once (a file of `start()` is kept for `retry()` instead: see below). The one exception is a file after a
   `/complete` that may have succeeded: it is kept, never deleted.
+- Four error codes come from the client and never from the server: `UPLOAD_REJECTED` (the bucket refused the bytes as
+  signed: a different size, type or checksum), `ABORTED` (a cancel), `NETWORK_ERROR` (no answer after every attempt;
+  retryable) and `UPLOAD_IN_USE` (`resume()` found the upload held in this browser: see
+  [Resume after reload](#resume-after-reload)).
 - Endpoint requests send cookies (`credentials: "include"`), so `authorize` can read the session; uploads to the bucket
   send none.
 - Wire types (`UploadRequest`, `FileTicket`, `ErrorBody` and the rest) and the route inference types (`RouteName`,
@@ -259,12 +263,101 @@ const again = await job.retry(); // or job.files[0].retry(): the failed files ag
   sends everything through it, `PUT`s included: a part's bytes then count only once it is stored, so progress moves a
   part at a time. Outside a browser (Node, Bun, Deno, Workers) `PUT`s use `fetch` the same way.
 
+### Resume after reload
+
+A file sent in parts (over the `multipartThreshold`, 64 MiB by default) survives a reload or a closed tab: the client
+keeps a record of its upload in the browser's IndexedDB, and when the user picks the same file again, only the parts the
+bucket does not hold are sent. It is on by default and needs nothing on the server. Files sent in one `PUT` are not
+kept: a reload loses them, and the page starts them again.
+
+```ts
+const client = createCloudropClient<typeof cloudrop>({
+  namespace: user.id, // the signed-in user's id: one user's unfinished uploads never mix with another's
+  // persist: false,  // keeps nothing on disk, and nothing can be resumed after a reload
+});
+
+// After the reload: what can be continued, newest first, for one route (every route without an argument).
+const { data: unfinished } = await client.resumable("files"); // null when the browser's storage failed
+const upload = unfinished?.[0]; // { id, route, name, size, type, lastModified, expiresAt }: enough to ask for the file
+
+// The user picks the file again, through a file input or a drop.
+if (upload) {
+  const job = client.resume(upload, picked, { signal });
+  const { data, error } = await job.done; // an UploadResult of one file, as start(...).done gives
+}
+
+// At sign-out:
+await client.forget();
+```
+
+- **The user picks the file again.** A page cannot get a `File` back after a reload: a browser hands a page a file
+  only when the user picks or drops it, and cloudrop does not copy files (see the end of this section). `resumable()`
+  gives the name and size to ask for. `start()` and `upload()` never match a file against a record: the same file
+  passed to them is uploaded again under a new key.
+- **The same file** means equal name, size, `lastModified` and type, and an equal SHA-256 of its first and last 64 KiB
+  (of the whole file up to 128 KiB). On a page that is not a secure context, such as plain HTTP on a LAN address, there
+  is no `crypto.subtle`, and only the first four are compared. It is a heuristic: a file changed only in the middle,
+  with the same timestamp, passes.
+- **`resume(upload, file, options?)`** returns an `UploadJob` of one file with everything a job of `start()` has:
+  `subscribe`, `getSnapshot`, `pause`, `resume`, `abort`, `retry` and `done`. The route and the metadata come from the
+  record; `signal` is the only option. Before any request, its `done` resolves `{ data: null, error }` with
+  `INVALID_INPUT` for wrong arguments or a different file, `NOT_FOUND` when there is no unexpired record of that upload
+  in the client's namespace (it finished, was cancelled or expired, or persistence is off), or `UPLOAD_IN_USE` (below).
+- **The server is asked first.** A resumed file starts as `completing`, and its first request is `/complete` with the
+  saved token, which lists the bucket's parts: one `ListParts`, a Class A operation, per resumed file.
+  - All there, or a `/complete` that finished before the reload: the file ends done without a `PUT`. The route's
+    `afterVerify` and `onComplete` run again then, so make them idempotent by `file.id`, as for any retried request.
+  - Parts missing: exactly those are sent, then `/complete` again. The parts that landed count in `bytes` from that
+    answer; before it, `bytes` is 0.
+  - The upload is gone (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`): the file asks `/upload` once for a new
+    ticket with the record's route and metadata and sends the whole file under a new key, its `bytes` from 0, with no
+    failure in between.
+  - Any other failure ends the file `failed` and keeps its record; `retry()`, or a later `resume()`, asks `/complete`
+    again.
+- **What is stored**, one record per upload, in the IndexedDB database `cloudrop`: the upload's id, route and the
+  metadata sent to `/upload`; its upload token, key, part size, part count and expiry; the file's name, size, type,
+  `lastModified` and fingerprint; and the namespace. Never a presigned URL, an ETag or a part list. The token is a
+  bearer credential for its upload for 24 hours: it signs `PUT`s for its key, completes the upload, and through
+  `/abort` cancels it or deletes its finished file. It is signed, not encrypted, so what `authorize` returned and the
+  metadata can be read from it.
+- **When a record is deleted:** when its file ends done or is cancelled, or `upload()` cleans up a failed file; when a
+  new ticket replaces it; when `pagehide` gives up a failed file's ticket with `/abort`; when it is found
+  expired, by `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time to start); and on
+  `forget()`. So after a reload, the uploads left to resume are those that were still uploading or paused, and failed
+  files after a `/complete` that may have succeeded. A delete issued in `pagehide` may not commit before the page
+  unloads: the next page then still lists that upload. Resuming it finds the upload gone when the `/abort` reached the
+  server, and starts over with a new ticket, sending every byte; when the `/abort` did not, only the missing parts are
+  sent.
+- **Two tabs.** The page that holds an upload's ticket holds a Web Lock on it (`cloudrop:upload:<id>`) as long as it
+  keeps the ticket: while the file runs, and while a failed file waits for `retry()`. `resume()` of an upload held in
+  another tab, or in this page, ends with `UPLOAD_IN_USE` and sends nothing: finish or cancel it there. `resumable()`
+  still lists held uploads. Without Web Locks (a page that is not a secure context) two tabs may send the same parts:
+  the stored file is still right, but the bytes are wasted.
+- **Namespace and sign-out.** Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by
+  default): a client sees only its namespace's records, and the namespace is fixed when the client is created, so
+  create a new client when the user changes. Call `forget()` at sign-out: it deletes the namespace's records and
+  resolves `{ data: { forgotten }, error }`; `forget({ all: true })` deletes every record of this origin. Uploads that
+  are running keep going; abort their jobs to stop them. Without `forget()`, a signed-out user's unfinished uploads,
+  tokens included, stay on the browser profile for up to 24 hours, and another user signed in on the same profile and
+  namespace could finish them. They stay the first user's files, since `authorize` runs only in `/upload`: re-check the
+  session in `onComplete` when that matters.
+- **Off, or no storage.** With `persist: false`, or where there is no `indexedDB` (Node, Bun, Deno, Workers), nothing
+  is read or written: `resumable()` resolves `[]`, `resume()` ends with `NOT_FOUND` and `forget()` with
+  `{ forgotten: 0 }`. `resumable()` and `forget()` never reject; when the browser's storage fails they resolve
+  `STORAGE_ERROR`. A storage failure never fails, pauses or slows an upload. Records live in the origin's best-effort
+  storage, which a browser may evict under pressure; cloudrop never calls `navigator.storage.persist()`, since Firefox
+  would prompt the user for it, so call it yourself if you want persistent storage.
+- **Not supported:** resuming without picking the file again (a copy into the origin-private file system is deferred
+  to a later opt-in: it needs Safari 26 or a worker, and writes every file a second time); files sent in one `PUT`;
+  resuming on another device or browser; continuing an upload after its 24-hour token expired (its record is deleted,
+  the old parts wait for the bucket's lifecycle rule, and the file is started again).
+
 ### Not done yet
 
 - The upload protocol is tested on the in-process fake, on real R2, and from Chromium through the example on RustFS
   and on real R2. Wrangler runs only the storage contract and, in the example, single uploads: its local R2 does not
   implement ListParts, so a multipart upload cannot complete there.
-- The client has no resume after a reload yet, and no React hooks.
+- The client has no React hooks yet.
 - How the server's parallel storage calls fit Cloudflare Workers' subrequest limits is unmeasured.
 
 ## Development
