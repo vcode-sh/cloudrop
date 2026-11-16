@@ -111,20 +111,23 @@ library itself is unchanged.
   visitors where it stores files.
 - **File:** choose one, or generate 1 KiB, 5 MiB, 20 MiB or 100 MiB of random bytes in the browser. Then **Upload**;
   **Cancel** aborts the upload's signal.
-- **Faults:** fail the next bucket PUT with a network error (the client renews the URL once and retries), answer the
-  next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so a 100 MiB file
-  shows four parts in flight), and drop the answer of the next `/complete` (the client retries it, and from then on a
-  cancel or failure keeps the file). Each line on the page names the decision behind the behaviour.
+- **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it
+  again), answer the next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so
+  a 100 MiB file shows four parts in flight), and drop the answer of the next `/complete` (the client retries it, and
+  from then on a cancel or failure keeps the file). Each line on the page names the decision behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals and injected faults, and a bar
   on a shared timeline. The log keeps only the request's kind, the bucket host, the part number, status, times and body
   size: never a URL, header or token, so no presigned URL reaches the page.
-- **Summary:** total time, bytes, throughput, parts, retries, renewals, peak parts in flight, `upload()`'s
-  `{ data, error }`, and one sentence that tells the run.
+- **Summary:** total time, file size, the bytes of the PUTs the bucket answered, end-to-end throughput in MiB/s (not
+  shown under 1 MiB, where round trips dominate), PUT requests started and answered, retries, renewals, peak parts in
+  flight, `upload()`'s `{ data, error }`, and one sentence that tells the run.
 
 Against RustFS, start the container and run `bun run setup:rustfs` and `bun run dev` as in "Run with RustFS" above, then
 open `/lab`. Against R2, set the variables from "Run with R2"; the bucket's CORS rule must allow
-`http://localhost:5173`, or every bucket PUT shows as a network error.
+`http://localhost:5173`, or every bucket PUT shows as a network error. Against Wrangler, only the 1 KiB and 5 MiB
+files work: the 20 and 100 MiB files go in parts, and their `/complete` fails with `STORAGE_ERROR` (see "Run with
+Wrangler").
 
 The numbers come from one browser on one network: they show how the client behaves, not a benchmark of the storage.
 
@@ -132,8 +135,9 @@ The numbers come from one browser on one network: they show how the client behav
 
 `app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file
 chosen twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload
-as three parts and a dropped bucket PUT as renewed and retried, and that no signed URL reaches the page. Run it from the repository root; install the shell once from this
-directory with `bunx playwright install --only-shell chromium`.
+as three parts, a dropped bucket PUT as renewed and retried, and a cancel during a delay as nothing sent, and that no
+signed URL reaches the page. Run them from the repository root; install the shell once from this directory with
+`bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves

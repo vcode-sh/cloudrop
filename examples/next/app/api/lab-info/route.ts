@@ -1,6 +1,6 @@
 import { displayHost } from "../../lab/host";
 
-export type StorageName = "RustFS" | "Wrangler" | "R2";
+type StorageName = "RustFS" | "Wrangler" | "R2";
 
 export interface LabInfo {
   storage: StorageName;

@@ -56,7 +56,11 @@ test("the lab shows a 20 MiB upload as three parts", async ({ page }) => {
     ["PUT part 3", "200", ""],
     ["/complete", "200", ""],
   ]);
-  await expect(summaryValue(page, "Bytes")).toHaveText("20971520 (20.0 MiB)");
+  await expect(page.getByRole("status")).toHaveText(
+    /^Started 3 PUTs \(at most 3 at a time\), all got an answer; completed in [\d.]+ m?s at [\d.]+ MiB\/s\.$/,
+  );
+  await expect(summaryValue(page, "File size")).toHaveText("20971520 (20.0 MiB)");
+  await expect(summaryValue(page, "Sent to the bucket")).toHaveText("20971520 (20.0 MiB)");
   await expectNoSignedUrl(page);
 });
 
@@ -74,5 +78,34 @@ test("a dropped bucket PUT is renewed and retried", async ({ page }) => {
     ["/complete", "200", ""],
   ]);
   await expect(page.getByRole("figure", { name: "Result" })).toContainText('"error": null');
+  // The PUT that failed sent nothing the bucket answered; a 1 KiB rate would measure round trips, not bandwidth.
+  await expect(page.getByRole("status")).toHaveText(
+    /^Started 2 PUTs, 1 got an answer; the PUT was retried once after a network error; renewed one URL through \/sign; completed in [\d.]+ m?s\.$/,
+  );
+  await expect(summaryValue(page, "Sent to the bucket")).toHaveText("1024 (1.0 KiB)");
+  await expectNoSignedUrl(page);
+});
+
+test("a cancel while parts wait sends nothing to the bucket", async ({ page }) => {
+  await signIn(page);
+  // Long enough that all three parts are still waiting inside the lab's fetch when Cancel is pressed.
+  await page.getByLabel(/Delay every bucket PUT by/).fill("3000");
+  await page.getByRole("button", { name: "20 MiB", exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "PUT part 3", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await expect(page.getByRole("status")).toHaveText(
+    /^Started 3 PUTs \(at most 3 at a time\), none got an answer; cancelled after [\d.]+ m?s; the client told the server with \/abort\.$/,
+  );
+  expect(await requestRows(page)).toEqual([
+    ["/upload", "200", ""],
+    ["PUT part 1", "cancelled", "delayed 3000 ms"],
+    ["PUT part 2", "cancelled", "delayed 3000 ms"],
+    ["PUT part 3", "cancelled", "delayed 3000 ms"],
+    ["/abort", "200", ""],
+  ]);
+  await expect(summaryValue(page, "Sent to the bucket")).toHaveText("0 bytes");
   await expectNoSignedUrl(page);
 });

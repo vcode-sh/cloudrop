@@ -3,7 +3,7 @@
 import type { ClientOptions } from "cloudrop/client";
 import { displayHost } from "./host";
 
-export type ClientFetch = NonNullable<ClientOptions["fetch"]>;
+type ClientFetch = NonNullable<ClientOptions["fetch"]>;
 
 /** What the log keeps of one request: never its URL, headers or body, which hold a signature or a token. */
 export interface RequestRecord {
@@ -12,6 +12,8 @@ export interface RequestRecord {
   isBucketPut: boolean;
   /** The bucket's host for a PUT, the page's own host for an endpoint call. */
   host: string;
+  /** For a /sign, the URL it asks for: "the PUT" or "part n"; null for every other request. */
+  signedFor: string | null;
   /** An HTTP status; null while the request is in flight. */
   status: number | "network error" | "cancelled" | null;
   startMs: number;
@@ -39,6 +41,13 @@ function readTarget(url: string, method: string): Pick<RequestRecord, "kind" | "
     return { kind: part ? `PUT part ${part}` : "PUT single", isBucketPut: true, host: displayHost(parsed.host) };
   }
   return { kind: `/${parsed.pathname.split("/").at(-1)}`, isBucketPut: false, host: parsed.host };
+}
+
+/** A /sign body is { token, parts? }: only the part numbers are kept, never the token. */
+function signedFor(kind: string, body: RequestInit["body"]): string | null {
+  if (kind !== "/sign" || typeof body !== "string") return null;
+  const { parts } = JSON.parse(body) as { parts?: number[] };
+  return parts ? `part ${parts.join(", ")}` : "the PUT";
 }
 
 function sizeOf(body: RequestInit["body"]): number {
@@ -93,8 +102,10 @@ async function sendWithFaults(record: RequestRecord, url: string, init: RequestI
 /** A fetch that appends a record per request to `log` and calls `changed` whenever a record starts or ends. */
 export function createLabFetch(log: RequestRecord[], faults: FaultSwitch, changed: () => void): ClientFetch {
   return async (url, init) => {
+    const target = readTarget(url, init.method ?? "GET");
     const record: RequestRecord = {
-      ...readTarget(url, init.method ?? "GET"),
+      ...target,
+      signedFor: signedFor(target.kind, init.body),
       status: null,
       startMs: performance.now(),
       endMs: null,

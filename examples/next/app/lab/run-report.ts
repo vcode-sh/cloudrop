@@ -4,7 +4,7 @@ import type { CompleteResponse, Result, RouteResult } from "cloudrop/client";
 import type { cloudrop } from "../../lib/cloudrop";
 import type { RequestRecord } from "./lab-fetch";
 
-export type UploadResult = Result<CompleteResponse<RouteResult<typeof cloudrop, "files">>>;
+type UploadResult = Result<CompleteResponse<RouteResult<typeof cloudrop, "files">>>;
 
 export interface Run {
   fileSize: number;
@@ -16,34 +16,42 @@ export interface Run {
 
 export interface LogRow {
   record: RequestRecord;
-  /** "retry", "renewal" and the injected faults, joined. */
+  /** "retry", "renewal", "already stored" and the injected faults, joined. */
   note: string;
 }
 
-/** A request that ended without a 2xx answer; one in flight has not failed yet. */
-export const requestFailed = ({ status }: RequestRecord): boolean =>
-  typeof status === "number" ? status >= 300 : status !== null;
+const MIB = 1024 * 1024;
+
+/** A PUT answered 412 repeats a create-only PUT whose first attempt stored the object: the client counts it as stored (M3-S10). */
+const alreadyStored = (record: RequestRecord): boolean => record.isBucketPut && record.status === 412;
+
+/** A request that ended without a 2xx answer (or a PUT's 412); one in flight has not failed yet. */
+export const requestFailed = (record: RequestRecord): boolean =>
+  typeof record.status === "number" ? record.status >= 300 && !alreadyStored(record) : record.status !== null;
 
 /**
- * A request of a kind already sent is a retry. Every /sign renews a URL: this example's /upload ticket signs every part
- * (the route's 100 MB limit, binary as in cloudrop, is 13 parts of 8 MiB; a ticket signs up to 20), so the client asks
- * /sign only to replace one.
+ * A request of a kind already sent is a retry. A /sign renews a URL, unless the last /sign for the same URL failed: then
+ * it is that renewal's retry. This example's /upload ticket signs every part (the route's 100 MB limit, binary as in
+ * cloudrop, is 13 parts of 8 MiB; a ticket signs up to 20), so the client asks /sign only to replace a URL.
  */
 export function annotate(records: readonly RequestRecord[]): LogRow[] {
   const seen = new Set<string>();
-  let lastSignFailed = false;
+  const signFailed = new Map<string, boolean>();
   return records.map((record) => {
-    const notes = [...record.injected];
-    if (record.kind === "/sign") {
-      notes.unshift(lastSignFailed ? "retry" : "renewal");
-      lastSignFailed = requestFailed(record);
-    } else if (seen.has(record.kind)) notes.unshift("retry");
+    let label: string | null = seen.has(record.kind) ? "retry" : null;
+    const target = record.signedFor;
+    if (target !== null) {
+      const of = target === "the PUT" ? "" : ` of ${target}`;
+      label = `${signFailed.get(target) ? "retry" : "renewal"}${of}`;
+      signFailed.set(target, requestFailed(record));
+    }
     seen.add(record.kind);
-    return { record, note: notes.join("; ") };
+    const notes = [label, alreadyStored(record) ? "already stored" : null, ...record.injected];
+    return { record, note: notes.filter((note) => note !== null).join("; ") };
   });
 }
 
-/** The most bucket PUTs that were in flight at the same moment. */
+/** The most bucket PUTs that were in flight at the same moment, the lab's injected delay included. */
 function peakInFlight(records: readonly RequestRecord[]): number {
   const edges = records
     .filter((record) => record.isBucketPut)
@@ -62,12 +70,16 @@ function peakInFlight(records: readonly RequestRecord[]): number {
   return peak;
 }
 
-export interface Summary {
+interface Summary {
   totalMs: number;
-  bytes: number;
-  /** Only for a completed upload. */
-  megabytesPerSecond: number | null;
-  parts: number;
+  completed: boolean;
+  fileSize: number;
+  /** Body bytes of the PUTs the bucket answered. A PUT cancelled or failed before an answer may have sent nothing. */
+  sentBytes: number;
+  /** File size over the whole upload() call; null when not completed or under 1 MiB. */
+  mibPerSecond: number | null;
+  putsStarted: number;
+  putsAnswered: number;
   retries: number;
   renewals: number;
   peakInFlight: number;
@@ -75,13 +87,20 @@ export interface Summary {
 
 export function summarize(rows: readonly LogRow[], run: Run & { endMs: number }): Summary {
   const records = rows.map((row) => row.record);
+  const puts = records.filter((record) => record.isBucketPut);
+  const answered = puts.filter((record) => typeof record.status === "number");
   const totalMs = run.endMs - run.startMs;
   const completed = run.result !== null && run.result.error === null;
+  // Under 1 MiB the time is mostly round trips to the server and the bucket, not bytes moving.
+  const measurable = completed && run.fileSize >= MIB && totalMs > 0;
   return {
     totalMs,
-    bytes: run.fileSize,
-    megabytesPerSecond: completed && totalMs > 0 ? run.fileSize / 1e6 / (totalMs / 1000) : null,
-    parts: new Set(records.filter((record) => record.isBucketPut).map((record) => record.kind)).size,
+    completed,
+    fileSize: run.fileSize,
+    sentBytes: answered.reduce((sum, record) => sum + record.bytes, 0),
+    mibPerSecond: measurable ? run.fileSize / MIB / (totalMs / 1000) : null,
+    putsStarted: puts.length,
+    putsAnswered: answered.length,
     retries: rows.filter((row) => row.note.startsWith("retry")).length,
     renewals: rows.filter((row) => row.note.startsWith("renewal")).length,
     peakInFlight: peakInFlight(records),
@@ -90,16 +109,27 @@ export function summarize(rows: readonly LogRow[], run: Run & { endMs: number })
 
 export const seconds = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-/** Two significant digits for a small file's rate, which would otherwise read 0.0 MB/s. */
-export const throughput = (megabytesPerSecond: number): string =>
-  `${megabytesPerSecond >= 10 ? megabytesPerSecond.toFixed(1) : megabytesPerSecond.toPrecision(2)} MB/s`;
+/** End to end, binary as cloudrop's sizes are: the file size over the time from /upload to /complete's answer. */
+export function throughputText({ completed, mibPerSecond }: Summary): string {
+  if (!completed) return "none: not completed";
+  if (mibPerSecond === null) return "not shown: under 1 MiB the time is mostly round trips";
+  return `${mibPerSecond.toFixed(1)} MiB/s`;
+}
 
 const times = (count: number): string => (count === 1 ? "once" : count === 2 ? "twice" : `${count} times`);
 
-function sendingClause(summary: Summary): string {
-  if (summary.parts === 0) return "Sent no bytes to the bucket";
-  if (summary.parts === 1 && summary.peakInFlight <= 1) return "Sent the file in one PUT";
-  return `Sent ${summary.parts} parts, at most ${summary.peakInFlight} at a time`;
+function answeredText(started: number, answered: number): string {
+  if (answered === 0) return started === 1 ? "it got no answer" : "none got an answer";
+  if (answered === started) return started === 1 ? "it got an answer" : "all got an answer";
+  return `${answered} got an answer`;
+}
+
+/** Counts requests, never parts "sent": a PUT cancelled before an answer may not have sent a byte. */
+function sendingClause({ putsStarted, putsAnswered, peakInFlight }: Summary): string {
+  if (putsStarted === 0) return "Started no PUT";
+  const atOnce = peakInFlight > 1 ? ` (at most ${peakInFlight} at a time)` : "";
+  const started = putsStarted === 1 ? "Started 1 PUT" : `Started ${putsStarted} PUTs`;
+  return `${started}${atOnce}, ${answeredText(putsStarted, putsAnswered)}`;
 }
 
 /** "part 2 was retried once after a network error", one clause per request kind that was sent again. */
@@ -112,9 +142,9 @@ function retryClauses(rows: readonly LogRow[]): string[] {
     if (attempts.length < 2) return [];
     const reasons = new Set(
       attempts
-        .map(({ record }) => record.status)
-        .filter((status) => status === "network error" || (typeof status === "number" && status >= 300))
-        .map((status) => (status === "network error" ? "a network error" : `HTTP ${status}`)),
+        .map(({ record }) => record)
+        .filter((record) => requestFailed(record) && record.status !== "cancelled")
+        .map(({ status }) => (status === "network error" ? "a network error" : `HTTP ${status}`)),
     );
     const subject = kind === "PUT single" ? "the PUT" : kind.replace("PUT ", "");
     const after = reasons.size > 0 ? ` after ${[...reasons].join(" and ")}` : "";
@@ -125,10 +155,7 @@ function retryClauses(rows: readonly LogRow[]): string[] {
 function endingClause(rows: readonly LogRow[], run: Run & { endMs: number }, summary: Summary): string {
   const took = seconds(summary.totalMs);
   const error = run.result?.error;
-  if (!error) {
-    const rate = summary.megabytesPerSecond === null ? "" : ` at ${throughput(summary.megabytesPerSecond)}`;
-    return `completed in ${took}${rate}`;
-  }
+  if (!error) return `completed in ${took}${summary.mibPerSecond === null ? "" : ` at ${throughputText(summary)}`}`;
   const ended = error.code === "ABORTED" ? `cancelled after ${took}` : `failed with ${error.code} after ${took}`;
   if (rows.some((row) => row.record.kind === "/abort")) return `${ended}; the client told the server with /abort`;
   const completeUnanswered = rows.some(
