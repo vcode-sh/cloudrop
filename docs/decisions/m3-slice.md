@@ -162,7 +162,7 @@ otherwise.
   completes again, at most 2 repair rounds (3 `/complete` answers), then returns the `PARTS_MISSING` error.
 - **Why:** spec §6.3 gives no bound; without one a part that never lands would loop.
 - **If wrong:** a bucket that loses a part three times running fails the file; the resume plan's `retry()` re-sends.
-- **Status:** in force (`bc06db2`).
+- **Status:** in force (`bc06db2`). A resumed file's first `PARTS_MISSING` is free of these rounds (`M3-U75`).
 - **Visible in:** `client/upload.ts` (`REPAIR_ROUNDS`, `sendAndComplete`).
 
 ### M3-S14: cancellation
