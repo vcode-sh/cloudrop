@@ -60,7 +60,7 @@ describe("bucket configuration", () => {
     "reports a %s 404 without the missing-configuration code as a non-retryable storage error",
     async (_name, read, setting) => {
       // A proxy or a wrong endpoint path also answers 404; only the storage's own code means "no configuration".
-      // Retrying the same path cannot fix a wrong endpoint (ruling R40).
+      // Retrying the same path cannot fix a wrong endpoint (ruling M2-X40).
       const proxy = stubbed(async () => new Response("<html><body>Not found</body></html>", { status: 404 }));
       expect((await read(driverWith(proxy))).error).toMatchObject({
         code: "STORAGE_ERROR",
