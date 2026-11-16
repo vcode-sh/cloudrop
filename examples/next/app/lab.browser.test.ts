@@ -289,28 +289,36 @@ test("going offline pauses an upload and coming back online completes it", async
 const doneFiles = async (page: Page): Promise<string[]> =>
   (await fileRows(page)).filter(([, status]) => status === "done").map(([name]) => name);
 
-for (const { order, puts, first } of [
-  {
-    order: "smallest-first",
-    puts: ["PUT part 1", "PUT single", "PUT part 2", "PUT part 3"],
-    first: "random-1-KiB.bin",
-  },
-  { order: "added", puts: ["PUT part 1", "PUT part 2", "PUT part 3", "PUT single"], first: "random-20-MiB.bin" },
+// The order's promise is which file completes first, not the PUT sequence: a PUT that finds a free slot is never held
+// back, so with smallest-first part 1 of the large file may go first, and a real retry on R2 adds an attempt.
+for (const { order, first } of [
+  { order: "smallest-first", first: "random-1-KiB.bin" },
+  { order: "added", first: "random-20-MiB.bin" },
 ]) {
   test(`with one connection and order ${order}, ${first} completes first`, async ({ page }) => {
     await signIn(page);
     await page.getByLabel("Connections", { exact: true }).selectOption("1");
     await page.getByLabel("Order", { exact: true }).selectOption(order);
-    // Every PUT waits a second, far longer than a /complete: the file whose last PUT is answered first completes first.
+    // Every PUT waits a second, far longer than a /complete: the two files complete at least a second apart, and a poll
+    // every 100 ms sees the first one done alone.
     await page.getByLabel(/Delay every bucket PUT by/).fill("1000");
     for (const size of ["20 MiB", "1 KiB"]) await page.getByRole("button", { name: size, exact: true }).click();
     await page.getByRole("button", { name: "Upload", exact: true }).click();
 
-    await expect.poll(() => doneFiles(page), { timeout: 20_000 }).not.toEqual([]);
-    expect(await doneFiles(page)).toEqual([first]);
+    let doneAtFirst: string[] = [];
+    await expect
+      .poll(
+        async () => {
+          doneAtFirst = await doneFiles(page);
+          return doneAtFirst.length;
+        },
+        { intervals: [100], timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    expect(doneAtFirst).toEqual([first]);
     await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
-    const rows = await requestRows(page);
-    expect(rows.map(([kind]) => kind).filter((kind) => kind?.startsWith("PUT"))).toEqual(puts);
+    expect(await doneFiles(page)).toEqual(["random-20-MiB.bin", "random-1-KiB.bin"]);
+    // One connection: never two PUTs in flight, retries included, however many attempts each PUT took.
     await expect(summaryValue(page, "Peak PUTs in flight")).toHaveText("1");
     // Four PUTs one after another, each delayed a second: the run took seconds, measured to its last answer.
     await expect(summaryValue(page, "Total time")).toHaveText(/^\d+\.\d s$/);
