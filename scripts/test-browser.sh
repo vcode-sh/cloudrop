@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Browser lane: the Next.js example, built and started by Playwright, uploads from headless Chromium to a disposable
-# RustFS container. The trap removes this run's container on success, failure and interrupt; Playwright stops the server.
+# Browser lane: the Next.js example, built and started by Playwright, uploads from headless Chromium to a
+# disposable RustFS container. The trap removes this run's container on success, failure and interrupt; Playwright
+# stops the server.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-PORT="${CLOUDROP_RUSTFS_PORT:-19000}"
+# Not test-rustfs.sh's 19000, so both RustFS lanes can run at once with their defaults.
+PORT="${CLOUDROP_RUSTFS_PORT:-19100}"
 # The example always serves on 5173: the bucket's CORS rule names that origin.
 if ss -ltnH "sport = :5173" | grep -q .; then
   echo "Port 5173 is in use. Stop what listens there; the example must serve on it." >&2
@@ -16,7 +18,8 @@ if ss -ltnH "sport = :${PORT}" | grep -q .; then
 fi
 export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-browser-rustfs-$$"
-# Registered before `up` so a container that starts but never becomes ready is still removed; `down` only touches this run's name.
+# Registered before `up` so a container that starts but never becomes ready is still removed; `down` only touches
+# this run's name.
 trap '"$ROOT/scripts/rustfs.sh" down' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM

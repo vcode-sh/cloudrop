@@ -59,7 +59,10 @@ async function uploadedKey(page: Page, start: string, extension: string): Promis
   const status = page.getByRole("status");
   // Longer than expect's default 5 s, for a 20 MiB upload over a slow link; the test's own 30 s still bounds it.
   await expect(status).toHaveText(pattern, { timeout: 20_000 });
-  return pattern.exec((await status.textContent()) ?? "")?.[1] ?? "";
+  const text = (await status.textContent()) ?? "";
+  const key = pattern.exec(text)?.[1];
+  if (!key) throw new Error(`The status line names no uploaded key: "${text}".`);
+  return key;
 }
 
 /** 0, 1, …, 250, 0, 1, …: a part sent at the wrong offset or cut at the wrong byte reads back different. */
