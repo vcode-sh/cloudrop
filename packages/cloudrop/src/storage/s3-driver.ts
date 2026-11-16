@@ -177,6 +177,17 @@ function readListedObject(block: string): Result<ListedObject> {
   return ok({ key, size, etag: etagIn(block), uploadedAt });
 }
 
+function readLifecycleRule(rule: string): Result<BucketLifecycleRule> {
+  const days = xmlText(xmlBlocks(rule, "AbortIncompleteMultipartUpload")[0] ?? "", "DaysAfterInitiation");
+  if (days !== undefined && !/^\d{1,9}$/.test(days)) return fail(incompleteResponse("valid multipart abort days"));
+  return ok({
+    id: xmlText(rule, "ID") ?? "",
+    enabled: xmlText(rule, "Status") === "Enabled",
+    prefix: xmlText(rule, "Prefix") ?? "",
+    ...(days === undefined ? {} : { abortIncompleteMultipartUploadDays: Number(days) }),
+  });
+}
+
 /** The first failure among the results, or all their values. */
 function allOk<T>(results: Result<T>[]): Result<T[]> {
   const values: T[] = [];
@@ -393,6 +404,26 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
     return { method: "PUT", url: signed.toString(), headers, expiresAt: new Date(date.getTime() + expiresIn * 1000) };
   }
 
+  /** One page of ListParts: its parts, and the marker of the next page, or null after the last one. */
+  async function partsPage(
+    key: string,
+    uploadId: string,
+    marker: string,
+  ): Promise<Result<{ parts: PartInfo[]; next: string | null }>> {
+    const result = await sendForXml(
+      "GET",
+      objectUrl(key, { uploadId, "max-parts": String(MAX_LIST_PAGE), "part-number-marker": marker }),
+    );
+    if (result.error) return result;
+    const parts = allOk(xmlBlocks(result.data, "Part").map((block) => readPart(block, rules.maxParts)));
+    if (parts.error) return parts;
+    if (xmlText(result.data, "IsTruncated") !== "true") return ok({ parts: parts.data, next: null });
+    const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
+    // A missing or non-advancing marker would loop forever.
+    if (!(Number(next) > Number(marker))) return fail(incompleteResponse("valid next part marker"));
+    return ok({ parts: parts.data, next });
+  }
+
   /** Not validated: createMultipart checks caller input first; a copy passes headers the storage itself returned. */
   async function startMultipart(key: string, options: ObjectOptions): Promise<Result<{ uploadId: string }>> {
     const result = await sendForXml("POST", objectUrl(key, { uploads: "" }), { headers: objectHeaders(options) });
@@ -522,41 +553,19 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
       if (result.error) return configurationReadError(result.error, "NoSuchLifecycleConfiguration", "lifecycle");
       const configuration = xmlBlocks(result.data, "LifecycleConfiguration")[0];
       if (configuration === undefined) return fail(incompleteResponse("lifecycle configuration"));
-      const parsed: BucketLifecycleRule[] = [];
-      for (const rule of xmlBlocks(configuration, "Rule")) {
-        const days = xmlText(xmlBlocks(rule, "AbortIncompleteMultipartUpload")[0] ?? "", "DaysAfterInitiation");
-        if (days !== undefined && !/^\d{1,9}$/.test(days))
-          return fail(incompleteResponse("valid multipart abort days"));
-        parsed.push({
-          id: xmlText(rule, "ID") ?? "",
-          enabled: xmlText(rule, "Status") === "Enabled",
-          prefix: xmlText(rule, "Prefix") ?? "",
-          ...(days === undefined ? {} : { abortIncompleteMultipartUploadDays: Number(days) }),
-        });
-      }
-      return ok(parsed);
+      return allOk(xmlBlocks(configuration, "Rule").map(readLifecycleRule));
     },
 
     async listParts(key, uploadId) {
       const problem = keyProblem(key) ?? uploadIdProblem(uploadId);
       if (problem) return fail(invalidInput(problem));
       const parts: PartInfo[] = [];
-      let marker = "0";
-      let truncated = true;
-      while (truncated) {
-        const result = await sendForXml(
-          "GET",
-          objectUrl(key, { uploadId, "max-parts": String(MAX_LIST_PAGE), "part-number-marker": marker }),
-        );
-        if (result.error) return result;
-        const page = allOk(xmlBlocks(result.data, "Part").map((block) => readPart(block, rules.maxParts)));
+      let marker: string | null = "0";
+      while (marker !== null) {
+        const page = await partsPage(key, uploadId, marker);
         if (page.error) return page;
-        parts.push(...page.data);
-        truncated = xmlText(result.data, "IsTruncated") === "true";
-        const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
-        // A missing or non-advancing marker would loop forever.
-        if (truncated && !(Number(next) > Number(marker))) return fail(incompleteResponse("valid next part marker"));
-        marker = next;
+        parts.push(...page.data.parts);
+        marker = page.data.next;
       }
       return ok(parts);
     },

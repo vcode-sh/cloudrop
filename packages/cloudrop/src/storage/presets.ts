@@ -70,6 +70,18 @@ function checkBucket(bucket: string, service: "R2" | "S3"): string {
   return bucket;
 }
 
+function checkAccountId(accountId: unknown): string {
+  // Cloudflare shows the ID in lower case; pasted values may not be.
+  const account = typeof accountId === "string" ? accountId.toLowerCase() : undefined;
+  if (account === undefined || !/^[0-9a-f]{32}$/.test(account)) {
+    const given = account === undefined ? "is not text" : `has ${account.length} characters`;
+    throw configError(
+      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given ${given}. Copy it from the R2 overview page in the Cloudflare dashboard.`,
+    );
+  }
+  return account;
+}
+
 export function r2(given: R2Options): StorageDriver {
   // Plain-JavaScript callers can pass nothing; the environment may still hold everything but the bucket.
   const options: Partial<R2Options> = given ?? {};
@@ -87,14 +99,7 @@ export function r2(given: R2Options): StorageDriver {
     "Pass them to r2(); a setting with a variable name in parentheses can also come from the environment.",
   );
   const bucket = checkBucket(options.bucket as string, "R2");
-  // Cloudflare shows the ID in lower case; pasted values may not be.
-  const account = typeof accountId === "string" ? accountId.toLowerCase() : undefined;
-  if (account === undefined || !/^[0-9a-f]{32}$/.test(account)) {
-    const given = account === undefined ? "is not text" : `has ${account.length} characters`;
-    throw configError(
-      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given ${given}. Copy it from the R2 overview page in the Cloudflare dashboard.`,
-    );
-  }
+  const account = checkAccountId(accountId);
   const { jurisdiction } = options;
   if (jurisdiction !== undefined && jurisdiction !== "eu" && jurisdiction !== "fedramp") {
     throw configError('The R2 jurisdiction must be "eu" or "fedramp". Omit it for the default location.');

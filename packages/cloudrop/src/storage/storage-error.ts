@@ -1,7 +1,72 @@
-import { CloudropError } from "../errors.ts";
+import { CloudropError, type CloudropErrorCode } from "../errors.ts";
 import { xmlText } from "./xml.ts";
 
 const INVALID_PART_CODES = new Set(["InvalidPart", "InvalidPartOrder", "EntityTooSmall"]);
+
+interface Rule {
+  matches: (status: number, storageCode: string | undefined) => boolean;
+  code: CloudropErrorCode;
+  message: string;
+  retryable?: true;
+}
+
+/** Checked in order; the first rule that matches decides. */
+const RULES: readonly Rule[] = [
+  {
+    matches: (status, storageCode) => status === 404 && storageCode === "NoSuchUpload",
+    code: "NO_SUCH_UPLOAD",
+    message: "The multipart upload no longer exists. Start a new upload.",
+  },
+  {
+    matches: (status, storageCode) => status === 404 && storageCode === "NoSuchBucket",
+    code: "STORAGE_ERROR",
+    message: "The bucket does not exist. Check the bucket name in your configuration.",
+  },
+  { matches: (status) => status === 404, code: "NOT_FOUND", message: "The object does not exist. Check the key." },
+  {
+    matches: (status) => status === 412,
+    code: "ALREADY_EXISTS",
+    message: "An object with this key already exists. Choose a different key.",
+  },
+  {
+    matches: (_status, storageCode) => storageCode !== undefined && INVALID_PART_CODES.has(storageCode),
+    code: "INVALID_PART",
+    message: "One or more parts are missing or have the wrong size. Upload them again, then complete the upload.",
+  },
+  {
+    matches: (_status, storageCode) => storageCode === "BadDigest",
+    code: "CHECKSUM_MISMATCH",
+    message: "The uploaded bytes do not match their checksum. Upload them again.",
+  },
+  {
+    matches: (_status, storageCode) => storageCode === "RequestTimeTooSkewed",
+    code: "STORAGE_DENIED",
+    message:
+      "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+  },
+  {
+    matches: (_status, storageCode) => storageCode === "ExpiredRequest",
+    code: "STORAGE_DENIED",
+    message: "The signed request expired. Sign it again and retry.",
+  },
+  {
+    matches: (status) => status === 403,
+    code: "STORAGE_DENIED",
+    message: "The storage service refused the request. Check the access key, its permissions and the bucket name.",
+  },
+  {
+    matches: (status) => status === 429 || status === 503,
+    code: "RATE_LIMITED",
+    message: "The storage service is throttling requests. Retry after a short delay.",
+    retryable: true,
+  },
+  {
+    matches: (status, storageCode) => status >= 500 || status === 408 || storageCode === "OperationAborted",
+    code: "STORAGE_ERROR",
+    message: "The storage service failed. Retry the request.",
+    retryable: true,
+  },
+];
 
 /**
  * Turns a failed S3 response into a CloudropError. 429 and 503 are matched by status, never by S3 code: real R2
@@ -11,70 +76,11 @@ export function storageError(status: number, body: string): CloudropError {
   const rawCode = xmlText(body, "Code");
   // The code comes from the response body and goes to logs, so accept only what an S3 code looks like.
   const storageCode = rawCode && /^[A-Za-z0-9]{1,64}$/.test(rawCode) ? rawCode : undefined;
-  const options = { status, storageCode };
-  if (status === 404 && storageCode === "NoSuchUpload") {
-    return new CloudropError("NO_SUCH_UPLOAD", "The multipart upload no longer exists. Start a new upload.", options);
-  }
-  if (status === 404 && storageCode === "NoSuchBucket") {
-    return new CloudropError(
-      "STORAGE_ERROR",
-      "The bucket does not exist. Check the bucket name in your configuration.",
-      options,
-    );
-  }
-  if (status === 404) return new CloudropError("NOT_FOUND", "The object does not exist. Check the key.", options);
-  if (status === 412)
-    return new CloudropError(
-      "ALREADY_EXISTS",
-      "An object with this key already exists. Choose a different key.",
-      options,
-    );
-  if (storageCode && INVALID_PART_CODES.has(storageCode)) {
-    return new CloudropError(
-      "INVALID_PART",
-      "One or more parts are missing or have the wrong size. Upload them again, then complete the upload.",
-      options,
-    );
-  }
-  if (storageCode === "BadDigest") {
-    return new CloudropError(
-      "CHECKSUM_MISMATCH",
-      "The uploaded bytes do not match their checksum. Upload them again.",
-      options,
-    );
-  }
-  if (storageCode === "RequestTimeTooSkewed") {
-    return new CloudropError(
-      "STORAGE_DENIED",
-      "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
-      options,
-    );
-  }
-  if (storageCode === "ExpiredRequest") {
-    return new CloudropError("STORAGE_DENIED", "The signed request expired. Sign it again and retry.", options);
-  }
-  if (status === 403) {
-    return new CloudropError(
-      "STORAGE_DENIED",
-      "The storage service refused the request. Check the access key, its permissions and the bucket name.",
-      options,
-    );
-  }
-  if (status === 429 || status === 503) {
-    return new CloudropError("RATE_LIMITED", "The storage service is throttling requests. Retry after a short delay.", {
-      ...options,
-      retryable: true,
-    });
-  }
-  if (status >= 500 || status === 408 || storageCode === "OperationAborted") {
-    return new CloudropError("STORAGE_ERROR", "The storage service failed. Retry the request.", {
-      ...options,
-      retryable: true,
-    });
-  }
+  const rule = RULES.find((candidate) => candidate.matches(status, storageCode));
+  if (rule) return new CloudropError(rule.code, rule.message, { status, storageCode, retryable: rule.retryable });
   return new CloudropError(
     "STORAGE_ERROR",
     `The storage service rejected the request (HTTP ${status}). Check the key, size and headers you passed, then retry.`,
-    options,
+    { status, storageCode },
   );
 }
