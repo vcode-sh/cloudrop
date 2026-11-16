@@ -578,16 +578,99 @@ live-test/cloudrop-f95ac80715849f69414523982edbed51/: objects=0 multipart_upload
 one-off scratch code outside the repository; they printed numbers only, through `createRedactor`, and never a URL,
 upload id or storage answer.
 
+## Bad checksum, gone upload and throttling from a browser, 2026-11-16
+
+Measured 2026-11-16, 23:54:05–23:56:35 UTC (2026-11-17 local time), on the same test bucket and CORS rule. Node
+24.22.2 presigned with the `r2` driver (`presignPut`, `presignPart`; one row with `presignUrl`, see H1); Chromium
+159.0.8154.6 headless shell, driven by Playwright 1.65.1, opened a blank page **served by a real HTTP server on
+`http://localhost:5173`** and sent each PUT from it with `fetch` and with `XMLHttpRequest` (`Blob` bodies of 16
+bytes). Recorded from the page: whether the answer was readable, the status, the S3 `<Code>` from the body and whether
+`getResponseHeader`/`headers.get("retry-after")` returned a value. Chrome DevTools Protocol `Network` events added what
+the page cannot see: the preflight's status and `access-control-allow-headers`, and the status and header names of a
+blocked answer (`responseReceivedExtraInfo`). "Outside" is the same request from Node's `https` with
+`Origin: http://localhost:5173`. Every request went under `live-test/cloudrop-<32 hex>/`; the scripts were scratch code
+outside the repository and printed through `createRedactor`, never a URL, signature or upload id.
+
+| Row | Request from the page | `fetch` | `XMLHttpRequest` | Preflight (R2's own) | Outside the browser |
+|---|---|---|---|---|---|
+| D1 bad checksum, single PUT | single PUT signed as the server signs it, plus `x-amz-checksum-crc32c` of other 16 bytes | **Readable** `400 BadDigest` | **Readable** `400 BadDigest` | `204`, allows `content-disposition, if-none-match, x-amz-checksum-crc32c, x-amz-meta-cloudrop-id` | `400 BadDigest` with `access-control-allow-origin`; HEAD absent on all three keys |
+| D2 bad checksum, part | `UploadPart` with a wrong `x-amz-checksum-crc32c` signed by `presignPart` | **Readable** `400 BadDigest` | **Readable** `400 BadDigest` | `204`, allows `x-amz-checksum-crc32c` | `400 BadDigest` with CORS header; ListParts afterwards: 0 parts |
+| N1 part of an aborted upload | parts 1–3 presigned, `abortMultipart`, then the PUTs (within 1 s) | **Readable** `404 NoSuchUpload` | **Readable** `404 NoSuchUpload` | `204` (no headers requested) | `404 NoSuchUpload` with CORS header; HEAD absent |
+| H1 checksum header the rule lacks | PUT with `content-type` and a correct `x-amz-checksum-sha256`, both signed (`presignUrl`) | **Opaque**, `TypeError: Failed to fetch` | **Opaque**, `error` event, status 0 | **`403`**, no `access-control-allow-origin`; the PUT was never sent | `200` with CORS header, stored (the signed request itself is valid) |
+| H2 unsigned extra header | a valid `presignPut` (`content-type`) plus `x-cloudrop-probe: 1` | **Opaque**, `TypeError: Failed to fetch` | **Opaque**, `error` event, status 0 | **`403`**, as H1 | not tried |
+| T1 throttling | 10 concurrent PUTs of 16 bytes to one key with one URL (no `if-none-match`) | **Readable** `429 ServiceUnavailable`; `retry-after` **not readable** | **Readable** `429 ServiceUnavailable`; `retry-after` **not readable** | `204` ×10 | not tried |
+
+H1 and H2 stored nothing (HEAD absent on each page key). T1 provoked a `429` in the first wave of every run, so the cap
+of 300 requests was never approached: 30 burst requests in all over three runs, each run one wave of 10 within about
+0.9 s. Run 1 (5 `fetch` + 5 XHR, interleaved): 2 `fetch` and 2 XHR got `429`, 6 got `200`; run 2 (the same mix): 3
+`fetch` got `429`; run 3 (10 XHR): 3 got `429`. On the wire every `429` carried `access-control-allow-origin` and
+`Retry-After: 5`, but the rule's `ExposeHeaders` (`ETag` and the two checksum headers) does not list `Retry-After`, so
+neither API returns it to the page. The body code is `ServiceUnavailable`, as Q9 measured outside a browser.
+
+**Playwright answers preflights itself when a route is set.** A first run (23:54:05) routed `http://localhost:5173/` to
+the blank page with `page.route`, as [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16) did.
+D1, D2, N1 and T1 came out exactly as above, but H1 and H2 **succeeded** (`200`, stored, readable). The reason is in
+playwright-core 1.65.1 (`lib/coreBundle.js`, the Chromium network manager): with request interception on, Playwright
+fulfils every intercepted CORS preflight with `204`, echoing the request's origin, method and requested headers, and R2
+never sees it. So the **Preflight column of that earlier section is Playwright's echo, not R2's answer**. Its `fetch`
+and outside columns stand: the actual PUT's answer comes from R2 and Chromium checks its CORS headers. Its statements
+about which headers the rule allows rest on its outside `OPTIONS` control, which this run confirms from a real page
+(D1, D2) and repeated at 23:54:32 with the same result: `204` with `access-control-allow-headers: content-type` for
+`content-type`; `403` without CORS headers for `x-amz-checksum-sha256` (alone or with `content-type`),
+`x-amz-sdk-checksum-algorithm`, `x-f1-probe` and `x-cloudrop-probe`, and for the origins `http://localhost:5174` and
+`https://example.invalid`. The `204` answers say `access-control-allow-methods: PUT, GET, HEAD`. A browser test that
+must see the bucket's preflight has to serve its page for real, without `page.route`.
+
+What this means for cloudrop's client ([`client/bucket.ts`](../../packages/cloudrop/src/client/bucket.ts)):
+
+- **D1, D2 `BadDigest`: readable.** `classifyAnswer(400, "BadDigest")` gives `rejected` with `uploadRejected(400)`, not
+  retryable, through `fetch` and XHR alike. The client sends no checksum today, so it meets this only once it signs
+  one. Then a `BadDigest` would mean the bytes sent differ from the bytes hashed (the file changed on disk, or the
+  checksum was computed from other bytes), which is the case `signatureMismatch()` words ("Pick the file again"); the
+  generic "refused the file (HTTP 400)" is accurate but less helpful.
+- **N1 `NoSuchUpload`: readable.** `classifyAnswer(404, "NoSuchUpload")` gives `rejected`, `uploadRejected(404)`, not
+  retryable; no renewal or retry is spent, which is right, because no new URL revives an aborted upload. Only a new
+  upload does.
+- **T1 `429`: readable.** `classifyAnswer(429, …)` gives `retry` with `storageBusy()` (`RATE_LIMITED`, retryable), as
+  designed. `parseRetryAfter(null)` is 0, so the client retries on its own jitter (first retry within 0.5 s) instead
+  of R2's 5 s. A bucket owner who wants the client to honour it must add `Retry-After` to the rule's `ExposeHeaders`
+  (not tried). Same-key throttling needs concurrent writes to one key; cloudrop writes one key per file and parts of
+  one upload did not throttle at 8 in parallel (Q9).
+- **H1, H2, a header the rule does not allow: opaque**, through `fetch` and XHR alike, and before any byte is sent. The
+  client takes the `opaque` row (renew once, retry within the budget, then the retryable `NETWORK_ERROR` of
+  `bucketUnreachable()`), as that function's comment already assumed; this replaces the inference in
+  [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16) with a measurement. A missing
+  `x-amz-checksum-crc32c` in a bucket's rule would therefore make every checksummed PUT fail as a network error.
+
+**Cleanup proof.** Each run registered every key and upload id before the request that could create it, aborted every
+upload and deleted every key at the end (also on error, a 10-minute watchdog, SIGINT, SIGTERM or SIGHUP), then listed
+its prefix. The H1 outside control stored one object per run; T1 stored one key. A separate read-only process re-listed
+the three prefixes (`ListObjectsV2` through the driver and a signed `ListMultipartUploads`), 23:56:35 UTC:
+
+```
+live-test/cloudrop-581921bae3394d918da4b3e8ab310683/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (run 1, routed)
+live-test/cloudrop-a19b60d4b28d7898fdd2fa6e2011be58/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (run 2, served)
+live-test/cloudrop-9a54765f1b93804dcb63a135a0c12ab3/: objects=0 multipart_uploads=0 truncated=false listings_ok=true   (run 3, XHR burst)
+```
+
+Runs 1 and 2 aborted 2 uploads and deleted 11 keys each; run 3 deleted 1. No bucket setting or CORS rule was read or
+written; the `OPTIONS` control writes nothing. The page server on port 5173 and every browser were stopped at the end
+of each run.
+
 ## Not verified
 
-- **Checksum headers from a browser:** measured in
-  [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16) for CRC32C only. A browser PUT with
-  `x-amz-checksum-crc64nvme`, a **wrong** checksum value from a browser (whether its `400 BadDigest` is readable), and
-  a page `fetch` with a checksum header the rule does not allow were not tried.
-- **Other refusals from a browser:** measured for `SignatureDoesNotMatch` (single PUT and part), `412`, and two `400
-  InvalidArgument` in [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16). Not tried from a
-  browser: `400 BadDigest`, `400 EntityTooSmall`/`InvalidPart` (Complete is server-side), `404 NoSuchUpload` on a part
-  of an aborted upload, and `429`.
+- **Checksum headers from a browser:** a correct CRC32C was measured in
+  [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16); a wrong one (`400 BadDigest`,
+  readable) and a checksum header the rule does not allow (opaque) in
+  [Bad checksum, gone upload and throttling](#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16). A
+  browser PUT with `x-amz-checksum-crc64nvme` was not tried.
+- **Other refusals from a browser:** `400 EntityTooSmall`/`InvalidPart` (Complete is server-side) were not tried. The
+  rest are measured in the two browser-refusal sections. `Retry-After` on a `429` with `Retry-After` in the rule's
+  `ExposeHeaders` was not tried (the rule was not changed).
+- **R2's own preflight answers in [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16):** that
+  run used `page.route`, so its preflights were answered by Playwright (see
+  [Bad checksum, gone upload and throttling](#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16)). Its
+  R1–R4 and C1–C2 rows were not repeated with a served page.
 - aws-chunked / `STREAMING-UNSIGNED-PAYLOAD-TRAILER` uploads (open item 4). Only plain `Transfer-Encoding: chunked` was
   tried (Q17).
 - Bucket lifecycle rules (not read; `GetBucketLifecycleConfiguration` not attempted) and the default 7-day multipart
