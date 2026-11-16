@@ -2,11 +2,12 @@
 // It reads the files Biome checks there: tracked ones and new ones git does not ignore.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const SOURCE_CAP = 250;
 const TEST_CAP = 400;
 
-export interface OversizedFile {
+interface OversizedFile {
   path: string;
   lines: number;
   cap: number;
@@ -24,6 +25,8 @@ export function findOversizedFiles(files: ReadonlyArray<{ path: string; text: st
 }
 
 if (import.meta.main) {
+  // The paths below are relative to the repository root; from any other directory git would list nothing.
+  process.chdir(fileURLToPath(new URL("..", import.meta.url)));
   const listed = execFileSync(
     "git",
     [
