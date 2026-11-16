@@ -1,11 +1,11 @@
 import { type CloudropError, fail, ok, type Result } from "../../errors.ts";
+import { invalidInput } from "../../input.ts";
 import { MiB } from "../../rules.ts";
 import type { ListedObject, ObjectInfo, StorageDriver } from "../driver.ts";
 import {
   bodyProblem,
   checksumProblem,
   cursorProblem,
-  invalidInput,
   keyListProblem,
   keyProblem,
   limitProblem,

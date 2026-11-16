@@ -2,9 +2,9 @@
 // before authorize has passed and the policy has accepted the file.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
-import { isPlainObject } from "../storage/validate.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { type AbortContext, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";

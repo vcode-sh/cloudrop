@@ -2,8 +2,8 @@
 // (spec §7.2) and the body cap (spec §7.3).
 
 import { CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
+import { invalidInput } from "../input.ts";
 import { type ErrorBody, MAX_BODY_BYTES } from "../protocol/types.ts";
-import { invalidInput } from "../storage/validate.ts";
 import type { Logger } from "./plugins.ts";
 
 const STATUS = {

@@ -1,5 +1,5 @@
+import { isPlainObject } from "../input.ts";
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
-import { isPlainObject } from "../storage/validate.ts";
 import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
 

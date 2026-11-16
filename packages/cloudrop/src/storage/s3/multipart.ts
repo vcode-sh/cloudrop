@@ -1,13 +1,7 @@
 import { fail, ok, type Result } from "../../errors.ts";
+import { invalidInput } from "../../input.ts";
 import type { ObjectOptions, PartInfo, StorageDriver } from "../driver.ts";
-import {
-  invalidInput,
-  keyProblem,
-  MAX_LIST_PAGE,
-  objectOptionsProblem,
-  partsProblem,
-  uploadIdProblem,
-} from "../validate.ts";
+import { keyProblem, MAX_LIST_PAGE, objectOptionsProblem, partsProblem, uploadIdProblem } from "../validate.ts";
 import { escapeXml, stripQuotes, xmlBlocks, xmlText } from "../xml.ts";
 import { objectUrl, type S3Context } from "./context.ts";
 import { objectHeaders, orEmpty } from "./options.ts";

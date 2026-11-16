@@ -1,5 +1,5 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../storage/validate.ts";
+import { invalidInput, isPlainObject } from "../input.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import type { AbortContext } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";

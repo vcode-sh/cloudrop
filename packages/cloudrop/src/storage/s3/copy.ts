@@ -1,7 +1,8 @@
 import { CloudropError, fail, ok, type Result } from "../../errors.ts";
+import { invalidInput } from "../../input.ts";
 import type { CompletedPart, ObjectInfo, StorageDriver } from "../driver.ts";
 import { encodeKeyPath, encodeRfc3986 } from "../sigv4.ts";
-import { invalidInput, keyProblem } from "../validate.ts";
+import { keyProblem } from "../validate.ts";
 import { objectUrl, type S3Context } from "./context.ts";
 import { startMultipart } from "./multipart.ts";
 import { etagIn, incompleteResponse } from "./responses.ts";

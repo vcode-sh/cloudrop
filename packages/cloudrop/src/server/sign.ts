@@ -2,9 +2,9 @@
 // key, the sizes and the part count; the request only says which parts.
 
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
+import { invalidInput } from "../input.ts";
 import { countParts } from "../plan.ts";
 import { PARTS_PER_SIGN, type SignResponse } from "../protocol/types.ts";
-import { invalidInput } from "../storage/validate.ts";
 import type { EndpointInput } from "./config.ts";
 import { storageFailure } from "./http.ts";
 import { presignParts, presignSingle } from "./presign.ts";

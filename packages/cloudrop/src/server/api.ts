@@ -1,9 +1,10 @@
 // cloudrop.api (spec §9): server-side file operations on the configured storage, all returning { data, error }.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { invalidInput, isPlainObject } from "../input.ts";
 import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
-import { invalidInput, isPlainObject, keyProblem } from "../storage/validate.ts";
+import { keyProblem } from "../storage/validate.ts";
 import { type BucketReport, checkBucket } from "./bucket-check.ts";
 import { isExactOrigin, type ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";

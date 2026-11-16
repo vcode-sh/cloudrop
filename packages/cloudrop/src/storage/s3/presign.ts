@@ -1,10 +1,10 @@
 import { fail, ok } from "../../errors.ts";
+import { invalidInput } from "../../input.ts";
 import type { PresignedRequest, StorageDriver } from "../driver.ts";
 import { presignUrl } from "../sigv4.ts";
 import {
   checksumProblem,
   expiryProblem,
-  invalidInput,
   keyProblem,
   objectOptionsProblem,
   partNumberProblem,

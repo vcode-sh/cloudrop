@@ -2,8 +2,9 @@
 // descriptor, policy and key. Nothing here touches storage or signs anything.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { invalidInput, isPlainObject } from "../input.ts";
 import { type FileDescriptor, MAX_NAME_LENGTH } from "../protocol/types.ts";
-import { formatBytes, invalidInput, isPlainObject } from "../storage/validate.ts";
+import { formatBytes } from "../storage/validate.ts";
 import { matchAccept, normalizeType } from "./accept.ts";
 import { ROUTE_NAME, type RouteConfig, type ServerConfig } from "./config.ts";
 import { generatedKey, newFileId, normalizeKey } from "./key.ts";
