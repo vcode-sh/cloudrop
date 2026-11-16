@@ -17,8 +17,8 @@ export interface PartSender {
   first: readonly SignedPart[];
   /** POST /sign for these parts; the answer holds exactly them (answers.ts checks it). */
   sign(partNumbers: readonly number[]): Promise<Result<SignedPart[]>>;
-  /** PUT this part's bytes to the URL. */
-  put(target: SignedRequest, partNumber: number): Promise<BucketOutcome>;
+  /** PUT this part's bytes to the URL. `stop` fires on a cancel or once the file has failed: start nothing after it. */
+  put(target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome>;
 }
 
 export type Step =
@@ -107,7 +107,9 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
     const target = await urlFor(run, partNumber, renew);
     // urlFor may have waited for a /sign; the upload may have been cancelled or have failed meanwhile.
     if (stopped(run)) return stopped(run);
-    const outcome = target.error ? signFailure(target.error) : await run.sender.put(target.data, partNumber);
+    const outcome = target.error
+      ? signFailure(target.error)
+      : await run.sender.put(target.data, partNumber, run.stop.signal);
     const step = nextStep(outcome, attempt, renewed);
     if (step.kind === "done") return null;
     if (step.kind === "fail") return step.error;

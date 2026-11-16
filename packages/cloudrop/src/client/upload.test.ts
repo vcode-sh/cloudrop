@@ -9,6 +9,7 @@ import type { Result } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route, unauthorized } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
+import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { albumSchema } from "../testing/upload-fixture.ts";
 
@@ -145,6 +146,73 @@ describe("upload", () => {
     expect({ error: errorOf(result), requests: fixture.requests }).toEqual({
       error: { code: "INVALID_INPUT", message, retryable: false },
       requests: [],
+    });
+  });
+
+  describe("the client's connection pool (spec §4.4)", () => {
+    /** A client whose fixture counts the bucket PUTs in flight and keeps the highest count. */
+    function counting(
+      options: { concurrency?: number },
+      answer: (label: string) => Response | undefined = () => undefined,
+    ) {
+      const seen = { inFlight: 0, most: 0 };
+      const fixture = clientFixture(
+        { albums },
+        {
+          multipartThreshold: "8MB",
+          appHeaders: { "x-user": "42" },
+          fault: async ({ label, init, forward }) => {
+            if (!label.startsWith("PUT")) return undefined;
+            const instead = answer(label);
+            if (instead) return instead;
+            seen.inFlight++;
+            seen.most = Math.max(seen.most, seen.inFlight);
+            // One turn of the event loop, so PUTs started together overlap here.
+            await Promise.resolve();
+            try {
+              return await forward(init);
+            } finally {
+              seen.inFlight--;
+            }
+          },
+        },
+      );
+      const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options });
+      const upload = (bytes: number) =>
+        client.upload("albums", new File([offsetBytes(bytes)], "video.bin"), { metadata });
+      return { seen, upload, fixture };
+    }
+    const threeParts = 16 * MiB + 1;
+
+    it.each([
+      { name: "concurrency 2", concurrency: 2, most: 2 },
+      { name: "the default of 4", concurrency: undefined, most: 4 },
+    ])("caps the PUTs of two uploads on one client: $name", async ({ concurrency, most }) => {
+      const { seen, upload } = counting({ concurrency });
+      const results = await Promise.all([upload(threeParts), upload(threeParts)]);
+      expect({ errors: results.map((r) => r.error), most: seen.most }).toEqual({ errors: [null, null], most });
+    });
+
+    it.each([
+      { name: "a 3-part file", bytes: threeParts, most: 3 },
+      { name: "a 9-part file", bytes: 8 * 8 * MiB + 1, most: 4 },
+    ])("keeps one file to 4 PUTs in flight under concurrency 16: $name", async ({ bytes, most }) => {
+      const { seen, upload } = counting({ concurrency: 16 });
+      const { error } = await upload(bytes);
+      expect({ error, most: seen.most }).toEqual({ error: null, most });
+    });
+
+    it("starts no part that was still waiting for a slot when another part failed the file", async () => {
+      const { fixture, upload } = counting({ concurrency: 1 }, (label) =>
+        label === "PUT part 1" ? errorResponse(400, "BadRequest", "Rejected.") : undefined,
+      );
+      const result = await upload(3 * 8 * MiB + 1);
+      // Part 2 is granted the slot part 1 gives back before parts.ts reads part 1's answer as a failure: the one PUT
+      // that window lets through. Parts 3 and 4, still waiting, never start.
+      expect({ code: result.error?.code, puts: fixture.requests.filter((r) => r.startsWith("PUT")) }).toEqual({
+        code: "UPLOAD_REJECTED",
+        puts: ["PUT part 1", "PUT part 2"],
+      });
     });
   });
 

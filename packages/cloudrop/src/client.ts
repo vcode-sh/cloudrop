@@ -1,6 +1,7 @@
 // The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
 
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
+import { createPool } from "./client/pool.ts";
 import { createPut } from "./client/transport.ts";
 import { type UploadContext, uploadFile } from "./client/upload.ts";
 import { configError, type Result } from "./errors.ts";
@@ -40,6 +41,8 @@ export interface ClientOptions {
   basePath?: string;
   /** Replaces the global fetch, for tests and runtimes that bring their own. */
   fetch?: ClientFetch;
+  /** How many bucket PUTs this client sends at once, across all its uploads: 1 to 16, default 4. */
+  concurrency?: number;
 }
 
 export interface UploadOptions<TMetadata = unknown> {
@@ -69,13 +72,16 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   options: ClientOptions = {},
 ): CloudropClient<TCloudrop> {
   // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
-  const { basePath = "/api/cloudrop", fetch } = options ?? {};
+  const { basePath = "/api/cloudrop", fetch, concurrency = 4 } = options ?? {};
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError(
       'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
     );
   }
   if (fetch !== undefined && typeof fetch !== "function") throw configError("The fetch option must be a function.");
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+    throw configError("concurrency must be a whole number from 1 to 16.");
+  }
   if (typeof (fetch ?? globalThis.fetch) !== "function") {
     throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
   }
@@ -83,7 +89,13 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
   // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling P6).
-  const context: UploadContext = { endpoints: createEndpoints(basePath, send), put: createPut(fetch, send) };
+  let rank = 0;
+  const context: UploadContext = {
+    endpoints: createEndpoints(basePath, send),
+    put: createPut(fetch, send),
+    pool: createPool(concurrency),
+    nextRank: () => ++rank,
+  };
   return {
     // No `this`: `const { upload } = createCloudropClient()` works (S2).
     upload: (route, file, ...rest) =>

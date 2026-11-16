@@ -42,6 +42,22 @@ describe("createCloudropClient", () => {
     },
   );
 
+  it.each([
+    { name: "text", concurrency: "4" },
+    { name: "0", concurrency: 0 },
+    { name: "17", concurrency: 17 },
+    { name: "a fraction", concurrency: 2.5 },
+    { name: "NaN", concurrency: Number.NaN },
+  ])("refuses a concurrency that is not a whole number from 1 to 16: $name", ({ concurrency }) => {
+    expect(() => createCloudropClient({ concurrency, fetch: vi.fn() } as unknown as ClientOptions)).toThrow(
+      expect.objectContaining({
+        name: "CloudropError",
+        code: "INVALID_CONFIG",
+        message: "concurrency must be a whole number from 1 to 16.",
+      }),
+    );
+  });
+
   it("treats null options as none, as createCloudrop does", async () => {
     // Plain JavaScript such as createCloudropClient(settings.cloudrop ?? null).
     vi.spyOn(Math, "random").mockReturnValue(0);
