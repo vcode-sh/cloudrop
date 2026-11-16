@@ -13,7 +13,7 @@ snapshot and its throttled listeners), `pool.ts` (connection slots shared by the
 `/upload` for every file, per-file runs, the `UploadResult`). Every bucket PUT takes a pool slot through the
 `PartSender.put` wrapper in `upload.ts`, so `parts.ts` does not change.
 
-**Tech Stack:** TypeScript 7, web-platform APIs only (`fetch`, `XMLHttpRequest`, `AbortSignal.any`), Vitest 5 with fake
+**Tech Stack:** TypeScript 7, web-platform APIs only (`fetch`, `XMLHttpRequest`, `AbortController`), Vitest 5 with fake
 timers, the in-process fake R2, Playwright for the browser lane, Next.js for the example.
 
 **Spec:** [`docs/superpowers/specs/2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md)
@@ -44,6 +44,10 @@ timers, the in-process fake R2, Playwright for the browser lane, Next.js for the
   free, and removes its RustFS container. Docker containers from tests carry the label `cloudrop.test`.
 - Live R2 (`bun run test:browser:live`) only in Task 7, with `CLOUDROP_R2_ENV_FILE=~/.config/cloudrop/live-r2.env`;
   never read or print that file.
+- Bundle: Task 1 raises the `cloudrop/client` limit in `scripts/size-limit.config.ts` to the owner's ceiling, 7.5 kB,
+  marked provisional; Task 8 sets it from the measured size. Every task reports the measured client size; above
+  6.5 kB, stop and report.
+- No `AbortSignal.any` (it would raise the browser floor to Safari 17.4): combine signals with a small helper.
 - Decisions taken while executing go to the ledger as rulings; Task 8 writes them to `docs/decisions/m3-uploader.md`
   (series `M3-U`).
 
@@ -60,7 +64,7 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 - **P4. A file that is completing ignores `pause()`**: its bytes are all sent and `/complete` runs without the pass's
   signal (`M3-S14`). A `PARTS_MISSING` repair turns it back to uploading, where pause applies again.
 - **P5. `upload(route, file)` with one `File`** returns that file's `Result` as before; its error now carries
-  `error.file` like every per-file error. A list (`File[]` or `FileList`) returns the job's `UploadResult`.
+  `error.file` like every per-file error. A list (an array or any `ArrayLike<File>`, such as `input.files`) returns the job's `UploadResult`.
 - **P6. The transport is chosen once, when the client is created:** XHR when `globalThis.XMLHttpRequest` is a function
   and no `fetch` option was passed; otherwise the `fetch` path, which reports a part's bytes when its answer arrives.
   The XHR constructor is read from `globalThis` on every PUT, so a page that wraps it later (the lab) is seen.
@@ -131,6 +135,11 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
     XMLHttpRequest: new () => unknown;
     /** Requests sent and not yet finished, failed or aborted, oldest first. Only `hold: true` leaves any here. */
     open: XhrCall[];
+    /** The label of every request ever sent, aborted ones included, in order. */
+    sent: readonly string[];
+    /** Resolves with the next call when it is sent (or at once with one already sent and not yet taken). Lets a test
+     * wait for a request without moving fake timers (`vi.waitFor` advances them). */
+    next(): Promise<XhrCall>;
   }
   /** Without `hold`, each request reports half its body, then all of it, then finishes by itself. */
   export function fakeXhr(fetch: ClientFetch, options?: { hold?: boolean }): FakeXhr;
@@ -167,7 +176,7 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
      the option (the fake XHR's `open` stays empty) and `onBytes` is called once with the body size.
   Run: `cd packages/cloudrop && bunx vitest run --project unit src/client/transport.test.ts` → FAIL (no module).
 
-- [ ] **Step 3: Implement `transport.ts`.** Export `STORAGE_CODE` and a helper `unreachable(signal)` from `bucket.ts`
+- [ ] **Step 3: Implement `transport.ts`.** Export `STORAGE_CODE` (typed `RegExp`, `isolatedDeclarations`) and a helper `unreachable(signal: AbortSignal): BucketOutcome` from `bucket.ts`
   (the `catch` branch of `putObject` becomes `return unreachable(signal)`), so both paths share them:
 
   ```ts
@@ -231,10 +240,12 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   `put: createPut(fetch, send)` where `fetch` is the option as passed and `send` the resolved fetch. Existing tests pass
   a `fetch` option, so they keep the fetch path and must pass unchanged.
 
-- [ ] **Step 5: Run** `bun run verify` → PASS, then `bun run test:browser` → 6/6 PASS: the quickstart and the lab now
-  send PUTs through real XHR (the lab still passes its own `fetch`, so its PUTs stay on fetch until Task 7).
+- [ ] **Step 5: Run** `bun run verify` → PASS, then `bun run test:browser` → 6/6 PASS: the quickstart now
+  sends PUTs through real XHR; the lab passes its own `fetch`, so its PUTs stay on fetch until Task 7. In the same task,
+  raise the `cloudrop/client` limit to `7.5 kB` with the comment "provisional during plan A (owner's ceiling, spec §7);
+  Task 8 sets it from the measured size", and report the measured size.
 
-- [ ] **Step 6: Commit** `feat(client): send bucket PUTs through XMLHttpRequest in a browser` (stage the five files).
+- [ ] **Step 6: Commit** `feat(client): send bucket PUTs through XMLHttpRequest in a browser` (stage each changed file by path, `scripts/size-limit.config.ts` included).
 
 ---
 
@@ -287,11 +298,12 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
     3. `restart` sets the speed back to 0.
   - `store.test.ts` (fake timers; `build` returns `{ n: counter }` objects so identity is observable):
     1. `get()` returns the same object until a publish, then a new one.
-    2. Three `changed(false)` within 30 ms → one listener call, 100 ms after the previous publish.
+    2. After one urgent publish at t = 0, three `changed(false)` within 30 ms → one listener call, at t = 100.
     3. `changed(true)` calls listeners at once, also inside the 100 ms window, and cancels the pending throttled call
        (one call, not two).
     4. While `active()` is true, a publish follows 1000 ms after the last one without any `changed`; once `active()` is
-       false, no timer is left (`vi.getTimerCount()` is 0).
+       false and an urgent publish has run (as the job does when a file leaves `uploading`), no timer is left
+       (`vi.getTimerCount()` is 0).
     5. A listener that throws: the next listener is still called, and advancing timers throws its error (`expect(() =>
        vi.runOnlyPendingTimers()).toThrow("listener failed")`).
     6. The function `subscribe` returns removes the listener.
@@ -414,6 +426,7 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 **Files:**
 - Create: `packages/cloudrop/src/client/pool.ts`, `pool.test.ts`
 - Modify: `packages/cloudrop/src/client/upload.ts` (`UploadContext.pool`, the `put` wrapper in `senderFor`),
+  `packages/cloudrop/src/client.test.ts` (the options refusal table),
   `packages/cloudrop/src/client.ts` (`concurrency` option, one pool per client), `client/upload.test.ts` (one row)
 
 **Interfaces:**
@@ -494,7 +507,9 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   ```
 
 - [ ] **Step 3: Use it.** In `senderFor`, `put` becomes: acquire `[rank, partNumber]` with the PUT's signal (`null` →
-  `{ kind: "aborted", error: aborted() }`), send, release in `finally`. Until Task 4 gives files a rank, `uploadFile`
+  `{ kind: "aborted", error: aborted() }`). After `acquire` resolves, check the PUT's signal before anything else: a
+  pause or cancel may have fired between the grant and this continuation, so release the slot and return aborted
+  (audit I1). Then send, and release in `finally`. Until Task 4 gives files a rank, `uploadFile`
   takes the next value of a counter that `client.ts` owns (`context.nextRank()`, counting from 1). The slot is released before
   a retry's wait, so a waiting part never holds one. `createCloudropClient` reads `concurrency` (default 4) and
   throws `configError("concurrency must be a whole number from 1 to 16.")` for anything else (a non-number, 0, 17, 2.5,
@@ -514,7 +529,8 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 ### Task 4: `start()`: several files, one `/upload`, `UploadResult`
 
 **Files:**
-- Create: `packages/cloudrop/src/client/arguments.ts`, `arguments.test.ts`, `job.ts`, `job.test.ts`, `types.ts`
+- Create: `packages/cloudrop/src/client/arguments.ts`, `arguments.test.ts`, `file-run.ts`, `job.ts`, `job.test.ts`,
+  `types.ts`
 - Modify: `packages/cloudrop/src/client/upload.ts` (becomes `runFile`), `endpoints.ts`, `answers.ts`,
   `packages/cloudrop/src/client.ts`, `packages/cloudrop/src/errors.ts`, `client/types.test.ts`, existing client tests
   that call `endpoints.start` or `uploadFile` directly (`endpoints.test.ts`)
@@ -551,7 +567,7 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   // client/arguments.ts
   export function readArguments(route: unknown, files: unknown, options: unknown):
     Result<{ route: string; files: File[]; metadata: unknown; signal: AbortSignal }>;
-  // client/upload.ts
+  // client/file-run.ts
   export interface Entry {
     readonly id: string; readonly file: File; readonly rank: number;
     status: FileStatus; result: CompleteResponse<unknown> | null; error: CloudropError | null;
@@ -564,16 +580,19 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   // client/job.ts
   export function startJob(context: UploadContext, route: unknown, files: unknown, options: unknown): UploadJob<unknown>;
   // client.ts: CloudropClient gains
-  start<TName extends RouteName<TCloudrop>>(route: TName, files: File | readonly File[] | FileList,
+  start<TName extends RouteName<TCloudrop>>(route: TName, files: File | ArrayLike<File>,
     ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>): UploadJob<RouteResult<TCloudrop, TName>>;
-  upload(route, file: File, ...options): Promise<Result<CompleteResponse<R>>>;          // overload 1, unchanged
-  upload(route, files: readonly File[] | FileList, ...options): Promise<UploadResult<R>>;  // overload 2
+  // The list overload first: ReturnType and Parameters read the last overload, which existing tests use with the
+  // single-file shape (upload.test.ts:143). Type the implementation explicitly (audit I3).
+  upload(route, files: ArrayLike<File>, ...options): Promise<UploadResult<R>>;            // overload 1
+  upload(route, file: File, ...options): Promise<Result<CompleteResponse<R>>>;          // overload 2, unchanged
   ```
 
 - [ ] **Step 1: Arguments.** Move `readArguments` and `encodesAsJson` from `upload.ts` to `arguments.ts` and accept a
-  `File`, an array of `File` or a `FileList` (`typeof FileList !== "undefined" && files instanceof FileList`). Messages
+  `File`, or a list: any other object with a numeric `length` (an array, `input.files`), read with `Array.from`. The
+  public type is `ArrayLike<File>`, not `FileList`, so the `.d.ts` needs no DOM-only type (audit M12). Messages
   (exact):
-  - not a `File`, array or `FileList`: unchanged, `Pass the file as a File, such as one from <input type="file">.`
+  - not a `File` and not a list: unchanged, `Pass the file as a File, such as one from <input type="file">.`
   - a list holding something else: `Pass the files as File objects, such as input.files from <input type="file" multiple>.`
   - an empty list: `Pass at least one file to upload.`
   Every other message stays as it is. `arguments.test.ts` takes over the argument rows of `upload.test.ts` that call
@@ -587,12 +606,15 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 - [ ] **Step 3: `CloudropError.file`.** Add the field and option in `errors.ts` (doc comment: "The file of a job this
   error belongs to; undefined for an error of the whole job or of the server"). Adding a public field is a minor semver
   change; say so in the commit body.
-- [ ] **Step 4: `runFile`.** Rewrite `uploadFile` in `upload.ts` as `runFile(context, entry, ticket)`. It owns what
+- [ ] **Step 4: `runFile`.** Plan the split now (audit M11): `client/upload.ts` keeps the sender and
+  `sendAndComplete`; a new `client/file-run.ts` holds `Entry`, `runFile`, its ending and (Task 6) the pass loop;
+  `withFile` lives in `client/failures.ts`, which both `job.ts` and `file-run.ts` import. Rewrite `uploadFile` as
+  `runFile(context, entry, ticket)` in `file-run.ts`. It owns what
   `uploadFile` did after `/upload`: `sendAndComplete`, keep-or-abort, the background `/abort` after a failure
   (`M3-S15`, unchanged in plan A), awaiting `/abort` after a cancel. The signal is `entry.cancel.signal`. It sets, in
   this order, `entry.status` and calls `entry.changed(true)` on each change:
-  - `queued` → `uploading` when a PUT of the file gets a pool slot (in the `put` wrapper, only if not yet
-    `uploading`);
+  - `queued` or `completing` → `uploading` when a PUT of the file gets a pool slot and its signal has not fired (in
+    the `put` wrapper); never from `paused` or a settled status (audit I1);
   - `completing` before each `/complete` round;
   - `done` with `entry.result`, or `failed` / `aborted` with `entry.error = withFile(error, entry)`.
   The pool rank is `[entry.rank, partNumber]`. `withFile` copies the error with `file: { id, name }` (a new
@@ -622,8 +644,10 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
      `"1"`, `"2"`, `"3"`, and each stored object equals its file.
   2. The route rejects the second file (too large for `notes`, `maxSize: 16`): the first and third are done, the
      second `failed` with `FILE_TOO_LARGE`, and `error` is that error with `error.file` `{ id: "2", name }`.
-  3. The bucket refuses one file's PUT with `400` (fault on `PUT object` nth 2): that file `failed` with
-     `UPLOAD_REJECTED` and `error.file`, the other done; a background `POST /abort` follows for the failed one only.
+  3. The bucket refuses one file's PUT with `400` (fault chosen by body size, `(call.init.body as Blob).size`, never
+     by arrival order): that file `failed` with
+     `UPLOAD_REJECTED` and `error.file`, the other done; a background `POST /abort` follows for the failed one only (keep the `/abort` promise
+     as `upload-abort.test.ts` does, `seen.aborted`, and await it before asserting).
   4. `/upload` refused (`UNAUTHORIZED`, signed out): `{ data: null, error }` with `error.file` undefined, and no PUT.
   5. More files than the route's `maxFiles` (add a route with `maxFiles: 2`, send 3): `{ data: null, error }` with code
      `TOO_MANY_FILES`; one `POST /upload`, nothing else.
@@ -645,8 +669,8 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 ### Task 5: The snapshot
 
 **Files:**
-- Modify: `packages/cloudrop/src/client/upload.ts` (`Entry` gains `progress`, `meter`; the `put` wrapper reports
-  bytes), `job.ts` (store, `subscribe`, `getSnapshot`), `types.ts` (`FileSnapshot`, `JobSnapshot`, `UploadJob`
+- Modify: `packages/cloudrop/src/client/file-run.ts` (`Entry` gains `progress`, `meter`), `upload.ts` (the `put`
+  wrapper reports bytes), `job.ts` (store, `subscribe`, `getSnapshot`), `types.ts` (`FileSnapshot`, `JobSnapshot`, `UploadJob`
   members), `client/types.test.ts`
 - Create: `packages/cloudrop/src/client/snapshot.ts` (building the snapshot from entries) and `snapshot.test.ts` if
   `job.ts` would pass about 220 lines; otherwise the builder stays in `job.ts` and its rows in `job.test.ts`
@@ -677,7 +701,10 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   turns `uploading`, `entry.meter.restart(Date.now())`.
 - [ ] **Step 2: The builder.** For each entry at `now = Date.now()`: `bytes` = `size` when done, else
   `progress.bytes`; `speed` = `meter.speed(now)` while `uploading`, else 0; `progress` = `bytes / size`, or for a
-  zero-byte file 1 when done and 0 otherwise; `eta` = `(size − bytes) / speed` when `speed > 0`, else `null`. Totals sum
+  zero-byte file 1 when done and 0 otherwise; `eta` = `(size − bytes) / speed` when `speed > 0`, else `null`. Totals
+  count only files that are not failed or aborted for `bytes`, `size`, `progress` and `eta`, so a failed file does not
+  hold the total below 1 or its bytes in the ETA, and a total size of 0 gives `progress` 1 when every counted file is
+  done, else 0 (audit M3; record it in `M3-U`). Totals sum
   `bytes`, `size` and `speed`, compute `progress` and `eta` the same way from the sums, and count `done`, `failed`,
   `aborted` and `count`. New objects on every build; the store caches them.
 - [ ] **Step 3: The store in the job.** `createStore(build, () => entries.some((e) => e.status === "uploading"))`;
@@ -698,7 +725,10 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   5. Totals of two files (one done 1000 bytes, one uploading 400 of 1000): `{ bytes: 1400, size: 2000, progress: 0.7,
      done: 1, failed: 0, aborted: 0, count: 2 }`.
   6. `getSnapshot()` returns the same object between two publishes (`toBe`).
-  7. A listener that throws does not stop the job: `done` resolves done.
+  7. A listener that throws does not stop the job: `done` resolves done (under fake timers; assert the re-thrown error
+     with `expect(() => vi.runOnlyPendingTimers()).toThrow(…)`, never let it reach real timers).
+  Wait for requests with `await xhr.next()`, never `vi.waitFor`, between the slot grant and a timed assertion: under
+  fake timers `vi.waitFor` advances the clock 50 ms per check (audit I2).
   `types.test.ts`: `getSnapshot().files[0].result` is `CompleteResponse<RouteResult<…>> | null`.
 - [ ] **Step 5: Run** `bun run verify` → PASS.
 - [ ] **Step 6: Commit** `feat(client): report each file's bytes, speed and time left`.
@@ -708,8 +738,8 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 ### Task 6: Pause, resume and abort
 
 **Files:**
-- Modify: `packages/cloudrop/src/client/upload.ts` (`Entry` gains `pass`, `wake`, `landed`; `runFile` loops over
-  passes), `job.ts` (handles and job-level `pause`, `resume`), `types.ts`
+- Modify: `packages/cloudrop/src/client/file-run.ts` (`Entry` gains `pass`, `wake`, `landed`; `runFile` loops over
+  passes), `upload.ts`, `job.ts` (handles and job-level `pause`, `resume`), `types.ts`
 - Create: `packages/cloudrop/src/client/pause.test.ts`
 
 **Interfaces:**
@@ -725,9 +755,9 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
   ```
 
 - [ ] **Step 1: Write the failing tests** (`pause.test.ts`, fake XHR held). Contract: spec §4.5, ruling P4. Rows:
-  1. Pause a 3-part file with parts 1 and 2 open and part 1 already stored (finish part 1, then pause): the open PUTs
+  1. With `concurrency: 2`, pause a 3-part file once part 1 is stored and parts 2 and 3 are open: the open PUTs
      are aborted (the fake's `open` is empty), status `paused`, `bytes` unchanged; `resume()` → the next PUTs are
-     parts 2 and 3 only (`fixture.requests` shows no second `PUT part 1`), and the file ends done.
+     parts 2 and 3 only (the fake's `sent` shows no second `PUT part 1`), and the file ends done.
   2. Pause and resume a single PUT: the PUT is aborted, resumed from the start, `bytes` never goes below what it
      reached, the file ends done with the stored bytes equal to the file.
   3. Abort a paused file: status `aborted`, a `POST /abort` is sent and awaited before `done` resolves.
@@ -743,16 +773,21 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
     if (entry.status === "paused") { await resumed(entry); continue; }           // resolves on wake() or cancel
     const pass = new AbortController();
     entry.pass = pass;
-    const signal = AbortSignal.any([entry.cancel.signal, pass.signal]);
+    const signal = eitherSignal(entry.cancel.signal, pass.signal);              // a small helper, not AbortSignal.any
     const sent = await sendAndComplete(context, entry, ticket, signal);
     if (!sent.result.error) return end(null, sent.result.data);
-    if (pass.signal.aborted && !entry.cancel.signal.aborted) continue;            // paused: try again after resume()
-    return end(sent.result.error);                                               // failed, or aborted by cancel
+    const error = sent.result.error;
+    // Paused: try again after resume(). Only an ABORTED ending counts; a real failure that won the race ends the file.
+    if (error.code === "ABORTED" && pass.signal.aborted && !entry.cancel.signal.aborted) continue;
+    return end(error);                                                           // failed, or aborted by cancel
   }
   ```
   `mayBeComplete` moves onto the run (a variable outside the loop) so it stays sticky across passes. Each round of
   `sendAndComplete` sends the parts that are not in `entry.landed` (the `put` wrapper adds a part when it is stored);
-  a `PARTS_MISSING` answer deletes the named parts from `landed` before the next round. If `sendParts` returns success
+  a `PARTS_MISSING` answer deletes the named parts from `landed` and sets the status back to `uploading` at once (so
+  pause applies), before the next round. The repair-round count lives on the run beside `mayBeComplete`, so pausing
+  does not reset `REPAIR_ROUNDS` (audit M2). Add a row: pause and the pool's grant in the same tick (a size-1 pool held
+  by another file, `pause()` right before its release) leave the file `paused` with no PUT sent (audit I1). If `sendParts` returns success
   but the pass was aborted meanwhile, return as paused before `/complete` (the next pass sends nothing and completes).
   `/complete` keeps `withRetry(complete, entry.cancel.signal)`, never the pass's signal.
   `pause(entry)`: only from `queued` or `uploading` → `paused`, `changed(true)`, `entry.pass?.abort()`.
@@ -777,22 +812,29 @@ These are part of the requirements. Task 8 records each as an `M3-U` entry.
 Requirements (the implementer designs the components; spec §6, third bullet):
 
 - [ ] **Step 1: Transport.** The lab no longer passes `fetch` by default. For the length of a run it installs two
-  wrappers and removes them when the run ends: `window.fetch` (the endpoints; the existing `createLabFetch` logic,
+  wrappers and removes them when the run ends: `window.fetch` (the endpoints, taken as `realFetch =
+  window.fetch.bind(window)` before installing and used inside, or the wrapper calls itself; it records only requests
+  under `/api/cloudrop/` and passes everything else through unrecorded; the existing `createLabFetch` logic,
   recording and the `endpoint503` and `dropComplete` faults) and `window.XMLHttpRequest` (bucket PUTs: a subclass that
   records each PUT as a `RequestRecord`, applies the `delayMs` fault before the real `send`, and for
   `bucketNetworkError` dispatches an `error` event instead of sending; `abort()` during the delay dispatches `abort`).
   A checkbox "Send PUTs with fetch (no progress while sending)" passes the lab's fetch as the client's `fetch` option
-  instead, to show spec §4.1's difference. Never record or show a URL, header or body.
+  instead, and installs no global wrapper, to show spec §4.1's difference. The XHR subclass observes its own requests
+  with `addEventListener` (the transport sets the `on…` properties after construction) and dispatches the injected
+  `error` event asynchronously. A background `/abort` that settles after the run ends is not recorded once the wrappers
+  are removed; say so on the page. Never record or show a URL, header or body.
 - [ ] **Step 2: Several files.** The file source keeps its generated test files and the file input (now `multiple`);
   chosen files form a list; Upload starts one job for all of them (`client.start("files", files, { signal })`).
 - [ ] **Step 3: Progress.** A row per file from `job.getSnapshot()` (through `useSyncExternalStore`): a `<progress>`
   with `aria-label` `Progress of <name>` and `value`/`max` in bytes, bytes sent, speed (MiB/s), ETA (s), status, and
-  Pause, Resume and Cancel buttons. A totals row, and "Connections: 4" (the client's `concurrency`). Job-level Pause,
+  Pause, Resume and Cancel buttons named with the file (`aria-label="Cancel <name>"`), because the job-level buttons
+  keep the exact names "Pause", "Resume" and "Cancel" that the existing tests use (audit I5). A totals row, and "Connections: 4" (the client's `concurrency`). Job-level Pause,
   Resume and Cancel. Keep the request table and the run summary; the summary's "completed" status line stays, so the
   existing tests keep their anchor.
 - [ ] **Step 4: Browser rows** in `lab.browser.test.ts` (the three existing tests must still pass):
   1. "progress rises while a file uploads and ends at its size": throttle uploads with a CDP session
-     (`Network.emulateNetworkConditions`, `uploadThroughput` 8 MiB/s, `downloadThroughput` −1, `latency` 0), upload
+     (`Network.emulateNetworkConditions`, `uploadThroughput` 4 MiB/s, `downloadThroughput` −1, `latency` 0, after `Network.enable`), sample with
+     `expect.poll(…, { intervals: [100] })`, upload
      the 20 MiB test file, sample the progress bar's `value` with `expect.poll` until the run completes; the samples
      never decrease, at least three are strictly between 0 and 20 971 520, and the last equals 20 971 520. If Chromium's
      throttling turns out not to slow XHR uploads (no intermediate sample), STOP and report instead of loosening the
@@ -824,7 +866,8 @@ Requirements (the implementer designs the components; spec §6, third bullet):
   decided, why, what it costs if wrong, status). Entries: `UploadResult` departs from `Result<T>` and `error.file`
   (spec §2.2); the snapshot contract and its throttle (P7, P8); XHR versus fetch (spec §4.1, P6); the pool, its default
   of 4 and its order (spec §4.4, P9); the budget; rulings P1 to P5; every ruling the execution ledger records for this
-  plan. Note that the failed-file rule amending `M3-S15` and the part-size outcome come with plan B. Add the series row
+  plan, and the audit's choices (ArrayLike instead of FileList, no `AbortSignal.any`, totals without failed files,
+  spec §4.6's "other PUTs stop at once" against the code, where requests already sent finish). Note that the failed-file rule amending `M3-S15` and the part-size outcome come with plan B. Add the series row
   to `docs/decisions/README.md` and `M3-U` to the series list in `AGENTS.md`.
 - [ ] **Step 3: Docs.** `README.md`: the job API (`start`, the snapshot, pause, resume, cancel, several files and
   `UploadResult`), what changes when `fetch` is passed, `concurrency`; replace the "No stall detection yet" limitation
