@@ -183,11 +183,11 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
 The bucket needs a CORS rule for your page's origin; [`examples/next`](examples/next/README.md#what-any-bucket-needs)
 lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md).
 
-Troubleshooting: when every upload ends in `NETWORK_ERROR` "The file could not reach the storage service, or the
-storage service refused it" although the connection works, check the bucket's CORS rule first. A rule that misses the
-page's origin, or one of the headers cloudrop signs, blocks every `PUT`, and the browser shows it as a network failure
-only after the retry budget; the browser console names what was blocked, and `cloudrop.api.checkBucket({ origins })`
-checks the rule when the credentials may read it.
+Troubleshooting: when every upload ends in `NETWORK_ERROR` "The file could not reach the storage service, or the storage
+service refused it" although the connection works, check the bucket's CORS rule first. A rule that misses the page's
+origin, or one of the headers cloudrop signs (or a checksum header you add), blocks every `PUT`, and the browser shows
+it as a network failure only after the retry budget; the browser console names what was blocked, and
+`cloudrop.api.checkBucket({ origins })` checks the rule when the credentials may read it.
 
 ### Not done yet
 

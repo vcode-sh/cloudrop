@@ -49,5 +49,6 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
   19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`).
   `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`
-  allows `http://localhost:5173` (owner-confirmed 2026-11-16) and the request headers `x-amz-checksum-crc32c` and
-  `x-amz-checksum-crc64nvme` (OPTIONS check, 2026-11-16).
+  allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with `content-type`, `content-disposition`,
+  `if-none-match` and `x-amz-meta-cloudrop-id` and exposes `ETag` (owner-confirmed 2026-11-16), plus
+  `x-amz-checksum-crc32c` and `x-amz-checksum-crc64nvme` (OPTIONS check, 2026-11-16).

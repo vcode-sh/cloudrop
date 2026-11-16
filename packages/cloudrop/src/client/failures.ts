@@ -12,11 +12,13 @@ export const serverUnreachable = (): CloudropError =>
   });
 
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers
-// carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16").
+// carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16"). A bucket
+// CORS rule that misses the page's origin or a signed header looks the same, so for a developer this error usually
+// means: check that rule first (README, "Troubleshooting").
 export const bucketUnreachable = (): CloudropError =>
   new CloudropError(
     "NETWORK_ERROR",
-    "The file could not reach the storage service, or the storage service refused it. Try again; if it keeps failing, the site's storage settings, such as its CORS rule, may need checking.",
+    "The file could not reach the storage service, or the storage service refused it. Try again, and contact the site owner if it keeps failing.",
     { retryable: true },
   );
 

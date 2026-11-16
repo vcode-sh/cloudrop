@@ -53,7 +53,8 @@ export async function putObject(
     // No cookies: the URL is the credential, and a credentialed request needs CORS rules the bucket does not send.
     response = await fetch(target.url, { method: "PUT", headers: target.headers, body, credentials: "omit", signal });
   } catch {
-    // Not only the network: R2's docs say its expired-URL 403 has no CORS headers, which a browser shows as a throw.
+    // Not only the network: R2 sends a refused URL (expired, bad signature) without CORS headers, which a browser shows
+    // as a throw (r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16").
     return signal.aborted
       ? { kind: "aborted", error: aborted() }
       : { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 };

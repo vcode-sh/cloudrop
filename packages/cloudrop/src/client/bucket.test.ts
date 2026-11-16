@@ -139,7 +139,7 @@ describe("putObject", () => {
       kind: "opaque",
       error: error(
         "NETWORK_ERROR",
-        "The file could not reach the storage service, or the storage service refused it. Try again; if it keeps failing, the site's storage settings, such as its CORS rule, may need checking.",
+        "The file could not reach the storage service, or the storage service refused it. Try again, and contact the site owner if it keeps failing.",
         true,
       ),
       retryAfterMs: 0,
