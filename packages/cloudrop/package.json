@@ -23,6 +23,10 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     }
   },
   "scripts": {
@@ -33,6 +37,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
+    "@size-limit/esbuild": "14.3.0",
     "@size-limit/file": "14.3.0",
     "@types/node": "^24",
     "aws4fetch": "^1.0.20",

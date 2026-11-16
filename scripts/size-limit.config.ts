@@ -19,8 +19,19 @@ function withImportedChunks(entry: string): string[] {
   return [...files].map((file) => join(dist, file));
 }
 
+const summed = { disablePlugins: ["@size-limit/esbuild"] };
+
 export default [
-  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB" },
-  { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB" },
-  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB" },
+  // Summed files, not a bundle: these budgets count the entry and its chunks as published.
+  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
+  { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
+  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
+  // Bundled and minified, the size an app ships (spec §1: client plus React ~8 kB): 4194 B + 10%, ruling S-10.
+  {
+    name: "cloudrop/client",
+    path: join(dist, "client.js"),
+    import: "{ createCloudropClient }",
+    gzip: true,
+    limit: "4.7 kB",
+  },
 ];

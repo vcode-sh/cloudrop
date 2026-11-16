@@ -20,5 +20,27 @@
         "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/cloudrop/src/client.ts", "packages/cloudrop/src/client/**", "!**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/storage/**", "**/server/**"],
+                    "message": "cloudrop/client must not import storage or server code. Import from errors, input, plan or protocol."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

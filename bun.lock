@@ -13,6 +13,7 @@
       "version": "0.0.0",
       "devDependencies": {
         "@arethetypeswrong/cli": "0.18.5",
+        "@size-limit/esbuild": "14.3.0",
         "@size-limit/file": "14.3.0",
         "@types/node": "^24",
         "aws4fetch": "^1.0.20",
@@ -244,6 +245,8 @@
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.1.1", "", {}, "sha512-glFIJDvLNDtJhT9qrMFWLPbvS+skxgt4L0K8Ei2YtnhPysAJnsI7nyxSJxKj4ADeKX0OLjC4ntRkwpLOoS3rwA=="],
 
     "@sindresorhus/is": ["@sindresorhus/is@4.6.0", "", {}, "sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw=="],
+
+    "@size-limit/esbuild": ["@size-limit/esbuild@14.3.0", "", { "dependencies": { "esbuild": "^0.28.2" }, "peerDependencies": { "size-limit": "14.3.0" } }, "sha512-0HvGvD5vw2j/lZ7u+koacP5UpveaFVirc8Gm0GJRfICDd+4xEpZX3ManDSnFzwlk7qe0JtJjE8d5jp5t8sUlEQ=="],
 
     "@size-limit/file": ["@size-limit/file@14.3.0", "", { "peerDependencies": { "size-limit": "14.3.0" } }, "sha512-GWKOi0rorXPbYmwbT926Z91t28rg5gd5hv8ywY1FNcaYf8NbibgK5K5YabYbLkV6KpGwuuixBRtIzl3ZpPzUfw=="],
 

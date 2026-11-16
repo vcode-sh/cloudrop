@@ -87,6 +87,20 @@ describe("type inference for the client", () => {
     expectTypeOf<RouteResult<typeof cloudrop, "banner">>();
   });
 
+  it("types an inline route without onComplete as null, as the quickstart writes routes", () => {
+    const inline = createCloudrop({
+      storage: r2({
+        bucket: "uploads",
+        accountId: "0123456789abcdef0123456789abcdef",
+        accessKeyId: "k",
+        secretAccessKey: "s",
+      }),
+      secret: "test-secret-0123456789abcdef0123456789",
+      routes: { notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }) },
+    });
+    expectTypeOf<RouteResult<typeof inline, "notes">>().toEqualTypeOf<null>();
+  });
+
   it("requires authorize", () => {
     // @ts-expect-error: a route without authorize does not type-check; public routes say authorize: allowAnyone.
     route({ accept: "*/*", maxSize: 1 });

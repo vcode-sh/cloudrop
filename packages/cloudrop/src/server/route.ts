@@ -121,7 +121,9 @@ export interface Route<TMetadataInput = unknown, TResult = unknown> {
 
 export function route<TAuth extends object, TSchema extends StandardSchema | undefined = undefined, TResult = null>(
   options: RouteOptions<TAuth, TSchema, TResult>,
-): Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>> {
+  // NoInfer: written inside createCloudrop({ routes }), the call would otherwise infer TResult from the expected Route
+  // and type a route without onComplete as unknown, not null.
+): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>> {
   // The checker cannot relate onComplete's context while TAuth is generic (Jsonified<TAuth> stays deferred); the
   // handler builds exactly the contexts typed above.
   return { definition: options as RouteDefinition };
