@@ -9,11 +9,11 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 - M0 (real-R2 spike) and M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite): done.
 - M2 (the server: `createCloudrop`, routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js
   and Node adapters): done.
-- M3 (the upload engine and the browser client): the first slice and the first progress plan are done on this branch,
-  the second is under way. `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with
-  retries, URL renewal, a connection pool shared by the client that sizes itself, progress, speed and time left, pause,
-  resume and cancel per file, and recovery from stalled requests and lost connectivity. Retrying a failed file in the
-  same page comes next, resume after a reload later. React hooks (`useUpload`) arrive in M4.
+- M3 (the upload engine and the browser client): the first slice and both progress plans are done on this branch.
+  `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with retries, URL renewal, a
+  connection pool shared by the client that sizes itself, progress, speed and time left, pause, resume, cancel and
+  retry per file, and recovery from stalled requests and lost connectivity. Resume after a reload comes next. React
+  hooks (`useUpload`) arrive in M4.
 
 Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
 
@@ -181,9 +181,10 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
 - In a browser, a bucket `PUT` that makes no progress for 30 s, or whose answer takes that long after the last byte,
   counts as a network error and is tried again. Through `fetch`, which reports no progress, a `PUT` gets 30 s plus its
   size at 100 KiB/s.
-- Cancelling through `options.signal` returns `ABORTED` and tells the server to clean up with `/abort`. A file that
-  fails after `/upload` is cleaned up the same way, in the background, so `upload()` answers the error at once. The
-  one exception is a file after a `/complete` that may have succeeded: it is kept, never deleted.
+- Cancelling through `options.signal` returns `ABORTED` and tells the server to clean up with `/abort`. A file of
+  `upload()` that fails after `/upload` is cleaned up the same way, in the background, so `upload()` answers the error
+  at once (a file of `start()` is kept for `retry()` instead: see below). The one exception is a file after a
+  `/complete` that may have succeeded: it is kept, never deleted.
 - Endpoint requests send cookies (`credentials: "include"`), so `authorize` can read the session; uploads to the bucket
   send none.
 - Wire types (`UploadRequest`, `FileTicket`, `ErrorBody` and the rest) and the route inference types (`RouteName`,
@@ -207,6 +208,7 @@ const unsubscribe = job.subscribe(() => render(job.getSnapshot())); // or React'
 job.files[0].pause(); job.files[0].resume(); job.files[0].abort();   // one file
 job.pause(); job.resume(); job.abort();                              // every file of the job
 const { data, error } = await job.done;
+const again = await job.retry(); // or job.files[0].retry(): the failed files again
 ```
 
 - `start()` sends every file through one `/upload`, then runs each file on its own: one file failing or being
@@ -236,6 +238,21 @@ const { data, error } = await job.done;
 - When the page goes offline, every queued and uploading file pauses (`status: "paused"`) and resumes when it is back
   online; a file the caller paused stays paused, and a caller's `pause()` or `resume()` of a file the network paused
   makes it the caller's. A job started while the page is offline pauses its files at once.
+- `job.files[n].retry()` sends a failed file again and resolves with its outcome; `job.retry()` does that for every
+  failed file and resolves with an `UploadResult` of the job's current outcomes once every file has settled (`data` null
+  when its `/upload` for every file was refused, as with `done`). A retry reuses the file's ticket when it can, so the
+  parts that landed are not sent again and the bytes stay counted. It asks `/upload` for a new ticket when the old one
+  expired or was given up, or the failure was one a new attempt with it cannot fix (`UPLOAD_EXPIRED`, `INVALID_TOKEN`,
+  `UPLOAD_REJECTED`, `VERIFICATION_FAILED`, or a file that never got a ticket); `job.retry()` asks for all of those
+  files in one `/upload`. On a new ticket the file starts again under a new key, and its `bytes` drop to 0. When a
+  `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload. `retry()` of a file that
+  is still running waits for it to settle; of a done or aborted file, it answers that outcome at once. `job.done` keeps
+  each file's first outcome whatever a retry does later; the snapshot shows the current one.
+- A failed file of `start()` keeps its ticket and the parts that landed, so `retry()` can reuse them, until `abort()`
+  of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours); `abort()` and
+  `pagehide` tell the server with `/abort`, and after expiry the bucket's lifecycle rule removes unfinished parts. A
+  failed single `PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not retry.
+  `upload()` returns no handle to retry with, so its failed files are cleaned up at once, as above.
 - In a browser, bucket `PUT`s go through `XMLHttpRequest`, which reports bytes while they are sent. Passing `fetch`
   sends everything through it, `PUT`s included: a part's bytes then count only once it is stored, so progress moves a
   part at a time. Outside a browser (Node, Bun, Deno, Workers) `PUT`s use `fetch` the same way.
@@ -245,7 +262,7 @@ const { data, error } = await job.done;
 - The upload protocol is tested on the in-process fake, on real R2, and from Chromium through the example on RustFS
   and on real R2. Wrangler runs only the storage contract and, in the example, single uploads: its local R2 does not
   implement ListParts, so a multipart upload cannot complete there.
-- The client has no `retry()` of a failed file or resume after a reload yet, and no React hooks.
+- The client has no resume after a reload yet, and no React hooks.
 - How the server's parallel storage calls fit Cloudflare Workers' subrequest limits is unmeasured.
 
 ## Development

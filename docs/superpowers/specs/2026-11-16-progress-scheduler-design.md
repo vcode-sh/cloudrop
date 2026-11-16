@@ -200,6 +200,8 @@ Owner decision 2026-11-16: a failed file keeps what it sent so `retry()` can reu
      `/upload` for a new ticket (new key) and starts over.
 - `retry()` on a done or aborted file does nothing; on a queued, uploading or paused file it does nothing.
 
+As built (plan B's task 5): `M3-U30` to `M3-U38` and `M3-U50` to `M3-U57` in `docs/decisions/m3-uploader.md`.
+
 ## 5. Part size (plan B, task 1, a measurement before any change)
 
 Outcome (`M3-U40`): files of 256 MiB or more start at 16 MiB parts, smaller files keep 8 MiB. Measured on live R2 on

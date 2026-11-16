@@ -22,8 +22,8 @@ Numbering:
   public contract, each naming its source as above (`task 2 R1`, `task 4 ruling 1`, `audit M4`).
 
 The part-size outcome spec §7 asks for is `M3-U40`. The failed-file rule that amends `M3-S15` (spec §4.7: a failed file
-of a `start()` job keeps its parts for `retry()` instead of the background `/abort`) is ruled in `M3-U29` to `M3-U38`
-and carried out by plan B's task 5; its entry as built comes with that task, and until then `M3-S15` holds unchanged.
+of a `start()` job keeps its parts for `retry()` instead of the background `/abort`) is ruled in `M3-U29` to `M3-U38`;
+its entry as built is `M3-U50`, and `upload()` keeps `M3-S15` (`M3-U29`).
 
 Rulings without an entry here, because an earlier entry holds them or they change neither behaviour nor a public
 contract:
@@ -212,9 +212,9 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
 - **Known cost:** job-level `pause()`, `resume()` and a refused `/upload` publish once per file, each publish building
   a snapshot of every file (a 500-file job: 500 publishes of 500 file snapshots, synchronously). Unmeasured; plan B
   measures it and coalesces urgent publishes if it shows.
-- **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`). Plan B decided one exception (`M3-U36`): a retry under a new
-  ticket starts the file's bytes again from 0.
-- **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job.ts` (`fileSnapshot`, `snapshotOf`),
+- **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`). Plan B made one exception (`M3-U36`, `4f1887a`): a retry under
+  a new ticket starts the file's bytes again from 0.
+- **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job-snapshot.ts` (`fileSnapshot`, `snapshotOf`),
   `client/types.ts` (`FileSnapshot`, `JobSnapshot`), `client/job-snapshot.test.ts`.
 
 ### M3-U12: one pool per client, 4 slots by default
@@ -365,8 +365,8 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
 
 ## Plan B rulings
 
-`M3-U23` to `M3-U28` and `M3-U39` are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, which
-plan B's task 5 carries out: they are decided, and their files are the ones that task changes.
+All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, which plan B's task 5 built
+(`613bbcf` split `job.ts`, `4f1887a` added `retry()`); `M3-U50` to `M3-U57` record how.
 
 ### M3-U23: automatic sizing weighs a window only when the pool is used
 
@@ -416,7 +416,7 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** the size changes every few seconds and is an implementation detail; exposing it would make it a contract and
   cost bundle bytes for something only a demo shows.
 - **If wrong:** a read-only size can be added later without breaking anyone.
-- **Status:** in force (`ea771fc`: the pool is not exported). The lab's counter comes with plan B's task 7.
+- **Status:** in force (`ea771fc`: the pool is not exported; the lab's "PUTs in flight" counter: `f84a845`).
 - **Visible in:** `client.ts`, `examples/next/app/lab/`.
 
 ### M3-U27: a stall is the network-error outcome
@@ -445,7 +445,7 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **If wrong:** a page cannot say "waiting for the network" from the snapshot alone; it can read `navigator.onLine`.
 - **Status:** in force (`58d24f7`).
 - **Visible in:** `client/file-run.ts` (`Entry.networkPaused`, `pauseFile`, `resumeFile`), `client/job-run.ts`
-  (`watchedRuns`), `client/lifecycle.test.ts`.
+  (`createJob`: `offline`, `online`), `client/lifecycle.test.ts`.
 
 ### M3-U29: `upload()` keeps `M3-S15`
 
@@ -455,9 +455,8 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** parts nobody can retry would wait for the lifecycle rule, and a single-PUT object would stay in the bucket
   for good: the cost `M3-S15` was made to remove.
 - **If wrong:** a page that wants to retry a failure of `upload()` calls `start()` instead.
-- **Status:** decided; plan B's task 5 carries it out (`upload()` passes `keepFailed: false`). Spec §4.7's first
-  bullet says so since this entry.
-- **Visible in:** `client.ts` (`upload`), `client/upload-abort.test.ts`.
+- **Status:** in force (`4f1887a`: `upload()` passes `keepFailed: false`). Spec §4.7's first bullet says so.
+- **Visible in:** `client.ts` (`upload`), `client/file-run.ts` (`end`), `client/upload-abort.test.ts`.
 
 ### M3-U30: `retry()` chooses its branch when it is called
 
@@ -469,9 +468,12 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** spec §4.7's order. `/complete` comes first because a second upload under a new key would leave two objects
   and run `onComplete` twice when the first did finish. One branch per call keeps the requests of a retry predictable.
 - **If wrong:** a same-ticket retry that fails with an error from `M3-U31`'s list takes a second `retry()` to get a
-  new ticket.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`, `client/job.ts`.
+  new ticket. A file whose `/complete` may have succeeded and whose ticket has expired can never be confirmed done by
+  `retry()`: `/complete` answers `UPLOAD_EXPIRED`, the file ends failed with it, and no new ticket follows, since the
+  file may be stored (task 5 concern, audit I6). The app's own `onComplete` record is then the only answer.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/retry-file.ts` (`needsTicket`, `retryFiles`), `client/retry-file.test.ts` (the two
+  `/complete`-first rows).
 
 ### M3-U31: the errors that need a new ticket
 
@@ -482,8 +484,8 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   refused (400, a signature mismatch) would be refused again under the same ticket.
 - **If wrong:** an error missing from the list spends one `retry()` on the old ticket; one wrongly on it re-sends a file
   that could have finished.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/retry-file.ts` (`NEEDS_NEW_TICKET`, `needsTicket`), `client/retry-file.test.ts`.
 
 ### M3-U32: `abort()` on a failed file
 
@@ -492,9 +494,10 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   only the snapshot and a later `retry()` see the change.
 - **Why:** spec §4.7 holds a failed file's parts until `abort()`, `pagehide` or the token's expiry; `abort()` is how a
   page lets them go.
-- **If wrong:** after such an abort the snapshot says `aborted` while `done` said `failed` (`M3-U35`).
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`, `client/job.ts`.
+- **If wrong:** after such an abort the snapshot says `aborted` while `done` said `failed` (`M3-U35`). A failed file
+  without a ticket turns `aborted` too, sending nothing (`M3-U51`).
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/file-run.ts` (`abortFile`), `client/job.ts` (`handleOf`), `client/retry-abort.test.ts`.
 
 ### M3-U33: `pagehide` gives up failed files' tickets
 
@@ -506,8 +509,10 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   back-forward cache.
 - **If wrong:** a page that closes without `pagehide` firing (a crash) leaves a failed single-PUT object in the bucket;
   a restored page re-sends the whole file under a new key.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/lifecycle.ts`.
+- **Status:** in force (`4f1887a`). An expired ticket is let go without an `/abort` (audit M7), and the failed file is
+  held before its status changes (`M3-U53`).
+- **Visible in:** `client/lifecycle.ts` (`createLeftovers`), `client/file-run.ts` (`end`), `client.ts` (`leftovers`),
+  `client/retry-abort.test.ts` (the `pagehide` rows).
 
 ### M3-U34: `job.retry()` asks for new tickets in one `/upload`
 
@@ -517,8 +522,9 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** one job is one `/upload` (`M3-U12`).
 - **If wrong:** one refusal of that `/upload` fails every file that needed a ticket; `file.retry()` retries one at a
   time.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/job.ts`.
+- **Status:** in force (`4f1887a`). What a refused `/upload` answers each file: `M3-U52`.
+- **Visible in:** `client/retry-file.ts` (`retryFiles`), `client/job-run.ts` (`launch`), `client/job.ts` (`retryJob`),
+  `client/retry-file.test.ts`.
 
 ### M3-U35: `done` reports each file's first outcome
 
@@ -529,19 +535,21 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   null beside a failed file breaks `UploadResult` (`M3-U10`).
 - **If wrong:** after a retry `done` and the snapshot disagree; a page that wants the latest outcome reads
   `job.retry()`'s result or the snapshot.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/job.ts`, `client/job-run.ts`.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/file-run.ts` (`Entry.firstOutcome`, `settled`), `client/job-run.ts` (`firstRun`),
+  `client/job.ts` (`retryJob`), `client/retry-file.test.ts`.
 
 ### M3-U36: a new ticket starts the bytes again
 
-- **Decision:** plan B Q14, from audit I10. A retry that gets a new ticket gives the file a fresh byte count and speed
-  meter, so its `bytes` drop to 0. A same-ticket retry keeps them. This is an explicit exception to spec §4.2 and to
-  `M3-U11`'s "bytes never decreases".
+- **Decision:** plan B Q14, from audit I10. A retry that gets a new ticket gives the file a fresh byte count, so its
+  `bytes` drop to 0; its speed starts from 0 when it sends again, as on every start. A same-ticket retry keeps them.
+  This is an explicit exception to spec §4.2 and to `M3-U11`'s "bytes never decreases".
 - **Why:** the new upload has stored nothing; keeping the old count would show 90 % or 100 % of a file of which nothing
   has landed.
 - **If wrong:** a bar jumps back to 0 on such a retry, which is what happened to the upload.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`, `client/progress.ts`.
+- **Status:** in force (`4f1887a`; the speed meter is kept and restarted since `b368bc4`, with the same snapshot).
+- **Visible in:** `client/retry-file.ts` (`requeue`), `client/file-run.ts` (`Entry.progress`),
+  `client/retry-file.test.ts`.
 
 ### M3-U37: `retry()` on a file that has not failed
 
@@ -551,8 +559,9 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** an outcome is always a settled state, so the promise waits for one; a Retry button pressed twice must not
   start a second run.
 - **If wrong:** a page awaiting `retry()` of a paused file waits until the user resumes it.
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`, `client/job.ts`.
+- **Status:** in force (`4f1887a`). When the promise resolves: `M3-U56`.
+- **Visible in:** `client/retry-file.ts` (`retryFiles`), `client/job-run.ts` (`allSettled`), `client/job.ts`
+  (`startJob`'s `retry`), `client/retry-file.test.ts`.
 
 ### M3-U38: one `abortFile` for every cancel
 
@@ -561,10 +570,12 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   listener on the caller's signal stays while any file of the job runs or is held, and is removed when none is.
 - **Why:** before, `job.abort()` and the signal reached only running files: a failed file kept its ticket after the job
   was aborted, and a signal fired after `done` stopped neither held files nor a running retry.
-- **If wrong:** a long-lived signal keeps the job reachable while a failed file is held, until its expiry or
-  `pagehide`. Changes plan A's task 4 ruling 10 (the listener went when `done` settled).
-- **Status:** decided (plan B task 5).
-- **Visible in:** `client/file-run.ts`, `client/job.ts`.
+- **If wrong:** a long-lived signal keeps the job reachable while a failed file is held, and after its expiry or
+  `pagehide` until the next run ends or an `abort()` (`M3-U54`). Changes plan A's task 4 ruling 10 (the listener went
+  when `done` settled).
+- **Status:** in force (`4f1887a`; the listener's flag gave way to the signal's own deduplication in `b368bc4`).
+- **Visible in:** `client/file-run.ts` (`abortFile`), `client/job-run.ts` (`createJob`: `busy`, `listen`, `idle`),
+  `client/job.ts`, `client/retry-abort.test.ts`.
 
 ### M3-U39: offline pauses queued and uploading files, also at the start
 
@@ -577,7 +588,7 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **If wrong:** a `navigator.onLine` that reads false while the bucket is reachable holds the files until an `online`
   event; browsers report false only when no network interface is up.
 - **Status:** in force (`58d24f7`).
-- **Visible in:** `client/lifecycle.ts` (`watchConnectivity`), `client/job-run.ts` (`watchedRuns`),
+- **Visible in:** `client/lifecycle.ts` (`watchConnectivity`), `client/job-run.ts` (`Job.runUpload`),
   `client/lifecycle.test.ts`.
 
 ## Plan B outcomes and execution rulings
@@ -637,7 +648,7 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
 - **Why:** the audit estimated 7.6 to 7.9 kB after plan B, above `M3-U13`'s 7.5 kB, and a forced stop at the last task
   would have cut scope late. Measured: 6.74 kB after plan A, 7.38 kB with tasks 2, 3, 4 and 6 merged.
 - **If wrong:** M4's React bindings have about 2 kB of the 11 kB.
-- **Status:** in force (`fbc5c15`); the budget comes with plan B's last step. Amends `M3-U13`.
+- **Status:** in force (`fbc5c15`); the budget after plan B is `M3-U58`. Amends `M3-U13`.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M3-U44: a window weighs only time the pool was busy
@@ -711,10 +722,115 @@ plan B's task 5 carries out: they are decided, and their files are the ones that
   B's task 5 bracket a retry's run with the same calls.
 - **If wrong:** an `/upload` sent offline spends its attempts and fails the job with `NETWORK_ERROR` instead of
   waiting for `online`.
-- **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`).
-- **Visible in:** `client/job-run.ts` (`watchedRuns`), `client/lifecycle.test.ts`.
+- **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`; one `Job.runUpload` brackets each run
+  since `b368bc4`).
+- **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/lifecycle.test.ts`.
 
-## Plan B task 5 (to come)
+## Plan B's failed-file rule as built, task 5's rulings and the budget
 
-Task 5's own execution rulings, the entry for the failed-file rule as built (which amends `M3-S15`, with a
-cross-reference in `m3-slice.md`) and the client budget get their entries with that task's docs, from `M3-U50`.
+### M3-U50: a failed file of a `start()` job keeps its ticket and parts
+
+- **Decision:** spec §4.7 as plan B's task 5 built it, ruled by `M3-U29` to `M3-U38`. When a file of a `start()` job
+  fails after `/upload` gave it a ticket, the client sends no `/abort`: the file keeps its ticket, the parts that landed
+  and its byte count, and `retry()` continues from them. They are held until `abort()` of the file or the job or the
+  caller's signal (`M3-U32`, `M3-U38`), `pagehide` (`M3-U33`), or the ticket's expiry, after which the bucket's
+  lifecycle rule removes unfinished parts. A same-ticket retry starts its repair rounds from 0 again and re-sends the
+  parts its last `/complete` found missing (audit I5). `upload()` keeps `M3-S15`'s background `/abort` (`M3-U29`); a
+  cancel sends `/abort` as before.
+- **Why:** a retry in the same page should not re-send what already landed (spec §4.7), and a retry gets the same
+  repair rounds as the first run.
+- **If wrong:** a failed single-PUT object of a `start()` job stays in the bucket for good when its page neither
+  aborts it nor fires `pagehide` before the ticket expires (a crash, a tab left open past the expiry): the case
+  `M3-S15` removed for every failure. A page that never retries can release its failed files with `job.abort()` after
+  `done`.
+- **Status:** in force (`4f1887a`). Amends `M3-S15` for `start()` jobs; its status line and spec §4.7's first bullet
+  say so.
+- **Visible in:** `client/file-run.ts` (`end`), `client/retry-file.ts` (`requeue`), `client.ts` (`keepFailed`),
+  `client/job.test.ts` (the PUT 400 row), `client/retry-file.test.ts`.
+
+### M3-U51: aborting a failed file that never had a ticket sends nothing
+
+- **Decision:** task 5 ruling 1. `abort()` on a failed file without a ticket (refused at `/upload`, or failed with the
+  job's error) turns it `aborted` and sends nothing.
+- **Why:** spec §4.5: `abort()` ends a file aborted, and only a done file ignores it. There is nothing to free.
+- **If wrong:** the snapshot says `aborted` where `done` said `failed`, as for every aborted failed file (`M3-U35`).
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/file-run.ts` (`abortFile`).
+
+### M3-U52: the errors of a retry's refused `/upload`
+
+- **Decision:** task 5 ruling 2. When a retry's `/upload` asked for every file of the job and is refused, each file
+  gets the job's error as it is, and `job.retry()` answers `{ data: null, error }` as `done` does. When it asked for
+  some files only (`file.retry()` in a job of several files, or a `job.retry()` where other files are done or keep
+  their ticket), each file's error carries `error.file`.
+- **Why:** `UploadResult`'s contract (`M3-U3`, `M3-U10`): a file's error names its file unless the whole job failed.
+- **If wrong:** the same refusal reads with or without `error.file` depending on how many files the retry asked for.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/job-run.ts` (`launch`, `runEntry`), `client/retry-file.test.ts`.
+
+### M3-U53: a failed file is held for `pagehide` before its status turns `failed`
+
+- **Decision:** task 5 ruling 3. A failed file of a `start()` job joins the tickets `pagehide` frees first, and only
+  then turns `failed`.
+- **Why:** a `subscribe` listener may call `retry()` inside the status change. Holding afterwards would hold a file
+  already running again, and `pagehide` would `/abort` a live upload.
+- **If wrong:** none known.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/file-run.ts` (`end`).
+
+### M3-U54: how long the caller's signal is heard
+
+- **Decision:** task 5 ruling 4, refining `M3-U38`. The job listens to the caller's signal while any file is queued,
+  uploading, paused or completing, or failed with a ticket that is neither dropped nor possibly complete. It checks
+  when a file's run ends, after a file's `abort()` and after `job.abort()`. A retry listens again, and a signal that
+  fired while nobody listened cancels that retry at once.
+- **Why:** a held ticket is still something the signal can release (`M3-U32`); checking at those moments needs no
+  timer.
+- **If wrong (known cost):** a ticket released by `pagehide` or by its expiry does not start the check, so the listener
+  stays on a long-lived signal, and the job stays reachable through it, until the next run ends or an `abort()`. If
+  the signal fires meanwhile, those files turn `aborted`; an expired ticket's `/abort` changes nothing on the server.
+- **Status:** in force (`4f1887a`, `b368bc4`).
+- **Visible in:** `client/job-run.ts` (`busy`, `listen`, `idle`), `client/retry-file.ts` (`retryFiles`),
+  `client/retry-abort.test.ts`.
+
+### M3-U55: no `/abort` for the old ticket on a new-ticket retry
+
+- **Decision:** task 5 ruling 5. A retry that asks `/upload` for a new ticket sends no `/abort` for the old one.
+- **Why:** spec §4.7 ends a kept ticket only by `abort()`, `pagehide` and expiry, and the cases that need a new ticket
+  leave little to free: a dropped ticket was aborted already, the server ignores an expired one, and after
+  `INVALID_TOKEN`, `UPLOAD_REJECTED` or `VERIFICATION_FAILED` nothing under the old ticket can be reused.
+- **If wrong:** parts landed under an old multipart ticket wait for the bucket's lifecycle rule.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/retry-file.ts` (`requeue`).
+
+### M3-U56: `retry()` resolves once every file it waits for has settled
+
+- **Decision:** task 5 ruling 6. `file.retry()` and `job.retry()` resolve when every file they retried or waited for
+  has settled, and wait again when a listener restarted one meanwhile.
+- **Why:** an outcome is a settled state (`M3-U37`); a running file has none to report.
+- **If wrong:** a listener that retries a file on every failure keeps the promise pending until it stops.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/job-run.ts` (`allSettled`), `client/job.ts` (`handleOf`, `retryJob`).
+
+### M3-U57: `upload()` marks the ticket it aborted
+
+- **Decision:** task 5 ruling 7. When a failed file of `upload()` sends `M3-S15`'s background `/abort`, its ticket is
+  marked dropped, so the caller's signal on an `upload()` of several files never sends a second `/abort` for it.
+- **Why:** one `/abort` per ticket (`M3-U38` routes the signal through `abortFile`, which would otherwise send it
+  again).
+- **If wrong:** none known.
+- **Status:** in force (`4f1887a`).
+- **Visible in:** `client/file-run.ts` (`drop`, `end`, `abortFile`), `client/upload.ts` (`Upload.dropped`).
+
+### M3-U58: the client's budget after plan B is the 9 kB ceiling
+
+- **Decision:** plan B task 8. `cloudrop/client` measures 8.32 kB gzip after plan B, against 6.74 kB after plan A:
+  1.58 kB for plan B against its allowance of about 1.2 kB. The rule of `M3-U43` (the measured size plus about 10 %,
+  rounded up to 0.1 kB, never above 9.0 kB) gives 9.2 kB, so the budget is the ceiling, 9 kB, and about 0.68 kB is
+  left for the resume plan.
+- **Why:** where plan B's bytes went: tasks 2, 3, 4 and 6 +0.64 kB, task 5's `retry()` +0.98 kB; task 8's size pass
+  took 0.04 kB (the job's connectivity count in one method, two "already listening" flags, a replaced speed meter).
+  Most of the rest is property names that do not minify and the messages, which stay as worded.
+- **If wrong:** the resume plan must fit in about 0.68 kB, find bytes elsewhere, or ask the owner to raise the ceiling.
+- **Status:** in force (`ab5f0b0`; the size pass `b368bc4`).
+- **Visible in:** `scripts/size-limit.config.ts`.

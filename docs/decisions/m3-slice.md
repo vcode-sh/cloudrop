@@ -209,8 +209,10 @@ otherwise.
   app deletes it.
 - **Status:** in force (`7ed3e60`); supersedes the first M3-S15 ("no `/abort` after a failure", `bc06db2`, owner
   accepted under M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good. Amends
-  M3-S31 and M3-H16 (their `/abort` now follows a failure too) and M2-D21 (when `onAbort` runs).
-- **Visible in:** `client/upload.ts` (`uploadFile`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
+  M3-S31 and M3-H16 (their `/abort` now follows a failure too) and M2-D21 (when `onAbort` runs). Amended by M3-U50
+  (`4f1887a`): a failed file of a `start()` job keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or
+  the ticket's expiry; `upload()` keeps this rule (M3-U29).
+- **Visible in:** `client/file-run.ts` (`end`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
 
