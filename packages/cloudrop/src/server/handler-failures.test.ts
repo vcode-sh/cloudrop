@@ -76,32 +76,36 @@ describe("cloudrop.handler failures", () => {
     });
   });
 
-  // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status.
-  it("answers a plugin refusal with an unknown code as a generic 500, never 200", async () => {
-    const plugin: CloudropPlugin = {
-      id: "quota",
-      server: { beforeUpload: () => new CloudropError("QUOTA_EXCEEDED" as CloudropErrorCode, "No quota left.") },
-    };
-    const fixture = serverFixture({ avatar }, { plugins: [plugin] });
-    const response = await fixture.post("upload", uploadBody);
-    expect({ status: response.status, body: await response.json(), logged: fixture.logger.errors }).toEqual({
-      status: 500,
-      body: {
-        error: {
-          code: "SERVER_ERROR",
-          message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
-          retryable: false,
+  // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status. The
+  // client's own codes have none either: the server never sends them.
+  it.each<{ code: string }>([{ code: "QUOTA_EXCEEDED" }, { code: "ABORTED" }])(
+    "answers a plugin refusal with the code $code, which the server cannot send, as a generic 500",
+    async ({ code }) => {
+      const plugin: CloudropPlugin = {
+        id: "quota",
+        server: { beforeUpload: () => new CloudropError(code as CloudropErrorCode, "No quota left.") },
+      };
+      const fixture = serverFixture({ avatar }, { plugins: [plugin] });
+      const response = await fixture.post("upload", uploadBody);
+      expect({ status: response.status, body: await response.json(), logged: fixture.logger.errors }).toEqual({
+        status: 500,
+        body: {
+          error: {
+            code: "SERVER_ERROR",
+            message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
+            retryable: false,
+          },
         },
-      },
-      logged: [
-        {
-          message:
-            "cloudrop: /upload failed with an error code cloudrop does not know, so the client got a generic 500. Return a CloudropError with one of cloudrop's codes.",
-          error: expect.objectContaining({ code: "QUOTA_EXCEEDED", message: "No quota left." }),
-        },
-      ],
-    });
-  });
+        logged: [
+          {
+            message:
+              "cloudrop: /upload failed with an error code cloudrop does not know, so the client got a generic 500. Return a CloudropError with one of cloudrop's codes.",
+            error: expect.objectContaining({ code, message: "No quota left." }),
+          },
+        ],
+      });
+    },
+  );
 
   it("marks every answer as not cacheable, since it carries tokens and signed URLs", async () => {
     const response = await setup().post("upload", uploadBody);

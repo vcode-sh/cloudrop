@@ -27,7 +27,14 @@ export type CloudropErrorCode =
   | "NOT_UPLOADED"
   | "PARTS_MISSING"
   | "VERIFICATION_FAILED"
-  | "SERVER_ERROR";
+  | "SERVER_ERROR"
+  // Client (spec §6.2): never sent by the server.
+  | "UPLOAD_REJECTED"
+  | "ABORTED"
+  | "NETWORK_ERROR";
+
+/** Codes only the client produces; the server's status table has no entry for them. */
+export type ClientErrorCode = "UPLOAD_REJECTED" | "ABORTED" | "NETWORK_ERROR";
 
 export interface CloudropErrorOptions {
   retryable?: boolean;

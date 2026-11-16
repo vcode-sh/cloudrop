@@ -1,10 +1,12 @@
 // What crosses the wire between the handler and the browser: response bodies, status codes, the origin and CORS rules
 // (spec §7.2) and the body cap (spec §7.3).
 
-import { CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
+import { type ClientErrorCode, CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
 import { type ErrorBody, MAX_BODY_BYTES } from "../protocol/types.ts";
 import type { Logger } from "./plugins.ts";
+
+type ServerErrorCode = Exclude<CloudropErrorCode, ClientErrorCode>;
 
 const STATUS = {
   INVALID_INPUT: 400,
@@ -34,7 +36,7 @@ const STATUS = {
   PARTS_MISSING: 409,
   VERIFICATION_FAILED: 422,
   SERVER_ERROR: 500,
-} satisfies Record<CloudropErrorCode, number>;
+} satisfies Record<ServerErrorCode, number>;
 
 export type ResponseHeaders = Record<string, string>;
 
@@ -60,7 +62,8 @@ export const serverError = (): CloudropError =>
   );
 
 /** CloudropError does not check its code: one from plain JavaScript may have none of ours, so no HTTP status. */
-export const hasKnownCode = (error: CloudropError): boolean => Object.hasOwn(STATUS, error.code);
+export const hasKnownCode = (error: CloudropError): error is CloudropError & { code: ServerErrorCode } =>
+  Object.hasOwn(STATUS, error.code);
 
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
   // An unknown code would otherwise answer 200.
