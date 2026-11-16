@@ -97,15 +97,17 @@ async function sendAndComplete(context: UploadContext, ticket: Ticket, file: Fil
   // Without the signal: the server may finish a /complete (and run onComplete) after the browser stopped waiting (S14).
   const complete = async (): Promise<Result<CompleteResponse<unknown>>> => {
     const done = await context.endpoints.complete(ticket.token);
-    // Sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
-    mayBeComplete ||= done.error?.code === "NETWORK_ERROR" || done.error?.code === "SERVER_ERROR";
+    const code = done.error?.code;
+    // PARTS_MISSING clears the doubt wherever it arrives: the server sends it only while the multipart upload is still
+    // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9).
+    if (code === "PARTS_MISSING") mayBeComplete = false;
+    // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
+    else mayBeComplete ||= code === "NETWORK_ERROR" || code === "SERVER_ERROR";
     return done;
   };
   for (let round = 0; ; round++) {
     const sent = await sendParts(sender, parts);
-    // False even after an uncertain /complete: a repair round follows PARTS_MISSING, which the server sends only while
-    // the multipart upload is still open, so no earlier /complete finished the file and /abort deletes nothing recorded.
-    if (sent.error) return { result: fail(sent.error), mayBeComplete: false };
+    if (sent.error) return { result: fail(sent.error), mayBeComplete };
     const done = await withRetry(complete, signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
     if (!missing?.length || round === REPAIR_ROUNDS) return { result: done, mayBeComplete };

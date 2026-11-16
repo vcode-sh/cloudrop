@@ -280,6 +280,68 @@ describe("upload, when it is cancelled", () => {
     });
   });
 
+  // Round 0's first /complete gets no answer and its retry answers PARTS_MISSING [2], which proves no /complete has
+  // finished the file (ruling S-9): a cancel in the repair round that follows tells the server.
+  // The repair round sends PUT part 2 for the second time, then POST /complete for the third; the cancel lands in one.
+  const cancelInRepair =
+    (cancelAt: { label: string; nth: number }, controller: AbortController): Fault =>
+    async ({ label, nth, init, forward }) => {
+      if (label === "PUT part 2" && nth === 1) return lostPart();
+      if (label === "POST /complete" && nth === 1) throw new TypeError("Failed to fetch");
+      if (label !== cancelAt.label || nth !== cancelAt.nth) return undefined;
+      // The refused /complete never reaches the server, so the multipart upload stays open for /abort to remove.
+      const answer = label === "POST /complete" ? storageBusy() : await forward(init);
+      controller.abort();
+      return answer;
+    };
+
+  it("tells the server after a cancel during a repair PUT, though an earlier /complete got no answer", async () => {
+    const controller = new AbortController();
+    const { fixture, client } = setup(cancelInRepair({ label: "PUT part 2", nth: 2 }, controller));
+    const result = await client.upload("albums", video(), { metadata, signal: controller.signal });
+    expect({
+      error: errorOf(result),
+      requests: fixture.requests,
+      pending: fixture.server.fake.pendingUploads(),
+    }).toEqual({
+      error: cancelled,
+      requests: [
+        "POST /upload",
+        "PUT part 1",
+        "PUT part 2",
+        "POST /complete",
+        "POST /complete",
+        "PUT part 2",
+        "POST /abort",
+      ],
+      pending: 0,
+    });
+  });
+
+  it("tells the server after a cancel during a repair /complete the server refused", async () => {
+    const controller = new AbortController();
+    const { fixture, client } = setup(cancelInRepair({ label: "POST /complete", nth: 3 }, controller));
+    const result = await client.upload("albums", video(), { metadata, signal: controller.signal });
+    expect({
+      error: errorOf(result),
+      requests: fixture.requests,
+      pending: fixture.server.fake.pendingUploads(),
+    }).toEqual({
+      error: cancelled,
+      requests: [
+        "POST /upload",
+        "PUT part 1",
+        "PUT part 2",
+        "POST /complete",
+        "POST /complete",
+        "PUT part 2",
+        "POST /complete",
+        "POST /abort",
+      ],
+      pending: 0,
+    });
+  });
+
   it("starts nothing for a signal that has already fired", async () => {
     const { fixture, client } = setup(() => undefined);
     const result = await client.upload("albums", pic(), { metadata, signal: AbortSignal.abort() });
