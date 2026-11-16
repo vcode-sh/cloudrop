@@ -61,7 +61,10 @@ export const serverError = (): CloudropError =>
     "The server could not handle the upload. Contact the site owner if this keeps happening.",
   );
 
-/** CloudropError does not check its code: one from plain JavaScript may have none of ours, so no HTTP status. */
+/**
+ * Whether the server may send this code. CloudropError does not check its code: one from plain JavaScript may have
+ * none of ours, and the client's own codes (ClientErrorCode) have no HTTP status either.
+ */
 export const hasKnownCode = (error: CloudropError): error is CloudropError & { code: ServerErrorCode } =>
   Object.hasOwn(STATUS, error.code);
 
