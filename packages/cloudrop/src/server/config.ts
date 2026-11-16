@@ -23,7 +23,10 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> {
   secret?: string | readonly string[];
   /** Where the handler is mounted. Default "/api/cloudrop". */
   basePath?: string;
-  /** Exact origins, such as "https://app.example.com", allowed to call the handler cross-origin with credentials. */
+  /**
+   * Exact origins, such as "https://app.example.com", allowed to call the handler cross-origin with credentials. Behind
+   * a proxy that terminates TLS or rewrites Host, list the app's own public origin too: no forwarded header is trusted.
+   */
   trustedOrigins?: readonly string[];
   /** Files larger than this use multipart. Default 64 MiB. */
   multipartThreshold?: Size;
@@ -83,7 +86,7 @@ function readSecrets(secret: unknown): [string, ...string[]] {
  * Only a scheme and host survive URL's own serialization unchanged: a path, credentials, "*", "null" and the line
  * breaks the parser strips all fail.
  */
-export const isExactOrigin = (origin: unknown): boolean =>
+export const isExactOrigin = (origin: unknown): origin is string =>
   typeof origin === "string" && URL.canParse(origin) && new URL(origin).origin === origin;
 
 function readOrigins(origins: unknown): Set<string> {

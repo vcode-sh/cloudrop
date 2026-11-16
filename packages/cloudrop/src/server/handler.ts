@@ -18,6 +18,7 @@ import {
   readJson,
   serverError,
 } from "./http.ts";
+import { originHint } from "./origin-hint.ts";
 import type { Logger } from "./plugins.ts";
 import { handleSign } from "./sign.ts";
 import { handleUpload } from "./upload.ts";
@@ -61,7 +62,7 @@ function contained(logger: Logger): Logger {
   };
 }
 
-async function answer(request: Request, config: ServerConfig): Promise<Response> {
+async function answer(request: Request, config: ServerConfig, hint: (request: Request) => void): Promise<Response> {
   const endpoint = endpointOf(request, config.basePath);
   if (endpoint === null) {
     return errorResponse(new CloudropError("NOT_FOUND", "There is no cloudrop endpoint at this path. Check basePath."));
@@ -73,7 +74,10 @@ async function answer(request: Request, config: ServerConfig): Promise<Response>
     });
   }
   const origin = checkOrigin(request, config.trustedOrigins);
-  if (!origin.allowed) return errorResponse(originNotAllowed());
+  if (!origin.allowed) {
+    hint(request);
+    return errorResponse(originNotAllowed());
+  }
   if (!isJsonRequest(request)) {
     return errorResponse(
       new CloudropError("UNSUPPORTED_MEDIA_TYPE", "Send the request body as JSON with Content-Type: application/json."),
@@ -106,6 +110,7 @@ async function warnAboutBucket(config: ServerConfig, pageOrigin: string): Promis
 
 export function createHandler(given: ServerConfig): (request: Request) => Promise<Response> {
   const config = { ...given, logger: contained(given.logger) };
+  const hint = originHint(config.logger);
   let bucketChecked = false;
   return async (request) => {
     try {
@@ -118,7 +123,7 @@ export function createHandler(given: ServerConfig): (request: Request) => Promis
           config.logger.error("cloudrop: the development bucket check failed.", error);
         });
       }
-      return await answer(request, config);
+      return await answer(request, config, hint);
     } catch (error) {
       // The endpoints catch their own failures: what lands here is an input that is not a Request.
       config.logger.error("cloudrop: the handler failed before any endpoint ran. Pass it a Fetch API Request.", error);
