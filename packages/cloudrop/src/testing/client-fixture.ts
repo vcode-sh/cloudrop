@@ -17,7 +17,7 @@ export interface FaultCall {
 }
 
 /** Answers a call in place of its target, or returns undefined to let it through. A throw is a network failure. */
-export type Fault = (call: FaultCall) => Response | Promise<Response> | undefined;
+export type Fault = (call: FaultCall) => Response | undefined | Promise<Response | undefined>;
 
 export interface ClientFixture {
   server: ServerFixture;

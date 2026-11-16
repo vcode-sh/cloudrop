@@ -18,12 +18,15 @@ export const bucketUnreachable = (): CloudropError =>
     { retryable: true },
   );
 
-/** A non-JSON answer or one of the wrong shape: a wrong basePath, a proxy's page, or another cloudrop version. */
+/**
+ * A non-JSON answer or one of the wrong shape: a wrong basePath, a proxy's page, or another cloudrop version. Worth
+ * retrying from 500 on, and for a 429: a proxy's rate-limit page in front of the app passes (ruling S-4).
+ */
 export const unreadableAnswer = (status: number): CloudropError =>
   new CloudropError(
     "SERVER_ERROR",
     `The upload server sent an answer this client cannot read (HTTP ${status}). Check that basePath points at the cloudrop handler and that the server runs the same cloudrop version.`,
-    { retryable: status >= 500 },
+    { retryable: status >= 500 || status === 429 },
   );
 
 export const signatureMismatch = (): CloudropError =>

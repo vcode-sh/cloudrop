@@ -1,12 +1,13 @@
 // Contract: decisions S16 (every server answer is validated; one that cannot be read is SERVER_ERROR, retryable from
-// 500 on) and S8 (endpoint POSTs send JSON with the page's credentials). Oracle: the server's real answers through the
-// client fixture, and the fetch rules of S8.
+// 500 on and for a 429, ruling S-4), S9 (a Retry-After is waited at least) and S8 (endpoint POSTs send JSON with the
+// page's credentials). Oracle: the server's real answers through the client fixture, and the fetch rules of S8.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { files } from "../testing/upload-fixture.ts";
 import { createEndpoints } from "./endpoints.ts";
+import { withRetry } from "./retry.ts";
 
 const unreadable = (status: number) =>
   `The upload server sent an answer this client cannot read (HTTP ${status}). Check that basePath points at the cloudrop handler and that the server runs the same cloudrop version.`;
@@ -27,6 +28,11 @@ const errorOf = (result: { error: { code: string; message: string; retryable: bo
   code: result.error?.code,
   message: result.error?.message,
   retryable: result.error?.retryable,
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("start", () => {
@@ -62,6 +68,33 @@ describe("start", () => {
     const { endpoints } = setup({ fault: () => page(status) });
     const result = await endpoints.start("files", png, undefined, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(status), retryable });
+  });
+
+  it("refuses an error answer of another shape", async () => {
+    // A gateway's own JSON error: it has an `error`, but not cloudrop's.
+    const { endpoints } = setup({ fault: () => Response.json({ error: { message: "Bad gateway" } }, { status: 502 }) });
+    const result = await endpoints.start("files", png, undefined, live());
+    expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(502), retryable: true });
+  });
+
+  it("retries a proxy's rate-limit page no sooner than its Retry-After", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // No jitter: without the Retry-After the second attempt would start at once.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const rateLimited = new Response("<html>Too many requests</html>", {
+      status: 429,
+      headers: { "retry-after": "2" },
+    });
+    const { fixture, endpoints } = setup({ fault: ({ nth }) => (nth === 1 ? rateLimited : undefined) });
+    const result = withRetry(() => endpoints.start("files", png, undefined, live()), live());
+    await vi.advanceTimersByTimeAsync(1999);
+    const before = [...fixture.requests];
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ before, after: fixture.requests, kind: (await result).data?.kind }).toEqual({
+      before: ["POST /upload"],
+      after: ["POST /upload", "POST /upload"],
+      kind: "single",
+    });
   });
 
   it("refuses JSON of another shape", async () => {
@@ -150,6 +183,30 @@ describe("signParts", () => {
     const { data: ticket } = await endpoints.start("files", twoParts, undefined, live());
     const result = await endpoints.signParts(ticket?.token ?? "", [1, 2], live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
+  });
+});
+
+describe("abort", () => {
+  // Task 6 awaits abort() bare on the cancel path, so a rejection here would make upload() reject.
+  it.each([
+    {
+      name: "the fetch throws synchronously",
+      fetch: () => {
+        throw new TypeError("Failed to fetch");
+      },
+      timeout: () => new AbortController().signal,
+    },
+    {
+      name: "the browser has no AbortSignal.timeout",
+      fetch: () => Promise.resolve(Response.json({ id: "x" })),
+      timeout: () => {
+        throw new TypeError("AbortSignal.timeout is not a function");
+      },
+    },
+  ])("resolves when $name", async ({ fetch, timeout }) => {
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(timeout);
+    const endpoints = createEndpoints("/api/cloudrop", fetch);
+    await expect(endpoints.abort("token")).resolves.toBeUndefined();
   });
 });
 

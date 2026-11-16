@@ -1,6 +1,6 @@
 // The retry budget every client request shares (spec §6.2's first row, decision S9).
 
-import { fail, type Result } from "../errors.ts";
+import { type CloudropError, fail, type Result } from "../errors.ts";
 import { aborted } from "./failures.ts";
 
 /** Attempts per request, the first one included. */
@@ -20,6 +20,15 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
   if (value === null) return 0;
   const waitMs = /^\d+$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value) - now;
   return Number.isFinite(waitMs) ? Math.max(waitMs, 0) : 0;
+}
+
+// Kept beside the error rather than as a field of CloudropError, which is public and would promise it.
+const retryAfters = new WeakMap<CloudropError, number>();
+
+/** Records that `error`'s request must not be tried again before `retryAfterMs` (its answer's Retry-After). */
+export function waitAtLeast(error: CloudropError, retryAfterMs: number): CloudropError {
+  retryAfters.set(error, retryAfterMs);
+  return error;
 }
 
 /** Waits `ms`, or less when the signal fires. Never rejects: the caller checks `signal.aborted` afterwards. */
@@ -45,7 +54,8 @@ export async function withRetry<T>(run: () => Promise<Result<T>>, signal: AbortS
   for (let attempt = 1; ; attempt++) {
     if (signal.aborted) return fail(aborted());
     const result = await run();
-    if (!result.error?.retryable || attempt === MAX_ATTEMPTS) return result;
-    await pause(retryDelay(attempt), signal);
+    const { error } = result;
+    if (!error?.retryable || attempt === MAX_ATTEMPTS) return result;
+    await pause(retryDelay(attempt, retryAfters.get(error)), signal);
   }
 }

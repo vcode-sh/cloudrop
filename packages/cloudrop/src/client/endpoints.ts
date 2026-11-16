@@ -13,6 +13,7 @@ import type {
 } from "../protocol/types.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTicket } from "./answers.ts";
 import { aborted, serverUnreachable, unreadableAnswer } from "./failures.ts";
+import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
 export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -44,7 +45,6 @@ function parseJson(text: string): unknown {
   }
 }
 
-// A code from a newer server passes through as it is (readErrorBody keeps any string).
 const toError = (body: ErrorBody): CloudropError =>
   new CloudropError(body.code, body.message, { retryable: body.retryable, parts: body.parts });
 
@@ -74,8 +74,9 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     }
     const json = parseJson(text);
     if (!response.ok) {
-      const error = readErrorBody(json);
-      return fail(error ? toError(error) : unreadableAnswer(response.status));
+      const body = readErrorBody(json);
+      const error = body ? toError(body) : unreadableAnswer(response.status);
+      return fail(waitAtLeast(error, parseRetryAfter(response.headers.get("retry-after"))));
     }
     const data = read(json);
     return data === null ? fail(unreadableAnswer(response.status)) : ok(data);
@@ -97,8 +98,11 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     signParts: (token, parts, signal) => post("sign", { token, parts }, signal, (json) => readSignedParts(json, parts)),
     complete: (token) => post("complete", { token }, undefined, readCompleted),
     async abort(token) {
-      // post never rejects, and a failed /abort changes nothing for a cancelled upload.
-      await post("abort", { token }, AbortSignal.timeout(ABORT_TIMEOUT_MS), () => true);
+      try {
+        await post("abort", { token }, AbortSignal.timeout(ABORT_TIMEOUT_MS), () => true);
+      } catch {
+        // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up.
+      }
     },
   };
 }
