@@ -6,14 +6,16 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
 - `app/api/cloudrop/[...all]/route.ts` mounts it: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);`.
 - `app/page.tsx` uploads with `cloudrop/client`. It imports only the server's type, so the server module and its
   secret never reach the browser bundle.
-
 - `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
   answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
 
-The demo sign-in must never ship: any visitor can set that cookie to any name and upload under that user's prefix. A
-real application reads its own signed session in `authorize`. Files up to 8 MB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
+Files up to 8 MB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
 
-Prerequisites: Docker (for RustFS), Bun and Node.js 24 (Next.js runs on the `node` on your `PATH`). Run every command below from this directory unless it says otherwise.
+The demo sign-in must never ship: any visitor can set that cookie to any name and upload under that user's prefix. A
+real application reads its own signed session in `authorize`.
+
+Prerequisites: Docker (for RustFS), Bun and Node.js 24 (Next.js runs on the `node` on your `PATH`). Run every command
+below from this directory unless it says otherwise.
 
 ## The build needs the settings
 
