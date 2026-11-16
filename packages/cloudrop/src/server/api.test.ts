@@ -14,6 +14,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** A server whose storage is the fake with some methods replaced. */
+function withStorage(changes: Partial<StorageDriver>) {
+  return serverFixture({ files }, { storage: { ...serverFixture({ files }).storage, ...changes } });
+}
+
 describe("api.getUrl", () => {
   it("returns the plain public URL, percent-encoded, when the storage has one", async () => {
     const { cloudrop } = serverFixture({ files }, { publicUrl: true });
@@ -75,6 +80,12 @@ describe("api.getUrl", () => {
       options: { expiresIn: 1.5 },
       message: "expiresIn must be a whole number of seconds from 1 to 302400.",
     },
+    // null is a value, not an omission: plain JavaScript must not get the default window for it.
+    {
+      name: "an expiry of null",
+      options: { expiresIn: null },
+      message: "expiresIn must be a whole number of seconds from 1 to 302400.",
+    },
     {
       name: "an empty download name",
       options: { download: "" },
@@ -134,15 +145,19 @@ describe("api.deletePrefix", () => {
     expect(fixture.storageCalls).toEqual([]);
   });
 
-  function withStorage(changes: Partial<StorageDriver>) {
-    const base = serverFixture({ files });
-    const storage = { ...base.storage, ...changes };
-    return { fixture: serverFixture({ files }, { storage }), base };
-  }
+  // No key starts with a slash, so the listing would be empty and the call would report a verified, empty folder.
+  it("refuses a prefix no key can start with, instead of reporting the folder empty", async () => {
+    const fixture = serverFixture({ files });
+    expect((await fixture.cloudrop.api.deletePrefix("/users/42/")).error).toMatchObject({
+      code: "INVALID_INPUT",
+      message: "No key can start with this prefix. The object key starts with a slash. Remove the leading slash.",
+    });
+    expect(fixture.storageCalls).toEqual([]);
+  });
 
   it("deletes nothing when the listing returns a key outside the prefix", async () => {
     const deleteMany = vi.fn<StorageDriver["deleteMany"]>();
-    const { fixture } = withStorage({
+    const fixture = withStorage({
       list: async () =>
         ok({ items: [{ key: "users/7/private.txt", size: 1, etag: "e", uploadedAt: new Date() }], nextCursor: null }),
       deleteMany,
@@ -154,7 +169,7 @@ describe("api.deletePrefix", () => {
   });
 
   it("fails instead of looping when deleted keys are listed again", async () => {
-    const { fixture } = withStorage({
+    const fixture = withStorage({
       list: async () =>
         ok({ items: [{ key: "users/42/ghost.txt", size: 1, etag: "e", uploadedAt: new Date() }], nextCursor: null }),
       deleteMany: async (keys) => ok({ deleted: [...keys], failed: [] }),
@@ -168,7 +183,7 @@ describe("api.deletePrefix", () => {
 
   it("stops after 10,000 pages when keys keep appearing", async () => {
     let page = 0;
-    const { fixture } = withStorage({
+    const fixture = withStorage({
       list: async () =>
         ok({
           items: [{ key: `users/42/${page++}.txt`, size: 1, etag: "e", uploadedAt: new Date() }],
@@ -184,7 +199,7 @@ describe("api.deletePrefix", () => {
 
   it("reports keys it could not delete, with the first one's reason", async () => {
     const denied = new CloudropError("STORAGE_DENIED", "Access denied.");
-    const { fixture } = withStorage({
+    const fixture = withStorage({
       list: async () =>
         ok({ items: [{ key: "users/42/a.txt", size: 1, etag: "e", uploadedAt: new Date() }], nextCursor: null }),
       deleteMany: async () => ok({ deleted: [], failed: [{ key: "users/42/a.txt", error: denied }] }),
@@ -198,7 +213,7 @@ describe("api.deletePrefix", () => {
 
   it("passes a failed listing through", async () => {
     const down = new CloudropError("STORAGE_UNREACHABLE", "Could not reach the storage service.", { retryable: true });
-    const { fixture } = withStorage({ list: async () => fail(down) });
+    const fixture = withStorage({ list: async () => fail(down) });
     expect((await fixture.cloudrop.api.deletePrefix("users/42/")).error).toBe(down);
   });
 });
@@ -262,6 +277,15 @@ describe("api.checkBucket", () => {
     const { cloudrop } = serverFixture({ files });
     const report = await cloudrop.api.checkBucket({ origins: ["https://app.example.com"] });
     expect([report.data?.cors.status, report.data?.lifecycle.status]).toEqual(["unknown", "unknown"]);
+  });
+
+  it("fails, instead of reporting unknown, when a setting cannot be read for another reason than denial", async () => {
+    const down = new CloudropError("STORAGE_UNREACHABLE", "Could not reach the storage service.", { retryable: true });
+    const fixture = withStorage({ getBucketCors: async () => fail(down) });
+    expect(await fixture.cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })).toEqual({
+      data: null,
+      error: down,
+    });
   });
 
   it("asks for origins when it has none to check", async () => {
@@ -346,15 +370,12 @@ describe("development start-up warnings", () => {
   // An unhandled rejection would stop a Node development server.
   it("logs a check that throws instead of leaving its rejection unhandled", async () => {
     vi.stubEnv("NODE_ENV", "development");
-    const base = serverFixture({ files });
     const broken = new Error("custom driver bug");
-    const storage = {
-      ...base.storage,
+    const fixture = withStorage({
       getBucketCors: () => {
         throw broken;
       },
-    };
-    const fixture = serverFixture({ files }, { storage });
+    });
     const response = await fixture.post("upload", {
       route: "files",
       files: [{ name: "a.txt", size: 1, type: "text/plain" }],

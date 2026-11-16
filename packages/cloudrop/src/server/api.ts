@@ -3,7 +3,7 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
-import { invalidInput, isPlainObject, keyProblem, prefixProblem } from "../storage/validate.ts";
+import { invalidInput, isPlainObject, keyProblem } from "../storage/validate.ts";
 import { type BucketReport, checkBucket } from "./bucket-check.ts";
 import { isExactOrigin, type ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";
@@ -53,7 +53,7 @@ async function getUrl(
       ? fail(invalidInput(problem))
       : ok({ url: `${storage.publicUrl}/${encodeKeyPath(key)}`, expiresAt: null });
   }
-  const window = expiresIn ?? DEFAULT_URL_WINDOW_SECONDS;
+  const window = expiresIn === undefined ? DEFAULT_URL_WINDOW_SECONDS : expiresIn;
   const maxWindow = Math.floor(storage.rules.maxPresignSeconds / 2);
   if (typeof window !== "number" || !Number.isInteger(window) || window < 1 || window > maxWindow) {
     return fail(invalidInput(`expiresIn must be a whole number of seconds from 1 to ${maxWindow}.`));
@@ -99,8 +99,10 @@ async function deletePrefix(
   if (typeof prefix !== "string" || !prefix.endsWith("/") || prefix === "/") {
     return fail(invalidInput('deletePrefix takes a folder prefix ending in "/", such as "users/42/".'));
   }
-  const problem = prefixProblem(prefix);
-  if (problem) return fail(invalidInput(problem));
+  // A prefix no key can have (a leading slash, a ".." segment, a control character) lists nothing, which would report
+  // a verified, empty folder while the files stay stored.
+  const unmatchable = keyProblem(prefix);
+  if (unmatchable) return fail(invalidInput(`No key can start with this prefix. ${unmatchable}`));
   let deleted = 0;
   let previous = new Set<string>();
   for (let page = 0; page < MAX_DELETE_PAGES; page++) {
