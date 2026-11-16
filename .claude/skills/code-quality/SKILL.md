@@ -21,11 +21,12 @@ In cloudrop, "APIs" means function names, options, results and `CloudropError`.
 
 ## What the tools already own
 
-`bun run check` (Biome) and `bun run typecheck` enforce formatting, lint and types. Spend no review words on what they
-report.
+`bun run check` and `bun run typecheck` enforce formatting, lint, types, file size (250 lines for a source file, 400
+for a `*.test.ts` file, through `scripts/check-file-size.ts`) and cognitive complexity (at most 15 per function,
+Biome's `noExcessiveCognitiveComplexity`). Spend no review words on what they report.
 
-Review owns what no tool checks: function and file size, parameter count, barrel files, `as` casts, names, comments,
-message wording, API shape, public surface, waterfalls, allocations on hot paths and bundle cost.
+Review owns what no tool checks: parameter count, barrel files, `as` casts, names, comments, message wording, API
+shape, public surface, waterfalls, allocations on hot paths and bundle cost.
 
 ## Library rules
 
@@ -34,8 +35,8 @@ message wording, API shape, public surface, waterfalls, allocations on hot paths
 - **Zero runtime dependencies.** A new dependency in `packages/cloudrop` needs owner approval
   ([references/dependencies.md](references/dependencies.md)).
 - **Web-platform APIs only** in library source (`fetch`, `crypto.subtle`, `TextEncoder`, `URL`): no `node:` imports,
-  no `process`, no `Buffer`, so it runs in Node 22+, Bun, Deno, Workers and browsers. The compiler enforces it; the
-  one guarded env read in `storage/presets.ts` is the only exception.
+  no `process`, no `Buffer`, so it runs in Node 24+, Bun, Deno, Workers and browsers. The compiler enforces it; the
+  guarded `fromEnv` in `src/env.ts` is the library's only access to the environment.
 - **Errors tell a person what to do.** `message` says what happened and what to do next; programs branch on `code`
   and `retryable`. A message never carries credentials, signed URLs or raw storage bodies.
 - **Performance is measured.** Hot paths avoid per-byte and per-call allocations and repeated key derivation; a speed
@@ -47,6 +48,9 @@ A rewrite is **required** when it keeps behaviour, performance, types and standa
 first fewer **concepts** a reader must hold (exported symbols, parameters, declared types, files, indirection hops,
 branches), then fewer **code lines**. Fewer concepts wins even with a few more lines. Clarity is part of the
 behaviour: a shorter version that hides intent is **golf** and fails review.
+
+The file-size cap outranks the score: a file over its cap is split by responsibility even though the split adds
+files.
 
 Simplification removes **accidental complexity**, never the project's conventions: the `Result<T>` shape, the injected
 `fetch` and `now` options, the storage contract suite, files the owner installed.

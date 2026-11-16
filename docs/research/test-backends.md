@@ -53,9 +53,9 @@ are deferred to M3.
 
 ## RustFS (container lane)
 
-Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run by `scripts/test-rustfs.sh`
-(`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label `cloudrop.test`, removed by a
-`trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
+Lane: `packages/cloudrop/src/storage/s3-driver.rustfs.integration.test.ts`, run by `bun run test:rustfs`, which
+calls `scripts/test-rustfs.sh` (`rustfs/rustfs:1.0.5`, one container per run named `cloudrop-test-rustfs-<pid>`, label
+`cloudrop.test`, removed by a `trap`). Driver: `createS3Driver` with `S3_RULES`, region `us-east-1`, path-style bucket `contract`.
 
 **Date:** 2026-11-15, re-run 2026-11-16. **Result:** 23 of 26 contract cases pass, 3 skip on declared gaps (21 of 24
 before the two presigned-GET cases, 19 of 22 before the copy-guard cases). The suite takes about 1 s. A presigned GET
@@ -79,9 +79,9 @@ why they are a declared gap, not a driver bug: the driver maps whatever the back
 
 ## Wrangler local R2 (Miniflare lane)
 
-Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, run by `scripts/test-wrangler.sh`
-(the pinned `wrangler@4.162.0` devDependency, worker fixture in `packages/cloudrop/fixtures/wrangler/`, port 18787 or
-`CLOUDROP_WRANGLER_PORT`, state in `fixtures/wrangler/.state`, stopped and wiped by a `trap`). The endpoint is
+Lane: `packages/cloudrop/src/storage/s3-driver.wrangler.integration.test.ts`, run by `bun run test:wrangler`,
+which calls `scripts/test-wrangler.sh` (the pinned `wrangler@4.162.0` devDependency, worker fixture in
+`packages/cloudrop/fixtures/wrangler/`, port 18787 or `CLOUDROP_WRANGLER_PORT`, state in `fixtures/wrangler/.state`, stopped and wiped by a `trap`). The endpoint is
 `http://127.0.0.1:<port>/cdn-cgi/local/r2/s3` (experimental, `local_dev.experimental_s3_credentials`). Driver:
 `createS3Driver` with `R2_RULES`, region `auto`, path-style bucket `contract`.
 
