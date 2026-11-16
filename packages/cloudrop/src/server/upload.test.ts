@@ -249,7 +249,7 @@ describe("POST /upload: authorization comes first", () => {
     {
       name: "a plain object whose JSON is not an object",
       auth: { toJSON: () => "x" },
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+      log: 'TypeError: Route "files": authorize returned an object whose toJSON does not give a JSON object. Return plain data or unauthorized().',
     },
     {
       name: "more than 2 KiB of JSON",

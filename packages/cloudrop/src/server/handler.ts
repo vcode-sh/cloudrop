@@ -11,6 +11,7 @@ import type { EndpointInput, ServerConfig } from "./config.ts";
 import {
   checkOrigin,
   errorResponse,
+  hasKnownCode,
   isJsonRequest,
   jsonResponse,
   originNotAllowed,
@@ -88,7 +89,14 @@ async function answer(request: Request, config: ServerConfig, hint: (request: Re
   if (body.error) return errorResponse(body.error, origin.cors);
   try {
     const result = await ENDPOINTS[endpoint]({ request, body: body.data, config });
-    return result.error ? errorResponse(result.error, origin.cors) : jsonResponse(result.data, 200, origin.cors);
+    if (!result.error) return jsonResponse(result.data, 200, origin.cors);
+    if (!hasKnownCode(result.error)) {
+      config.logger.error(
+        `cloudrop: /${endpoint} failed with an error code cloudrop does not know, so the client got a generic 500. Return a CloudropError with one of cloudrop's codes.`,
+        result.error,
+      );
+    }
+    return errorResponse(result.error, origin.cors);
   } catch (error) {
     // A throw here is a bug in the application's callbacks, a plugin, or cloudrop: the details go to the log only.
     config.logger.error(`cloudrop: /${endpoint} failed on the server.`, error);

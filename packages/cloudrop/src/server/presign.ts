@@ -57,8 +57,9 @@ export async function presignSingle(storage: StorageDriver, token: UploadTokenPa
 }
 
 /**
- * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch
- * with Promise.all against 0.38 ms one after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
+ * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured
+ * 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch with Promise.all against 0.38 ms one
+ * after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
  */
 export async function presignParts(
   storage: StorageDriver,

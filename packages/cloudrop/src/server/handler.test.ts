@@ -352,7 +352,7 @@ describe("cloudrop.handler failures", () => {
     };
     const fixture = serverFixture({ avatar }, { plugins: [plugin] });
     const response = await fixture.post("upload", uploadBody);
-    expect({ status: response.status, body: await response.json() }).toEqual({
+    expect({ status: response.status, body: await response.json(), logged: fixture.logger.errors }).toEqual({
       status: 500,
       body: {
         error: {
@@ -361,6 +361,13 @@ describe("cloudrop.handler failures", () => {
           retryable: false,
         },
       },
+      logged: [
+        {
+          message:
+            "cloudrop: /upload failed with an error code cloudrop does not know, so the client got a generic 500. Return a CloudropError with one of cloudrop's codes.",
+          error: expect.objectContaining({ code: "QUOTA_EXCEEDED", message: "No quota left." }),
+        },
+      ],
     });
   });
 

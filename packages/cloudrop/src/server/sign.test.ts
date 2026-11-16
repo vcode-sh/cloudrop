@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SignedPart, SignedRequest } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
+import type { StorageDriver } from "../storage/driver.ts";
 import { SECRET, serverFixture } from "../testing/server-fixture.ts";
 import { allowAnyone, route } from "./route.ts";
 
@@ -112,6 +113,28 @@ describe("POST /sign: single PUT", () => {
     expect((await fixture.send(body.put as SignedRequest, new TextEncoder().encode("hello"))).status).toBe(200);
   });
 
+  // The driver reads the clock after the server has computed the URL's lifetime, here 1 ms later and in the next
+  // second. Counting the lifetime from the next whole second still ends the URL at the token's deadline.
+  it("keeps the URL within the token when the storage reads the clock a moment after the server", async () => {
+    const { storage } = serverFixture({ files });
+    const late: StorageDriver = {
+      ...storage,
+      presignPut: async (key, options) => {
+        vi.setSystemTime(Date.now() + 1);
+        return storage.presignPut(key, options);
+      },
+    };
+    const fixture = serverFixture({ files }, { storage: late });
+    const ticket = await fixture.single("files", SMALL);
+    // The token expires at 2026-11-16T12:00:00Z; the server reads 11:59:50.999 and the driver 11:59:51.000.
+    vi.setSystemTime(new Date("2026-11-16T11:59:50.999Z"));
+    const url = new URL((await sign(fixture, { token: ticket.token })).body.put?.url ?? "");
+    expect({ signedAt: url.searchParams.get("X-Amz-Date"), expiresIn: url.searchParams.get("X-Amz-Expires") }).toEqual({
+      signedAt: "20261116T115951Z",
+      expiresIn: "9",
+    });
+  });
+
   it("refuses part numbers for a single PUT", async () => {
     const fixture = serverFixture({ files });
     const ticket = await fixture.single("files", SMALL);
@@ -140,27 +163,27 @@ describe("POST /sign: tokens", () => {
 
   // Verifying the token awaits the HMAC; a renewal sent in the token's last second can cross its deadline there.
   it.for([
-    { name: "a single PUT", file: SMALL, parts: undefined },
-    { name: "a multipart upload", file: BIG, parts: [1] },
-  ])("answers 410 UPLOAD_EXPIRED when $name's deadline passes while the token is verified", async ({ file, parts }) => {
-    const fixture = serverFixture({ files }, { multipartThreshold: 16 * MiB });
-    const { token } = await fixture.post("upload", { route: "files", files: [file] }).then(async (response) => {
-      const [ticket] = ((await response.json()) as { files: { token: string }[] }).files;
-      return ticket as { token: string };
-    });
-    vi.setSystemTime(new Date("2026-11-16T11:59:59Z"));
-    const sign = crypto.subtle.sign.bind(crypto.subtle);
-    vi.spyOn(crypto.subtle, "sign").mockImplementation((...args) => {
-      vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
-      return sign(...args);
-    });
-    const response = await fixture.post("sign", { token, parts });
-    expect({
-      status: response.status,
-      code: ((await response.json()) as { error?: { code: string } }).error?.code,
-      logged: fixture.logger.errors,
-    }).toEqual({ status: 410, code: "UPLOAD_EXPIRED", logged: [] });
-  });
+    { name: "a single PUT", kind: "single", file: SMALL, parts: undefined },
+    { name: "a multipart upload", kind: "multipart", file: BIG, parts: [1] },
+  ] as const)(
+    "answers 410 UPLOAD_EXPIRED when $name's deadline passes while the token is verified",
+    async ({ kind, file, parts }) => {
+      const fixture = serverFixture({ files }, { multipartThreshold: 16 * MiB });
+      const { token } = await fixture[kind]("files", file);
+      vi.setSystemTime(new Date("2026-11-16T11:59:59Z"));
+      const hmac = crypto.subtle.sign.bind(crypto.subtle);
+      vi.spyOn(crypto.subtle, "sign").mockImplementation((...args) => {
+        vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+        return hmac(...args);
+      });
+      const response = await fixture.post("sign", { token, parts });
+      expect({
+        status: response.status,
+        code: ((await response.json()) as { error?: { code: string } }).error?.code,
+        logged: fixture.logger.errors,
+      }).toEqual({ status: 410, code: "UPLOAD_EXPIRED", logged: [] });
+    },
+  );
 
   it("refuses a token signed with a secret this server does not hold", async () => {
     const ticket = await serverFixture({ files }, { secret: "another-secret-0123456789abcdef0123456" }).single(

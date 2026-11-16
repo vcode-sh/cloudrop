@@ -175,9 +175,14 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   // as the user would sign uploads for a refused request. The token carries this one JSON snapshot, measured and
   // signed as the same text, because a toJSON may answer differently each time it runs. JSON.stringify throws for a
   // BigInt or a cycle, which the handler reports.
-  const ownerJson = isPlainObject(auth) ? JSON.stringify(auth) : undefined;
-  if (!isPlainObject(auth) || ownerJson?.[0] !== "{") {
+  if (!isPlainObject(auth)) {
     throw new TypeError(`Route "${route.name}": authorize must return a plain object or unauthorized().`);
+  }
+  const ownerJson: string | undefined = JSON.stringify(auth);
+  if (ownerJson?.[0] !== "{") {
+    throw new TypeError(
+      `Route "${route.name}": authorize returned an object whose toJSON does not give a JSON object. Return plain data or unauthorized().`,
+    );
   }
   if (new TextEncoder().encode(ownerJson).length > MAX_METADATA_JSON_BYTES) {
     throw new TypeError(`Route "${route.name}": authorize returned more than 2 KiB of JSON. Return ids, not records.`);
