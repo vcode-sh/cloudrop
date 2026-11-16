@@ -15,6 +15,8 @@ Load the matching skill from `.claude/skills/` before the work:
 ## Rules
 
 - Write everything in English.
+- Decisions live in `docs/decisions/`, cited as `M1-R…`, `M2-D…` or `M2-X…`; a ruling that changes behaviour or a
+  public contract gets an entry there in the same change.
 - `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`. The compiler enforces
   it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
   `src/node.ts` describes Node's request and response by hand for the same reason; `src/node.test.ts` proves real Node

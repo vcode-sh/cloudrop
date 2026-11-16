@@ -12,6 +12,8 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 - M3 (the upload engine and the browser client): next. Until it lands there is no client; the four endpoints are
   described in the [design spec](docs/superpowers/specs/2026-11-15-cloudrop-design.md#5-upload-protocol).
 
+Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
+
 ## Goals
 
 - Headless core with a small footprint, plus thin React, Vue and Svelte bindings.

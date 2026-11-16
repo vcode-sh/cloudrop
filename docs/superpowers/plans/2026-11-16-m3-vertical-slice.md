@@ -43,7 +43,7 @@ lane G (gates, package checks, trimmed root entry) and lane Docs (Task 17 of M2)
   and Biome's `complexity/noExcessiveCognitiveComplexity` at 15; `packages/cloudrop/package.json` has a
   `package:check` script running publint, attw and size-limit with one budget per published entry; the root entry no
   longer exports the 18 wire types, `Jsonified`, `RouteTypes`, `StandardIssue` or `StandardResult` (lane G brief G5,
-  ruling R38).
+  ruling M2-X38).
 - Lane Docs: `AGENTS.md` names `bun run verify` as the gate.
 
 Read the merged `packages/cloudrop/package.json`, `biome.json` and `.github/workflows/ci.yml` before Task 1: Tasks 7
@@ -104,17 +104,17 @@ proceeds with the recommendation, and the owner may overrule it before execution
 - **S4 Public surface of `cloudrop/client` (owner).** Values: `createCloudropClient`, `CloudropError`. Types:
   `ClientOptions`, `CloudropClient`, `UploadOptions`, `UploadArguments`, `Result`, `CloudropErrorCode`,
   `CompleteResponse`, `UploadedFile`. Ten names, each a semver promise. The other 16 wire types (`UploadRequest`,
-  `FileTicket`, `SignedRequest`, `ErrorBody`, …) stay unexported: no signature of the client names them, and ruling R38
+  `FileTicket`, `SignedRequest`, `ErrorBody`, …) stay unexported: no signature of the client names them, and ruling M2-X38
   only moved the decision here. `CloudropError` is the same class the root exports (one shared chunk), so `instanceof`
   agrees across entries.
-- **S5 Three client error codes (owner).** `UPLOAD_REJECTED` (named by spec §6.2 line 208 and by M2 decision D17 as
+- **S5 Three client error codes (owner).** `UPLOAD_REJECTED` (named by spec §6.2 line 208 and by M2-D17 as
   "a client classification"), and two the spec does not name: `ABORTED` (the caller's signal fired) and
   `NETWORK_ERROR` (no answer at all, retryable). They join `CloudropErrorCode` (`errors.ts:1-30`). The server's status
   table must not grow fake statuses for them, so `STATUS` in `server/http.ts:9-37` becomes keyed by
   `ServerErrorCode = Exclude<CloudropErrorCode, ClientErrorCode>` and `hasKnownCode` (`http.ts:60`) becomes a type
   guard. A plugin that returns a client code gets the generic 500 that any unknown code gets today
   (`server/handler.ts:93-98`, tested at `server/handler.test.ts:347-372`).
-- **S6 The neutral module is `src/input.ts` (ruling R35).** It holds `invalidInput` and `isPlainObject`, moved
+- **S6 The neutral module is `src/input.ts` (ruling M2-X35).** It holds `invalidInput` and `isPlainObject`, moved
   verbatim from `src/storage/validate.ts:10-19`: the two helpers the client needs (arguments from plain JavaScript;
   answers from the server). `formatBytes` (`validate.ts:154-157`) stays: no client code formats a size, and its
   callers are storage (`validate.ts:163-164`) and server modules that depend on storage anyway
@@ -180,7 +180,7 @@ proceeds with the recommendation, and the owner may overrule it before execution
   completed, the client sends one `POST /abort { token }` without the signal, ignores its answer (the bucket's
   lifecycle rule cleans the rest, spec §5.5 line 188) and returns `ABORTED`. A signal already aborted at the call
   starts no request. A signal that fires after `/complete` succeeded changes nothing: the result is returned, because
-  `/abort` with a live token would delete the completed object (ruling R1, `server/abort.ts:24-30`).
+  `/abort` with a live token would delete the completed object (ruling M2-X1, `server/abort.ts:24-30`).
 - **S15 No `/abort` after a failure (owner).** A file that fails for any reason other than cancellation is left to
   the lifecycle rule: after a `/complete` attempt the object may be verified and `onComplete` may have run
   (`server/complete.ts:157-166`), and `/abort` would delete it. The resume plan owns re-trying a failed upload.
@@ -314,7 +314,7 @@ test infrastructure, like `server-fixture.ts`, and is not an entry.
 
 ---
 
-### Task 1: The neutral input module (ruling R35)
+### Task 1: The neutral input module (ruling M2-X35)
 
 A pure move: same behaviour, same messages, no test changes.
 
@@ -888,7 +888,7 @@ export async function uploadFile(
   const started = await withRetry(() => context.endpoints.start(route as string, file as File, metadata, signal), signal);
   if (started.error) return fail(signal.aborted ? aborted() : started.error);
   const result = await sendAndComplete(context, started.data, file as File, signal);
-  // A completed upload stays completed: /abort with a live token would delete it (ruling R1).
+  // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
   if (!result.error || !signal.aborted) return result;
   await context.endpoints.abort(started.data.token);
   return fail(aborted());
@@ -918,7 +918,7 @@ the stored bytes):
 | returns authorize's refusal without sending bytes | `authorize` refuses: error `UNAUTHORIZED` with the route's message; no `PUT` in `requests` | refusal thrown, or bytes sent anyway |
 | returns the server's verdict on a file the route refuses | 17-byte file to `notes`: `FILE_TOO_LARGE`, the server's message (`server/upload.ts:90-95`); no `PUT` | rejected ticket read as success |
 | refuses arguments from plain JavaScript before any request | `upload(42, file)`, `upload("notes", "x")`, `upload("notes", file, { signal: {} })` | `INVALID_INPUT` with the three messages; `requests` empty |
-| leaves metadata out of the request when the caller gives none | `notes` upload without options: success (the server refuses any metadata on a schemaless route, M2 D28) | `metadata: undefined` sent as `null` |
+| leaves metadata out of the request when the caller gives none | `notes` upload without options: success (the server refuses any metadata on a schemaless route, M2-D28) | `metadata: undefined` sent as `null` |
 
 `upload-failures.test.ts` (contract: S10 to S14 through the real client and server; oracle: the measured R2 answers
 named in S10, built by `fault` exactly as the fake sends them, `testing/fake-r2/responses.ts:11-13`):
@@ -1097,7 +1097,7 @@ export const cloudrop = createCloudrop({
 `s3()` and `r2()` throw `INVALID_CONFIG` naming every missing setting (`storage/presets.ts:40-43`), so the `?? ""`
 fallbacks surface as one clear start-up error. `createCloudrop` reads `CLOUDROP_SECRET` (`server/config.ts:64-77`).
 
-`app/api/cloudrop/[...all]/route.ts`: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);` (M2 D27 adds
+`app/api/cloudrop/[...all]/route.ts`: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);` (M2-D27 adds
 `OPTIONS` to the spec's `{ GET, POST }`, spec line 36).
 
 `app/page.tsx` (`"use client"`): `import type { cloudrop } from "../lib/cloudrop";`,
@@ -1303,7 +1303,7 @@ Each item: the plan's recommendation, then what it costs if wrong.
 1. **One file per call (S1).** Recommended: `upload(route, file)`. If wrong: adding an array form later is a widening,
    but a hook API built on a single-file call in M4 may need reshaping.
 2. **Public surface of `cloudrop/client` (S4).** Recommended: ten names; the other 16 wire types stay internal
-   (R38 said "cloudrop/client will export the wire types"). If wrong: a third-party client author has no protocol
+   (M2-X38 said "cloudrop/client will export the wire types"). If wrong: a third-party client author has no protocol
    types until one is exported (non-breaking to add).
 3. **Error codes `ABORTED` and `NETWORK_ERROR` (S5).** The spec names only `UPLOAD_REJECTED`. If wrong: renaming a code
    after 0.x is breaking; before the first publish it is free.
@@ -1315,7 +1315,7 @@ Each item: the plan's recommendation, then what it costs if wrong.
    `"same-origin"`), or cookies go to a cross-origin server the app did not mean to authenticate to (with `"include"`;
    the server must list the origin in `trustedOrigins` first).
 7. **`/upload` is retried after a network failure (S9).** If its first request reached the server, a multipart upload
-   is orphaned and a future quota plugin's reservation is held until it expires (R27). Not retrying makes a brief
+   is orphaned and a future quota plugin's reservation is held until it expires (M2-X27). Not retrying makes a brief
    network drop fail the file.
 8. **No progress callback in the slice.** If wrong: the example shows no progress for a large file, and the
    ergonomics feedback the slice exists for misses progress.
