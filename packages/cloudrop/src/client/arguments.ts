@@ -14,6 +14,8 @@ export interface Arguments {
 export const isList = (value: unknown): value is ArrayLike<unknown> =>
   typeof value === "object" && value !== null && "length" in value && typeof value.length === "number";
 
+const refuse = (message: string) => fail(invalidInput(message));
+
 function encodesAsJson(value: unknown): boolean {
   try {
     JSON.stringify(value);
@@ -24,7 +26,6 @@ function encodesAsJson(value: unknown): boolean {
 }
 
 function readFiles(files: unknown): Result<File[]> {
-  const refuse = (message: string) => fail(invalidInput(message));
   if (files instanceof File) return ok([files]);
   if (!isList(files)) return refuse('Pass the file as a File, such as one from <input type="file">.');
   const list = Array.from(files);
@@ -35,7 +36,6 @@ function readFiles(files: unknown): Result<File[]> {
 }
 
 export function readArguments(route: unknown, files: unknown, options: unknown): Result<Arguments> {
-  const refuse = (message: string) => fail(invalidInput(message));
   if (typeof route !== "string" || route === "") {
     return refuse('Name the upload route as text, such as upload("avatar", file).');
   }
