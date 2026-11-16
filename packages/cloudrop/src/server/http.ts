@@ -56,9 +56,12 @@ export function jsonResponse(body: unknown, status: number, headers: ResponseHea
 export const serverError = (): CloudropError =>
   new CloudropError("SERVER_ERROR", "The server could not handle the upload. Try again later.");
 
+/** CloudropError does not check its code: one from plain JavaScript may have none of ours, so no HTTP status. */
+export const hasKnownCode = (error: CloudropError): boolean => Object.hasOwn(STATUS, error.code);
+
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
-  // CloudropError does not check its code: one from plain JavaScript may have none of ours, which would answer 200.
-  if (!Object.hasOwn(STATUS, error.code)) return errorResponse(serverError(), headers);
+  // An unknown code would otherwise answer 200.
+  if (!hasKnownCode(error)) return errorResponse(serverError(), headers);
   return jsonResponse({ error: errorBody(error) }, STATUS[error.code], headers);
 }
 

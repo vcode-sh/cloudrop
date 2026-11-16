@@ -2,6 +2,7 @@
 // from the request: the client cannot change a key, size, type or part boundary.
 
 import { fail, ok, type Result } from "../errors.ts";
+import { sizeOfPart } from "../plan.ts";
 import type { SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { PresignedRequest, StorageDriver } from "../storage/driver.ts";
 import { contentDisposition } from "./key.ts";
@@ -55,19 +56,10 @@ export async function presignSingle(storage: StorageDriver, token: UploadTokenPa
   return signed.error ? signed : ok(toWire(signed.data));
 }
 
-export function partCount(token: MultipartToken): number {
-  return Math.ceil(token.size / token.partSize);
-}
-
-/** Every part but the last has exactly partSize bytes, so R2's equal-part rule holds by construction (spec §5.1). */
-export function partSizeOf(token: MultipartToken, partNumber: number): number {
-  const count = partCount(token);
-  return partNumber < count ? token.partSize : token.size - (count - 1) * token.partSize;
-}
-
 /**
- * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch
- * with Promise.all against 0.38 ms one after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
+ * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured
+ * 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch with Promise.all against 0.38 ms one
+ * after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
  */
 export async function presignParts(
   storage: StorageDriver,
@@ -79,7 +71,7 @@ export async function presignParts(
   const signed = await Promise.all(
     partNumbers.map(async (partNumber): Promise<Result<SignedPart>> => {
       const result = await storage.presignPart(token.key, token.uploadId, partNumber, {
-        size: partSizeOf(token, partNumber),
+        size: sizeOfPart(token.size, token.partSize, partNumber),
         expiresIn,
       });
       return result.error ? result : ok({ partNumber, ...toWire(result.data) });

@@ -254,6 +254,40 @@ describe("POST /complete: multipart", () => {
     expect(aborted).toEqual([]);
   });
 
+  it("asks for a retry, keeping the upload, when a part is uploaded again while the upload is being completed", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
+    const ticket = await fixture.multipart("files", BIG);
+    await fixture.send(ticket.parts[0] as SignedPart, partOne);
+    await fixture.send(ticket.parts[1] as SignedPart, partTwo);
+    // Part 2 is sent again, with other bytes of the same size, after ListParts and before the completion: the ETag
+    // the server listed is stale by the time the bucket checks it.
+    const { fetch } = fixture.fake;
+    let replaced = false;
+    fixture.fake.fetch = async (input, init) => {
+      const completing = init?.method === "POST" && String(input).includes("uploadId=");
+      if (completing && !replaced) {
+        replaced = true;
+        await fixture.send(ticket.parts[1] as SignedPart, new Uint8Array(5).fill(9));
+      }
+      return fetch(input, init);
+    };
+    expect(await complete(fixture, ticket.token)).toEqual({
+      status: 502,
+      body: {
+        error: {
+          code: "STORAGE_ERROR",
+          message: "A part of the file changed while the upload was being completed. Complete the upload again.",
+          retryable: true,
+        },
+      },
+    });
+    expect([fixture.fake.pendingUploads(), aborted]).toEqual([1, []]);
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    expect((await fixture.storage.getRange(ticket.key, 8 * MiB, 8 * MiB + 4)).data).toEqual(new Uint8Array(5).fill(9));
+  });
+
   it("refuses to complete over an object that appeared at the key, and keeps that object", async () => {
     const fixture = serverFixture({ files }, { multipartThreshold: 0 });
     const ticket = await fixture.multipart("files", BIG);

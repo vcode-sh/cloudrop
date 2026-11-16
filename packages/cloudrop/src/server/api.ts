@@ -70,6 +70,27 @@ async function getUrl(
   });
 }
 
+/** Why a listed page must not be deleted, or undefined when it may. */
+function pageProblem(keys: string[], prefix: string, previous: ReadonlySet<string>): CloudropError | undefined {
+  // A listing that strays outside the prefix is a storage or encoding fault: deleting it could erase other data.
+  if (keys.some((key) => !key.startsWith(prefix))) {
+    return new CloudropError(
+      "STORAGE_ERROR",
+      "The storage listed keys outside the prefix, so nothing more was deleted.",
+    );
+  }
+  if (keys.some((key) => previous.has(key))) {
+    return new CloudropError(
+      "STORAGE_ERROR",
+      "Some keys were still listed after they were deleted. Retry deletePrefix.",
+      {
+        retryable: true,
+      },
+    );
+  }
+  return undefined;
+}
+
 async function deletePrefix(
   storage: StorageDriver,
   prefix: string,
@@ -87,19 +108,8 @@ async function deletePrefix(
     if (listed.error) return listed;
     const keys = listed.data.items.map((item) => item.key);
     if (keys.length === 0) return ok({ deleted, verifiedAt: new Date() });
-    // A listing that strays outside the prefix is a storage or encoding fault: deleting it could erase other data.
-    if (keys.some((key) => !key.startsWith(prefix))) {
-      return fail(
-        new CloudropError("STORAGE_ERROR", "The storage listed keys outside the prefix, so nothing more was deleted."),
-      );
-    }
-    if (keys.some((key) => previous.has(key))) {
-      return fail(
-        new CloudropError("STORAGE_ERROR", "Some keys were still listed after they were deleted. Retry deletePrefix.", {
-          retryable: true,
-        }),
-      );
-    }
+    const problem = pageProblem(keys, prefix, previous);
+    if (problem) return fail(problem);
     const removed = await storage.deleteMany(keys);
     if (removed.error) return removed;
     const [first] = removed.data.failed;
