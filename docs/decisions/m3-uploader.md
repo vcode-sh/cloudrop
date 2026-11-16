@@ -184,13 +184,16 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   `failed`/`aborted` with its `error`. `CloudropError` gains an optional `file: { id, name }`, set on every error that
   belongs to one file. A job refused for its arguments has the same handles over no files: the calls do nothing and
   its snapshot is empty (`R5-3`). When `/upload` fails, a file cancelled on its own meanwhile ends `aborted` with its
-  own `ABORTED` error and `error.file`; the others end `failed` with the job's error, which stays the result's.
+  own `ABORTED` error and `error.file`; the others end `failed` with the job's error, which stays the result's. A file
+  cancelled while `/upload` was on its way that `/upload` then refuses on its own ends `aborted` the same way.
 - **Why:** owner decision 2026-11-16 (spec §2.2). `UploadResult` departs from `Result<T>`, where `data` is null
   whenever `error` is set, on purpose: a partial failure must not hide the files that succeeded. It keeps the
   `{ data, error }` shape, so `if (error)` still works.
 - **If wrong:** a caller that treats every `error` as "nothing happened" misses the files that succeeded; the type's
   doc comment and the README say so. `error.file` is a new public field (a minor semver change).
-- **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`, `5cc63e5`). Supersedes `M3-S1`; spec §1 says so.
+- **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`, `5cc63e5`). Supersedes `M3-S1`; spec §1 says so. A cancelled
+  file that `/upload` refused ends `aborted` since `d399b90` (plan B early review M3): before, it ended `failed`, and
+  its `retry()` asked for a ticket only to `/abort` it at once.
 - **Visible in:** `client/job.ts`, `client/types.ts`, `errors.ts` (`CloudropError.file`), `client/failures.ts`
   (`withFile`), `client/job.test.ts`.
 
@@ -387,14 +390,17 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 ### M3-U24: one halving per window
 
 - **Decision:** plan B Q2. `slowDown()` halves an automatic pool (rounded down, at least 1), starts a new window and
-  holds: another `slowDown()` before that window closes does nothing, and the window's close only clears the hold, so
-  it cannot grow. The window after can. A fixed pool ignores `slowDown()` and never weighs `sent`.
+  holds: another `slowDown()` before a window closes does nothing, and that close only clears the hold, so it cannot
+  grow. The window after can. Restarting the window when the pool is used again after idleness (`M3-U44`) keeps the
+  hold. A fixed pool ignores `slowDown()` and never weighs `sent`.
 - **Why:** one cause, such as a dropped link, fails every PUT in flight at once; halving per failure would take the pool
   to 1 for a single event.
 - **If wrong:** a link that keeps failing loses at most half its slots per window, and regaining each slot takes at
-  least one window of rising throughput.
-- **Status:** in force (`ea771fc`).
-- **Visible in:** `client/pool.ts` (`slowDown`), `client/pool.test.ts`.
+  least one window of rising throughput. The PUTs of one outage usually all give their slots back before their retries
+  ask again, so the hold then lasts until 2 s after the pool is used again.
+- **Status:** in force (`ea771fc`). Since `d399b90` (plan B early review M1) the idle restart keeps the hold; before,
+  it cleared it, and one outage could take the pool from 4 to 1 within a second.
+- **Visible in:** `client/pool.ts` (`slowDown`, `update`), `client/pool.test.ts`.
 
 ### M3-U25: what slows the pool down
 
@@ -655,7 +661,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 
 - **Decision:** task 2 R1 and R2, from audit I2. An `acquire` on a pool with no slot in use starts a fresh window with
   no rate to compare, and a window longer than 4000 ms is not compared either: both leave the rate at 0, which means
-  "nothing to compare". The pool grows only when the previous and the current rate are both above 0.
+  "nothing to compare". The pool grows only when the previous and the current rate are both above 0. That restart
+  keeps a `slowDown()`'s hold (`M3-U24`).
 - **Why:** a client created at page load and first used minutes later would read a near-empty window, then any window
   as a rise, and climb to 8 one step per window whatever the throughput; so would every gap between jobs and every
   window during a stall. With fetch a part's bytes arrive only when it is stored, so empty windows are common. The
@@ -704,13 +711,17 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 ### M3-U48: the offline check lives with the listeners
 
 - **Decision:** task 4 ruling 1. `watchConnectivity` reads `navigator.onLine` only after it added its listeners, and
-  only where the global has `addEventListener`. A runtime whose `navigator.onLine` is false but that has no
-  `addEventListener` uploads as if online.
+  only where the global has `addEventListener`: false calls `offline`, anything else `online`, which resumes only files
+  `offline` paused. A runtime whose `navigator.onLine` is false but that has no `addEventListener` uploads as if
+  online.
 - **Why:** a file paused there could never resume, since no `online` event would arrive. Checking at registration also
-  means every start of watching checks it, including a retry's.
+  means every start of watching checks it, including a retry's. Calling `online` catches up an `online` event that
+  came while nothing listened (`M3-U49`): a retry's file paused by `offline` while its `/upload` was on its way, after
+  the job's last counted run ended, would otherwise wait for good.
 - **If wrong:** none known; no such runtime is known (Node's `navigator` has no `onLine`).
-- **Status:** in force (`58d24f7`).
-- **Visible in:** `client/lifecycle.ts` (`watchConnectivity`), `client/lifecycle.test.ts`.
+- **Status:** in force (`58d24f7`). `online` at the start since `d399b90` (plan B early review I1).
+- **Visible in:** `client/lifecycle.ts` (`watchConnectivity`), `client/lifecycle.test.ts`, `client/retry-abort.test.ts`
+  (the connectivity row).
 
 ### M3-U49: connectivity is watched only while files run
 
@@ -721,7 +732,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Why:** tying the listeners to `done` would leave a later `retry()` without offline handling; the count lets plan
   B's task 5 bracket a retry's run with the same calls.
 - **If wrong:** an `/upload` sent offline spends its attempts and fails the job with `NETWORK_ERROR` instead of
-  waiting for `online`.
+  waiting for `online`. An `online` that comes while nothing is watched is caught up when the next run starts
+  (`M3-U48`).
 - **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`; one `Job.runUpload` brackets each run
   since `b368bc4`).
 - **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/lifecycle.test.ts`.
@@ -789,7 +801,10 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **If wrong (known cost):** a ticket released by `pagehide` or by its expiry does not start the check, so the listener
   stays on a long-lived signal, and the job stays reachable through it, until the next run ends or an `abort()`. If
   the signal fires meanwhile, those files turn `aborted`; an expired ticket's `/abort` changes nothing on the server.
-- **Status:** in force (`4f1887a`, `b368bc4`).
+- **Status:** in force (`4f1887a`, `b368bc4`). Plan B's early review (M2) proposed checking after `pagehide` and
+  treating an expired ticket as idle; it stays a known cost: the only harm is the job's memory while a long-lived
+  signal lives, and the fix would spend client bytes (`M3-U58`) on it. A row since `d399b90` proves the listener is
+  held while a ticket is and goes after the file's or the job's `abort()`.
 - **Visible in:** `client/job-run.ts` (`busy`, `listen`, `idle`), `client/retry-file.ts` (`retryFiles`),
   `client/retry-abort.test.ts`.
 
@@ -806,11 +821,14 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 ### M3-U56: `retry()` resolves once every file it waits for has settled
 
 - **Decision:** task 5 ruling 6. `file.retry()` and `job.retry()` resolve when every file they retried or waited for
-  has settled, and wait again when a listener restarted one meanwhile.
-- **Why:** an outcome is a settled state (`M3-U37`); a running file has none to report.
+  has settled, and wait again when a listener restarted one meanwhile. The outcomes are read in the step that sees
+  every file settled, so another retry that starts a file again before the promise resolves cannot change them.
+- **Why:** an outcome is a settled state (`M3-U37`); a running file has none to report. Read later, a file started
+  again reads as `failed` with a null `error`, which breaks `UploadResult` (`M3-U10`, `M3-U35`).
 - **If wrong:** a listener that retries a file on every failure keeps the promise pending until it stops.
-- **Status:** in force (`4f1887a`).
-- **Visible in:** `client/job-run.ts` (`allSettled`), `client/job.ts` (`handleOf`, `retryJob`).
+- **Status:** in force (`4f1887a`). Outcomes read when every file settled since `d399b90` (plan B early review I2).
+- **Visible in:** `client/job-run.ts` (`allSettled`), `client/retry-file.ts` (`retryFiles`), `client/job.ts`
+  (`handleOf`, `retryJob`), `client/retry-file.test.ts` (the "a retry's result" rows).
 
 ### M3-U57: `upload()` marks the ticket it aborted
 
@@ -832,5 +850,6 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   took 0.04 kB (the job's connectivity count in one method, two "already listening" flags, a replaced speed meter).
   Most of the rest is property names that do not minify and the messages, which stay as worded.
 - **If wrong:** the resume plan must fit in about 0.68 kB, find bytes elsewhere, or ask the owner to raise the ceiling.
-- **Status:** in force (`ab5f0b0`; the size pass `b368bc4`).
+- **Status:** in force (`ab5f0b0`; the size pass `b368bc4`). The early review's fixes (`d399b90`) cost 0.02 kB:
+  8.34 kB, 0.66 kB left.
 - **Visible in:** `scripts/size-limit.config.ts`.
