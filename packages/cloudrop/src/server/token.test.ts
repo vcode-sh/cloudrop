@@ -61,7 +61,6 @@ describe("verifyToken", () => {
     expect((await verifyToken(SIGNED_WITH_CURRENT, [current], EXP)).error).toMatchObject({
       code: "UPLOAD_EXPIRED",
       message: "This upload expired. Start it again to upload the file.",
-      status: 410,
       retryable: false,
     });
   });

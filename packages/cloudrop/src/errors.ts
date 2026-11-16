@@ -41,6 +41,7 @@ export interface CloudropErrorOptions {
 export class CloudropError extends Error {
   readonly code: CloudropErrorCode;
   readonly retryable: boolean;
+  /** The HTTP status the storage service answered, for logs. The handler's own answer takes its status from `code`. */
   readonly status: number | undefined;
   /** The storage service's own error code, for logs. Never shown to end users. */
   readonly storageCode: string | undefined;

@@ -67,7 +67,7 @@ describe("POST /upload: storage failures and plugins", () => {
       logged: fixture.logger.errors.map(({ message, error }) => [message, (error as CloudropError).code]),
       events,
     }).toEqual({
-      logged: [["cloudrop: the storage service refused a request.", "STORAGE_DENIED"]],
+      logged: [["cloudrop: a storage request failed.", "STORAGE_DENIED"]],
       events: ["release failed big.png"],
     });
   });
@@ -88,7 +88,7 @@ describe("POST /upload: storage failures and plugins", () => {
       tickets: [
         {
           code: "SERVER_ERROR",
-          message: "The server could not handle the upload. Try again later.",
+          message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
           retryable: false,
         },
         "single",

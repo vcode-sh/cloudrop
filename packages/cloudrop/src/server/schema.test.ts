@@ -28,7 +28,6 @@ describe("validateMetadata", () => {
   it("explains the first issue with its path", async () => {
     expect((await validateMetadata(albumSchema(), { albumId: 7 })).error).toMatchObject({
       code: "INVALID_METADATA",
-      status: 400,
       message: "The metadata is not valid: Expected a string (at albumId). Correct it and try again.",
     });
   });
@@ -36,7 +35,6 @@ describe("validateMetadata", () => {
   it("refuses metadata on a route without a schema", async () => {
     expect((await validateMetadata(undefined, { albumId: "a1" })).error).toMatchObject({
       code: "INVALID_METADATA",
-      status: 400,
       message: "This upload takes no metadata. Remove it.",
     });
   });

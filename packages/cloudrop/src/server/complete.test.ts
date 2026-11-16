@@ -128,7 +128,7 @@ describe("POST /complete: single PUT", () => {
       init?.method === "DELETE" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
     expect((await complete(fixture, ticket.token)).body.error).toEqual({
       code: "STORAGE_ERROR",
-      message: "The storage service did not respond. Try again in a moment.",
+      message: "The storage service failed. Try again in a moment.",
       retryable: true,
     });
     expect([(await fixture.storage.head(ticket.key)).data?.type, aborted]).toEqual(["text/html", []]);
@@ -248,7 +248,7 @@ describe("POST /complete: multipart", () => {
       init?.method === "HEAD" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
     expect((await complete(fixture, ticket.token)).body.error).toEqual({
       code: "STORAGE_ERROR",
-      message: "The storage service did not respond. Try again in a moment.",
+      message: "The storage service failed. Try again in a moment.",
       retryable: true,
     });
     expect(aborted).toEqual([]);

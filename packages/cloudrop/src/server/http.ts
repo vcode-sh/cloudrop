@@ -54,7 +54,10 @@ export function jsonResponse(body: unknown, status: number, headers: ResponseHea
 }
 
 export const serverError = (): CloudropError =>
-  new CloudropError("SERVER_ERROR", "The server could not handle the upload. Try again later.");
+  new CloudropError(
+    "SERVER_ERROR",
+    "The server could not handle the upload. Contact the site owner if this keeps happening.",
+  );
 
 /** CloudropError does not check its code: one from plain JavaScript may have none of ours, so no HTTP status. */
 export const hasKnownCode = (error: CloudropError): boolean => Object.hasOwn(STATUS, error.code);
@@ -70,14 +73,14 @@ export function errorResponse(error: CloudropError, headers: ResponseHeaders = {
  * full error goes to the logger.
  */
 export function storageFailure(error: CloudropError, logger: Logger): CloudropError {
-  logger.error("cloudrop: the storage service refused a request.", error);
+  logger.error("cloudrop: a storage request failed.", error);
   if (error.code === "RATE_LIMITED") {
     return new CloudropError("RATE_LIMITED", "The storage service is busy. Try again in a moment.", {
       retryable: true,
     });
   }
   return error.retryable
-    ? new CloudropError("STORAGE_ERROR", "The storage service did not respond. Try again in a moment.", {
+    ? new CloudropError("STORAGE_ERROR", "The storage service failed. Try again in a moment.", {
         retryable: true,
       })
     : new CloudropError(

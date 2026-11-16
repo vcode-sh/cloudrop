@@ -27,8 +27,7 @@ export type SchemaOutput<TSchema> = TSchema extends StandardSchema<unknown, infe
 /** Metadata travels inside every upload token (spec §5.2); the same 2 KiB cap as object metadata keeps tokens small. */
 export const MAX_METADATA_JSON_BYTES: number = 2048;
 
-const invalidMetadata = (message: string): CloudropError =>
-  new CloudropError("INVALID_METADATA", message, { status: 400 });
+const invalidMetadata = (message: string): CloudropError => new CloudropError("INVALID_METADATA", message);
 
 /** Control characters, Unicode line and paragraph separators, and bidi overrides and isolates (Trojan Source). */
 const UNSAFE_IN_LOGS = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/gu;

@@ -272,7 +272,7 @@ describe("toNodeHandler", () => {
         {
           error: {
             code: "SERVER_ERROR",
-            message: "The server could not handle the upload. Try again later.",
+            message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
             retryable: false,
           },
         },

@@ -94,10 +94,10 @@ export async function signToken(payload: UploadTokenPayload, key: CryptoKey): Pr
 }
 
 const invalidToken = (): CloudropError =>
-  new CloudropError("INVALID_TOKEN", "The upload token is not valid. Start the upload again.", { status: 400 });
+  new CloudropError("INVALID_TOKEN", "The upload token is not valid. Start the upload again.");
 
 export const uploadExpired = (): CloudropError =>
-  new CloudropError("UPLOAD_EXPIRED", "This upload expired. Start it again to upload the file.", { status: 410 });
+  new CloudropError("UPLOAD_EXPIRED", "This upload expired. Start it again to upload the file.");
 
 /**
  * The payload of a token any of `keys` signed. An expired token is UPLOAD_EXPIRED unless `allowExpired` (abort, which
