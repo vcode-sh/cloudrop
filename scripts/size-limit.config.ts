@@ -26,13 +26,13 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
-  // Bundled and minified, the size an app ships (spec §1: client plus React ~10 kB). Set after M3 progress plan A:
-  // 6.71 kB measured plus ~10% (M3-U13). The owner's ceiling is 7.5 kB (spec §7), so plan B has about 0.8 kB left.
+  // Bundled and minified, the size an app ships. Owner decision 2026-11-16: a 9 kB ceiling with headroom for the rest
+  // of M3 instead of raising it plan by plan (6.74 kB after progress plan A); plan B's Task 8 sets it from measurement.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "7.4 kB",
+    limit: "9 kB",
   },
 ];

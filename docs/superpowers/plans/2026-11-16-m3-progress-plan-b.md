@@ -31,9 +31,10 @@ Plan A is done (`a5de46a..a003cdb`); its decisions are `M3-U1` to `M3-U22` in `d
 - Public calls return `{ data, error }`; `UploadResult` as in spec §2.2; `done` and every new promise never reject.
   Messages say what happened and what to do next, never a URL, token or storage answer.
 - No `AbortSignal.any` (`M3-U19`): combine signals with listeners.
-- **Bundle:** `cloudrop/client` is 6.74 kB gzip, budget 7.4 kB, owner's ceiling about 7.5 kB. Every task reports its
-  measured size. Tasks may pass 7.4 kB (raise the limit to 7.5 kB in the task that needs it, saying so); if the size
-  passes 7.5 kB, finish the task and STOP before the next one: the controller asks the owner.
+- **Bundle:** `cloudrop/client` is 6.74 kB gzip. Owner decision 2026-11-16: raise the ceiling with headroom for the
+  rest of M3 instead of raising it step by step; the plan commit sets the `cloudrop/client` limit to 9.0 kB. Tasks
+  never edit `scripts/size-limit.config.ts` (Task 8 sets the final number) and every task reports its measured size.
+  Allowance for plan B as a whole: about 1.2 kB.
 - **Ports during parallel waves:** only the task that the wave names may use port 5173 (`test:browser`, the lab);
   others run unit gates only. RustFS lanes take their own `CLOUDROP_RUSTFS_PORT`.
 - Live R2: `CLOUDROP_R2_ENV_FILE=~/.config/cloudrop/live-r2.env`; never read or print it; write only under
@@ -56,11 +57,13 @@ Plan A is done (`a5de46a..a003cdb`); its decisions are `M3-U1` to `M3-U22` in `d
   of the budget and renews the URL once, as any opaque outcome does.
 - **Q6. Paused by the network** is not a separate status: `paused` in the snapshot. `online` resumes only files that
   `offline` paused; a caller's `pause()` on such a file makes it the caller's.
-- **Q7. `upload()` keeps `M3-S15`:** it returns no handle, so nobody can retry its failed file; its failure still sends
+- **Q7. `upload()` keeps `M3-S15`** (owner-confirmed 2026-11-16; Task 8 amends spec §4.7): it returns no handle, so nobody can retry its failed file; its failure still sends
   the background `/abort`. Only `start()` jobs keep a failed file's ticket and parts (spec §4.7).
 - **Q8. `retry()` chooses at the time it is called:** same ticket when the file has one that is not expired, was not
   aborted, and the error is not one a new attempt with that ticket cannot fix; otherwise a new `/upload`. It does not
-  fall back from one branch to the other within one call.
+  fall back from one branch to the other within one call. Exception first (audit I6): when a `/complete` may have
+  succeeded, `retry()` always sends `/complete` with the kept ticket, whatever the clock says or `dropped`; success ends
+  the file done, any other answer ends it failed with that answer.
 - **Q9. Codes that need a new ticket:** `UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UPLOAD_REJECTED`, `VERIFICATION_FAILED`,
   and any failure of a file that never had a ticket (rejected at `/upload`, or a job-level error).
 - **Q10. `abort()` on a failed file** sends its `/abort` (keep-or-abort: not when a `/complete` may have succeeded) and
@@ -71,6 +74,22 @@ Plan A is done (`a5de46a..a003cdb`); its decisions are `M3-U1` to `M3-U22` in `d
 - **Q12. `job.retry()` asks for new tickets in one `/upload`** for all its files that need one, so a job refused with
   `TOO_MANY_FILES` is never split silently; `file.retry()` asks for its file alone.
 
+- **Q13. `done` reports each file's first outcome** (audit C1): a file's outcome is recorded when it first settles
+  (`entry.firstOutcome`) and a later `retry()` never changes it; `done` is built from those. `job.retry()` resolves
+  only when every file of the job has settled (it waits for files still running), with the current outcomes.
+- **Q14. A new ticket starts new byte accounting** (audit I10): a retry that asks `/upload` for a new ticket gives the
+  file a fresh `Progress` and `Meter`, so its bytes drop to 0: an explicit exception to spec §4.2, because the new
+  upload has stored nothing. A same-ticket retry keeps the bytes.
+- **Q15. `retry()` on a file that has not settled** sends nothing and resolves with its outcome when it next settles; on
+  a done or aborted file, at once with that outcome. `job.retry()` on a job refused for its arguments resolves with the
+  same `{ data: null, error }` as `done` (audit I11).
+- **Q16. One `abortFile(entry)`** serves the file handle, `job.abort()` and the caller's signal: a running file is
+  cancelled as today; a failed file holding a ticket follows Q10 (it turns `aborted`; its `/abort` is skipped only when
+  a `/complete` may have succeeded). The caller's signal stays attached while any file of the job runs or is held,
+  and is removed when none is (audit I9, M8).
+- **Q17. Offline pauses queued and uploading files** (spec §4.6 says uploading; queued files would start and fail
+  too). A job that starts while `navigator.onLine === false` pauses its files at once (audit M1, M2).
+
 ## File map
 
 | File | Task | Change |
@@ -79,7 +98,7 @@ Plan A is done (`a5de46a..a003cdb`); its decisions are `M3-U1` to `M3-U22` in `d
 | `packages/cloudrop/src/client/pool.ts`, `pool.test.ts`, `client.ts`, `client.test.ts`, `upload.ts` | 2 | Auto size, `sent`, `slowDown`; `concurrency: "auto"`, `order` |
 | `packages/cloudrop/src/client/transport.ts`, `transport.test.ts` | 3 | Stall watchdog (XHR) and timeout (fetch) |
 | `packages/cloudrop/src/client/lifecycle.ts` (new), `file-run.ts`, `job.ts`, `lifecycle.test.ts` | 4 | `offline`/`online` |
-| `file-run.ts`, `job.ts`, `types.ts`, `lifecycle.ts`, `client.ts`, `retry-file.test.ts` (new) | 5 | `retry()`, the failed-file rule, `pagehide` |
+| `file-run.ts`, `job.ts`, `types.ts`, `lifecycle.ts`, `upload.ts`, `client.ts`, `job.test.ts`, `retry-file.test.ts` (new) | 5 | `retry()`, the failed-file rule, `pagehide` |
 | `packages/cloudrop/src/plan.ts` and its tests | 6 | Only if Task 1 says so |
 | `examples/next/app/lab/*`, `examples/next/app/lab.browser.test.ts`, `examples/next/README.md` | 7 | Lab controls and browser rows |
 | `scripts/size-limit.config.ts`, `docs/decisions/m3-uploader.md`, `README.md`, specs, plans README | 8 | Size pass, budget, decisions, docs |
@@ -171,6 +190,25 @@ export interface ClientOptions { basePath?; fetch?; concurrency?: number | "auto
 - [ ] **Step 5:** `bun run verify`; report the size. **Commit** `feat(client): size the pool by itself and send small
   files first`.
 
+**Audit amendments (binding; they override the steps above where they differ):**
+- Invariant (I1): every `acquire`, release and `sent` first evaluates the window if it is due, then grants waiters in
+  rank order while `inUse < size`. An `acquire` waits whenever waiters exist or `inUse >= size` (no overtaking). A
+  release decrements `inUse` (the double-call guard stays). `now` defaults to `() => Date.now()`, read per call (M11).
+- Evaluation (I3): evaluate before counting the call's bytes; the new window starts at `now()`; compare as
+  `rate >= lastRate * 1.1`. Row 2 with times: `sent(1000)` at t = 0, `sent(1101)` at t = 2000 (this call closes window
+  1 before counting), `acquire` at t = 4000 → size 5; with `sent(1099)` → 4.
+- Idle (I2): grow only when `lastRate > 0` and `rate > 0`. A window that began while the pool was idle (`inUse === 0`
+  and no waiters) or that lasted over 4000 ms is discarded (`lastRate = null`, new window). Rows: first use after an
+  idle minute does not grow; 0 → 0 does not grow.
+- The 429 row (I4): two 3-part files in one job (6 wanted, 4 granted), `Math.random` at 0, fake `Date` frozen; answer
+  one PUT with 429 and hold the others; assert no new PUT starts until fewer than 2 are in flight (release the held ones
+  one by one), and both files end done.
+- Smallest-first row (M10): both files in one `start()` (the large one first), `concurrency: 1`.
+- Existing tests (I8): update `client.test.ts`'s `concurrency` refusal row to the new message; rename
+  `upload.test.ts`'s "the default of 4" row (the default is `"auto"`, which starts at 4).
+- `sent` counts only bytes above a part's earlier best (`progress.sent`), so re-sent bytes are not throughput (M12):
+  say so in a comment.
+- Report the measured gzip size; do not edit `scripts/size-limit.config.ts`.
 ### Task 3: Stalls
 
 **Files:** modify `packages/cloudrop/src/client/transport.ts`, `transport.test.ts`.
@@ -191,6 +229,12 @@ export interface ClientOptions { basePath?; fetch?; concurrency?: number | "auto
   has not fired becomes `unreachable` of the caller's signal (opaque). Comment: Q5 and spec §4.6.
 - [ ] **Step 3:** `bun run verify`; report the size. **Commit** `feat(client): give up on a stalled PUT and try again`.
 
+**Audit amendments (binding):**
+- Fetch path (M3): if the caller's signal has already fired, abort the controller at once; clear the timer and remove
+  the listener in `finally`.
+- Comment (M4): an answer slower than 30 s after the body is sent, or an XHR the browser queues behind its per-host
+  connection limit, also counts as a stall: spec-conformant; one line in the code comment.
+- Report the measured gzip size; do not edit `scripts/size-limit.config.ts`.
 ### Task 4: Offline and online
 
 **Files:** create `packages/cloudrop/src/client/lifecycle.ts`, `lifecycle.test.ts`; modify `file-run.ts` (`Entry`
@@ -215,6 +259,15 @@ export function watchConnectivity(offline: () => void, online: () => void): () =
   and a caller `pause()` on a paused file clears it. Keep `pauseFile`'s ruling `M3-U4`.
 - [ ] **Step 3:** `bun run verify`; report the size. **Commit** `feat(client): pause on offline and resume on online`.
 
+**Audit amendments (binding):**
+- Lifetime (I14): do not tie the listeners to `done`. The job keeps a count of files that are running (from the start
+  of a file's run to its end); `watchConnectivity` is registered when the count goes from 0 to 1 and removed when it
+  returns to 0. Expose this as two small functions in `job.ts` (for example `begin()`/`finish()` around `runFile`), so
+  Task 5's retries reuse them unchanged.
+- `resumeFile` (a caller's `resume()` while offline) clears `networkPaused` (M1). At registration, when
+  `navigator.onLine === false` (where `navigator` exists), pause the running files at once (Q17).
+- Doc comment (M5): "no-op where the global has no addEventListener"; Deno and Workers have one, which is harmless.
+- Report the measured gzip size; do not edit `scripts/size-limit.config.ts`.
 ### Task 5: `retry()` and the failed-file rule
 
 **Files:** modify `packages/cloudrop/src/client/file-run.ts`, `job.ts`, `types.ts`, `lifecycle.ts`, `upload.ts` (the
@@ -269,6 +322,25 @@ export function createLeftovers(abort: (token: string) => Promise<void>): Leftov
 - [ ] **Step 3:** `bun run verify`, `bun run test:browser` (port 5173 is free in wave 2); report the size. **Commit**
   `feat(client): retry a failed file and keep what it sent`.
 
+**Audit amendments (binding):**
+- Q13 to Q16 above are part of this task: `entry.firstOutcome` and `done` built from it, with a row "a file retried
+  while another still runs: `done` reports the first outcome and an error"; `job.retry()` waits for every file; Q14
+  fresh `Progress`/`Meter` on a new ticket, with a row; Q15 rows; Q16 `abortFile` with rows for `job.abort()` on a
+  failed file and the caller's signal firing during a retry.
+- Same-ticket retry (I5): reset `upload.repairs = 0`; when the error is `PARTS_MISSING`, delete its parts (read from the
+  error's `cause`, which `withFile` keeps) from `entry.landed`. Row: a file that failed with `PARTS_MISSING` after two
+  repairs completes on retry.
+- `mayBeComplete` first (I6, Q8): row with the fake clock past `expiresAt`: `retry()` sends `POST /complete` with the
+  kept ticket and no `/upload`.
+- Row 2 (I7): part 3 fails with six `500` answers (`STORAGE_ERROR`, retryable, budget exhausted, `Math.random` at 0),
+  never a `400`, which Q9 sends to a new ticket.
+- Existing tests (I8): `job.test.ts`'s row "fails only the file whose PUT the bucket refused, and aborts only that one"
+  becomes `aborts: 0` (a `start()` failure keeps its ticket); `FileHandle` becomes `FileHandle<R = unknown>` so
+  `examples/next/app/lab/file-rows.tsx` still compiles.
+- `runFile` registers its cancel listener once per entry, not once per call (M6).
+- Leftovers (M7): skip and release entries whose ticket's `expiresAt` has passed, when `pagehide` fires and when an
+  entry is held.
+- Report the measured gzip size; do not edit `scripts/size-limit.config.ts`.
 ### Task 6: The planner change (only if Task 1 recommends one)
 
 **Files:** modify `packages/cloudrop/src/plan.ts` and its tests; whatever server tests pin the first part size.
@@ -293,6 +365,10 @@ export function createLeftovers(abort: (token: string) => Promise<void>): Leftov
 - [ ] Gates: `bun run verify`, `bun run test:browser`, `bun run test:browser:live`. **Commit** `feat(examples): show
   auto connections, smallest-first and retry in the lab`.
 
+**Audit amendments (binding):**
+- The "reused its ticket" row needs a fault that fails a file with a retryable outcome until the budget runs out (for
+  example the bucket answering `500`, or network errors, on every PUT while ticked); a `400` always takes the
+  new-ticket branch (M14). Show both: one row per branch.
 ### Task 8: Size pass, budget, decisions, docs
 
 - [ ] Size pass over `client/` (simplify rule, no behaviour change, own `refactor(client)` commit, browser lane green);
@@ -306,6 +382,13 @@ export function createLeftovers(abort: (token: string) => Promise<void>): Leftov
   plan. Replace "ruling Q<n>" citations in code with `M3-U` ids.
 - [ ] `bun run verify`. **Commit** `docs: record plan B's decisions, the client budget and the uploader guide`.
 
+**Audit amendments (binding):**
+- Amend spec §4.7's first bullet: the rule applies to files of `start()` jobs; `upload()` keeps `M3-S15`'s background
+  `/abort` (Q7, owner-confirmed). Spec §7: the client ceiling is 9.0 kB for the rest of M3 (owner decision
+  2026-11-16); spec §1's "client plus React" target becomes about 11 kB.
+- The budget: the measured size + about 10 %, rounded up to 0.1 kB, and never above 9.0 kB; the comment states the
+  room left for the resume plan.
+- Decision entries also for Q13–Q17, M4 (slow answers count as stalls) and M12 (what `sent` measures).
 ## Self-review
 
 - Spec coverage: §4.4 auto and smallest-first → Task 2; §4.6 stalls → Task 3, offline → Task 4; §4.7 → Task 5; §5 →
