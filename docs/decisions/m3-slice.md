@@ -192,18 +192,21 @@ otherwise.
   `upload()` answers the original error at once and the `/abort` runs in the background; on a cancel `upload()` waits
   for it (at most 10 s) and answers `ABORTED`. `/abort` is sent with `keepalive: true`, so a tab closed right after the
   failure or cancel still delivers it. When a `/complete` may have finished the file, nothing is sent and the file is
-  kept. The route's `onAbort` therefore also runs after such a failure, not only after a cancel.
+  kept. A plugin's `onAbort` hook (`reason: "aborted"`) therefore also runs after such a failure, not only after a
+  cancel: a quota plugin's reservation is released at once instead of at its own expiry.
 - **Why:** the owner asked on 2026-11-16 for the approach that is best for performance, after the final review found
   that a failed single `PUT` (every file under 64 MiB) left a complete object that no lifecycle rule removes and that
   the app never recorded: the abort-incomplete-multipart rule only removes unfinished multipart uploads. The safety
   argument is M3-S14's: with no `/complete` that may have succeeded, `/abort` deletes only this upload's own object
   (`server/abort.ts`). Answering before `/abort` settles adds no latency to the failure; `/abort` never rejects
   (`client/endpoints.ts`, `abort`), so the background request cannot surface as an unhandled rejection.
-- **If wrong:** a background request after a failure that the caller does not see, and an `onAbort` call an app may
-  not expect after a failure. A file kept because a `/complete` may have finished it still stays until the app
-  deletes it.
+- **If wrong:** a background request after a failure that the caller does not see, and an `onAbort` call a plugin may
+  not expect after a failure (a second one after a `/complete` refusal that already ran it with `"rejected"`, which the
+  idempotency rule by `file.id` allows). A file kept because a `/complete` may have finished it still stays until the
+  app deletes it.
 - **Status:** in force (`7ed3e60`); supersedes the first M3-S15 ("no `/abort` after a failure", `bc06db2`, owner
-  accepted under M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good.
+  accepted under M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good. Amends
+  M3-S31 and M3-H16 (their `/abort` now follows a failure too) and M2-D21 (when `onAbort` runs).
 - **Visible in:** `client/upload.ts` (`uploadFile`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
@@ -371,17 +374,19 @@ otherwise.
 ### M3-S31: a `PARTS_MISSING` answer clears the doubt
 
 - **Decision:** ledger ruling S-9. Wherever a `PARTS_MISSING` answer arrives, the first `/complete` or a repair round's,
-  it clears the flag that keeps the file after a cancel, so a cancel after it sends `/abort`.
+  it clears the flag that keeps the file, so a cancel or a failure after it sends `/abort` (M3-S15).
 - **Why:** the server answers `PARTS_MISSING` only after ListParts succeeded, while the multipart upload is still open
   (`server/complete.ts`, `completeParts`); a completed upload answers ListParts with `NoSuchUpload`, which ends in
   success instead. No `PUT` runs while `/complete` runs, so no earlier attempt can have completed the file, and
   `/abort` deletes nothing recorded while it frees the parts at once (plan re-review 2, D-3).
 - **If wrong:** a recorded file is deleted. The one path found: a proxy holds an earlier `/complete` and delivers it
-  after the repair `PUT`s, it completes the file, and the user then cancels. The `/abort` that follows deletes the
+  after the repair `PUT`s, it completes the file, and the upload then ends without success: the user cancels, or,
+  since M3-S15, the repair round fails with no user action at all. The `/abort` that follows deletes the
   recorded object: `abortMultipart` treats `NoSuchUpload` as success (`storage/s3/multipart.ts:115`), R2 answers an
   abort after completion with `204` (spike Q11), and `server/abort.ts` then deletes the upload's own object while the
   token is valid (`server/abort.test.ts:86`). Not considered a realistic threat.
-- **Status:** in force (`cec31c9`); amends M3-H16 and M3-S14.
+- **Status:** in force (`cec31c9`); amends M3-H16 and M3-S14. Amended by M3-S15 (S-18): the `/abort` it allows now
+  also follows a failure.
 - **Visible in:** `client/upload.ts` (the `complete` closure), `client/upload-failures.test.ts`.
 
 ### M3-S32: `cloudrop/client`'s budget is 4.7 kB gzip

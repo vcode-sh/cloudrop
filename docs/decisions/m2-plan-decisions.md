@@ -220,7 +220,8 @@ later.
 
 - **Decision:** `{ id, server?: { beforeUpload, afterVerify, onAbort, extendRoute } }`. A hook refuses by returning a
   `CloudropError`; the first refusal stops the rest. `onAbort` runs when a file a plugin's `beforeUpload` accepted is
-  refused, cannot be started, is rejected or collides at `/complete`, or is cancelled through `/abort`. Nothing runs at
+  refused, cannot be started, is rejected or collides at `/complete`, or is ended through an `/abort` that keeps
+  nothing (after a cancel, or after a failure no `/complete` may have finished, M3-S15). Nothing runs at
   token expiry, so a reservation needs its own expiry. Hooks can run more than once for one file, so reserve and release
   are idempotent by `file.id`. `onAbort` errors are logged and never stop the others. `extendRoute` may throw
   `INVALID_CONFIG` at construction.
@@ -228,7 +229,8 @@ later.
 - **If wrong:** M5 reshapes the hook contract before 1.0.
 - **Status:** amended by audit T10-2 (`onAbort` only when nothing is kept) and by the Task 17 review, which removed the
   plan's promise that `onAbort` runs for every file that will not complete. `extendRoute`'s design belongs to M5
-  (M2-P4).
+  (M2-P4). Amended by M3-S15: the client now also calls `/abort` after a failure, so `onAbort` runs then too and a
+  reservation is released at once.
 - **Visible in:** spec §8, `src/server/plugins.ts`, `src/server/config.ts`.
 
 ### M2-D22: visibility

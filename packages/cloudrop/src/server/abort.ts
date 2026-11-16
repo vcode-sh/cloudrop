@@ -1,5 +1,6 @@
-// POST /abort (spec §5.5): the user cancelled. An expired token still aborts what never finished, but never deletes a
-// stored file: /abort keeps no state and cannot tell an upload that landed from one /complete accepted.
+// POST /abort (spec §5.5): the user cancelled, or the client cleans up a failed upload (M3-S15). An expired token
+// still aborts what never finished, but never deletes a stored file: /abort keeps no state and cannot tell an upload
+// that landed from one /complete accepted.
 
 import { fail, ok, type Result } from "../errors.ts";
 import type { AbortResponse } from "../protocol/types.ts";

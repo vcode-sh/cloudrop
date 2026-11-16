@@ -119,9 +119,9 @@ without a number; they are `M1-N1` to `M1-N3` at the end. Numbers not listed her
 - **Status:** in force.
 - **Visible in:** `src/server/schema.ts`, `AGENTS.md` (Rules).
 
-### M1-N3: Node 24 and caret ranges for dev dependencies
+### M1-N3: Node 24 and caret ranges for dependencies
 
-- **Decision:** `engines` requires Node `>=24`. Dev dependencies use caret ranges, and a new one is added at a version
+- **Decision:** `engines` requires Node `>=24`. Every dependency uses a caret range, and a new one is added at a version
   released at least two weeks earlier.
 - **Why:** the owner made both changes after M1 (`dcae90e`, `b0f3e9a`). A version two weeks old has had time for a bad
   release to be found and pulled.

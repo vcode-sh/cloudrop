@@ -332,11 +332,12 @@ ran out.
 ## 8. Plugins (1.0)
 
 A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpload`, `afterVerify`, `onAbort`,
-`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs when a file
-a plugin's `beforeUpload` accepted is refused, cannot be started, is rejected or collides at `/complete`, or is
-cancelled through `/abort`. Nothing runs when an abandoned upload's token expires, so a reservation also needs its own
-expiry. Hooks can run more than once for one file (§5.4), so a plugin that reserves and releases makes both idempotent
-by `file.id`.
+`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs when a file a
+plugin's `beforeUpload` accepted is refused, cannot be started, is rejected or collides at `/complete`, or is ended
+through an `/abort` that keeps nothing: after a cancel, or after a failure no `/complete` may have finished, which the
+client cleans up (M3-S15), so a quota plugin's reservation is released at once. Nothing runs when an abandoned upload's
+token expires, so a reservation also needs its own expiry. Hooks can run more than once for one file (§5.4), so a plugin
+that reserves and releases makes both idempotent by `file.id`.
 
 - **`contentChecks()`**: ranged GET of the first 4 KiB at completion, magic bytes checked against `accept`; rejects
   executables and HTML disguised as other types by default; optional quarantine (upload under `_pending/`, promote

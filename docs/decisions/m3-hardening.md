@@ -228,22 +228,22 @@ reviews accepted.
   (`NETWORK_ERROR`) or answered `SERVER_ERROR`. The flag is sticky across the attempts `withRetry` makes and across
   repair rounds, with one exception: a `PARTS_MISSING` answer clears it, because it proves that no attempt before it
   completed the file (it comes only while the multipart upload is open, `server/complete.ts:82-102`; a completed one
-  answers through `completedBefore` instead). The client sends `/abort` after a cancel only when the flag is not set,
-  for example after a 503 `RATE_LIMITED` the server answers before it completes the file, or when a repair round is
-  cancelled after `PARTS_MISSING` (M3-S31).
+  answers through `completedBefore` instead). The client sends `/abort` after a cancel or a failure only when the flag
+  is not set, for example after a 503 `RATE_LIMITED` the server answers before it completes the file, or when a repair
+  round ends after `PARTS_MISSING` (M3-S31).
 - **Why:** `/complete` is repeatable: a second call after a completed one verifies the object again and reruns
-  `afterVerify` and `onComplete` (`server/complete.ts:17-23`). So the last attempt alone cannot tell whether an
-  earlier one finished: attempt 1 completes the file and records it, its answer is lost, attempt 2 answers
-  `SERVER_ERROR` because `onComplete` throws on the duplicate row, the user cancels in the backoff, and `/abort` with
-  the live token deletes the recorded object (`server/abort.ts:23-31`). The handler's retryable `SERVER_ERROR` from
-  `/complete` (`unfinished()` at `server/complete.ts:18-23`, status 500 at `server/http.ts:38`) means the object is
-  verified and kept; its other
-  `SERVER_ERROR` answers (a throw caught at `server/handler.ts:99-102`) and a proxy's unreadable 502 or 504 may also
-  follow a completion, so every `SERVER_ERROR` counts. Counting the ones that follow no completion only keeps more
-  files. A recorded file must never be deleted by a cancel.
+  `afterVerify` and `onComplete` (`server/complete.ts:17-23`). So the last attempt alone cannot tell whether an earlier
+  one finished: attempt 1 completes the file and records it, its answer is lost, attempt 2 answers `SERVER_ERROR`
+  because `onComplete` throws on the duplicate row, the user cancels in the backoff, and `/abort` with the live token
+  deletes the recorded object (`server/abort.ts:23-31`). The handler's retryable `SERVER_ERROR` from `/complete`
+  (`unfinished()` at `server/complete.ts:18-23`, status 500 at `server/http.ts:38`) means the object is verified and
+  kept; its other `SERVER_ERROR` answers (a throw caught at `server/handler.ts:99-102`) and a proxy's unreadable 502 or
+  504 may also follow a completion, so every `SERVER_ERROR` counts. Counting the ones that follow no completion only
+  keeps more files. A recorded file must never be deleted by a cancel.
 - **If wrong:** an object stays in the bucket after a cancel that really did not complete, until the app deletes it;
   once the token expires, `/abort` can no longer delete it either.
 - **Status:** in force (`bc06db2`, `cec31c9`); controller ruling H16 on the M3 plan's re-review (N-1). Amended by
-  M3-S31 (the `PARTS_MISSING` exception, worded here since plan re-review 2's D-1 to D-3).
+  M3-S31 (the `PARTS_MISSING` exception, worded here since plan re-review 2's D-1 to D-3) and by M3-S15 (S-18: the
+  same flag decides the `/abort` after a failure).
 - **Visible in:** `src/client/upload.ts` (`sendAndComplete`, `uploadFile`), `src/client/upload-failures.test.ts` (the
   four `/complete` cancel rows), M3-S14.
