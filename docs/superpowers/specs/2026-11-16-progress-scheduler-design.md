@@ -1,7 +1,7 @@
 # Progress and scheduler: design
 
-Status: approved by the owner 2026-11-16. Plan A executed 2026-11-16 (`a5de46a..a003cdb`, merged to `main`); plan B is
-next. Parent spec:
+Status: approved by the owner 2026-11-16. Plan A executed 2026-11-16 (`a5de46a..a003cdb`, merged to `main`); plan B
+executed 2026-11-16 (`fbc5c15..220332c`, on `feat/m3-progress-b`). Parent spec:
 [`2026-11-15-cloudrop-design.md`](2026-11-15-cloudrop-design.md) §6.1, §6.2 and §6.4 (§6.3, resume after reload, is
 out of scope). Builds on `cloudrop/client` as merged at `d3f36a7` (`packages/cloudrop/src/client/`). Decisions taken
 while executing this design go to a new series `M3-U` in `docs/decisions/`.
