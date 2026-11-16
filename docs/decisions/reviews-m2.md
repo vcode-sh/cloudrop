@@ -32,20 +32,19 @@ Severity is the reviewer's. "Owner" means the decision is left to the project ow
 | Tasks 15+16 | The live credential check is copied in two lane files | Minor | Parked (M2-P1) |
 | Tasks 15+16 | Live lanes never print their run prefix, so an interrupted run names only a placeholder | Minor | Fixed in `d5dacc2` (final review m13) |
 | Lane S (server fixes) | The "agree with planParts" property compares the functions with themselves | Important | Fixed in `fe7a1b1` (M2-X39) |
-| Lane S | `copy` computes its own part ranges | Minor | Owner: judged acceptable (final review m15) |
+| Lane S, final m15 | `copy` computes its own part ranges | Minor | Kept: judged acceptable (M2-X41) |
 | Lane T (fake R2 split) | The `ContractSuite` interface could be inferred | Minor | Parked (M2-P3) |
-| Lane G (quality gates) | Source maps ship in the package tarball (about 255 kB raw) | Owner decision | Owner |
+| Lane G (quality gates) | Source maps ship in the package tarball (about 255 kB raw) | Owner decision | Kept until M6 (M3-H4) |
 | Task 17 (docs) | Spec §8 and `plugins.ts` promise `onAbort` for every file that will not complete; nothing runs at token expiry | Important | Fixed in `9d3e694` (M2-D21) |
 | Task 17 | The code-quality skill still said 280 lines while `AGENTS.md` caps source at 250 | Important | Fixed in `9d3e694` |
 | Final branch review | `toNodeHandler` ignores HTTP/2 `:authority`, so same-origin h2 uploads get 403 | Important | Fixed in `37a9595` |
 | Final branch review | A storage 501 (Wrangler's `ListParts`) answers a retryable error | Important | Fixed in `835697c` |
 | Final branch review | `/abort` is refused once a deploy removes the token's route | Important | Fixed in `2a8eff9` |
-| Final branch review | m15: `copy` keeps its own range arithmetic | Minor | Owner |
-| Final branch review | m16: the file's id is `fileId` on the wire and `id` in `UploadedFile` and `PluginFile` | Minor | Owner: decide before M3 exports the wire types |
+| Final branch review | m16: the file's id is `fileId` on the wire and `id` in `UploadedFile` and `PluginFile` | Minor | Owner: `id` everywhere on the wire (M3-O2); lane I changes the server |
 | Final branch review | m17: the M3 client must decide retries of cloudrop's endpoints by `error.retryable`, not HTTP status | Minor | Owner: M3 contract note |
 | Final fix re-review | Spec §5.3 said only a HEAD precedes a delete; a refused multipart file is deleted after its create-only completion | Minor (new breakage, docs) | Fixed in `9df61ef` |
 | Final fix re-review | `extendRoute` passes through a `CloudropError` with a code other than `INVALID_CONFIG` | Minor | Parked for M5 (M2-P4) |
-| Final fix wave (implementer) | `upload.ts` is 243 lines (cap 250, target 220) | Concern | Owner |
+| Final fix wave (implementer) | `upload.ts` is 243 lines (cap 250, target 220) | Concern | Fixed by the hardening split in `0ce548b` (`upload.ts` 136 lines) |
 | Final fix wave (implementer) | The application's own `logger.warn` in `createCloudrop` runs unguarded | Concern | Owner |
 | Final fix wave (implementer) | A multipart upload created before a throwing custom driver's `presignParts` stays until the lifecycle rule | Concern | Owner |
 

@@ -1,9 +1,10 @@
 # M2 execution rulings
 
 Rulings made while executing the M2 plan, numbered 1 to 41 in the M2 execution ledger, which git never tracked. Rulings
-1 to 6 are the owner's (they answer the plan audit's six "Owner decisions"); the rest are the controller's, many made on
-a review finding. Several are about process rather than code; they are kept because later rulings and commits refer to
-them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
+1 to 6 are the owner's: M2-X1 and M2-X3 answer the plan audit's owner decision 1, M2-X4 decisions 2 and 3, M2-X5
+decision 4, M2-X6 decisions 5 and 6, and M2-X2 is the owner's acceptance condition for the audit's Critical T14-1. The
+rest are the controller's, many made on a review finding. Several are about process rather than code; they are kept
+because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
 
 ## Owner rulings
 
@@ -198,7 +199,7 @@ them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
 ### M2-X22: unmeasured bucket-settings codes fail closed
 
 - **Decision:** For bucket-settings reads, only the explicit missing-configuration codes the fake represents mean "no
-  rules". Any other 404 is a storage error. Lifecycle tag filters are documented, not modelled.
+  rules". Any other 404 is a storage error (built retryable; M2-X40 made it non-retryable). Lifecycle tag filters are documented, not modelled.
 - **Why:** R2's codes for a bucket without settings are unmeasured (object tokens get 403), so they must fail closed
   rather than be read as "missing".
 - **If wrong:** a real R2 empty-settings code gives an actionable error until measured.
@@ -326,7 +327,8 @@ them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
 - **Decision:** Moving `invalidInput`, `isPlainObject` and `formatBytes` out of `storage/validate.ts` waits for M3.
 - **Why:** nothing needs a neutral module until a client exists, and the M3 plan knows which helpers the client shares.
 - **If wrong:** eight server imports change later instead of now.
-- **Status:** in force; the M3 plan (Task 1) carries it out.
+- **Status:** in force; the M3 plan (Task 1, S6) moves `invalidInput` and `isPlainObject` to `src/input.ts` and keeps
+  `formatBytes` where it is.
 - **Visible in:** `src/storage/validate.ts`, `docs/superpowers/plans/2026-11-16-m3-vertical-slice.md`.
 
 ### M2-X36: delete the duplicated abort case
@@ -353,7 +355,8 @@ them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
 - **Why:** every export is a semver promise and no server developer needs them; `cloudrop/client` was to export the
   wire types.
 - **If wrong:** re-adding an export is not breaking.
-- **Status:** closed by `d1b2c26`. The M3 plan revisits the "client exports the wire types" half.
+- **Status:** closed by `d1b2c26`. Its second half holds: the owner decided on 2026-11-16 that `cloudrop/client`
+  exports all protocol wire types, overruling the M3 plan's ten-name S4 (M3-O1).
 - **Visible in:** `src/index.ts`.
 
 ### M2-X39: delete a property that cannot fail
@@ -381,7 +384,7 @@ them. `M2-P1` to `M2-P4` are rulings the ledger recorded without a number.
 - **Why:** the owner asked for all fixes in this session, and each fix was small with a named trigger.
 - **If wrong:** one more implementer and one scoped re-review.
 - **Status:** closed (`37a9595` to `9df61ef`). The items left to the owner are listed in
-  [reviews-m2.md](reviews-m2.md).
+  [reviews-m2.md](reviews-m2.md); m16 is decided by M3-O2 and the source maps by M3-H4.
 
 ## Unnumbered rulings
 
