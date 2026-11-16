@@ -13,9 +13,9 @@ export interface Store<T> {
 
 export function createStore<T>(build: () => T, active: () => boolean): Store<T> {
   let snapshot = build();
-  let lastMs = Number.NEGATIVE_INFINITY;
+  let lastMs = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let dueMs = Number.POSITIVE_INFINITY;
+  let dueMs = Infinity;
   const listeners = new Set<() => void>();
 
   const schedule = (atMs: number) => {
@@ -27,7 +27,7 @@ export function createStore<T>(build: () => T, active: () => boolean): Store<T> 
   function publish() {
     clearTimeout(timer);
     timer = undefined;
-    dueMs = Number.POSITIVE_INFINITY;
+    dueMs = Infinity;
     snapshot = build();
     lastMs = Date.now();
     for (const listener of [...listeners]) {
