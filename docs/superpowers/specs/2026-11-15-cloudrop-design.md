@@ -145,7 +145,8 @@ server never handles them.
 ```
 client                     server (cloudrop.handler)                  bucket
   │ POST /upload  {route, files[], metadata}                            │
-  │──────────────▶ bounds → metadata → authorize → policy → plugins.before → plan ─▶ CreateMultipartUpload
+  │──────────────▶ bounds → metadata → authorize → policy → plugins.before│
+  │                → plan ─────────────────────────────────────────────▶│ CreateMultipartUpload (multipart only)
   │◀────────────── per file: token, plan, first batch of signed URLs     │
   │ PUT bytes (parallel, retried) ──────────────────────────────────────▶│
   │ POST /sign    {token, parts[]}  → more or renewed URLs              │
@@ -176,8 +177,8 @@ The server decides; the client cannot.
 - Lifetime 24 hours by default; this is the resume window. Signed URLs live 15 minutes, never past the token's
   expiry, and are renewed through `/sign`, in batches (default 20 parts).
 - The token is the authority for its whole lifetime: `authorize` runs only in `/upload`, so a session revoked
-  mid-upload can still finish that upload. `onComplete` receives the request and re-checks the session when that
-  matters. Nothing revokes a live token (§5.5).
+  mid-upload can still finish that upload. `onComplete` receives the request, so an application that needs it
+  re-checks the session there. Nothing revokes a live token (§5.5).
 - Verification accepts any secret in the `secret` array, so secrets rotate without breaking live uploads.
 
 ### 5.3 Keys
@@ -271,11 +272,12 @@ only the missing parts.
    result flows into the token and `onComplete`. It runs only in `/upload` (§5.2).
 2. **Origin and CSRF.** The handler accepts same-origin requests and `trustedOrigins` only, requires
    `Content-Type: application/json` (cross-origin calls must preflight), and checks `Origin`. A request without
-   `Origin` comes from a server or a native app, never from a browser page, and is accepted, unless
-   `Sec-Fetch-Site: cross-site` shows a browser that stripped it; `Origin: null` is refused.
+   `Origin` is accepted as a server or native-app call, unless `Sec-Fetch-Site: cross-site` shows a browser that
+   stripped the header; `Origin: null` is refused.
    Same-origin means `Origin` equals the origin of the request URL the handler sees. No `X-Forwarded-*` header is
    trusted, so behind a proxy that terminates TLS or rewrites `Host` the app's public origin is listed in
-   `trustedOrigins`; the first refusal of each origin logs a hint naming both origins.
+   `trustedOrigins`; the first refused POST from each exact origin logs a hint naming both origins, for at most 16
+   origins per handler.
 3. **Input bounds.** Body at most 64 KiB; `maxFiles` (default 10, at most 100); filenames 1 to 255 Unicode code
    points, counted after normalization to NFC, the form the name is stored and signed in; metadata validated by its
    schema and size-capped. The Node adapter reads at most one chunk past the body cap so the handler answers `413`,
@@ -292,8 +294,8 @@ only the missing parts.
      must match. Completion uses the server's part list and ETags, never the client's.
    - Single PUT: `HEAD`; size, type and `cloudrop-id` must match.
    - A wrong size or type deletes the object and answers `VERIFICATION_FAILED`. Another writer's object (a different
-     `cloudrop-id`) is kept and answers `VERIFICATION_FAILED`. A missing or wrong-sized part answers `PARTS_MISSING`
-     with its number, and the client sends it again.
+     `cloudrop-id`) is kept and answers `VERIFICATION_FAILED` (single PUT) or `ALREADY_EXISTS` (multipart). A missing
+     or wrong-sized part answers `PARTS_MISSING` with its number, and the client sends it again.
    - On R2 a mismatched size or type is already rejected at upload time (§12). Completion verification stays for
      defence in depth, for S3-compatible backends that behave differently, and because R2 rejects bad part sizes only
      at completion.
@@ -305,9 +307,11 @@ only the missing parts.
 ## 8. Plugins (1.0)
 
 A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpload`, `afterVerify`, `onAbort`,
-`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs for every file
-a plugin's `beforeUpload` accepted that will not complete. Hooks can run more than once for one file (§5.4), so a
-plugin that reserves and releases makes both idempotent by `file.id`.
+`extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs when a file
+a plugin's `beforeUpload` accepted is refused, cannot be started, is rejected or collides at `/complete`, or is
+cancelled through `/abort`. Nothing runs when an abandoned upload's token expires, so a reservation also needs its own
+expiry. Hooks can run more than once for one file (§5.4), so a plugin that reserves and releases makes both idempotent
+by `file.id`.
 
 - **`contentChecks()`**: ranged GET of the first 4 KiB at completion, magic bytes checked against `accept`; rejects
   executables and HTML disguised as other types by default; optional quarantine (upload under `_pending/`, promote
@@ -316,8 +320,8 @@ plugin that reserves and releases makes both idempotent by `file.id`.
   as a query parameter), so the bucket rejects corrupted bytes with `400 BadDigest`. End to end, the client compares
   its CRC64NVME of the whole file with the value R2 stores on every write (§12).
 - **`limits()`**: `rateLimit` per owner; quota through `reserve` at `/upload`, `commit` at `/complete` and `release`
-  at `/abort` or expiry, so quota cannot be overshot between signing and completion. A failing limiter rejects
-  (fail-closed). In 1.0 the app supplies the callbacks; in 1.1 the database adapter does.
+  at `/abort` or by the reservation's own expiry, so quota cannot be overshot between signing and completion. A
+  failing limiter rejects (fail-closed). In 1.0 the app supplies the callbacks; in 1.1 the database adapter does.
 - **`images()`**: client-side resize and compression in a Worker (OffscreenCanvas); server-side dimension checks
   (`minWidth`, `maxWidth`, …) parsed from file headers (PNG, JPEG, WebP, AVIF, GIF), no native dependencies.
 
@@ -365,7 +369,7 @@ Audits of two private production codebases informed these rules (findings kept o
    run passes when every upload ends correct or with a clear error code.
 4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB and OPFS, offline and online, CORS.
 5. **Types:** inference tests (`expect-type`) for route names, metadata and the `onComplete` result.
-6. **Package:** size-limit, publint and attw on the packed tarball (`bun run package:check`).
+6. **Package:** publint and attw on the packed tarball, size-limit on the built entries (`bun run package:check`).
 
 CI runs on GitHub-hosted runners: npm trusted publishing requires them.
 

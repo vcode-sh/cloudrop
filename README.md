@@ -50,9 +50,9 @@ secrets.
 
 ### Mounting the handler
 
-`cloudrop.handler(request)` takes a `Request` and always resolves to a `Response`. It serves `POST` to
-`/api/cloudrop/upload`, `/sign`, `/complete` and `/abort` (change the prefix with `basePath`), in any framework that
-speaks `Request` and `Response`.
+`cloudrop.handler(request)` takes a `Request` and always resolves to a `Response`. It serves `POST` (and the CORS
+preflight, `OPTIONS`) to `/api/cloudrop/upload`, `/sign`, `/complete` and `/abort` (change the prefix with
+`basePath`), in any framework that speaks `Request` and `Response`.
 
 ```ts
 // Next.js: app/api/cloudrop/[...all]/route.ts
@@ -72,7 +72,8 @@ The handler accepts requests from its own origin and from `trustedOrigins` (exac
 (unless `Sec-Fetch-Site: cross-site` shows a browser that dropped it).
 It sees its own origin in the request URL and trusts no `X-Forwarded-*` header. Behind a proxy that terminates TLS or
 rewrites `Host`, your own pages therefore look cross-origin: list the app's public origin in `trustedOrigins`. The
-first time the handler refuses an origin it logs a warning naming both the refused origin and the one it sees.
+first time the handler refuses a request from an origin, it logs a warning naming the refused origin and the one it
+sees (for up to 16 origins).
 
 ### Uploads and the token
 

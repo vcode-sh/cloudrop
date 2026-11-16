@@ -46,7 +46,11 @@ export interface ServerHooks {
   beforeUpload?(context: BeforeUploadContext): Awaitable<CloudropError | undefined>;
   /** Runs in `/complete` after verification, before `onComplete`. An error deletes the object and reaches the client. */
   afterVerify?(context: AfterVerifyContext): Awaitable<CloudropError | undefined>;
-  /** Runs for every file this plugin's `beforeUpload` accepted that will not complete (release a reservation here). */
+  /**
+   * Runs when a file this plugin's `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete` or
+   * is cancelled through `/abort`: release a reservation here. Nothing runs when an abandoned upload's token expires,
+   * so a reservation also needs its own expiry. It can run more than once for one file; make it idempotent by `file.id`.
+   */
   onAbort?(context: AbortContext): Awaitable<void>;
   /** Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route. */
   extendRoute?(route: { name: string; definition: RouteDefinition }): void;

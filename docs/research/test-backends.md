@@ -33,7 +33,7 @@ The unsigned-metadata row is the only difference from the fake found so far (bel
 read-only listing of `live-test/` after the first two runs returned 0 objects and 0 multipart uploads.
 
 **M2 run, 2026-11-16** (about 17 s): 31 cases in two files, all pass, none skipped: 26 contract cases (the two
-presigned-GET cases are new) and 5 upload-protocol cases. A read-only listing afterwards found 0 objects and 0 open
+presigned-GET cases are new) and 5 server cases (three upload-protocol, two file-API). A read-only listing afterwards found 0 objects and 0 open
 multipart uploads under `live-test/`.
 
 | Behaviour | Evidence |

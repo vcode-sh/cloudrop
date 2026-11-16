@@ -44,8 +44,9 @@ live lane a verbose report (both checked 2026-11-15).
 - Colocated: `src/foo.ts` → `src/foo.test.ts`; the backend variant of a module sits beside it as
   `foo.integration.test.ts`. No `test/`, `tests/`, `__tests__/`, no file snapshots.
 - Shared test infrastructure lives in `src/testing/`: `fake-r2.ts` (its modules under `fake-r2/`),
-  `storage-contract.ts` (its case groups under `storage-contract/`) and `server-fixture.ts` (a cloudrop server on the
-  fake, called through `cloudrop.handler`).
+  `storage-contract.ts` (its case groups under `storage-contract/`), `server-fixture.ts` (a cloudrop server on the
+  fake, called through `cloudrop.handler`) and `driver-fixture.ts` (an S3 driver over the fake or a stubbed `fetch`,
+  for the driver's unit tests).
 
 ## Unit lane
 

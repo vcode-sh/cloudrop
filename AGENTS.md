@@ -22,7 +22,7 @@ Load the matching skill from `.claude/skills/` before the work:
 - Source files aim at about 200 to 220 lines. `bun run check` fails a source file over 250 lines, a `*.test.ts` file
   over 400, and a function over cognitive complexity 15. Get under by separating responsibilities, keeping Biome's
   layout and every comment that explains why.
-- Tests live next to the source (`foo.ts` beside `foo.test.ts`); there is no `test/` folder. Server tests run the real
+- Tests live next to the source (`foo.ts` beside `foo.test.ts`); there is no `test/` folder. Endpoint tests run the real
   handler on the fake R2 through `src/testing/server-fixture.ts`.
 - The lane is chosen by filename: `*.test.ts` is the unit lane (`bun run test`); `*.integration.test.ts` runs only
   through its lane script and fails, never skips, when its service or credentials are missing.

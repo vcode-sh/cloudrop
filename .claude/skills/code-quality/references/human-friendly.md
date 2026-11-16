@@ -19,7 +19,7 @@ Levels: **MUST**, **SHOULD**, **AVOID**.
 | --- | --- |
 | MUST | Deep modules: a small exported surface with the complexity inside. Export what callers use today. |
 | MUST | Extend the existing owner before creating a parallel one. |
-| SHOULD | Source files under about 280 code lines. Split by concern, never by line count alone. |
+| MUST | Source files aim at about 200 to 220 lines; `bun run check` fails one over 250 (400 for a `*.test.ts` file). Get under by splitting responsibilities, never by reformatting or deleting comments that explain why. |
 | SHOULD | Split a function when two concerns change independently, not because it is long. |
 | SHOULD | Early returns for preconditions, so the happy path reads top to bottom without nesting. |
 | AVOID | Layers that only forward calls. |
