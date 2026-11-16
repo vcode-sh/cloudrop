@@ -142,8 +142,10 @@ rule it already has):
   untick themselves after one hit. Two more hold until unticked, to fail a file for Retry: every PUT of part 2 gets a
   network error (the client renews its URL once and makes 6 attempts, up to about 15 s of waits, then the file fails
   with `NETWORK_ERROR` and keeps its ticket), and the lab answers every bucket PUT with 400 in the bucket's place,
-  sending nothing (the file fails at once with `UPLOAD_REJECTED`, which needs a new ticket). Each line on the page names
-  the decision behind the behaviour.
+  sending nothing (the file fails at once with `UPLOAD_REJECTED`, which needs a new ticket). A third holds every
+  `/complete` answer: the lab forwards the request and the server finishes the file, but the page hears nothing and
+  shows the `/complete` in flight until the box is unticked; a reload before then drops the answer unheard and leaves
+  the file stored. Each line on the page names the decision behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
   `/upload` for a new ticket and injected faults, and a bar on a shared timeline. The log keeps only the request's kind,
@@ -175,7 +177,13 @@ part is sent again and the file completes. Two more rows upload a 20 MiB file an
 and every PUT delayed by a second: with `smallest-first` the 1 KiB file completes first, with `added` the 20 MiB file
 does. Two rows retry a failed file: a 20 MiB file whose part 2 fails until the budget runs out is retried with its
 ticket, so the table shows no new `/upload` and only part 2 and `/complete` sent again; a 1 KiB file refused with 400 is
-retried with a new ticket, through a second `/upload`. Run them from the repository root; install the shell once from
+retried with a new ticket, through a second `/upload`. `app/lab-reload.browser.test.ts` covers what the
+resume-after-reload rows stand on, with a 20 MiB file of fixed bytes written once to Playwright's output directory
+(`test-results/`) and chosen through the file input, so a reload picks the same file with the same `lastModified`: with
+one connection and every PUT delayed by a second, part 1 is stored while part 2 still waits, and after a reload the
+same file uploads again; with `/complete` answers held, the page shows `/complete` in flight while the object is
+already in the bucket (read back through the example's storage), and unticking the box completes the file and lets the
+next upload through. The helpers the lab's tests share are in `app/lab-page.ts`. Run them from the repository root; install the shell once from
 this directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and

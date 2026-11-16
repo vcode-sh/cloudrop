@@ -29,7 +29,7 @@ export interface RequestRecord {
 
 export type OneShotFault = "bucketNetworkError" | "endpoint503" | "dropComplete";
 /** Faults that hit every matching request while ticked. */
-export type HeldFault = "part2NetworkError" | "bucket400";
+export type HeldFault = "part2NetworkError" | "bucket400" | "holdComplete";
 
 export interface FaultSwitch {
   /** Every bucket PUT waits this long before it is sent; 0 for none. */
@@ -63,6 +63,8 @@ export interface Journal {
   /** Appends a record for a request about to be sent. The URL and body are read here and kept nowhere. */
   start(url: string, method: string, body: unknown): RequestRecord;
   end(record: RequestRecord, status: NonNullable<RequestRecord["status"]>): void;
+  /** Adds what the lab did to a request still in flight, and shows it at once. */
+  note(record: RequestRecord, words: string): void;
 }
 
 function sizeOf(body: unknown): number {
@@ -127,8 +129,15 @@ export function createJournal(log: RequestRecord[], changed: () => void): Journa
       record.endMs = performance.now();
       changed();
     },
+    note(record, words) {
+      record.injected.push(words);
+      changed();
+    },
   };
 }
+
+/** How often a held /complete looks at its box: the lab hears of an untick only by asking. */
+const HOLD_CHECK_MS = 100;
 
 /** A browser's own words for a request that got no readable answer. */
 const networkError = () => new TypeError("Failed to fetch");
@@ -171,9 +180,29 @@ async function sendWithFaults(
     // What a proxy in front of the app sends: a page, not cloudrop's error body.
     return new Response("<h1>Service Unavailable</h1>", { status: 503, headers: { "content-type": "text/html" } });
   }
-  const response = await send(url, init);
-  if (record.kind === "/complete" && faults.take("dropComplete")) {
-    // The server has answered, so the file may be complete; the client must not learn it.
+  return send(url, init);
+}
+
+/** The server's answer to a /complete, held while that box is ticked, or dropped once. */
+async function completeAnswer(
+  journal: Journal,
+  record: RequestRecord,
+  response: Response,
+  faults: FaultSwitch,
+  signal: AbortSignal | null | undefined,
+): Promise<Response> {
+  // The server has answered, so the file may be complete; the client must not learn it yet, or at all.
+  if (faults.on("holdComplete")) {
+    // Shown now, while the request stays in flight. A reload ends the wait with the page, and the answer is never heard.
+    journal.note(record, `answer held (the server sent ${response.status})`);
+    try {
+      while (faults.on("holdComplete")) await delay(HOLD_CHECK_MS, signal);
+    } catch (error) {
+      await response.body?.cancel();
+      throw error;
+    }
+  }
+  if (faults.take("dropComplete")) {
     await response.body?.cancel();
     record.injected.push(`answer dropped (the server sent ${response.status})`);
     throw networkError();
@@ -186,7 +215,9 @@ export function createLabFetch(journal: Journal, faults: FaultSwitch, send: Clie
   return async (url, init) => {
     const record = journal.start(url, init.method ?? "GET", init.body);
     try {
-      const response = await sendWithFaults(record, url, init, faults, send);
+      const sent = await sendWithFaults(record, url, init, faults, send);
+      const response =
+        record.kind === "/complete" ? await completeAnswer(journal, record, sent, faults, init.signal) : sent;
       journal.end(record, response.status);
       return response;
     } catch (error) {

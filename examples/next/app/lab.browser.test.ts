@@ -3,18 +3,10 @@
 // (decisions S10 to S12, S14): the page must show exactly those requests, and never a signed URL. The progress rows
 // read the job's snapshot through the page's bars (spec §6).
 import { type CDPSession, expect, type Page, test } from "@playwright/test";
+import { expectNoSignedUrl, fileRows, requestRows, signIn, summaryValue } from "./lab-page";
 
 const MIB = 1024 * 1024;
 const TWENTY_MIB = 20_971_520;
-
-/** Signs in through the lab's form; the server answers with a redirect back to /lab. */
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/lab");
-  await Promise.all([
-    page.waitForEvent("load"),
-    page.getByRole("button", { name: "Sign in as the demo user" }).click(),
-  ]);
-}
 
 /** Generates a test file in the page and uploads it, then waits for the line that says how the run ended. */
 async function uploadGenerated(page: Page, size: string): Promise<void> {
@@ -22,25 +14,6 @@ async function uploadGenerated(page: Page, size: string): Promise<void> {
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   // Longer than expect's default 5 s, for a 20 MiB upload over a slow link; the test's own 30 s still bounds it.
   await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
-}
-
-/** Each logged request as [kind, status, note], in the order the page shows them. */
-function requestRows(page: Page): Promise<string[][]> {
-  return page
-    .getByRole("table", { name: "Requests" })
-    .locator("tbody tr")
-    .evaluateAll((rows) =>
-      rows.map((row) => [...row.querySelectorAll("td")].slice(0, 3).map((cell) => cell.textContent ?? "")),
-    );
-}
-
-/** Each file of the job as [name, status], in the order the page shows them. */
-function fileRows(page: Page): Promise<[name: string, status: string][]> {
-  return page
-    .getByRole("table", { name: "Files" })
-    .locator("tbody tr")
-    .evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "")))
-    .then((rows) => rows.map((cells): [string, string] => [cells[0] ?? "", cells[5] ?? ""]));
 }
 
 /** Chromium's network at 4 MiB/s up, so a 20 MiB file takes about five seconds and its bar has time to move. */
@@ -73,20 +46,6 @@ async function sampleUntilEnded(page: Page, name: string): Promise<number[]> {
   // Kept with the test's result, as evidence that the bar moved.
   test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
   return samples;
-}
-
-const summaryValue = (page: Page, term: string) => page.locator(`dt:text-is("${term}") + dd`);
-
-/**
- * No signed URL on the page: no signature parameter, and nothing after the bucket host that could be a query. The host
- * comes from the server's settings (/api/lab-info), not from what the page recorded of the requests.
- */
-async function expectNoSignedUrl(page: Page): Promise<void> {
-  const host = (await summaryValue(page, "Storage host").textContent()) ?? "";
-  expect(host).toMatch(/^[\w.…-]+(?::\d+)?$/);
-  const text = (await page.locator("body").textContent()) ?? "";
-  expect(text).not.toContain("X-Amz-Signature");
-  expect(text).not.toMatch(new RegExp(`${host.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\S*\\?`));
 }
 
 test("the lab shows a 20 MiB upload as three parts", async ({ page }) => {

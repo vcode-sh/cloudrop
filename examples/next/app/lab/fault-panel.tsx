@@ -9,6 +9,7 @@ export const NO_FAULTS: Faults = {
   dropComplete: false,
   part2NetworkError: false,
   bucket400: false,
+  holdComplete: false,
   delayMs: 0,
 };
 
@@ -43,6 +44,12 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     effect:
       "The lab answers in the bucket's place, sending nothing, as a bucket answers a request it will never accept: the file fails at once with UPLOAD_REJECTED, and Retry asks /upload for a new ticket and a new key, so the file starts again from 0 bytes (M3-U31, M3-U36).",
   },
+  {
+    fault: "holdComplete",
+    label: "Hold /complete answers while ticked",
+    effect:
+      "The server finishes the file but the page hears nothing until you untick this, and a reload before then drops the answer unheard, as a closed tab would: the file is stored, and only a resumed upload's first /complete can find that out (M3-U61).",
+  },
 ];
 
 interface Props {
@@ -55,7 +62,7 @@ export function FaultPanel({ faults, onChange }: Props) {
     <section className={styles.section}>
       <h2>Faults</h2>
       <p className={styles.muted}>
-        The first three boxes hit the next matching request once, then untick themselves; the next two hit every
+        The first three boxes hit the next matching request once, then untick themselves; the next three hit every
         matching request until you untick them. Faults can change while an upload runs.
       </p>
       {FAULT_BOXES.map(({ fault, label, effect }) => (
