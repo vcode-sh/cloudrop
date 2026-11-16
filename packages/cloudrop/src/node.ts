@@ -64,9 +64,10 @@ async function readBody(request: NodeRequest): Promise<Uint8Array<ArrayBuffer>> 
 function toUrl(request: NodeRequest): URL {
   // No X-Forwarded-* header is trusted: behind a proxy, list the public origin in trustedOrigins instead.
   const scheme = "encrypted" in request.socket && request.socket.encrypted === true ? "https" : "http";
-  const host = [request.headers.host].flat()[0] ?? "localhost";
-  // Only the origin of the Host header is kept: a path or credentials written there would otherwise become part of
-  // the URL the handler matches.
+  // HTTP/2 sends the host as the ":authority" pseudo-header and no Host header.
+  const host = [request.headers.host ?? request.headers[":authority"]].flat()[0] ?? "localhost";
+  // Only the origin of the host is kept: a path or credentials written there would otherwise become part of the URL
+  // the handler matches.
   const base = URL.canParse(`${scheme}://${host}`) ? new URL(`${scheme}://${host}`).origin : `${scheme}://localhost`;
   const target = request.originalUrl ?? request.url ?? "/";
   // Only a path may follow the Host header's origin: "//other.host/…" or an absolute URL would replace that origin,

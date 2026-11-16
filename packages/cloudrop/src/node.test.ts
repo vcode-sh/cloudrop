@@ -1,7 +1,8 @@
 import { once } from "node:events";
 import { createServer, type RequestListener, type Server } from "node:http";
+import { connect as connectHttp2, createServer as createHttp2Server } from "node:http2";
 import { type AddressInfo, connect } from "node:net";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { toNodeHandler } from "./node.ts";
 import { allowAnyone, route } from "./server/route.ts";
 import { serverFixture } from "./testing/server-fixture.ts";
@@ -117,6 +118,28 @@ describe("toNodeHandler", () => {
       body,
     ].join("\r\n");
     expect(await raw(base, request)).toBe("HTTP/1.1 404 Not Found");
+  });
+
+  // An HTTP/2 client sends the host as ":authority" and no Host header; a browser's Origin is still the same origin.
+  it("accepts a same-origin upload over HTTP/2, where the host arrives as :authority", async () => {
+    const { cloudrop } = serverFixture({ files: route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }) });
+    const h2 = createHttp2Server(toNodeHandler(cloudrop));
+    onTestFinished(() => void h2.close());
+    h2.listen(0, "127.0.0.1");
+    await once(h2, "listening");
+    const origin = `http://127.0.0.1:${(h2.address() as AddressInfo).port}`;
+    const client = connectHttp2(origin);
+    onTestFinished(() => void client.close());
+    const stream = client.request({
+      ":method": "POST",
+      ":path": "/api/cloudrop/upload",
+      origin,
+      "content-type": "application/json",
+    });
+    stream.end(body);
+    const [headers] = await once(stream, "response");
+    stream.resume();
+    expect(headers[":status"]).toBe(200);
   });
 
   it("answers 413 to a 100 KiB body and still delivers the answer", async () => {
