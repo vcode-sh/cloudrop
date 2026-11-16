@@ -138,12 +138,12 @@ later.
 - **Decision:** Same-origin means `Origin` equals the origin of the request URL the handler sees. `trustedOrigins` are
   exact origins, never `"*"`. A request without `Origin` is accepted as a server or native-app call unless
   `Sec-Fetch-Site: cross-site` shows a browser; `Origin: null` is refused. CORS answers carry the exact origin with
-  credentials. No `X-Forwarded-*` header is trusted: behind a proxy, list the public origin.
+  credentials. A trusted preflight may name its own request headers. No `X-Forwarded-*` header is trusted: behind a proxy, list the public origin.
 - **Why:** every browser sends `Origin` on POST; forwarded headers are spoofable unless a proxy is known.
 - **If wrong:** operators behind proxies must list their public origin.
 - **Status:** amended by audit T8-3 (the `Sec-Fetch-Site` refusal) and M2-X33 (a log hint names the origin to list).
   The Node adapter keeps only the Host header's origin and reads HTTP/2 `:authority` when there is no Host
-  (reviews-m2.md, Task 14 I1 and final I1).
+  (reviews-m2.md, Task 14 I1 and final I1); since M3-H10 it answers 400 when the request names no single valid host.
 - **Visible in:** spec §7.2, `src/server/http.ts`, `src/server/handler.ts`, `src/node.ts`.
 
 ### M2-D15: body cap

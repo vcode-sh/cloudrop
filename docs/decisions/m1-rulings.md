@@ -2,8 +2,9 @@
 
 Rulings made while building the storage layer (M1). The M1 ledger was not kept; these are the rulings the M2 planning
 brief restated as "decided, do not reopen", with its wording made explicit. Where the brief grouped several numbers
-under one rule without saying which number is which, the entry keeps them together. Numbers not listed here are not
-recoverable (see [README.md](README.md#gaps)).
+under one rule without saying which number is which, the entry keeps them together. The brief also restated rulings
+without a number; they are `M1-N1` to `M1-N3` at the end. Numbers not listed here are not recoverable (see
+[README.md](README.md#gaps)).
 
 ### M1-R1 and M1-R2: the filename picks the test lane
 
@@ -93,3 +94,40 @@ recoverable (see [README.md](README.md#gaps)).
 - **If wrong:** none known; the value is still enforced by the signature.
 - **Status:** in force.
 - **Visible in:** `src/storage/s3/presign.ts`, `src/protocol/types.ts`.
+
+## Unnumbered rulings
+
+### M1-N1: public calls never throw
+
+- **Decision:** Public calls return `{ data, error }` for expected failures and never throw. A configuration mistake
+  throws `CloudropError` with `INVALID_CONFIG` at construction. The handler answers every request with a stable code and
+  a human message, never a stack, a raw storage body, a credential or a presigned URL, and `error.cause` never carries a
+  secret. Every public boundary has tests with adversarial input (null, wrong types, non-object metadata).
+- **Why:** M1 found many input holes that plain JavaScript reaches past the types; a library that throws on them turns
+  a caller's mistake into a crash.
+- **If wrong:** none known; it is the library's error contract.
+- **Status:** in force. M2-X21 hardens the scrub of `cause`; M2-D16 applies the contract to the wire.
+- **Visible in:** `AGENTS.md` (Rules), `src/errors.ts`, `src/server/http.ts`.
+
+### M1-N2: Standard Schema without a dependency
+
+- **Decision:** Route schemas are read through the Standard Schema v1 interface, typed in cloudrop's own code.
+  `packages/cloudrop` keeps zero runtime dependencies.
+- **Why:** zod, valibot and arktype values all satisfy the interface, so typing it by hand supports them all without
+  tying the library to one schema package or its releases.
+- **If wrong:** a future Standard Schema version needs its types copied in by hand.
+- **Status:** in force.
+- **Visible in:** `src/server/schema.ts`, `AGENTS.md` (Rules).
+
+### M1-N3: Node 24 and caret ranges for dev dependencies
+
+- **Decision:** `engines` requires Node `>=24`. Dev dependencies use caret ranges, and a new one is added at a version
+  released at least two weeks earlier.
+- **Why:** the owner made both changes after M1 (`dcae90e`). A version two weeks old has had time for a bad release to
+  be found and pulled.
+- **If wrong:** a fix that ships in a newer release waits up to two weeks.
+- **Status:** in force for Node 24 and for the dev dependencies of `dcae90e`. Contradicted since: the code-quality
+  skill says to pin dev dependencies exactly, and the package-check tools added in `e8cd2dc` (`@arethetypeswrong/cli`,
+  `publint`, `size-limit`, `@size-limit/file`) and the root's `@biomejs/biome` are exact pins. Left to the owner: one
+  of the two rules goes.
+- **Visible in:** `packages/cloudrop/package.json`, `.claude/skills/code-quality/references/dependencies.md`.
