@@ -30,15 +30,15 @@ in [`docs/decisions/`](../../decisions/README.md).
 | [M3 progress plan A](2026-11-16-m3-progress-plan-a.md) ([audit](2026-11-16-m3-progress-plan-a.audit.md)), design [`2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md) | Done, `27e9152..a003cdb` | XHR progress, the snapshot, one connection pool per client, several files per job with a result per file, pause, resume and cancel, the lab; decisions `M3-U1`..`M3-U22` |
 | [M3 progress plan B](2026-11-16-m3-progress-plan-b.md) ([audit](2026-11-16-m3-progress-plan-b.audit.md)) | Done, `fbc5c15..220332c` | `concurrency: "auto"`, `order: "smallest-first"`, stalled PUTs, offline and online, `retry()` with the failed-file rule and `pagehide`, 16 MiB parts from 256 MiB, the lab's controls; decisions `M3-U23`..`M3-U59` |
 
-## State of `feat/m3-progress-b` after progress plan B (2026-11-16)
+## State of `main` after progress plan B (2026-11-16)
 
-- **Gates:** `bun run verify` passes: 1135 unit tests, 1 skipped (a pre-existing skip). `test:browser` 13/13 on
-  RustFS. `test:live` was 31/31 on R2 and `test:rustfs` and `test:wrangler` green after the part-size change (plan B
-  task 6, `8f50795`); the rest of plan B changed only client code. `test:browser:live` was not rerun for plan B. The
-  branch has not been pushed, so CI has not run it.
+- **Gates:** `bun run verify` passes: 1145 unit tests, 1 skipped (a pre-existing skip). `test:browser` 15/15 on
+  RustFS and `test:browser:live` 15/15 on R2 (the lab's retry and order rows). `test:live` was 31/31 on R2 and
+  `test:rustfs` and `test:wrangler` green after the part-size change (plan B task 6, `8f50795`); the rest of plan B
+  changed only client and example code.
 - **Bundle (gzip):** `cloudrop` 33.99 kB of 36 kB, `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of
-  3.2 kB, `cloudrop/client` 8.32 kB of 9 kB: the budget is the owner's ceiling for the rest of M3 (`M3-U43`,
-  `M3-U58`), with about 0.68 kB left for the resume plan.
+  3.2 kB, `cloudrop/client` 8.35 kB of 9 kB: the budget is the owner's ceiling for the rest of M3 (`M3-U43`,
+  `M3-U58`), with about 0.65 kB left for the resume plan.
 - **What works end to end:** server (`createCloudrop`, `route`, the four endpoints, verification, `api.*`), Next and
   Node adapters, `cloudrop/client` (single PUT and multipart, four parts of a file in flight, URL renewal,
   `PARTS_MISSING` repair, bounded retry, cancel with keep-or-abort; since plan A: bytes, speed and time left through
@@ -59,7 +59,7 @@ The progress and scheduler design (`2026-11-16-progress-scheduler-design.md`) me
 into plans A and B. Both are done. Next, in order:
 
 1. **M3 resume plan** (not written yet): persistence, fingerprints, `resumable()`, OPFS, resume after a reload (parent
-   spec §6.3). It has about 0.68 kB of gzip under the 9 kB ceiling (`M3-U58`).
+   spec §6.3). It has about 0.65 kB of gzip under the 9 kB ceiling (`M3-U58`).
 2. **M3 chaos plan:** the chaos proxy (§11.3), to test the above under loss, delay and resets.
 
 ### Open decisions for the owner
