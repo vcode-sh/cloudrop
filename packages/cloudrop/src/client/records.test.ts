@@ -196,15 +196,33 @@ describe("store failures", () => {
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
   });
 
-  it("a failed open fails list, get and clear with STORAGE_ERROR, keeps failing, and never reopens", async () => {
+  it("a failed open drops the operation, and the next operation opens again and works", async () => {
     const records = storeAt();
     fake.failNext("InvalidStateError");
     records.save(SAVED);
-    expect(await records.list("user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
-    expect(await records.get("u-1", "user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
-    expect(await records.clear(null)).toMatchObject({ data: null, error: STORAGE_ERROR });
-    expect(opens).toHaveBeenCalledTimes(1);
+    expect(await records.list("user-1")).toEqual({ data: [], error: null });
     expect(fake.stored()).toEqual({});
+    fake.failNext("UnknownError");
+    expect(await records.get("u-1", "user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
+    records.save(SAVED);
+    expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
+    // The save's open failed and the list's worked; the get's failed request kept that connection, not a new one.
+    expect(opens).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { name: "closes it and says so", notify: true },
+    { name: "closes it without a word", notify: false },
+  ])("opens a new connection when the browser $name", async ({ notify }) => {
+    const records = storeAt();
+    records.save(SAVED);
+    await afterQueued(records);
+    fake.closeConnections(notify);
+    // Without a word, the first operation finds the connection dead and fails; the next one opens again.
+    const first = await records.list("user-1");
+    expect(first).toMatchObject(notify ? { data: [SAVED], error: null } : { data: null, error: STORAGE_ERROR });
+    expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
+    expect(opens).toHaveBeenCalledTimes(2);
   });
 });
 

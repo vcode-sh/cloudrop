@@ -12,6 +12,11 @@ export interface FakeIndexedDb {
   stored(): Record<string, unknown>;
   /** Makes the next n requests (an open or any store request) fail with this DOMException name. */
   failNext(name: "QuotaExceededError" | "UnknownError" | "InvalidStateError", n?: number): void;
+  /**
+   * Closes every open connection as the browser does when site data is cleared: with `notify`, the connection's
+   * `onclose` fires; without, it only stops working (its next transaction() throws InvalidStateError).
+   */
+  closeConnections(notify: boolean): void;
 }
 
 type Handler = (() => void) | null;
@@ -118,18 +123,33 @@ export function fakeIndexedDb(): FakeIndexedDb {
     return name === undefined ? null : new DOMException(`The fake database failed this request (${name}).`, name);
   };
 
+  const connections: ((notify: boolean) => void)[] = [];
   /** A connection to `stores`; `createObjectStore` works only while `upgrading()` holds, as in onupgradeneeded. */
-  const connect = (stores: Map<string, Store>, upgrading: () => boolean) => ({
-    createObjectStore(name: string, options: { keyPath: string }): void {
-      if (!upgrading()) throw new DOMException("Not in an upgrade.", "InvalidStateError");
-      stores.set(name, { keyPath: options.keyPath, rows: new Map() });
-    },
-    transaction(name: string, mode = "readonly"): FakeTransaction {
-      const store = stores.get(name);
-      if (store === undefined) throw new DOMException(`No object store "${name}".`, "NotFoundError");
-      return new FakeTransaction(name, store, mode, nextFailure);
-    },
-  });
+  const connect = (stores: Map<string, Store>, upgrading: () => boolean) => {
+    let closed = false;
+    const connection = {
+      onclose: null as (() => void) | null,
+      onversionchange: null as (() => void) | null,
+      createObjectStore(name: string, options: { keyPath: string }): void {
+        if (!upgrading()) throw new DOMException("Not in an upgrade.", "InvalidStateError");
+        stores.set(name, { keyPath: options.keyPath, rows: new Map() });
+      },
+      transaction(name: string, mode = "readonly"): FakeTransaction {
+        if (closed) throw new DOMException("The database connection is closing.", "InvalidStateError");
+        const store = stores.get(name);
+        if (store === undefined) throw new DOMException(`No object store "${name}".`, "NotFoundError");
+        return new FakeTransaction(name, store, mode, nextFailure);
+      },
+      close(): void {
+        closed = true;
+      },
+    };
+    connections.push((notify) => {
+      closed = true;
+      if (notify) connection.onclose?.();
+    });
+    return connection;
+  };
 
   const indexedDB = {
     open(name: string, _version: number): FakeRequest {
@@ -159,6 +179,9 @@ export function fakeIndexedDb(): FakeIndexedDb {
     stored: () => {
       const rows = databases.get("cloudrop")?.get("uploads")?.rows ?? new Map();
       return Object.fromEntries([...rows].map(([key, value]) => [key, structuredClone(value)]));
+    },
+    closeConnections(notify) {
+      for (const close of connections.splice(0)) close(notify);
     },
     failNext(name, n = 1) {
       for (let i = 0; i < n; i += 1) failures.push(name);

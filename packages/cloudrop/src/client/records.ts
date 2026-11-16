@@ -2,7 +2,8 @@
 // plan rulings R1–R3). An upload only queues writes here: it never waits for the store or fails on it. Reads report a
 // failure as STORAGE_ERROR, never with the browser's own text.
 
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { fail, ok, type Result } from "../errors.ts";
+import { storageUnavailable } from "./failures.ts";
 
 /** One multipart upload as IndexedDB keeps it: never a presigned URL, an ETag or a part list (spec §3.1). */
 export interface UploadRecord {
@@ -41,13 +42,6 @@ const STORE = "uploads";
 
 /** A record with less time left than this counts as expired, so a listed upload has time to start (R3, spec §3.6). */
 const EXPIRY_MARGIN_MS = 60_000;
-
-// Task 2 of the resume plan adds this message to failures.ts as `storageUnavailable`; this copy goes when it lands.
-const storageUnavailable = (): CloudropError =>
-  new CloudropError(
-    "STORAGE_ERROR",
-    "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
-  );
 
 const noRecords: Records = {
   save: () => undefined,
@@ -92,15 +86,41 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
   const factory: IDBFactory | undefined = enabled ? globalThis.indexedDB : undefined;
   if (factory == null) return noRecords;
 
-  // Opened on the first operation; a failed open fails every later operation the same way (R2).
+  // Opened on the first operation and kept. A failed open, or a connection the browser closed (site data cleared, a
+  // newer schema in another tab), is opened again by the next operation, so one bad moment does not end resuming for
+  // the page's life (R2).
   let database: Promise<IDBDatabase> | undefined;
+  const connect = (): Promise<IDBDatabase> => {
+    const opening = open(factory).then((connection) => {
+      const drop = () => {
+        if (database === opening) database = undefined;
+      };
+      connection.onclose = drop;
+      connection.onversionchange = () => {
+        connection.close();
+        drop();
+      };
+      return connection;
+    });
+    opening.catch(() => {
+      if (database === opening) database = undefined;
+    });
+    return opening;
+  };
   // Every operation runs after the one made before it, so a remove made after a save never runs first (R2).
   let queue: Promise<unknown> = Promise.resolve();
 
   const enqueue = <T>(work: Work<T>): Promise<Result<T>> => {
     const done = queue.then(async () => {
-      database ??= open(factory);
-      return ok(await transact(await database, work));
+      database ??= connect();
+      const connection = await database;
+      try {
+        return ok(await transact(connection, work));
+      } catch (error) {
+        // transaction() throws InvalidStateError on a connection that closed without telling us: open a new one next.
+        if (error instanceof DOMException && error.name === "InvalidStateError") database = undefined;
+        throw error;
+      }
     });
     const result = done.catch(() => fail(storageUnavailable()));
     queue = result;
