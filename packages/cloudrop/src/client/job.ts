@@ -4,12 +4,12 @@
 
 import { fail } from "../errors.ts";
 import { readArguments } from "./arguments.ts";
-import { abortFile, createEntry, type Entry, outcomeOf, pauseFile, resumeFile } from "./file-run.ts";
+import { abortFile, createEntry, type Entry, pauseFile, resumeFile } from "./file-run.ts";
 import { createJob, firstRun, type Job, resultOf } from "./job-run.ts";
 import { snapshotOf } from "./job-snapshot.ts";
 import { retryFiles } from "./retry-file.ts";
 import { createStore } from "./store.ts";
-import type { FileHandle, UploadJob, UploadResult } from "./types.ts";
+import type { FileHandle, FileOutcome, UploadJob, UploadResult } from "./types.ts";
 import type { UploadContext } from "./upload.ts";
 
 function handleOf(job: Job, entry: Entry): FileHandle {
@@ -22,17 +22,14 @@ function handleOf(job: Job, entry: Entry): FileHandle {
       abortFile(job.context, entry);
       job.idle();
     },
-    retry: async () => {
-      await retryFiles(job, [entry]);
-      return outcomeOf(entry);
-    },
+    retry: async () => (await retryFiles(job, [entry])).outcomes[0] as FileOutcome<unknown>,
   };
 }
 
 /** Retries every failed file of the job and resolves with every file's current outcome once all have settled. */
 async function retryJob(job: Job): Promise<UploadResult<unknown>> {
-  const refused = await retryFiles(job, job.entries);
-  return refused ? fail(refused) : resultOf(job.entries.map(outcomeOf));
+  const { outcomes, refused } = await retryFiles(job, job.entries);
+  return refused ? fail(refused) : resultOf(outcomes);
 }
 
 export function startJob(context: UploadContext, route: unknown, files: unknown, options: unknown): UploadJob<unknown> {

@@ -5,8 +5,8 @@
 import { CloudropError, fail, type Result } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
 import type { Ticket } from "./endpoints.ts";
-import { aborted, withFile } from "./failures.ts";
-import { abortFile, type Entry, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
+import { aborted, unreadableAnswer, withFile } from "./failures.ts";
+import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { withRetry } from "./retry.ts";
 import type { FileOutcome, UploadResult } from "./types.ts";
@@ -96,10 +96,12 @@ async function runEntry(
     const error = own ? aborted() : answer.error;
     return settle(entry, cancelled ? "aborted" : "failed", own || !whole ? withFile(error, entry) : error);
   }
-  const ticket = answer.data[index];
-  if (ticket instanceof CloudropError) return settle(entry, "failed", withFile(ticket, entry));
-  // readTickets answered one ticket per file, so `ticket` is never undefined here.
-  if (!ticket) return;
+  // readTickets answers one ticket per file; a missing one would otherwise leave the file queued for good.
+  const ticket = answer.data[index] ?? unreadableAnswer(200);
+  if (ticket instanceof CloudropError) {
+    // A file cancelled meanwhile ends as cancelled: it holds no ticket the server must be told about.
+    return settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : ticket, entry));
+  }
   entry.upload = { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false };
   await job.runUpload(entry.upload);
 }
@@ -122,9 +124,13 @@ export async function launch(job: Job, entries: readonly Entry[]): Promise<Cloud
   return whole ? error : null;
 }
 
-/** Resolves once every file of `entries` has settled, also those a retry restarted meanwhile. */
-export async function allSettled(entries: readonly Entry[]): Promise<void> {
+/**
+ * Resolves with the outcomes of `entries` once every file has settled, also those a retry restarted meanwhile. They are
+ * read in the step that sees every file settled: another retry may start a file again before the caller resumes.
+ */
+export async function allSettled(entries: readonly Entry[]): Promise<FileOutcome<unknown>[]> {
   while (!entries.every(settledStatus)) await Promise.all(entries.map((entry) => entry.run));
+  return entries.map(outcomeOf);
 }
 
 /** The job's result over `files`: the first file, in the order passed, that did not end done (ruling M3-U3). */

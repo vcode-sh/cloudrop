@@ -14,7 +14,10 @@ export interface FileSnapshot<R> {
   size: number;
   type: string;
   status: FileStatus;
-  /** Bytes sent, never decreasing: a re-sent part counts once it passes its earlier attempt (spec §4.2). */
+  /**
+   * Bytes sent, never decreasing while the file keeps its ticket: a re-sent part counts once it passes its earlier
+   * attempt (spec §4.2). A retry() that starts a new upload starts again from 0.
+   */
   bytes: number;
   /** `bytes / size`; for an empty file, 1 once done and 0 before. */
   progress: number;
@@ -76,13 +79,15 @@ export interface FileHandle<R = unknown> {
   resume(): void;
   /**
    * Cancels this file only, paused or not: its requests stop, the server is told, and it ends aborted. A failed file
-   * ends aborted too, and the server is told to drop what it kept for retry(). A done file ignores it.
+   * ends aborted too, and the server is told to drop what it kept for retry(), unless a /complete may have finished the
+   * file. A done file ignores it.
    */
   abort(): void;
   /**
    * Sends a failed file again: with its ticket, only the parts that have not landed; when that ticket cannot succeed
    * (expired, refused, or a failure only a new upload fixes), as a new upload with a new key. Resolves with the file's
-   * outcome once it settles. A file still sending is waited for, and a done or aborted one resolves as it is.
+   * outcome once it settles. A file still sending is waited for, a paused one until it is resumed, and a done or
+   * aborted one resolves as it is.
    */
   retry(): Promise<FileOutcome<R>>;
 }
@@ -104,7 +109,8 @@ export interface UploadJob<R> {
   resume(): void;
   /**
    * Retries every failed file, as FileHandle.retry does, with one /upload for all that need a new ticket. Resolves
-   * with every file's current outcome once all have settled; never rejects.
+   * with every file's current outcome once all have settled, or with `data` null and the error when that /upload asked
+   * for every file of the job and was refused or cancelled; never rejects.
    */
   retry(): Promise<UploadResult<R>>;
   /**

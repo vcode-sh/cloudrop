@@ -2,12 +2,13 @@
 // reuses its ticket when a new attempt with it can succeed, re-sending only the parts that had not landed and keeping
 // the key and the bytes counted; it calls /complete first when one may have succeeded, whatever the clock says; after a
 // refusal only a new upload fixes, or with an expired ticket, it asks /upload for a new ticket (new key, bytes from 0),
-// one /upload for every file of job.retry(). A file that has not failed is waited for or left as it is, and `done`
-// keeps each file's first outcome. Oracle: the requests the fixture saw, the keys the server issued, and the objects
+// one /upload for every file of job.retry(). A file that has not failed is waited for or left as it is, `done` keeps
+// each file's first outcome, and a retry resolves with the outcome the file settled with, though another retry starts it
+// again before the promise resolves (M3-U56). Oracle: the requests the fixture saw, the keys the server issued, and the objects
 // the fake bucket holds.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient, type FileOutcome } from "../client.ts";
+import { createCloudropClient, type FileHandle, type FileOutcome, type UploadJob } from "../client.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route, unauthorized } from "../server/route.ts";
 import { clientFixture, type Fault, type FaultCall } from "../testing/client-fixture.ts";
@@ -58,6 +59,7 @@ const fileOf = (size: number, name = "a.bin") =>
 const threeParts = () => fileOf(16 * MiB + 5);
 const twoParts = () => fileOf(8 * MiB + 5);
 const storageDown = () => errorResponse(500, "InternalError", "We encountered an internal error. Please try again.");
+const errorOf = (outcome: FileOutcome<unknown> | undefined) => (outcome?.status === "done" ? null : outcome?.error);
 const keyOf = (outcome: FileOutcome<unknown> | undefined) =>
   outcome?.status === "done" ? outcome.result.file.key : null;
 /** /complete reached the server, which finished the file, and its answer was lost on the way back. */
@@ -292,5 +294,40 @@ describe("done", () => {
       done: data?.files.map((outcome) => outcome.status),
       error: [error?.code, error?.file?.name],
     }).toEqual({ retried: "done", done: ["failed", "done"], error: ["STORAGE_ERROR", "a.bin"] });
+  });
+});
+
+describe("a retry's result", () => {
+  // The file fails again with UPLOAD_REJECTED, so each retry asks /upload for a new ticket. The other retry starts the
+  // file again as soon as its own promise resolves, before the observed retry's promise does.
+  it.each([
+    {
+      name: "job.retry(), while a file.retry() retries again once it resolves",
+      run: (job: UploadJob<unknown>, a: FileHandle<unknown>) => {
+        const observed = job.retry().then(({ data, error }) => ({ outcome: data?.files[0], error }));
+        return { observed, other: a.retry().then(() => a.retry()) };
+      },
+    },
+    {
+      name: "file.retry(), while a job.retry() is followed by file.retry() once it resolves",
+      run: (job: UploadJob<unknown>, a: FileHandle<unknown>) => {
+        const observed = a.retry().then((outcome) => ({ outcome, error: errorOf(outcome) }));
+        return { observed, other: job.retry().then(() => a.retry()) };
+      },
+    },
+  ])("holds the failure the file ended with, though another retry starts it again: $name", async (row) => {
+    const { client } = setup(({ label }) =>
+      label === "PUT object" ? errorResponse(403, "SignatureDoesNotMatch", "Signature mismatch.") : undefined,
+    );
+    const job = client.start("files", fileOf(1000));
+    await job.done;
+    const { observed, other } = row.run(job, job.files[0] as FileHandle<unknown>);
+    const { outcome, error } = await observed;
+    await other;
+    expect([outcome?.status, errorOf(outcome)?.code, error?.code]).toEqual([
+      "failed",
+      "UPLOAD_REJECTED",
+      "UPLOAD_REJECTED",
+    ]);
   });
 });

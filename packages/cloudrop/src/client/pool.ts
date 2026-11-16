@@ -46,14 +46,14 @@ export function createPool(size: number | "auto", now: () => number = () => Date
   let windowStart = 0;
   let windowBytes = 0;
   let lastRate = 0;
-  // Set by slowDown until its window closes (ruling M3-U24).
+  // Set by slowDown until a window closes (ruling M3-U24). Restarting the window after idleness keeps it: the PUTs of
+  // one outage often all give their slots back before their retries ask again.
   let hold = false;
 
   const restart = (rate: number) => {
     lastRate = rate;
     windowStart = now();
     windowBytes = 0;
-    hold = false;
   };
 
   /** Closes a window that is due, one slot more when work waits and bytes per ms rose; then fills the free slots. */
@@ -64,6 +64,7 @@ export function createPool(size: number | "auto", now: () => number = () => Date
       // `lastRate > 0` also keeps a pool that sends nothing from reading 0 after 0 as a rise.
       if (!hold && waiting.length > 0 && lastRate > 0 && rate >= lastRate * RISE && slots < AUTO_MAX) slots++;
       restart(rate);
+      hold = false;
     }
     while (inUse < slots) {
       const next = waiting.shift();

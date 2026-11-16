@@ -4,9 +4,10 @@
 import type { Entry } from "./file-run.ts";
 
 /**
- * Calls `offline` and `online` on the page's connectivity events until the returned function runs, and `offline` at
- * once when the page is already offline. A no-op where the global has no addEventListener (Node); Deno and Workers
- * have one and never fire these events, which is harmless.
+ * Calls `offline` and `online` on the page's connectivity events until the returned function runs, and one of them at
+ * once for where the page is now: an `online` that came while nobody listened must still resume what `offline` paused.
+ * A no-op where the global has no addEventListener (Node); Deno and Workers have one and never fire these events, which
+ * is harmless.
  */
 export function watchConnectivity(offline: () => void, online: () => void): () => void {
   // Without listeners no `online` would ever resume what an early `offline` paused.
@@ -14,6 +15,7 @@ export function watchConnectivity(offline: () => void, online: () => void): () =
   addEventListener("offline", offline);
   addEventListener("online", online);
   if (globalThis.navigator?.onLine === false) offline();
+  else online();
   return () => {
     removeEventListener("offline", offline);
     removeEventListener("online", online);

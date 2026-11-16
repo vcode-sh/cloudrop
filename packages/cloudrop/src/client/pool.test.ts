@@ -249,6 +249,24 @@ describe("createPool('auto')", () => {
     expect({ climbedTo, halved, held, after: run.held.length }).toEqual({ climbedTo: 8, halved: 4, held: 4, after: 5 });
   });
 
+  it("halves once for one outage, though every PUT gave its slot back before the next acquire (M3-U24)", async () => {
+    const run = clocked("auto");
+    run.ask(4);
+    await settle();
+    run.at(100);
+    run.pool.slowDown();
+    run.release(4);
+    // The backoff after the failures: the pool is idle until the retries ask again.
+    run.at(600);
+    run.ask(4);
+    await settle();
+    run.at(700);
+    run.pool.slowDown();
+    run.release(2);
+    await settle();
+    expect(run.held.length).toBe(2);
+  });
+
   it("halves 1 to 1", async () => {
     const run = clocked("auto");
     run.ask(6);

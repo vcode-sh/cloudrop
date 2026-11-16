@@ -1,10 +1,12 @@
 // Contract: spec §4.7 and rulings M3-U32, M3-U33 and M3-U38 through the real client: a failed file of start() keeps its
 // ticket until abort() of the file or the job, or the caller's signal, ends it aborted with its /abort (skipped when a
 // /complete may have succeeded), or pagehide sends a keepalive /abort for it, after which a retry asks for a new
-// ticket. The caller's signal also cancels a retry. pagehide leaves running and done files alone, and an expired ticket
-// is let go without an /abort. Oracle: the requests the fixture saw, the tokens /upload issued, and the snapshot's
-// statuses.
+// ticket. The caller's signal also cancels a retry, and is no longer listened to once no file runs or holds a ticket.
+// pagehide leaves running and done files alone, and an expired ticket is let go without an /abort. A file offline
+// paused while its retry's /upload was on its way resumes when its run starts online (M3-U48). Oracle: the requests
+// the fixture saw, the tokens /upload issued, the snapshot's statuses and the signal's listeners.
 
+import { getEventListeners } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type UploadJob } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
@@ -54,8 +56,8 @@ const fileOf = (size: number, name: string) =>
 const storageDown = () => errorResponse(500, "InternalError", "We encountered an internal error. Please try again.");
 const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
-/** A PUT of `size` bytes held until `release()`; `reached` resolves when it arrives. */
-function heldPut(size: number) {
+/** Holds every caller of `pass()` until `release()`; `reached` resolves when the first arrives. */
+function gate() {
   let release = () => {};
   const open = new Promise<void>((resolve) => {
     release = resolve;
@@ -64,10 +66,18 @@ function heldPut(size: number) {
   const reached = new Promise<void>((resolve) => {
     arrived = resolve;
   });
-  const hold = async (body: Blob) => {
-    if (body.size !== size) return;
+  const pass = async () => {
     arrived();
     await open;
+  };
+  return { release, reached, pass };
+}
+
+/** A PUT of `size` bytes held until `release()`; `reached` resolves when it arrives. */
+function heldPut(size: number) {
+  const { release, reached, pass } = gate();
+  const hold = async (body: Blob) => {
+    if (body.size === size) await pass();
   };
   return { release, reached, hold };
 }
@@ -115,6 +125,19 @@ describe("abort of a failed file", () => {
       status: ["aborted"],
       retried: "aborted",
     });
+  });
+
+  it.each([
+    { name: "the file's abort()", cancel: (job: UploadJob<unknown>) => job.files[0]?.abort() },
+    { name: "the job's abort()", cancel: (job: UploadJob<unknown>) => job.abort() },
+  ])("hears the caller's signal while the ticket is held, and no more after $name (M3-U38)", async (row) => {
+    const { client } = setup(({ label }) => (label === "PUT object" ? storageDown() : undefined));
+    const { signal } = new AbortController();
+    const job = client.start("files", fileOf(1000, "a.bin"), { signal });
+    await job.done;
+    const whileHeld = getEventListeners(signal, "abort").length;
+    row.cancel(job);
+    expect([whileHeld, getEventListeners(signal, "abort").length]).toEqual([1, 0]);
   });
 
   it("ends a file whose /complete may have succeeded aborted without an /abort (M3-U38)", async () => {
@@ -183,6 +206,47 @@ describe("abort of a failed file", () => {
       first: "RATE_LIMITED",
       retried: [null, "ABORTED"],
       aborts: [],
+    });
+  });
+});
+
+describe("connectivity during a retry", () => {
+  it("resumes a file offline paused when online came while no run was watched, once its run starts (M3-U39)", async () => {
+    const page = pageEvents();
+    let failing = true;
+    const put = heldPut(1000);
+    const upload = gate();
+    const { client } = setup(async ({ label, nth, init }) => {
+      // The retry's /upload, for b.bin.
+      if (label === "POST /upload" && nth === 2) await upload.pass();
+      if (label !== "PUT object") return undefined;
+      const body = init.body as Blob;
+      // a.bin fails with a 500 and keeps its ticket; b.bin fails with a mismatch and needs a new one (M3-U31).
+      if (failing) return body.size === 1000 ? storageDown() : errorResponse(403, "SignatureDoesNotMatch", "Mismatch.");
+      await put.hold(body);
+      return undefined;
+    });
+    const job = client.start("files", [fileOf(1000, "a.bin"), fileOf(2000, "b.bin")]);
+    await job.done;
+    failing = false;
+    const [a] = job.files;
+    const retried = job.retry();
+    await Promise.all([put.reached, upload.reached]);
+    page.fire("offline");
+    const offline = statuses(job);
+    // a.bin's PUT answers after offline aborted it, and a.bin's run ends, the last one counted: nothing listens any
+    // more when online fires.
+    put.release();
+    a?.abort();
+    await vi.waitFor(() => expect(page.listening()).toEqual([]));
+    page.fire("online");
+    upload.release();
+    // A b.bin left paused would hold the retry for good: fail on the statuses instead of the test's timeout.
+    await vi.waitFor(() => expect(statuses(job)).toEqual(["aborted", "done"]));
+    const { data } = await retried;
+    expect({ offline, retried: data?.files.map((file) => file.status) }).toEqual({
+      offline: ["paused", "paused"],
+      retried: ["aborted", "done"],
     });
   });
 });

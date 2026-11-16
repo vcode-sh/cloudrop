@@ -6,6 +6,7 @@ import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
 import { allSettled, type Job, launch } from "./job-run.ts";
 import { createProgress } from "./progress.ts";
+import type { FileOutcome } from "./types.ts";
 
 /** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
 const NEEDS_NEW_TICKET = new Set<string | undefined>([
@@ -44,12 +45,18 @@ function requeue(job: Job, entry: Entry, fresh: boolean): void {
   entry.changed(true);
 }
 
+/** What a retry ended with: the outcome of every file it was given, and the refusal of an /upload for the whole job. */
+export interface Retried {
+  outcomes: FileOutcome<unknown>[];
+  refused: CloudropError | null;
+}
+
 /**
  * Retries the failed files among `entries`: those that need a ticket share one /upload (M3-U34). Files that have not
  * settled are waited for, done and aborted ones left as they are (M3-U37). Resolves once every file of `entries` has
- * settled, with the /upload's refusal when it asked for every file of the job.
+ * settled, with their outcomes and the /upload's refusal when it asked for every file of the job.
  */
-export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<CloudropError | null> {
+export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<Retried> {
   const failed = entries.filter((entry) => entry.status === "failed");
   const fresh = failed.filter(needsTicket);
   for (const entry of failed) requeue(job, entry, fresh.includes(entry));
@@ -60,6 +67,6 @@ export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<C
     if (upload) entry.run = job.runUpload(upload).finally(job.idle);
   }
   const refused = fresh.length > 0 ? launch(job, fresh) : null;
-  await allSettled(entries);
-  return refused;
+  const outcomes = await allSettled(entries);
+  return { outcomes, refused: await refused };
 }

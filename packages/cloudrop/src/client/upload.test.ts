@@ -261,31 +261,28 @@ describe("upload", () => {
       const first = [await xhr.next(), await xhr.next(), await xhr.next(), await xhr.next()];
       // A real timer: the retry of the refused part waits one (Math.random is 0) before it asks for a slot again.
       const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+      /** Finishes the oldest open PUT and lets the next one start; returns how many were open before. */
+      const finishOldest = async () => {
+        const open = xhr.open.length;
+        await xhr.open[0]?.finish();
+        await turn();
+        return open;
+      };
       await first.find((put) => put.label === "PUT part 1")?.finish();
       await turn();
       const afterRateLimit = xhr.sent.length;
-      await xhr.open[0]?.finish();
-      await turn();
+      await finishOldest();
       const afterOne = xhr.sent.length;
-      await xhr.open[0]?.finish();
-      await turn();
+      await finishOldest();
       const afterTwo = xhr.sent.length;
-      let settled = false;
-      void job.done.then(() => {
-        settled = true;
-      });
-      let most = 0;
-      while (!settled) {
-        most = Math.max(most, xhr.open.length);
-        await xhr.open[0]?.finish();
-        await turn();
-      }
+      // Seven PUTs in all, the refused part's retry included: four are left, and never more than 2 are open.
+      const inFlight = [await finishOldest(), await finishOldest(), await finishOldest(), await finishOldest()];
       const { data } = await job.done;
-      expect({ afterRateLimit, afterOne, afterTwo, most, statuses: data?.files.map((f) => f.status) }).toEqual({
+      expect({ afterRateLimit, afterOne, afterTwo, inFlight, statuses: data?.files.map((f) => f.status) }).toEqual({
         afterRateLimit: 4,
         afterOne: 4,
         afterTwo: 5,
-        most: 2,
+        inFlight: [2, 2, 2, 1],
         statuses: ["done", "done"],
       });
     });

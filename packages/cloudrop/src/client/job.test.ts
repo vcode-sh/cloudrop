@@ -276,6 +276,32 @@ describe("start", () => {
     });
   });
 
+  it("reports a file cancelled during an /upload that refuses it as aborted, and its retry() sends nothing", async () => {
+    const upload = heldUpload();
+    const { fixture, client } = setup(upload.fault);
+    const job = client.start("notes", [note("alpha", "a.txt"), note("seventeen bytes!!", "big.txt")]);
+    await upload.seen;
+    job.files[1]?.abort();
+    upload.release();
+    const { data } = await job.done;
+    const sent = fixture.requests.length;
+    const retried = await job.files[1]?.retry();
+    expect({
+      files: data?.files.map(view),
+      retried: retried && view(retried),
+      sentByRetry: fixture.requests.slice(sent),
+      aborts: count(fixture.requests, "POST /abort"),
+    }).toEqual({
+      files: [
+        { id: "1", status: "done", file: ["a.txt", 5] },
+        { id: "2", status: "aborted", code: "ABORTED", file: { id: "2", name: "big.txt" } },
+      ],
+      retried: { id: "2", status: "aborted", code: "ABORTED", file: { id: "2", name: "big.txt" } },
+      sentByRetry: [],
+      aborts: 0,
+    });
+  });
+
   it("counts file ids across the jobs of one client", async () => {
     const { client } = setup();
     const first = client.start("notes", three());
