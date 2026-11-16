@@ -9,6 +9,7 @@ import { createCloudropClient, type JobSnapshot, type UploadJob } from "../clien
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
+import { pageEvents } from "../testing/page-events.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone });
@@ -20,27 +21,6 @@ function setup(concurrency: number) {
   vi.stubGlobal("XMLHttpRequest", xhr.XMLHttpRequest);
   vi.stubGlobal("fetch", fixture.fetch);
   return { xhr, client: createCloudropClient({ basePath: fixture.basePath, concurrency }) };
-}
-
-/** The page's connectivity events: an EventTarget stubbed as the global one, and the event types it listens for. */
-function page() {
-  const target = new EventTarget();
-  const held: { type: string; listener: EventListenerOrEventListenerObject }[] = [];
-  vi.stubGlobal("addEventListener", (type: string, listener: EventListenerOrEventListenerObject) => {
-    held.push({ type, listener });
-    target.addEventListener(type, listener);
-  });
-  vi.stubGlobal("removeEventListener", (type: string, listener: EventListenerOrEventListenerObject) => {
-    held.splice(
-      held.findIndex((entry) => entry.type === type && entry.listener === listener),
-      1,
-    );
-    target.removeEventListener(type, listener);
-  });
-  return {
-    fire: (type: "offline" | "online") => target.dispatchEvent(new Event(type)),
-    listening: () => held.map((entry) => entry.type).sort(),
-  };
 }
 
 const fileOf = (name: string) => new File([offsetBytes(1000)], name, { type: "application/octet-stream" });
@@ -76,7 +56,7 @@ afterEach(() => {
 describe("offline and online", () => {
   it("pauses a queued and an uploading file on offline, aborting the PUT, and resumes both on online", async () => {
     const { xhr, client } = setup(1);
-    const connectivity = page();
+    const connectivity = pageEvents();
     const job = client.start("files", [fileOf("a.bin"), fileOf("b.bin")]);
     await xhr.next();
     const before = statuses(job);
@@ -96,7 +76,7 @@ describe("offline and online", () => {
 
   it("resumes on online only the files offline paused and the caller did not pause (Q6)", async () => {
     const { xhr, client } = setup(3);
-    const connectivity = page();
+    const connectivity = pageEvents();
     const job = client.start("files", [fileOf("a.bin"), fileOf("b.bin"), fileOf("c.bin")]);
     const [a, b] = job.files;
     await Promise.all([xhr.next(), xhr.next(), xhr.next()]);
@@ -112,7 +92,7 @@ describe("offline and online", () => {
 
   it("pauses at once a job that starts while the page is offline, and sends nothing until online", async () => {
     const { xhr, client } = setup(1);
-    const connectivity = page();
+    const connectivity = pageEvents();
     vi.stubGlobal("navigator", { onLine: false });
     const job = client.start("files", fileOf("a.bin"));
     const paused = (await until(job, (snapshot) => snapshot.files[0]?.status !== "queued")).files[0]?.status;
@@ -130,7 +110,7 @@ describe("offline and online", () => {
 
   it("listens from the first file's run until the last one ends, not while /upload is on its way", async () => {
     const { xhr, client } = setup(2);
-    const connectivity = page();
+    const connectivity = pageEvents();
     const job = client.start("files", [fileOf("a.bin"), fileOf("b.bin")]);
     const duringUpload = connectivity.listening();
     const [first, second] = await Promise.all([xhr.next(), xhr.next()]);

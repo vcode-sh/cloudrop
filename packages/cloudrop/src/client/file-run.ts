@@ -1,13 +1,13 @@
 // One file of a job after /upload, from its ticket to its outcome: passes that send its bytes and /complete
-// (upload.ts), paused and resumed in between (spec §4.5), then an ending without success (a cancel or a failure) that
-// tells the server unless a /complete may have finished the file (decisions S14, S15, ruling S-18).
+// (upload.ts), paused and resumed in between (spec §4.5), then an ending without success (a cancel or a failure). A
+// cancel tells the server unless a /complete may have finished the file (decisions S14, S15, ruling S-18); a failure
+// of start() keeps the ticket and the parts for retry() (spec §4.7), and one of upload() tells the server (Q7).
 
 import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
-import type { Ticket } from "./endpoints.ts";
 import { aborted, withFile } from "./failures.ts";
-import type { Meter, Progress } from "./progress.ts";
-import type { FileStatus } from "./types.ts";
+import { createMeter, createProgress, type Meter, type Progress } from "./progress.ts";
+import type { FileOutcome, FileStatus } from "./types.ts";
 import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
 
 /** One file of a job and where it stands. */
@@ -19,11 +19,11 @@ export interface Entry {
   status: FileStatus;
   result: CompleteResponse<unknown> | null;
   error: CloudropError | null;
-  /** The bytes sent so far. */
-  readonly progress: Progress;
+  /** The bytes sent so far; a new ticket starts a new count (Q14). */
+  progress: Progress;
   /** How fast they are sent. */
-  readonly meter: Meter;
-  /** Fires on abort() of the file or the job, and when the job's signal fires. */
+  meter: Meter;
+  /** Fires on abort() of the running file or the job, and when the job's signal fires. */
   readonly cancel: AbortController;
   /** The current sending pass: pause() aborts it, and so does a cancel. */
   pass: AbortController | null;
@@ -33,15 +33,64 @@ export interface Entry {
   networkPaused: boolean;
   /** The part numbers the bucket stored (1 for a single PUT): a new pass sends only the others. */
   readonly landed: Set<number>;
+  /** The current ticket's upload, which a retry with the same ticket continues; null without a ticket. */
+  upload: Upload | null;
+  /** How the file first settled, which `done` reports whatever a retry does later (Q13). */
+  firstOutcome: FileOutcome<unknown> | null;
+  /** The file's current run, from its /upload or retry until it settles. */
+  run: Promise<void>;
   /** Tells the job something changed; `urgent` for a status change. */
   changed(urgent: boolean): void;
+}
+
+export function createEntry(file: File, rank: number, changed: (urgent: boolean) => void): Entry {
+  const entry: Entry = {
+    id: String(rank),
+    file,
+    rank,
+    status: "queued",
+    result: null,
+    error: null,
+    progress: createProgress(),
+    meter: createMeter(Date.now()),
+    cancel: new AbortController(),
+    pass: null,
+    wake: null,
+    networkPaused: false,
+    landed: new Set(),
+    upload: null,
+    firstOutcome: null,
+    run: Promise.resolve(),
+    changed,
+  };
+  // The pass's signal is the only one its requests hear (/complete excepted), so a cancel aborts the pass too, and wakes
+  // a paused file to end it. One listener per file, whatever its runs, does what AbortSignal.any would, without raising
+  // the browser floor to Safari 17.4.
+  entry.cancel.signal.addEventListener("abort", () => {
+    entry.pass?.abort();
+    entry.wake?.();
+  });
+  return entry;
+}
+
+export function outcomeOf({ id, file, status, result, error }: Entry): FileOutcome<unknown> {
+  const { name } = file;
+  if (status === "done" && result) return { id, name, status, result };
+  // Every settled entry without a result holds its error: settle() sets both.
+  return { id, name, status: status === "aborted" ? "aborted" : "failed", error: error as CloudropError };
+}
+
+/** The file's status is final for now: the first time, its outcome is the one `done` reports. */
+function settled(entry: Entry): void {
+  entry.firstOutcome ??= outcomeOf(entry);
+  entry.changed(true);
 }
 
 /** Ends `entry` without success. `error` is final: callers set `file` on it when it is the file's own. */
 export function settle(entry: Entry, status: "failed" | "aborted", error: CloudropError): void {
   entry.error = error;
   entry.status = status;
-  entry.changed(true);
+  settled(entry);
 }
 
 /**
@@ -66,39 +115,57 @@ export function resumeFile(entry: Entry): void {
   entry.wake?.();
 }
 
-/** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */
-async function end(context: UploadContext, { ticket, entry, mayBeComplete }: Upload, error: CloudropError) {
-  const cancelled = entry.cancel.signal.aborted;
-  // The status settles first, so a page shows a cancel at once rather than when the server answers (ruling M3-U11).
-  settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : error, entry));
-  // A /complete that may have succeeded keeps the file rather than delete a recorded one (M3-H15, M3-H16). Otherwise
-  // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
-  if (mayBeComplete) return;
-  const cleanup = context.endpoints.abort(ticket.token);
-  // A failure's /abort finishes in the background: abort() never rejects, so nothing is left unhandled. A cancel waits
-  // for it, and `done` with it, so the caller knows the server was told.
-  if (cancelled) await cleanup;
+/** Sends the /abort that frees `upload`'s parts and deletes its own object, once. */
+function drop(context: UploadContext, upload: Upload): Promise<void> {
+  upload.dropped = true;
+  return context.endpoints.abort(upload.ticket.token);
 }
 
 /**
- * Sends the file and completes it, one pass at a time: a pause ends the pass, a resume starts the next. A file
- * cancelled before this starts sends nothing but the /abort that tells the server.
+ * Cancels a file (Q16). A running one ends aborted through its run, which tells the server. A failed one ends aborted
+ * at once and frees what it kept (Q10), unless a /complete may have finished it (keep-or-abort, M3-S14, M3-H16).
  */
-export async function runFile(context: UploadContext, entry: Entry, ticket: Ticket): Promise<void> {
+export function abortFile(context: UploadContext, entry: Entry): void {
+  const { status, upload } = entry;
+  if (status === "done" || status === "aborted") return;
+  if (status !== "failed") {
+    entry.cancel.abort();
+    return;
+  }
+  context.leftovers.release(entry);
+  settle(entry, "aborted", withFile(aborted(), entry));
+  if (upload && !upload.mayBeComplete && !upload.dropped) void drop(context, upload);
+}
+
+/** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */
+async function end(context: UploadContext, upload: Upload, error: CloudropError) {
+  const { entry, mayBeComplete } = upload;
+  const failed = !entry.cancel.signal.aborted;
+  if (failed && context.keepFailed) {
+    // Held before the status settles: a listener may retry the file at once, which lets it go again. A /complete
+    // that may have finished the file is never undone by pagehide (Q11).
+    if (!mayBeComplete) context.leftovers.hold(entry);
+    return settle(entry, "failed", withFile(error, entry));
+  }
+  // The status settles first, so a page shows a cancel at once rather than when the server answers (ruling M3-U11).
+  settle(entry, failed ? "failed" : "aborted", withFile(failed ? error : aborted(), entry));
+  // A /complete that may have succeeded keeps the file rather than delete a recorded one (M3-H15, M3-H16). Otherwise
+  // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
+  if (mayBeComplete) return;
+  const cleanup = drop(context, upload);
+  // A failure's /abort finishes in the background: abort() never rejects, so nothing is left unhandled. A cancel waits
+  // for it, and `done` with it, so the caller knows the server was told.
+  if (!failed) await cleanup;
+}
+
+/**
+ * Sends the file and completes it, one pass at a time: a pause ends the pass, a resume starts the next. `upload` is
+ * kept across passes and same-ticket retries, so neither forgets a /complete that may have finished nor the parts that
+ * landed. A file cancelled before this starts sends nothing but the /abort that tells the server.
+ */
+export async function runFile(context: UploadContext, upload: Upload): Promise<void> {
+  const { entry } = upload;
   const { cancel } = entry;
-  // Kept across passes: a pause neither forgets a /complete that may have finished nor resets the repairs.
-  const upload: Upload = { ticket, entry, mayBeComplete: false, repairs: 0 };
-  // The pass's signal is the only one its requests hear (/complete excepted), so a cancel aborts the pass too, and wakes
-  // a paused file to end it. One listener per file does what AbortSignal.any would, without raising the browser floor
-  // to Safari 17.4.
-  cancel.signal.addEventListener(
-    "abort",
-    () => {
-      entry.pass?.abort();
-      entry.wake?.();
-    },
-    { once: true },
-  );
   while (!cancel.signal.aborted) {
     if (entry.status === "paused") {
       // Resolved by resume() or a cancel; calling it again later does nothing.
@@ -114,8 +181,7 @@ export async function runFile(context: UploadContext, entry: Entry, ticket: Tick
     if (!result.error) {
       entry.result = result.data;
       entry.status = "done";
-      entry.changed(true);
-      return;
+      return settled(entry);
     }
     // Paused: the next pass starts after resume(). A failure that won the race with the pause ends the file.
     const paused = result.error.code === "ABORTED" && pass.signal.aborted && !cancel.signal.aborted;

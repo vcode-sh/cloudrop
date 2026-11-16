@@ -9,6 +9,7 @@ import type { BucketOutcome } from "./bucket.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import { aborted } from "./failures.ts";
 import type { Entry } from "./file-run.ts";
+import type { Leftovers } from "./lifecycle.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
 import { withRetry } from "./retry.ts";
@@ -26,6 +27,10 @@ export interface UploadContext {
   order: "added" | "smallest-first";
   /** The next file's rank in the pool, counting from 1 across the client's uploads (ruling M3-U9). */
   nextRank(): number;
+  /** The failed files' tickets that pagehide frees (Q11). */
+  leftovers: Leftovers;
+  /** A failed file keeps its ticket and parts for retry(): start() jobs; upload() has no handle to retry with (Q7). */
+  keepFailed: boolean;
 }
 
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
@@ -34,7 +39,7 @@ function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
   return file.slice(start, start + sizeOfPart(file.size, ticket.partSize, partNumber));
 }
 
-/** A file's upload across its passes. */
+/** A file's upload under one ticket, across its passes and same-ticket retries. */
 export interface Upload {
   readonly ticket: Ticket;
   readonly entry: Entry;
@@ -42,6 +47,8 @@ export interface Upload {
   mayBeComplete: boolean;
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
+  /** Its /abort was sent (after a failure of upload(), on pagehide or on abort()): a retry needs a new ticket (Q11). */
+  dropped: boolean;
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */

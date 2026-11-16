@@ -3,6 +3,7 @@
 import { isList } from "./client/arguments.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
 import { startJob } from "./client/job.ts";
+import { createLeftovers } from "./client/lifecycle.ts";
 import { createPool } from "./client/pool.ts";
 import { createPut } from "./client/transport.ts";
 import type { FileOutcome, UploadJob, UploadResult } from "./client/types.ts";
@@ -132,12 +133,15 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
   // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling M3-U6).
   let rank = 0;
+  const endpoints = createEndpoints(basePath, send);
   const context: UploadContext = {
-    endpoints: createEndpoints(basePath, send),
+    endpoints,
     put: createPut(fetch, send),
     pool: createPool(concurrency),
     order,
     nextRank: () => ++rank,
+    leftovers: createLeftovers(endpoints.abort),
+    keepFailed: true,
   };
   // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them
   // at run time: the casts below give the route's result type to what the server sent.
@@ -146,7 +150,8 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     files: unknown,
     options?: unknown,
   ): Promise<UploadResult<unknown> | Result<CompleteResponse<unknown>>> {
-    const { done } = startJob(context, route, files, options);
+    // No handle to retry with: a failed file tells the server at once (Q7).
+    const { done } = startJob({ ...context, keepFailed: false }, route, files, options);
     // Anything that is not a list goes the one-file way, so a wrong argument keeps the message it had.
     return isList(files) ? done : done.then(oneFile);
   }

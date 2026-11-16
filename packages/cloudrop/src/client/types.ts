@@ -63,7 +63,7 @@ export type UploadResult<R> =
   | { data: null; error: CloudropError };
 
 /** One file of a job. */
-export interface FileHandle {
+export interface FileHandle<R = unknown> {
   /** The client's sequence number as text ("1", "2", …): unique per client, stable for the job's life. */
   readonly id: string;
   readonly name: string;
@@ -74,22 +74,39 @@ export interface FileHandle {
   pause(): void;
   /** Sends a paused file's parts that have not landed; a single PUT starts again. Other files ignore it. */
   resume(): void;
-  /** Cancels this file only, paused or not: its requests stop, the server is told, and it ends aborted. */
+  /**
+   * Cancels this file only, paused or not: its requests stop, the server is told, and it ends aborted. A failed file
+   * ends aborted too, and the server is told to drop what it kept for retry(). A done file ignores it.
+   */
   abort(): void;
+  /**
+   * Sends a failed file again: with its ticket, only the parts that have not landed; when that ticket cannot succeed
+   * (expired, refused, or a failure only a new upload fixes), as a new upload with a new key. Resolves with the file's
+   * outcome once it settles. A file still sending is waited for, and a done or aborted one resolves as it is.
+   */
+  retry(): Promise<FileOutcome<R>>;
 }
 
 /** Several files sent through one /upload and one connection pool. */
 export interface UploadJob<R> {
   /** The files in the order they were passed. */
-  readonly files: readonly FileHandle[];
-  /** Settles once, when every file has settled. Never rejects. */
+  readonly files: readonly FileHandle<R>[];
+  /**
+   * Settles once, when every file has first settled, with those outcomes: a later retry() never changes it. Never
+   * rejects.
+   */
   readonly done: Promise<UploadResult<R>>;
-  /** Cancels every file, as the signal does. */
+  /** Cancels every file that has not ended done, as the signal does. */
   abort(): void;
   /** Pauses every file that is queued or uploading, as FileHandle.pause does. */
   pause(): void;
   /** Resumes every paused file. */
   resume(): void;
+  /**
+   * Retries every failed file, as FileHandle.retry does, with one /upload for all that need a new ticket. Resolves
+   * with every file's current outcome once all have settled; never rejects.
+   */
+  retry(): Promise<UploadResult<R>>;
   /**
    * Calls `listener` when the snapshot changes: at once on a status change, at most every 100 ms while bytes flow, and
    * every second while a file uploads. Returns the unsubscribe. Needs no `this`, as `useSyncExternalStore` calls it.

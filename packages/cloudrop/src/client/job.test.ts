@@ -136,13 +136,12 @@ describe("start", () => {
     });
   });
 
-  it("fails only the file whose PUT the bucket refused, and aborts only that one", async () => {
+  it("fails only the file whose PUT the bucket refused, and sends no /abort: start() keeps its ticket", async () => {
     const { fixture, seen, client } = setup(({ label, init }) =>
       label === "PUT object" && bodySize(init) === 6 ? errorResponse(400, "BadRequest", "Rejected.") : undefined,
     );
     const { data, error } = await client.start("notes", three()).done;
     await seen.aborted;
-    // The kept files are still there: the one /abort was not theirs.
     const kept = await Promise.all(
       [data?.files[0], data?.files[2]].map(async (outcome) =>
         outcome?.status === "done" ? (await fixture.server.storage.head(outcome.result.file.key)).data?.size : null,
@@ -160,7 +159,7 @@ describe("start", () => {
         { id: "3", status: "done", file: ["c.txt", 7] },
       ],
       error: { code: "UPLOAD_REJECTED", file: { id: "2", name: "b.txt" } },
-      aborts: 1,
+      aborts: 0,
       kept: [5, 7],
     });
   });
