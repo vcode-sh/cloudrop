@@ -22,6 +22,8 @@ export interface UploadContext {
   put: PutObject;
   /** The client's connection slots: every bucket PUT holds one (spec §4.4). */
   pool: Pool;
+  /** Which waiting PUTs the pool grants first: the earlier file's, or the smaller file's (spec §4.4). */
+  order: "added" | "smallest-first";
   /** The next file's rank in the pool, counting from 1 across the client's uploads (ruling M3-U9). */
   nextRank(): number;
 }
@@ -52,10 +54,12 @@ function moveTo(entry: Entry, status: "uploading" | "completing"): void {
 /** Sends through `signal`, the pass's: a pause or a cancel aborts the PUTs and /sign calls in flight. */
 function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: AbortSignal): PartSender {
   const { file, rank } = entry;
+  const { pool } = context;
   // A slot is held for the PUT alone: it is free again before a retry's wait (spec §4.4). A part still waiting for one
   // when the file is cancelled or has failed never starts; a PUT already sent finishes (spec §6.2).
   const put = async (target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome> => {
-    const release = await context.pool.acquire([rank, partNumber], stop);
+    const place = context.order === "smallest-first" ? [file.size, rank, partNumber] : [rank, partNumber];
+    const release = await pool.acquire(place, stop);
     try {
       // `stop` may also fire between the grant and this line: the slot goes back unused (ruling M3-U21).
       if (release === null || stop.aborted) return { kind: "aborted", error: aborted() };
@@ -63,12 +67,18 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
       if (entry.status === "queued") moveTo(entry, "uploading");
       const body = bodyOf(ticket, file, partNumber);
       const outcome = await context.put(target, body, signal, (sent) => {
+        // Only bytes above this part's earlier best: a retry sending them again is no throughput.
         const added = entry.progress.sent(partNumber, sent, body.size);
         if (added === 0) return;
+        pool.sent(added);
         entry.meter.add(added, Date.now());
         entry.changed(false);
       });
       if (outcome.kind === "stored") entry.landed.add(partNumber);
+      // Before the release below, so the slot it frees goes back to a pool already halved (ruling Q3).
+      if (outcome.kind === "opaque" || (outcome.kind === "retry" && outcome.error.code === "RATE_LIMITED")) {
+        pool.slowDown();
+      }
       return outcome;
     } finally {
       release?.();

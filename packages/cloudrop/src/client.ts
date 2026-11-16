@@ -53,8 +53,13 @@ export interface ClientOptions {
   basePath?: string;
   /** Replaces the global fetch, for tests and runtimes that bring their own. */
   fetch?: ClientFetch;
-  /** How many bucket PUTs this client sends at once, across all its uploads: 1 to 16, default 4. */
-  concurrency?: number;
+  /**
+   * How many bucket PUTs this client sends at once, across all its uploads: 1 to 16, or "auto" (the default), which
+   * starts at 4, adds one while the bytes sent keep rising, up to 8, and halves on a network error or a busy bucket.
+   */
+  concurrency?: number | "auto";
+  /** Which PUTs go first when they wait for a connection: "added" (the default) or "smallest-first" by file size. */
+  order?: "added" | "smallest-first";
 }
 
 export interface UploadOptions<TMetadata = unknown> {
@@ -106,15 +111,18 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   options: ClientOptions = {},
 ): CloudropClient<TCloudrop> {
   // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
-  const { basePath = "/api/cloudrop", fetch, concurrency = 4 } = options ?? {};
+  const { basePath = "/api/cloudrop", fetch, concurrency = "auto", order = "added" } = options ?? {};
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError(
       'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
     );
   }
   if (fetch !== undefined && typeof fetch !== "function") throw configError("The fetch option must be a function.");
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
-    throw configError("concurrency must be a whole number from 1 to 16.");
+  if (concurrency !== "auto" && !(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16)) {
+    throw configError('concurrency must be "auto" or a whole number from 1 to 16.');
+  }
+  if (order !== "added" && order !== "smallest-first") {
+    throw configError('order must be "added" or "smallest-first".');
   }
   if (typeof (fetch ?? globalThis.fetch) !== "function") {
     throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
@@ -128,6 +136,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     endpoints: createEndpoints(basePath, send),
     put: createPut(fetch, send),
     pool: createPool(concurrency),
+    order,
     nextRank: () => ++rank,
   };
   // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them

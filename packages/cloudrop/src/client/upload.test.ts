@@ -4,12 +4,13 @@
 // server/protocol.test.ts expects from the same handler, and the bytes the fake bucket stored.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient } from "../client.ts";
+import { type ClientOptions, createCloudropClient } from "../client.ts";
 import type { Result } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route, unauthorized } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
+import { fakeXhr } from "../testing/fake-xhr.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { albumSchema } from "../testing/upload-fixture.ts";
 
@@ -47,6 +48,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -163,7 +166,7 @@ describe("upload", () => {
   describe("the client's connection pool (spec §4.4)", () => {
     /** A client whose fixture counts the bucket PUTs in flight and keeps the highest count. */
     function counting(
-      options: { concurrency?: number },
+      options: Pick<ClientOptions, "concurrency" | "order">,
       answer: (label: string) => Response | undefined = () => undefined,
     ) {
       const seen = { inFlight: 0, most: 0 };
@@ -191,13 +194,14 @@ describe("upload", () => {
       const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options });
       const upload = (bytes: number) =>
         client.upload("albums", new File([offsetBytes(bytes)], "video.bin"), { metadata });
-      return { seen, upload, fixture };
+      return { seen, upload, fixture, client };
     }
     const threeParts = 16 * MiB + 1;
+    const video = () => new File([offsetBytes(threeParts)], "video.bin");
 
     it.each([
       { name: "concurrency 2", concurrency: 2, most: 2 },
-      { name: "the default of 4", concurrency: undefined, most: 4 },
+      { name: 'the default "auto", which starts at 4', concurrency: undefined, most: 4 },
     ])("caps the PUTs of two uploads on one client: $name", async ({ concurrency, most }) => {
       const { seen, upload } = counting({ concurrency });
       const results = await Promise.all([upload(threeParts), upload(threeParts)]);
@@ -223,6 +227,66 @@ describe("upload", () => {
       expect({ code: result.error?.code, puts: fixture.requests.filter((r) => r.startsWith("PUT")) }).toEqual({
         code: "UPLOAD_REJECTED",
         puts: ["PUT part 1", "PUT part 2"],
+      });
+    });
+    it.each([
+      { order: "added", puts: ["PUT part 1", "PUT part 2", "PUT part 3", "PUT object"] },
+      { order: "smallest-first", puts: ["PUT part 1", "PUT object", "PUT part 2", "PUT part 3"] },
+    ] as const)("grants the waiting PUTs in $order order", async ({ order, puts }) => {
+      const { client, fixture } = counting({ concurrency: 1, order });
+      // The large file is passed first, so its part 1 takes the one slot before anything waits.
+      const small = new File([offsetBytes(1000)], "pic.bin");
+      const { error } = await client.start("albums", [video(), small], { metadata }).done;
+      expect({ error, puts: fixture.requests.filter((r) => r.startsWith("PUT")) }).toEqual({ error: null, puts });
+    });
+
+    it("halves an automatic pool on a 429: no PUT starts until fewer than 2 are in flight", async () => {
+      // A frozen clock closes no window, so the pool cannot grow back while the test runs.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const fixture = clientFixture(
+        { albums },
+        {
+          multipartThreshold: "8MB",
+          appHeaders: { "x-user": "42" },
+          fault: ({ label, nth }) =>
+            label === "PUT part 1" && nth === 1 ? errorResponse(429, "ServiceUnavailable", "Slow down.") : undefined,
+        },
+      );
+      const xhr = fakeXhr(fixture.fetch, { hold: true });
+      vi.stubGlobal("XMLHttpRequest", xhr.XMLHttpRequest);
+      vi.stubGlobal("fetch", fixture.fetch);
+      const client = createCloudropClient({ basePath: fixture.basePath });
+      // Six parts want a slot; 4 get one.
+      const job = client.start("albums", [video(), video()], { metadata });
+      const first = [await xhr.next(), await xhr.next(), await xhr.next(), await xhr.next()];
+      // A real timer: the retry of the refused part waits one (Math.random is 0) before it asks for a slot again.
+      const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+      await first.find((put) => put.label === "PUT part 1")?.finish();
+      await turn();
+      const afterRateLimit = xhr.sent.length;
+      await xhr.open[0]?.finish();
+      await turn();
+      const afterOne = xhr.sent.length;
+      await xhr.open[0]?.finish();
+      await turn();
+      const afterTwo = xhr.sent.length;
+      let settled = false;
+      void job.done.then(() => {
+        settled = true;
+      });
+      let most = 0;
+      while (!settled) {
+        most = Math.max(most, xhr.open.length);
+        await xhr.open[0]?.finish();
+        await turn();
+      }
+      const { data } = await job.done;
+      expect({ afterRateLimit, afterOne, afterTwo, most, statuses: data?.files.map((f) => f.status) }).toEqual({
+        afterRateLimit: 4,
+        afterOne: 4,
+        afterTwo: 5,
+        most: 2,
+        statuses: ["done", "done"],
       });
     });
   });

@@ -1,7 +1,8 @@
 // Contract: decisions S4 (the entry's only values are createCloudropClient and CloudropError), S17 (a base path the
-// handler cannot be mounted at, or a fetch option that is not a function, is a configuration error; null options are
-// none, as for createCloudrop) and S18 (the default fetch is looked up on each request and never called as a method of
-// another object). Oracle: S17's messages and the public surface listed in S4.
+// handler cannot be mounted at, a fetch option that is not a function, or a concurrency or an order outside spec §4.4's
+// values is a configuration error; null options are none, as for createCloudrop) and S18 (the default fetch is looked
+// up on each request and never called as a method of another object). Oracle: S17's messages, spec §4.4 and the
+// public surface listed in S4.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ClientOptions, createCloudropClient } from "./client.ts";
@@ -48,12 +49,22 @@ describe("createCloudropClient", () => {
     { name: "17", concurrency: 17 },
     { name: "a fraction", concurrency: 2.5 },
     { name: "NaN", concurrency: Number.NaN },
-  ])("refuses a concurrency that is not a whole number from 1 to 16: $name", ({ concurrency }) => {
+  ])('refuses a concurrency that is not "auto" or a whole number from 1 to 16: $name', ({ concurrency }) => {
     expect(() => createCloudropClient({ concurrency, fetch: vi.fn() } as unknown as ClientOptions)).toThrow(
       expect.objectContaining({
         name: "CloudropError",
         code: "INVALID_CONFIG",
-        message: "concurrency must be a whole number from 1 to 16.",
+        message: 'concurrency must be "auto" or a whole number from 1 to 16.',
+      }),
+    );
+  });
+
+  it("refuses an order it does not know", () => {
+    expect(() => createCloudropClient({ order: "largest-first", fetch: vi.fn() } as unknown as ClientOptions)).toThrow(
+      expect.objectContaining({
+        name: "CloudropError",
+        code: "INVALID_CONFIG",
+        message: 'order must be "added" or "smallest-first".',
       }),
     );
   });
