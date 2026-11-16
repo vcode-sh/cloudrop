@@ -3,8 +3,7 @@
 
 import { R2_RULES } from "../../rules.ts";
 import { presignUrl, sha256Hex, signRequest, UNSIGNED_PAYLOAD } from "../../storage/sigv4.ts";
-import type { Bytes, FakeBucket } from "./bucket.ts";
-import { META_PREFIX } from "./bucket.ts";
+import { type Bytes, type FakeBucket, META_PREFIX } from "./bucket.ts";
 import { clockSkewed, errorResponse } from "./responses.ts";
 
 // S3 rejects a request dated further ahead than this; the spike measured 30 minutes ahead (Q7).
@@ -81,7 +80,9 @@ function presignedWindow(query: URLSearchParams, now: () => Date): { signedAt: D
 // URL did not sign fails the signature. Other methods were not measured, so the fake does not assert it for them.
 function unsignedMetadata(request: Request, signedNames: string[]): Response | null {
   if (request.method !== "PUT") return null;
-  const name = [...request.headers.keys()].find((name) => name.startsWith(META_PREFIX) && !signedNames.includes(name));
+  const name = [...request.headers.keys()].find(
+    (header) => header.startsWith(META_PREFIX) && !signedNames.includes(header),
+  );
   return name ? errorResponse(403, "SignatureDoesNotMatch", `Header ${name} is not signed.`) : null;
 }
 
