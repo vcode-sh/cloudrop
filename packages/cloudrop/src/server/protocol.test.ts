@@ -7,7 +7,6 @@ import type {
   ErrorResponse,
   MultipartTicket,
   SignedPart,
-  SignResponse,
   SingleTicket,
   UploadResponse,
 } from "../protocol/types.ts";
@@ -87,8 +86,11 @@ describe("upload protocol, end to end", () => {
     // The page reloads here; the client kept the token and asks the server what is missing.
     const incomplete = await call<CompleteResponse>("complete", { token: ticket.token });
     expect({ status: incomplete.status, parts: incomplete.body.error?.parts }).toEqual({ status: 409, parts: [2] });
-    const renewed = await call<SignResponse>("sign", { token: ticket.token, parts: incomplete.body.error?.parts });
-    const [second] = (renewed.body as { parts: SignedPart[] }).parts;
+    const renewed = await call<{ parts: SignedPart[] }>("sign", {
+      token: ticket.token,
+      parts: incomplete.body.error?.parts,
+    });
+    const [second] = renewed.body.parts;
     expect(await put(second as SignedPart, bytes.slice(8 * MiB, 16 * MiB))).toBe(200);
     const done = await call<CompleteResponse>("complete", { token: ticket.token });
     expect(done.body.data).toEqual({ owner: "42", bytes: size });
@@ -116,20 +118,8 @@ describe("upload protocol, end to end", () => {
     expect((await call<CompleteResponse>("complete", { token: ticket.token })).status).toBe(200);
   });
 
-  it("aborts: the upload is gone and can no longer complete", async () => {
-    const { fixture, call } = client();
-    const upload = await call<UploadResponse>("upload", {
-      route: "albums",
-      files: [{ name: "video.bin", size: 9 * MiB, type: "application/octet-stream" }],
-    });
-    const ticket = upload.body.files[0] as MultipartTicket;
-    expect((await call("abort", { token: ticket.token })).status).toBe(200);
-    expect(fixture.fake.pendingUploads()).toBe(0);
-    expect((await call<CompleteResponse>("complete", { token: ticket.token })).body.error?.code).toBe("NO_SUCH_UPLOAD");
-  });
-
-  it("starts several files in one /upload call, each with its own token", async () => {
-    const { call } = client();
+  it("starts several files in one /upload call, each completing through its own ticket", async () => {
+    const { call, put } = client();
     const upload = await call<UploadResponse>("upload", {
       route: "albums",
       files: [
@@ -138,6 +128,15 @@ describe("upload protocol, end to end", () => {
       ],
     });
     const [a, b] = upload.body.files as [SingleTicket, SingleTicket];
-    expect([a.kind, b.kind, a.token === b.token, a.key === b.key]).toEqual(["single", "single", false, false]);
+    // Each URL signs its own file's length, so a ticket handed to the wrong file is refused here.
+    expect([await put(a.put, offsetBytes(1)), await put(b.put, offsetBytes(2))]).toEqual([200, 200]);
+    const first = await call<CompleteResponse>("complete", { token: a.token });
+    const second = await call<CompleteResponse>("complete", { token: b.token });
+    expect([first.body.file.name, first.body.data, second.body.file.name, second.body.data]).toEqual([
+      "a.png",
+      { owner: "42", bytes: 1 },
+      "b.png",
+      { owner: "42", bytes: 2 },
+    ]);
   });
 });

@@ -8,7 +8,6 @@ import type {
   ErrorResponse,
   MultipartTicket,
   SignedPart,
-  SignResponse,
   SingleTicket,
   UploadResponse,
 } from "../protocol/types.ts";
@@ -90,6 +89,7 @@ describe("upload protocol on live R2", () => {
       metadata: { "cloudrop-id": ticket.fileId },
     });
     const link = await cloudrop.api.getUrl(ticket.key, { expiresIn: 300, download: "photo.png" });
+    expect(link.error).toBeNull();
     const response = await fetch(link.data?.url ?? "");
     expect({
       status: response.status,
@@ -115,8 +115,8 @@ describe("upload protocol on live R2", () => {
     expect(await put(second, bytes.slice(8 * MiB))).toBe(200);
     const incomplete = await call<CompleteResponse>("complete", { token: ticket.token });
     expect({ status: incomplete.status, parts: incomplete.body.error?.parts }).toEqual({ status: 409, parts: [1] });
-    const renewed = await call<SignResponse>("sign", { token: ticket.token, parts: [1] });
-    const [first] = (renewed.body as { parts: SignedPart[] }).parts;
+    const renewed = await call<{ parts: SignedPart[] }>("sign", { token: ticket.token, parts: [1] });
+    const [first] = renewed.body.parts;
     expect(await put(first as SignedPart, bytes.slice(0, 8 * MiB))).toBe(200);
     const done = await call<CompleteResponse>("complete", { token: ticket.token });
     expect(done.status).toBe(200);
@@ -139,7 +139,8 @@ describe("upload protocol on live R2", () => {
 
   it("erases a folder with deletePrefix and proves it empty", async () => {
     const folder = `${prefix}erase/`;
-    await Promise.all(["a.txt", "b.txt"].map((name) => cloudrop.api.put(`${folder}${name}`, "x")));
+    const stored = await Promise.all(["a.txt", "b.txt"].map((name) => cloudrop.api.put(`${folder}${name}`, "x")));
+    expect(stored.map((result) => result.error)).toEqual([null, null]);
     expect((await cloudrop.api.deletePrefix(folder)).data?.deleted).toBe(2);
     expect((await storage?.list(folder))?.data?.items).toEqual([]);
   });
