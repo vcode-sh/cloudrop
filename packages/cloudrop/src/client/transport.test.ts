@@ -6,27 +6,28 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
 import type { CloudropErrorCode } from "../errors.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
-import { fakeXhr } from "../testing/fake-xhr.ts";
+import { fakeXhr, type XhrCall } from "../testing/fake-xhr.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { files } from "../testing/upload-fixture.ts";
 import { createPut } from "./transport.ts";
 
 const withCode = (code: CloudropErrorCode) => expect.objectContaining({ code });
 
-/** A presigned single PUT for a 1000-byte file, a fake XHR stubbed over the fixture, and the bytes it reports. */
-async function setup({ fault, hold = false }: { fault?: Fault; hold?: boolean } = {}) {
+/** A presigned single PUT for a file of `size` bytes, a fake XHR stubbed over the fixture, and the bytes it reports. */
+async function setup({ fault, hold = false, size = 1000 }: { fault?: Fault; hold?: boolean; size?: number } = {}) {
   const fixture = clientFixture({ files }, { fault });
   const xhr = fakeXhr(fixture.fetch, { hold });
   vi.stubGlobal("XMLHttpRequest", xhr.XMLHttpRequest);
-  const ticket = await fixture.server.single("files", { name: "a.bin", size: 1000, type: "application/octet-stream" });
+  const ticket = await fixture.server.single("files", { name: "a.bin", size, type: "application/octet-stream" });
   const reported: number[] = [];
   const onBytes = (sent: number) => reported.push(sent);
   // The XHR path: no fetch option. Server calls, which these tests make none of, would go to the fixture.
   const put = createPut(undefined, fixture.fetch);
-  return { fixture, xhr, put, target: ticket.put, body: new Blob([offsetBytes(1000)]), reported, onBytes };
+  return { fixture, xhr, put, target: ticket.put, body: new Blob([offsetBytes(size)]), reported, onBytes };
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -198,5 +199,108 @@ describe("createPut with a fetch option", () => {
       xhr: [],
       requests: ["PUT object"],
     });
+  });
+});
+
+// Contract: spec §4.6 and ruling Q5: a PUT that stalls is given up and reported as the network-error outcome, so the
+// caller retries it; a caller's cancel stays a cancel, and a settled PUT leaves no timer behind. Oracle: 30 s without
+// progress for XHR; for fetch, 30 s plus the body at 100 KiB/s (1 MiB: 30 000 + 10 240 ms).
+describe("a stalled PUT", () => {
+  const opaque = { kind: "opaque", error: withCode("NETWORK_ERROR"), retryAfterMs: 0 };
+  const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+  it("aborts an XHR after 30 s without progress", async () => {
+    const { xhr, put, target, body, onBytes } = await setup({ hold: true });
+    fakeClock();
+    const outcome = put(target, body, new AbortController().signal, onBytes);
+    await xhr.next();
+    vi.advanceTimersByTime(29_999);
+    const openAt29999 = xhr.open.length;
+    vi.advanceTimersByTime(1);
+    expect({ openAt29999, outcome: await outcome, open: xhr.open }).toEqual({
+      openAt29999: 1,
+      outcome: opaque,
+      open: [],
+    });
+  });
+
+  it("counts the 30 s again from each progress event", async () => {
+    const { xhr, put, target, body, onBytes } = await setup({ hold: true });
+    fakeClock();
+    const outcome = put(target, body, new AbortController().signal, onBytes);
+    const call = await xhr.next();
+    vi.advanceTimersByTime(20_000);
+    call.progress(500);
+    vi.advanceTimersByTime(29_999);
+    const openAt49999 = xhr.open.length;
+    vi.advanceTimersByTime(1);
+    expect({ openAt49999, outcome: await outcome }).toEqual({ openAt49999: 1, outcome: opaque });
+  });
+
+  it.each([
+    {
+      name: "a stored XHR",
+      end: (call: XhrCall) => call.finish(),
+      expected: { kind: "stored" },
+    },
+    {
+      name: "an XHR the caller cancels",
+      end: (_call: XhrCall, controller: AbortController) => controller.abort(),
+      expected: { kind: "aborted", error: withCode("ABORTED") },
+    },
+  ])("leaves no timer after $name", async ({ end, expected }) => {
+    const { xhr, put, target, body, onBytes } = await setup({ hold: true });
+    fakeClock();
+    const controller = new AbortController();
+    const outcome = put(target, body, controller.signal, onBytes);
+    await end(await xhr.next(), controller);
+    expect({ outcome: await outcome, timers: vi.getTimerCount() }).toEqual({ outcome: expected, timers: 0 });
+  });
+
+  /** A bucket that never answers: its request fails only when the request's own signal fires. */
+  const silent: Fault = ({ label, init }) =>
+    label === "PUT object"
+      ? new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)))
+      : undefined;
+
+  it("gives a fetch PUT 30 s plus its size at 100 KiB/s", async () => {
+    const { fixture, target, body, onBytes } = await setup({ fault: silent, size: 1024 * 1024 });
+    fakeClock();
+    let settled = false;
+    const outcome = createPut(fixture.fetch, fixture.fetch)(target, body, new AbortController().signal, onBytes);
+    void outcome.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(40_239);
+    const settledAt40239 = settled;
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ settledAt40239, outcome: await outcome, timers: vi.getTimerCount() }).toEqual({
+      settledAt40239: false,
+      outcome: opaque,
+      timers: 0,
+    });
+  });
+
+  it("reports a fetch PUT the caller cancels as aborted, not as a stall", async () => {
+    const { fixture, target, body, onBytes } = await setup({ fault: silent });
+    fakeClock();
+    const controller = new AbortController();
+    const outcome = createPut(fixture.fetch, fixture.fetch)(target, body, controller.signal, onBytes);
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.abort();
+    expect({ outcome: await outcome, timers: vi.getTimerCount() }).toEqual({
+      outcome: { kind: "aborted", error: withCode("ABORTED") },
+      timers: 0,
+    });
+  });
+
+  it("sends no fetch PUT for a signal that already fired", async () => {
+    const { fixture, target, body, onBytes } = await setup();
+    const controller = new AbortController();
+    controller.abort();
+    expect({
+      outcome: await createPut(fixture.fetch, fixture.fetch)(target, body, controller.signal, onBytes),
+      requests: fixture.requests,
+    }).toEqual({ outcome: { kind: "aborted", error: withCode("ABORTED") }, requests: [] });
   });
 });
