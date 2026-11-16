@@ -271,7 +271,8 @@ only the missing parts.
    result flows into the token and `onComplete`. It runs only in `/upload` (§5.2).
 2. **Origin and CSRF.** The handler accepts same-origin requests and `trustedOrigins` only, requires
    `Content-Type: application/json` (cross-origin calls must preflight), and checks `Origin`. A request without
-   `Origin` comes from a server or a native app, never from a browser page, and is accepted; `Origin: null` is not.
+   `Origin` comes from a server or a native app, never from a browser page, and is accepted, unless
+   `Sec-Fetch-Site: cross-site` shows a browser that stripped it; `Origin: null` is refused.
    Same-origin means `Origin` equals the origin of the request URL the handler sees. No `X-Forwarded-*` header is
    trusted, so behind a proxy that terminates TLS or rewrites `Host` the app's public origin is listed in
    `trustedOrigins`; the first refusal of each origin logs a hint naming both origins.
