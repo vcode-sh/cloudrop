@@ -1,5 +1,8 @@
 # Audit: M3 vertical slice plan
 
+> **Status (2026-11-16): closed.** Its findings were ruled in `M3-H13` to `M3-H16` and applied to the plan before it
+> executed. Where the project stands now: [`README.md`](README.md).
+
 Plan: [`2026-11-16-m3-vertical-slice.md`](2026-11-16-m3-vertical-slice.md) (1,578 lines, 11 tasks, S1 to S26, U1 to
 U14). Audited 2026-11-16 on `feat/hardening` at `f946826` (lane I merged), against the design spec (§1, §3, §5, §6, §7,
 §9, §11, §12), `docs/decisions/` (M3-O1 to M3-O4 and the cited M2 rulings), `AGENTS.md`, the `testing-patterns` and

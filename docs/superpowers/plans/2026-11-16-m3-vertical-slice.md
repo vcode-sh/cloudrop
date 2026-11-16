@@ -1,5 +1,9 @@
 # M3 vertical slice: the first client and a real application, implementation plan
 
+> **Status (2026-11-16): done.** All 11 tasks executed and merged, `ca91b33..90380fb`; follow-ups to `dcea6c3`. The
+> checkboxes below are not ticked: each task's outcome is in git history and `docs/decisions/m3-slice.md` (`M3-S1` to
+> `M3-S34`). The rest of M3 (progress, scheduler, resume, chaos) and the open decisions are in [`README.md`](README.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

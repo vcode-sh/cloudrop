@@ -1,5 +1,9 @@
 # M1: Repository foundation and storage layer, implementation plan
 
+> **Status (2026-11-16): done.** Executed 2026-11-15, closed at `ca28497`; later fixes landed with M2. The
+> checkboxes below are not ticked: what was built is in git history and `docs/decisions/m1-rulings.md`. Where the
+> project stands now: [`README.md`](README.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

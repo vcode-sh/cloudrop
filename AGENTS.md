@@ -1,7 +1,8 @@
 # cloudrop: rules for coding agents
 
 cloudrop is an MIT TypeScript library for direct-to-bucket uploads to Cloudflare R2 and S3-compatible storage.
-Design: `docs/superpowers/specs/2026-11-15-cloudrop-design.md`. Plans: `docs/superpowers/plans/`.
+Design: `docs/superpowers/specs/2026-11-15-cloudrop-design.md`. Plans: `docs/superpowers/plans/`; where the project
+stands and what comes next: `docs/superpowers/plans/README.md`.
 Real-R2 evidence: `docs/research/r2-spike-findings.md`. Work strictly from Cloudflare's R2 documentation and that
 evidence; when they disagree, the measured behaviour wins and the docs page is cited.
 
