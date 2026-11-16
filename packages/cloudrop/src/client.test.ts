@@ -55,7 +55,7 @@ describe("createCloudropClient", () => {
   });
 
   it("exports only the two values of the public surface", async () => {
-    // The other 29 names are types; Task 7 checks them in the declaration file.
+    // The other 29 are types (S4); client/types.test.ts imports the ones a caller annotates with.
     expect(Object.keys(await import("./client.ts")).sort()).toEqual(["CloudropError", "createCloudropClient"]);
   });
 });

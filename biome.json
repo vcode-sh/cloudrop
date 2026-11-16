@@ -32,8 +32,15 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["**/storage/**", "**/server/**"],
-                    "message": "cloudrop/client must not import storage or server code. Import from errors, input, plan or protocol."
+                    "group": [
+                      "**/storage/**",
+                      "**/server/**",
+                      "**/index.ts",
+                      "**/next.ts",
+                      "**/node.ts",
+                      "**/testing/**"
+                    ],
+                    "message": "cloudrop/client must not import storage, server or test code, nor another entry that pulls them in. Import from errors, input, plan or protocol."
                   }
                 ]
               }
