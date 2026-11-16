@@ -19,7 +19,7 @@ const SIZE_STRING = /^(\d+)(?:\.(\d+))?(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)$/;
 
 /** Bytes, or null when `size` is not a whole number of bytes, zero or more. */
 export function parseSize(size: Size): number | null {
-  // Normalize negative zero so returned and serialized limits agree.
+  // "+ 0" turns -0 into 0, so a limit of -0 reads and prints as 0.
   if (typeof size === "number") return Number.isSafeInteger(size) && size >= 0 ? size + 0 : null;
   const match = typeof size === "string" ? SIZE_STRING.exec(size) : null;
   if (match === null) return null;
