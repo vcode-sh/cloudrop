@@ -1,5 +1,6 @@
-// Fails when a TypeScript file under packages/*/src or scripts is longer than its cap: `bun scripts/check-file-size.ts`.
-// It reads the files Biome checks there: tracked ones and new ones git does not ignore.
+// Fails when a TypeScript file under packages/*/src, scripts or examples/* (.ts and .tsx) is longer than its cap:
+// `bun scripts/check-file-size.ts`. It reads the files Biome checks there: tracked ones and new ones git does not ignore,
+// so a build's .next/ output is never counted.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,8 @@ if (import.meta.main) {
       "--",
       ":(glob)packages/*/src/**/*.ts",
       ":(glob)scripts/**/*.ts",
+      ":(glob)examples/*/**/*.ts",
+      ":(glob)examples/*/**/*.tsx",
     ],
     { encoding: "utf8" },
   );

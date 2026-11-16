@@ -10,3 +10,10 @@ coverage/
 
 .wrangler/
 packages/cloudrop/fixtures/wrangler/.state/
+
+# Next.js and Playwright output
+.next/
+next-env.d.ts
+*.tsbuildinfo
+test-results/
+playwright-report/
