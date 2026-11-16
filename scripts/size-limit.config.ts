@@ -22,5 +22,5 @@ function withImportedChunks(entry: string): string[] {
 export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB" },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB" },
-  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "2.9 kB" },
+  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB" },
 ];

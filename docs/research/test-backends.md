@@ -94,7 +94,7 @@ and 8 skips before the presigned-GET cases, 16 of 22 and 6 skips before the copy
 | Expired presigned URL | `403 ExpiredRequest`, as R2. No gap |
 | Unsigned `x-amz-meta-*` on a presigned PUT | `200`, the header is **stored** as object metadata (R2: `403 SignatureDoesNotMatch`). Lane field `unsignedMetaOnPresignedPut: "stored"` |
 | Last part larger than the first | Refused, but as `404 NoSuchUpload`, not `InvalidPart`; the upload survives and completes once the part is replaced. Lane field `unequalPartsCode: "NO_SUCH_UPLOAD"`. Real R2 and the fake enforce the same rule; Wrangler's `NoSuchUpload` makes it a weaker oracle for the error code, though the repair-and-complete half of the case still holds |
-| ListParts | `501 NotImplemented`, also after an abort. Gap `listParts` |
+| ListParts | `501 NotImplemented`, also after an abort. Gap `listParts`. The driver reports a 501 as a non-retryable `STORAGE_ERROR`, so the server's `/complete` cannot finish a multipart upload on Wrangler and says so at once |
 | Part with a wrong CRC32C | Accepted with `200`: `x-amz-checksum-*` is ignored. Gap `checksums` |
 | HEAD checksum | No `x-amz-checksum-crc64nvme`. Gap `crc64nvme` |
 | `If-None-Match: *` on completion, key exists | Ignored: the completion succeeds and overwrites the key (R2 and RustFS: `412`). Gap `conditionalCompletion` |
