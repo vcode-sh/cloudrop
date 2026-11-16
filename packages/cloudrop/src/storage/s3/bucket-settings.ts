@@ -7,8 +7,9 @@ import { sendForXml } from "./transport.ts";
 
 /**
  * A failed bucket-configuration read. Only S3's documented "no such configuration" code means no rules: a proxy or a
- * wrong endpoint path also answers 404, and reading that as no rules would report a rule nobody read. R2's own code
- * for a bucket without the setting is unmeasured (the test token gets 403), so this follows S3.
+ * wrong endpoint path also answers 404, and reading that as no rules would report a rule nobody read. Retrying the same
+ * path cannot fix that, so it is not retryable. R2's own code for a bucket without the setting is unmeasured (the test
+ * token gets 403), so this follows S3.
  */
 function configurationReadError(error: CloudropError, missingCode: string, setting: string): Result<never[]> {
   if (error.status === 404 && error.storageCode === missingCode) return ok([]);
@@ -17,7 +18,7 @@ function configurationReadError(error: CloudropError, missingCode: string, setti
     new CloudropError(
       "STORAGE_ERROR",
       `The storage service answered 404 without saying that the bucket has no ${setting} configuration. Check the endpoint, then retry.`,
-      { status: 404, storageCode: error.storageCode, retryable: true },
+      { status: 404, storageCode: error.storageCode },
     ),
   );
 }

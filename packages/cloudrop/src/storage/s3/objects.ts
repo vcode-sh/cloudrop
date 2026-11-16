@@ -50,6 +50,12 @@ function readObjectInfo(key: string, headers: Headers): Result<ObjectInfo> {
   });
 }
 
+/** A string is sent as UTF-8 and an ArrayBuffer as its bytes; a Blob or byte view goes as it is. */
+function toPayload(body: Uint8Array<ArrayBuffer> | ArrayBuffer | string | Blob): Uint8Array<ArrayBuffer> | Blob {
+  if (typeof body === "string") return encoder.encode(body);
+  return body instanceof ArrayBuffer ? new Uint8Array(body) : body;
+}
+
 function readListedObject(block: string): Result<ListedObject> {
   const key = xmlText(block, "Key");
   if (!key) return fail(incompleteResponse("object key"));
@@ -105,8 +111,7 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
         objectOptionsProblem(options) ??
         checksumProblem(options.checksumCrc32c);
       if (problem) return fail(invalidInput(problem));
-      const payload =
-        typeof body === "string" ? encoder.encode(body) : body instanceof ArrayBuffer ? new Uint8Array(body) : body;
+      const payload = toPayload(body);
       const size = payload instanceof Blob ? payload.size : payload.length;
       const tooLarge = sizeProblem(size, rules.maxSinglePutSize);
       if (tooLarge) return fail(invalidInput(tooLarge));
@@ -117,7 +122,8 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
         timeoutMs: REQUEST_TIMEOUT_MS + Math.ceil(size / MiB) * 1000,
       });
       if (result.error) return result;
-      return ok({ etag: stripQuotes(result.data.headers.get("etag") ?? "") });
+      const etag = stripQuotes(result.data.headers.get("etag") ?? "");
+      return etag ? ok({ etag }) : fail(incompleteResponse("ETag"));
     },
 
     async delete(key) {

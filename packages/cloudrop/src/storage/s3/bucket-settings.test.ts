@@ -57,13 +57,14 @@ describe("bucket configuration", () => {
     ["CORS", (driver: StorageDriver) => driver.getBucketCors(), "CORS"],
     ["lifecycle", (driver: StorageDriver) => driver.getBucketLifecycle(), "lifecycle"],
   ])(
-    "reports a %s 404 without the missing-configuration code as a retryable storage error",
+    "reports a %s 404 without the missing-configuration code as a non-retryable storage error",
     async (_name, read, setting) => {
       // A proxy or a wrong endpoint path also answers 404; only the storage's own code means "no configuration".
+      // Retrying the same path cannot fix a wrong endpoint (ruling R40).
       const proxy = stubbed(async () => new Response("<html><body>Not found</body></html>", { status: 404 }));
       expect((await read(driverWith(proxy))).error).toMatchObject({
         code: "STORAGE_ERROR",
-        retryable: true,
+        retryable: false,
         message: `The storage service answered 404 without saying that the bucket has no ${setting} configuration. Check the endpoint, then retry.`,
       });
     },

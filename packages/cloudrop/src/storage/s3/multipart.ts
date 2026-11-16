@@ -45,8 +45,10 @@ async function partsPage(
   if (parts.error) return parts;
   if (xmlText(result.data, "IsTruncated") !== "true") return ok({ parts: parts.data, next: null });
   const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
-  // A missing or non-advancing marker would loop forever.
-  if (!(Number(next) > Number(marker))) return fail(incompleteResponse("valid next part marker"));
+  // A missing or non-advancing marker would loop forever, and so would one past the last possible part number.
+  if (!(Number(next) > Number(marker)) || Number(next) > ctx.rules.maxParts) {
+    return fail(incompleteResponse("valid next part marker"));
+  }
   return ok({ parts: parts.data, next });
 }
 

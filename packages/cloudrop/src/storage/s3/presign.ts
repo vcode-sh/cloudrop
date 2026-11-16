@@ -18,6 +18,11 @@ import { orEmpty, writeHeaders } from "./options.ts";
 // presigned URL needs one, and they usually mean a seconds value was passed where milliseconds belong.
 const SIGNABLE_UNTIL_MS = Date.UTC(10000, 0, 1);
 
+/** X-Amz-Date drops the milliseconds, so the URL expires counting from the start of the signing second. */
+function expiryOf(signedAt: Date, expiresIn: number): Date {
+  return new Date(Math.floor(signedAt.getTime() / 1000) * 1000 + expiresIn * 1000);
+}
+
 async function presign(
   ctx: S3Context,
   url: URL,
@@ -36,7 +41,7 @@ async function presign(
     date,
     expiresIn,
   });
-  return { method: "PUT", url: signed.toString(), headers, expiresAt: new Date(date.getTime() + expiresIn * 1000) };
+  return { method: "PUT", url: signed.toString(), headers, expiresAt: expiryOf(date, expiresIn) };
 }
 
 export function presignMethods(ctx: S3Context): Pick<StorageDriver, "presignPut" | "presignPart" | "presignGet"> {
@@ -95,7 +100,7 @@ export function presignMethods(ctx: S3Context): Pick<StorageDriver, "presignPut"
         date: signedAt,
         expiresIn: options.expiresIn,
       });
-      return ok({ url: url.toString(), expiresAt: new Date(signedAt.getTime() + options.expiresIn * 1000) });
+      return ok({ url: url.toString(), expiresAt: expiryOf(signedAt, options.expiresIn) });
     },
   };
 }

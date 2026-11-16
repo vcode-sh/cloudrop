@@ -110,6 +110,7 @@ describe("createS3Driver", () => {
       (driver) => driver.completeMultipart("a.txt", "u", [{ partNumber: 1, etag: "e" }]),
       stubbed(async () => new Response("<CompleteMultipartUploadResult></CompleteMultipartUploadResult>")),
     ],
+    ["single PUT", (driver) => driver.put("a.txt", "x"), stubbed(async () => new Response(null))],
     [
       "single copy",
       (driver) => driver.copy("a.txt", "b.txt"),
@@ -147,6 +148,21 @@ describe("createS3Driver", () => {
     expect((await driverWith(stuck).listParts("big.bin", "upload-1")).error).toMatchObject({
       code: "STORAGE_ERROR",
       retryable: true,
+    });
+  });
+
+  // Part numbers end at 10,000: a marker past them could only lead to empty pages with ever larger markers.
+  it("stops when a truncated part list's marker passes the part limit", async () => {
+    const pages = [
+      "<ListPartsResult><IsTruncated>true</IsTruncated><NextPartNumberMarker>10001</NextPartNumberMarker></ListPartsResult>",
+      "<ListPartsResult><IsTruncated>false</IsTruncated></ListPartsResult>",
+    ];
+    let page = 0;
+    const runaway: FetchLike = async () => new Response(pages[page++]);
+    expect((await driverWith(runaway).listParts("big.bin", "upload-1")).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: true,
+      message: "The storage service's response had no valid next part marker. Retry the request.",
     });
   });
 

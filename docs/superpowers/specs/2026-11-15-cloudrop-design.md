@@ -422,7 +422,8 @@ for both by the M2 live lane), so `checkBucket()` needs an account API token wit
 "unknown" rather than "missing" without one. With such a token, R2's answers to `GetBucketCors` and
 `GetBucketLifecycleConfiguration` are unmeasured, both for a configured bucket and for one without a configuration;
 the driver follows S3's documented `NoSuchCORSConfiguration` and `NoSuchLifecycleConfiguration` codes and treats any
-other `404` as a retryable `STORAGE_ERROR`.
+other `404` as a non-retryable `STORAGE_ERROR` that points at the endpoint: a wrong endpoint path does not heal by
+retrying.
 
 Also unmeasured: how the server's parallel storage calls (a `CreateMultipartUpload` for each large file of an
 `/upload` call, up to 100 files, and `deleteMany` 16 at a time) fit Cloudflare Workers' subrequest limits. No

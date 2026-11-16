@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { R2_RULES } from "../../rules.ts";
-import { driverWith, neverCalled, setup } from "../../testing/driver-fixture.ts";
+import { credentials, driverWith, endpoint, neverCalled, setup } from "../../testing/driver-fixture.ts";
+import { createS3Driver } from "../s3-driver.ts";
 
 describe("createS3Driver", () => {
   it("presigns a PUT of exactly the single-PUT limit and rejects one byte more", async () => {
@@ -16,6 +17,26 @@ describe("createS3Driver", () => {
     });
     const overLimit = await driver.presignPut("movie.mp4", { ...options, size: R2_RULES.maxSinglePutSize + 1 });
     expect(overLimit.error?.code).toBe("INVALID_INPUT");
+  });
+
+  // X-Amz-Date has whole seconds, so the URL expires counting from the second the clock was in.
+  it("reports the expiry of a URL signed mid-second from the start of that second", async () => {
+    const midSecond = new Date("2026-11-15T12:00:00.750Z");
+    const driver = createS3Driver({
+      endpoint,
+      region: "auto",
+      bucket: "test",
+      credentials,
+      rules: R2_RULES,
+      fetch: neverCalled,
+      now: () => midSecond,
+    });
+    const put = await driver.presignPut("a.txt", { type: "text/plain", size: 1, expiresIn: 60 });
+    const get = await driver.presignGet("a.txt", { expiresIn: 60, signedAt: midSecond });
+    expect([put.data?.expiresAt, get.data?.expiresAt]).toEqual([
+      new Date("2026-11-15T12:01:00Z"),
+      new Date("2026-11-15T12:01:00Z"),
+    ]);
   });
 });
 
