@@ -199,7 +199,8 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 ### M2-X22: unmeasured bucket-settings codes fail closed
 
 - **Decision:** For bucket-settings reads, only the explicit missing-configuration codes the fake represents mean "no
-  rules". Any other 404 is a storage error (built retryable; M2-X40 made it non-retryable). Lifecycle tag filters are documented, not modelled.
+  rules". Any other 404 is a storage error (built retryable; M2-X40 made it non-retryable). Lifecycle tag filters are
+  documented, not modelled.
 - **Why:** R2's codes for a bucket without settings are unmeasured (object tokens get 403), so they must fail closed
   rather than be read as "missing".
 - **If wrong:** a real R2 empty-settings code gives an actionable error until measured.
