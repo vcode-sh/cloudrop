@@ -1,8 +1,9 @@
-// Contract: spec §4.7 and plan B's rulings Q10, Q11 and Q16 through the real client: a failed file of start() keeps its
+// Contract: spec §4.7 and rulings M3-U32, M3-U33 and M3-U38 through the real client: a failed file of start() keeps its
 // ticket until abort() of the file or the job, or the caller's signal, ends it aborted with its /abort (skipped when a
-// /complete may have succeeded), or pagehide sends a keepalive /abort for it, after which a retry asks for a new ticket.
-// The caller's signal also cancels a retry. pagehide leaves running and done files alone, and an expired ticket is let
-// go without an /abort. Oracle: the requests the fixture saw, the tokens /upload issued, and the snapshot's statuses.
+// /complete may have succeeded), or pagehide sends a keepalive /abort for it, after which a retry asks for a new
+// ticket. The caller's signal also cancels a retry. pagehide leaves running and done files alone, and an expired ticket
+// is let go without an /abort. Oracle: the requests the fixture saw, the tokens /upload issued, and the snapshot's
+// statuses.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type UploadJob } from "../client.ts";
@@ -116,7 +117,7 @@ describe("abort of a failed file", () => {
     });
   });
 
-  it("ends a file whose /complete may have succeeded aborted without an /abort (M8)", async () => {
+  it("ends a file whose /complete may have succeeded aborted without an /abort (M3-U38)", async () => {
     const { seen, client } = setup((call) =>
       call.label === "POST /complete"
         ? call.forward(call.init).then(() => Promise.reject(new TypeError("Failed to fetch")))
@@ -187,7 +188,7 @@ describe("abort of a failed file", () => {
 });
 
 describe("pagehide", () => {
-  it("sends a keepalive /abort for a failed file only, and a later retry asks for a new ticket (Q11)", async () => {
+  it("sends a keepalive /abort for a failed file only, and a later retry asks for a new ticket (M3-U33)", async () => {
     const page = pageEvents();
     let failing = true;
     const put = heldPut(3000);
@@ -228,7 +229,7 @@ describe("pagehide", () => {
     });
   });
 
-  it("lets an expired ticket go without an /abort (M7)", async () => {
+  it("lets an expired ticket go without an /abort (M3-U33)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const page = pageEvents();
     const { seen, client } = setup(({ label }) => (label === "PUT object" ? storageDown() : undefined));

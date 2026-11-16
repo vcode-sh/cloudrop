@@ -56,7 +56,7 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
       for (const entry of entries) pauseFile(entry);
     },
     resume: () => entries.forEach(resumeFile),
-    // A job refused for its arguments answers a retry as it answered `done` (Q15).
+    // A job refused for its arguments answers a retry as it answered `done` (ruling M3-U37).
     retry: () => (job ? retryJob(job) : done),
     // Taken from the store as they are: neither needs `this`.
     subscribe: store.subscribe,

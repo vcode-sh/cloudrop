@@ -1,5 +1,5 @@
-// The page's events that reach a job: connectivity while a file runs (spec §4.6, plan B rulings Q6 and Q17), and
-// pagehide while a failed file holds its ticket (spec §4.7, Q11).
+// The page's events that reach a job: connectivity while a file runs (spec §4.6, rulings M3-U28, M3-U39 and M3-U48),
+// and pagehide while a failed file holds its ticket (spec §4.7, M3-U33).
 
 import type { Entry } from "./file-run.ts";
 
@@ -20,13 +20,13 @@ export function watchConnectivity(offline: () => void, online: () => void): () =
   };
 }
 
-/** Keeps a keepalive /abort ready for failed files' tickets: one pagehide listener while any is held (Q11). */
+/** Keeps a keepalive /abort ready for failed files' tickets: one pagehide listener while any is held (M3-U33). */
 export interface Leftovers {
   hold(entry: Entry): void;
   release(entry: Entry): void;
 }
 
-/** `entry`'s upload while its ticket lasts; after that the bucket's lifecycle rule removes it (spec §4.7, M7). */
+/** `entry`'s upload while its ticket lasts; after that the bucket's lifecycle rule removes it (spec §4.7, M3-U33). */
 function unexpired({ upload }: Entry) {
   return upload && Date.parse(upload.ticket.expiresAt) > Date.now() ? upload : null;
 }

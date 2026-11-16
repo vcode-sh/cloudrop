@@ -1,6 +1,6 @@
-// Contract: spec §4.7 and plan B's rulings Q8, Q9, Q12 to Q15 through the real client: retry() of a failed file reuses
-// its ticket when a new attempt with it can succeed, re-sending only the parts that had not landed and keeping the key
-// and the bytes counted; it calls /complete first when one may have succeeded, whatever the clock says; after a
+// Contract: spec §4.7 and rulings M3-U30, M3-U31, M3-U34 to M3-U37 through the real client: retry() of a failed file
+// reuses its ticket when a new attempt with it can succeed, re-sending only the parts that had not landed and keeping
+// the key and the bytes counted; it calls /complete first when one may have succeeded, whatever the clock says; after a
 // refusal only a new upload fixes, or with an expired ticket, it asks /upload for a new ticket (new key, bytes from 0),
 // one /upload for every file of job.retry(). A file that has not failed is waited for or left as it is, and `done`
 // keeps each file's first outcome. Oracle: the requests the fixture saw, the keys the server issued, and the objects
@@ -103,7 +103,7 @@ describe("retry with the file's ticket", () => {
     });
   });
 
-  it("repairs again a file that failed with PARTS_MISSING after its two repair rounds (I5)", async () => {
+  it("repairs again a file that failed with PARTS_MISSING after its two repair rounds (M3-U50)", async () => {
     // The bucket says it stored part 2 and keeps nothing: on the first send, on both repairs and on the retry's send.
     const { client, from } = setup(({ label, nth }) =>
       label === "PUT part 2" && nth <= 4 ? new Response(null, { status: 200 }) : undefined,
@@ -122,7 +122,7 @@ describe("retry with the file's ticket", () => {
 
   it.each([
     { name: "a live ticket", late: false, outcome: ["done", undefined] },
-    // The server's own verdict on the expired token; asking for a new one could store the file twice (I6).
+    // The server's own verdict on the expired token; asking for a new one could store the file twice (M3-U30).
     { name: "an expired ticket", late: true, outcome: ["failed", "UPLOAD_EXPIRED"] },
   ])("sends /complete first when one may have succeeded, with $name", async (row) => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -171,14 +171,14 @@ describe("retry with a new ticket", () => {
       newKey: key !== null && key === issued[1]?.key && key !== issued[0]?.key,
     }).toEqual({
       first: row.code,
-      // A new upload has stored nothing: its bytes start from 0 (Q14).
+      // A new upload has stored nothing: its bytes start from 0 (M3-U36).
       bytes: [8 * MiB, 0],
       sent: ["POST /complete", "POST /upload", "PUT part 1", "PUT part 2"],
       newKey: true,
     });
   });
 
-  it("asks one /upload for every file of a job the server refused, once the user signs in (Q12)", async () => {
+  it("asks one /upload for every file of a job the server refused, once the user signs in (M3-U34)", async () => {
     let signedIn = false;
     const { client, from } = setup(({ label, init, forward }) =>
       signedIn && label === "POST /upload"
@@ -261,7 +261,7 @@ describe("retry of a file that has not failed", () => {
 });
 
 describe("done", () => {
-  it("reports the first outcome of a file retried while another still runs (Q13)", async () => {
+  it("reports the first outcome of a file retried while another still runs (M3-U35)", async () => {
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;

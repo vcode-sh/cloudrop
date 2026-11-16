@@ -1,13 +1,13 @@
-// retry() of a failed file (spec §4.7, plan B rulings Q8, Q9, Q12, Q14, Q15): the same ticket when a new attempt with it
-// can succeed, so the parts that landed are not sent again; otherwise a new ticket from /upload, shared by every file
-// of one job.retry() that needs one.
+// retry() of a failed file (spec §4.7, rulings M3-U30, M3-U31, M3-U34, M3-U36, M3-U37): the same ticket when a new
+// attempt with it can succeed, so the parts that landed are not sent again; otherwise a new ticket from /upload, shared
+// by every file of one job.retry() that needs one.
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
 import { allSettled, type Job, launch } from "./job-run.ts";
 import { createProgress } from "./progress.ts";
 
-/** Failures that a new attempt with the same ticket cannot fix (Q9). */
+/** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
 const NEEDS_NEW_TICKET = new Set<string | undefined>([
   "UPLOAD_EXPIRED",
   "INVALID_TOKEN",
@@ -16,9 +16,9 @@ const NEEDS_NEW_TICKET = new Set<string | undefined>([
 ]);
 
 /**
- * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (Q8): never when a
- * /complete may have finished the file, which only /complete with its ticket can tell (I6); always without a ticket,
- * with one that expired or whose /abort was sent, or after a failure in Q9.
+ * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): never when
+ * a /complete may have finished the file, which only /complete with its ticket can tell; always without a ticket,
+ * with one that expired or whose /abort was sent, or after a failure in M3-U31.
  */
 function needsTicket({ upload, error }: Entry): boolean {
   if (!upload) return true;
@@ -35,7 +35,7 @@ function requeue(job: Job, entry: Entry, fresh: boolean): void {
     entry.landed.clear();
     entry.progress = createProgress();
   } else if (entry.upload) {
-    // The same ticket repairs from round 0 again (I5), and sends again the parts its last /complete found missing.
+    // The same ticket repairs from round 0 again (M3-U50), and sends again the parts its last /complete found missing.
     entry.upload.repairs = 0;
     if (entry.error?.code === "PARTS_MISSING") for (const part of entry.error.parts ?? []) entry.landed.delete(part);
   }
@@ -45,8 +45,8 @@ function requeue(job: Job, entry: Entry, fresh: boolean): void {
 }
 
 /**
- * Retries the failed files among `entries`: those that need a ticket share one /upload (Q12). Files that have not
- * settled are waited for, done and aborted ones left as they are (Q15). Resolves once every file of `entries` has
+ * Retries the failed files among `entries`: those that need a ticket share one /upload (M3-U34). Files that have not
+ * settled are waited for, done and aborted ones left as they are (M3-U37). Resolves once every file of `entries` has
  * settled, with the /upload's refusal when it asked for every file of the job.
  */
 export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<CloudropError | null> {

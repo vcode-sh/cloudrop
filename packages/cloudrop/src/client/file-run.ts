@@ -1,7 +1,7 @@
 // One file of a job after /upload, from its ticket to its outcome: passes that send its bytes and /complete
 // (upload.ts), paused and resumed in between (spec §4.5), then an ending without success (a cancel or a failure). A
 // cancel tells the server unless a /complete may have finished the file (decisions S14, S15, ruling S-18); a failure
-// of start() keeps the ticket and the parts for retry() (spec §4.7), and one of upload() tells the server (Q7).
+// of start() keeps the ticket and the parts for retry() (spec §4.7), and one of upload() tells the server (M3-U29).
 
 import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
@@ -19,7 +19,7 @@ export interface Entry {
   status: FileStatus;
   result: CompleteResponse<unknown> | null;
   error: CloudropError | null;
-  /** The bytes sent so far; a new ticket starts a new count (Q14). */
+  /** The bytes sent so far; a new ticket starts a new count (ruling M3-U36). */
   progress: Progress;
   /** How fast they are sent. */
   readonly meter: Meter;
@@ -29,13 +29,16 @@ export interface Entry {
   pass: AbortController | null;
   /** Ends the wait of a paused file: resume() and a cancel call it. */
   wake: (() => void) | null;
-  /** Paused by the page going offline, so going online resumes it; the caller's pause() or resume() clears it (Q6). */
+  /**
+   * Paused by the page going offline, so going online resumes it; the caller's pause() or resume() clears it
+   * (M3-U28).
+   */
   networkPaused: boolean;
   /** The part numbers the bucket stored (1 for a single PUT): a new pass sends only the others. */
   readonly landed: Set<number>;
   /** The current ticket's upload, which a retry with the same ticket continues; null without a ticket. */
   upload: Upload | null;
-  /** How the file first settled, which `done` reports whatever a retry does later (Q13). */
+  /** How the file first settled, which `done` reports whatever a retry does later (M3-U35). */
   firstOutcome: FileOutcome<unknown> | null;
   /** The file's current run, from its /upload or retry until it settles. */
   run: Promise<void>;
@@ -95,7 +98,7 @@ export function settle(entry: Entry, status: "failed" | "aborted", error: Cloudr
 
 /**
  * Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling M3-U4). `byNetwork` marks a
- * pause by the page going offline; the caller's pause of a file already paused makes the pause the caller's (Q6).
+ * pause by the page going offline; the caller's pause of a file already paused makes the pause the caller's (M3-U28).
  */
 export function pauseFile(entry: Entry, byNetwork = false): void {
   if (entry.status === "paused" && !byNetwork) entry.networkPaused = false;
@@ -122,8 +125,9 @@ function drop(context: UploadContext, upload: Upload): Promise<void> {
 }
 
 /**
- * Cancels a file (Q16). A running one ends aborted through its run, which tells the server. A failed one ends aborted
- * at once and frees what it kept (Q10), unless a /complete may have finished it (keep-or-abort, M3-S14, M3-H16).
+ * Cancels a file (ruling M3-U38). A running one ends aborted through its run, which tells the server. A failed one
+ * ends aborted at once and frees what it kept (M3-U32), unless a /complete may have finished it (keep-or-abort,
+ * M3-S14, M3-H16).
  */
 export function abortFile(context: UploadContext, entry: Entry): void {
   const { status, upload } = entry;
@@ -143,7 +147,7 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
   const failed = !entry.cancel.signal.aborted;
   if (failed && context.keepFailed) {
     // Held before the status settles: a listener may retry the file at once, which lets it go again. A /complete
-    // that may have finished the file is never undone by pagehide (Q11).
+    // that may have finished the file is never undone by pagehide (M3-U33).
     if (!mayBeComplete) context.leftovers.hold(entry);
     return settle(entry, "failed", withFile(error, entry));
   }

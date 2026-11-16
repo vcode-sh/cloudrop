@@ -27,9 +27,12 @@ export interface UploadContext {
   order: "added" | "smallest-first";
   /** The next file's rank in the pool, counting from 1 across the client's uploads (ruling M3-U9). */
   nextRank(): number;
-  /** The failed files' tickets that pagehide frees (Q11). */
+  /** The failed files' tickets that pagehide frees (ruling M3-U33). */
   leftovers: Leftovers;
-  /** A failed file keeps its ticket and parts for retry(): start() jobs; upload() has no handle to retry with (Q7). */
+  /**
+   * A failed file keeps its ticket and parts for retry(): start() jobs; upload() has no handle to retry with
+   * (M3-U29).
+   */
   keepFailed: boolean;
 }
 
@@ -47,7 +50,10 @@ export interface Upload {
   mayBeComplete: boolean;
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
-  /** Its /abort was sent (after a failure of upload(), on pagehide or on abort()): a retry needs a new ticket (Q11). */
+  /**
+   * Its /abort was sent (after a failure of upload(), on pagehide or on abort()): a retry needs a new ticket
+   * (M3-U33).
+   */
   dropped: boolean;
 }
 
@@ -82,7 +88,7 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
         entry.changed(false);
       });
       if (outcome.kind === "stored") entry.landed.add(partNumber);
-      // Before the release below, so the slot it frees goes back to a pool already halved (ruling Q3).
+      // Before the release below, so the slot it frees goes back to a pool already halved (ruling M3-U45).
       if (outcome.kind === "opaque" || (outcome.kind === "retry" && outcome.error.code === "RATE_LIMITED")) {
         pool.slowDown();
       }

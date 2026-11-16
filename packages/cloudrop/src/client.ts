@@ -150,7 +150,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     files: unknown,
     options?: unknown,
   ): Promise<UploadResult<unknown> | Result<CompleteResponse<unknown>>> {
-    // No handle to retry with: a failed file tells the server at once (Q7).
+    // No handle to retry with: a failed file tells the server at once (ruling M3-U29).
     const { done } = startJob({ ...context, keepFailed: false }, route, files, options);
     // Anything that is not a list goes the one-file way, so a wrong argument keeps the message it had.
     return isList(files) ? done : done.then(oneFile);
