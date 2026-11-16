@@ -48,7 +48,8 @@ function sizeOf(body: unknown): number {
 }
 
 type Target = Pick<RequestRecord, "kind" | "isBucketPut" | "host" | "signedFor"> & {
-  /** What tells this request's upload from another's: a PUT's URL path or an endpoint's token. Never kept. */
+  /** What tells this request's upload from another's: a PUT's URL path or an endpoint's token. Held only as a key in
+   * memory for the run's numbering; never shown, logged or stored. */
   secret: string;
 };
 
