@@ -41,6 +41,8 @@ describe("upload protocol on live R2", () => {
         `Live R2 settings are missing: ${missing.join(", ")}. Run \`bun run test:live\` with CLOUDROP_R2_ENV_FILE naming a file that sets them, or export them.`,
       );
     }
+    // Printed once, so a run stopped before its teardown can name what to delete.
+    console.log(`Live R2 upload protocol: writing under ${prefix}`);
     storage = r2({ bucket: process.env.CLOUDROP_R2_BUCKET as string });
     cloudrop = createCloudrop({
       storage,

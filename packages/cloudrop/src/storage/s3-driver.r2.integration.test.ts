@@ -20,6 +20,9 @@ describeStorageContract("live R2", async () => {
   }
   const env = process.env as Record<(typeof SETTINGS)[number], string>;
   const bucket = env.CLOUDROP_R2_BUCKET;
+  const prefix = randomPrefix("live-test/");
+  // Printed once, so a run stopped before its teardown can name what to delete.
+  console.log(`Live R2 storage contract: writing under ${prefix}`);
   return {
     // The public preset, built the way an application builds it: everything but the bucket comes from the environment.
     driver: r2({ bucket }),
@@ -34,7 +37,7 @@ describeStorageContract("live R2", async () => {
         fetch,
         now: () => new Date(Date.now() - secondsAgo * 1000),
       }),
-    prefix: randomPrefix("live-test/"),
+    prefix,
     http: fetch,
     // Real R2 passed every contract case on 2026-11-15, so it declares no gap.
     gaps: {},
