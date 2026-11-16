@@ -56,6 +56,10 @@ interface CachedKeys {
   byScope: Map<string, Promise<CryptoKey>>;
 }
 const signingKeys = new WeakMap<Credentials, CachedKeys>();
+// A presigned GET may be signed at an earlier time (api.getUrl rounds it down to its window), so a long-lived
+// credentials object would otherwise keep a key for every day and region it ever signed for. Eight covers the current
+// day and the few days such windows reach; dropping them all when full leaves a cache hit untouched.
+const MAX_CACHED_SCOPES = 8;
 
 function signingKey(credentials: Credentials, day: string, region: string): Promise<CryptoKey> {
   let cached = signingKeys.get(credentials);
@@ -67,6 +71,7 @@ function signingKey(credentials: Credentials, day: string, region: string): Prom
   let derived = cached.byScope.get(scope);
   if (!derived) {
     const { byScope } = cached;
+    if (byScope.size >= MAX_CACHED_SCOPES) byScope.clear();
     derived = deriveSigningKey(credentials.secretAccessKey, day, region);
     derived.catch(() => byScope.delete(scope));
     byScope.set(scope, derived);

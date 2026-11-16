@@ -1,5 +1,5 @@
 import { AwsClient } from "aws4fetch";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   type Credentials,
   EMPTY_SHA256,
@@ -208,6 +208,33 @@ describe("signing key reuse", () => {
     const after = await oursAndTheirs(credentials, "auto", at);
     expect([before.ours, after.ours]).toEqual([before.theirs, after.theirs]);
     expect(after.ours).not.toBe(before.ours);
+  });
+
+  it("keeps a bounded number of days, so signing at many past times cannot grow the cache forever", async () => {
+    const credentials = { accessKeyId: "test-access-key", secretAccessKey: "secret-one" };
+    // Counts key derivations: each one imports HMAC keys, and a cached key imports none.
+    const imports = vi.spyOn(crypto.subtle, "importKey");
+    onTestFinished(() => imports.mockRestore());
+    const importsFor = async (day: number): Promise<number> => {
+      const before = imports.mock.calls.length;
+      await presignUrl({
+        method: "GET",
+        url: new URL(url),
+        credentials,
+        region: "auto",
+        date: new Date(Date.UTC(2026, 10, day, 12)),
+        expiresIn: 60,
+      });
+      return imports.mock.calls.length - before;
+    };
+    const cold = await importsFor(1);
+    // Nine more days than the first: more than the cache keeps.
+    for (const day of [2, 3, 4, 5, 6, 7, 8, 9, 10]) await importsFor(day);
+    expect(cold).toBeGreaterThan(0);
+    expect({ latestDay: await importsFor(10), firstDay: await importsFor(1) }).toEqual({
+      latestDay: 0,
+      firstDay: cold,
+    });
   });
 });
 
