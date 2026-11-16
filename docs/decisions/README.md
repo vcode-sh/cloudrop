@@ -22,6 +22,8 @@ What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 Reading older text:
 
 - In `docs/superpowers/plans/2026-11-15-m2-server.md`, a bare `R<n>` is an M1 ruling (`M1-R<n>`).
+- Executed plans are short stubs since 2026-11-16; a section a ruling cites is in the full text at commit `415198a`
+  (`git show 415198a:docs/superpowers/plans/<file>`).
 - In the M2 plan, the M2 audit and the M2 reviews, a bare `D<n>` is `M2-D<n>`.
 - In the M2 execution ledger, the M2 reviews and the M3 plan before this index existed, a bare `R<n>` is `M2-X<n>`.
 - In the hardening ledger and its lane briefs, a bare `O<n>` is `M3-O<n>` and `H<n>` is `M3-H<n>`.

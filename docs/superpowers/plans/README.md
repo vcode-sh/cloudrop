@@ -1,9 +1,8 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-16 at `main` = `dcea6c3`. This file is the one place that says what is done and what comes next; each
-plan's own status block points here. The checkboxes inside the plans are not ticked: execution was tracked in
-per-plan ledgers (git-ignored, archived under `~/projects/.worktrees/cloudrop/archive/`), and the outcome of every task
-is in git history and in [`docs/decisions/`](../../decisions/README.md).
+Updated 2026-11-16 at `main` = `dcea6c3`. This file is the one place that says what is done and what comes next. The
+code is the truth: an executed plan is kept as a short stub marked done, with the commit that holds its full text
+(`git show 415198a:docs/superpowers/plans/<file>`); every decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## Milestones (spec §14)
 
