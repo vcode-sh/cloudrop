@@ -495,7 +495,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   refused (400, a signature mismatch) would be refused again under the same ticket.
 - **If wrong:** an error missing from the list spends one `retry()` on the old ticket; one wrongly on it re-sends a file
   that could have finished.
-- **Status:** in force (`4f1887a`). Amended by `M3-U74` (decided): `NO_SUCH_UPLOAD` joins the list.
+- **Status:** in force (`4f1887a`). Amended by `M3-U74`: `NO_SUCH_UPLOAD` joins the list (in force, resume plan
+  task 4), also after a `/complete` that left doubt (`M3-U83`).
 - **Visible in:** `client/retry-file.ts` (`NEEDS_NEW_TICKET`, `needsTicket`), `client/retry-file.test.ts`.
 
 ### M3-U32: `abort()` on a failed file
@@ -1049,17 +1050,20 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 
 ### M3-U69: a Web Lock keeps two tabs from sending one upload
 
-- **Decision:** research decision 9 (resume design §2, §3.5). Every run of a persisted upload, from `start()`,
-  `resume()` or `retry()`, holds a Web Lock for its upload from its first request until it settles, where
-  `navigator.locks` exists (`M3-U73`). `resume()` asks for it without waiting; when another tab holds it, the job ends
+- **Decision:** research decision 9 (resume design §2, §3.5), as audit C2 amends it. A persisted upload holds a Web
+  Lock for its upload for as long as the page keeps its ticket alive, where `navigator.locks` exists (`M3-U73`): from
+  the ticket's arrival (`start()`, `upload()`, a retry's new ticket) or from `resume()` until the page gives the
+  ticket up, not for one run. `resume()` asks for it without waiting; when another tab holds it, the job ends
   with the new client error code `UPLOAD_IN_USE` and sends nothing. Like `ABORTED`, the server never sends it.
 - **Why:** a lock is shared by every tab and worker of the origin (MDN, "Web Locks API"; Baseline since March 2022),
   for about 50 B. Two tabs resuming one record would send the same parts twice and race at `/complete`, where a part
   sent again during the call makes a listed ETag stale and answers a retryable `STORAGE_ERROR` (spec §5.4).
 - **If wrong:** Web Locks exist only in secure contexts. Without them two tabs may send the same parts: harmless to
   the result, since the server verifies, but wasted bytes.
-- **Status:** decided (resume plan, tasks 2, 4 and 5).
-- **Visible in:** `client/locks.ts`, `errors.ts` (`ClientErrorCode`), `client/failures.ts` (`uploadInUse`).
+- **Status:** decided (resume plan, tasks 2, 4 and 5); the lock of a ticket from `/upload` is in force (resume plan
+  task 4), `resume()`'s comes with task 5.
+- **Visible in:** `client/locks.ts`, `client/persist.ts`, `errors.ts` (`ClientErrorCode`), `client/failures.ts`
+  (`uploadInUse`).
 
 ## Resume plan rulings
 
@@ -1082,17 +1086,19 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 ### M3-U71: one ordered queue per client, and the store never holds up an upload
 
 - **Decision:** R2 (resume design §3.2). Every store operation of one client is chained on one promise, so a delete
-  issued after a save runs after it. The database is opened once, lazily, by the first operation; a failed open makes
-  every later operation fail the same way. Uploads ignore store failures. `resumable()` and `forget()` resolve
-  `{ data: null, error }` with code `STORAGE_ERROR` and a message that names the browser's storage, never its raw
-  text.
+  issued after a save runs after it, also when the save is called with a record still being made (its fingerprint
+  is hashed from the file): it holds its place in the queue from the call (audit C1, `M3-U80`). The database is
+  opened lazily by the first operation and kept; a failed open, or a connection the browser closed (`onclose`,
+  `onversionchange`, or `InvalidStateError` from `transaction()`), is opened again by the next operation (`22b270f`,
+  amending R2's "a failed open makes every later operation fail"). Uploads ignore store failures. `resumable()` and
+  `forget()` resolve `{ data: null, error }` with code `STORAGE_ERROR` and a message that names the browser's storage,
+  never its raw text.
 - **Why:** a file that ends right after its ticket arrived issues a delete right after a save; out of order, the save
   could land last and leave a live token for a finished upload (`M3-U62`). A page that never uploads never opens the
   database. The records are a convenience: a quota error or a browser that refuses storage must not fail an upload the
   network can finish.
-- **If wrong:** one failed open turns resume off for the client's life, also when a later open would have worked; the
-  next page load tries again.
-- **Status:** decided (resume plan, task 1).
+- **If wrong:** a browser whose store keeps failing is asked again on every operation; each failure costs one open.
+- **Status:** in force (`7f2a7b1`, `22b270f`; the pending record, resume plan task 4).
 - **Visible in:** `client/records.ts`, `client/failures.ts` (`storageUnavailable`).
 
 ### M3-U72: a record counts as expired 60 seconds early
@@ -1109,16 +1115,21 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 
 ### M3-U73: the lock's name and how long it is held
 
-- **Decision:** R4. The lock is `cloudrop:upload:<id>`, requested with `ifAvailable: true` and held until the file's
-  run settles: done, failed or aborted. A retry of a failed file asks for it again. Without `navigator.locks` nothing
-  is locked.
+- **Decision:** R4, as audit C2 and I2 amend it. The lock is `cloudrop:upload:<id>`, requested with
+  `ifAvailable: true`, once per ticket, and held for as long as the page keeps the ticket alive: until the file ends
+  done or aborted, its `/abort` is sent, a retry's new ticket replaces it, or the page unloads. A failed file of
+  `start()` keeps it, so a same-ticket retry needs no second request, which Web Locks would refuse to the page that
+  holds it. Without `navigator.locks`, and with persistence off, nothing is locked.
 - **Why:** `ifAvailable` never queues behind another tab, which would leave a job waiting with no status to show. A
-  failed file holds no lock, so a tab that gave up does not block a resume in another. The prefix keeps the name apart
-  from an app's own locks.
-- **If wrong:** between a file's failure and its retry another tab may resume the same upload; the retry's request
-  for the lock is what finds it.
-- **Status:** decided (resume plan, tasks 2 and 4).
-- **Visible in:** `client/locks.ts`.
+  lock released when a run settled would let `resume()` in this page or another finish the upload while the failed
+  entry still holds a live token, whose later `/abort` (pagehide, cancel, the job's signal) would delete the finished
+  object (audit C2). The prefix keeps the name apart from an app's own locks.
+- **If wrong:** a failed file left on a page keeps another tab from resuming it until that page cancels it, retries
+  it or closes; `UPLOAD_IN_USE` says so (`M3-U69`).
+- **Status:** in force for tickets from `/upload` (resume plan task 4; how the lock is taken, `M3-U81`); `resume()`'s
+  comes with task 5. Supersedes the draft ruling that a retry refused the lock fails with `UPLOAD_IN_USE`: a retry
+  never asks again.
+- **Visible in:** `client/locks.ts`, `client/persist.ts`.
 
 ### M3-U74: a resumed upload that is gone starts over in the same run
 
@@ -1132,7 +1143,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   sets `mayBeComplete` as any `/complete` does (`M3-S14`), so a file that may be stored never takes this branch.
 - **If wrong:** the old upload's parts wait for the bucket's lifecycle rule (`M3-U55`). The page sees one outcome per
   run and no failure in between.
-- **Status:** decided (resume plan, task 4 for the retry list, task 5 for the probe). Amends `M3-U31`.
+- **Status:** the retry list in force (resume plan task 4, with `M3-U83`); the probe decided (task 5). Amends
+  `M3-U31`.
 - **Visible in:** `client/resume.ts`, `client/retry-file.ts` (`NEEDS_NEW_TICKET`).
 
 ### M3-U75: the probe's first `PARTS_MISSING` is free
@@ -1201,5 +1213,67 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   a record and the filter's comparison small.
 - **If wrong:** a longer user id must be shortened or hashed by the app. The namespace is fixed when the client is
   created, so a page that switches users creates a new client.
-- **Status:** decided (resume plan, task 4).
-- **Visible in:** `client.ts` (`ClientOptions`).
+- **Status:** in force (resume plan, task 4).
+- **Visible in:** `client.ts` (`ClientOptions`, `readOptions`), `client.test.ts`.
+
+## Resume plan execution rulings
+
+### M3-U80: a record is queued when its ticket arrives, and only what can be used is kept
+
+- **Decision:** audit C1, I12, M2 and M6. A multipart ticket's record is handed to the store the moment the ticket
+  arrives, as a promise that resolves once the file's fingerprint is hashed; the store's queue holds its place from
+  that call, so a delete issued when the file ends at once runs after it. The record's `metadata` is the JSON round
+  trip of what was passed, which is what `/upload` received. A file the browser can no longer read rejects the
+  fingerprint and the record is dropped. A record read back with a field of the wrong type (another library version,
+  another script on the origin) is never returned and is deleted, as an expired one is.
+- **Why:** hashing before queueing let a file cancelled during `/upload` delete its record before the record was
+  written, leaving a live token on disk for a cancelled upload (spec §4). A structured clone keeps what JSON drops and
+  throws on a function (`DataCloneError`), which `readArguments`' JSON check lets through. A record of another shape
+  would make `resume()` throw.
+- **If wrong:** a record of a newer shape written into version 1 of the database is deleted; a newer version uses a
+  new database version.
+- **Status:** in force (resume plan, task 4).
+- **Visible in:** `client/persist.ts` (`uploadOf`), `client/records.ts` (`save`, `isRecord`).
+
+### M3-U81: a ticket's lock is asked for without waiting for the answer
+
+- **Decision:** a ticket from `/upload` asks for its lock when it arrives and sends at once, without waiting for the
+  answer; a refusal is ignored. Its `release` can be called before the answer, and the lock is then let go as soon as
+  it is granted.
+- **Why:** an id `/upload` just made is unknown to every other holder: a record of it exists only after the lock was
+  asked for, and the lock manager answers requests in order. Waiting would delay every multipart file for nothing.
+- **If wrong:** a forged record with a reused id could be resumed in another tab while this page sends it; the server
+  still verifies every part at `/complete`.
+- **Status:** in force (resume plan, task 4).
+- **Visible in:** `client/persist.ts`, `client/locks.ts`.
+
+### M3-U82: `upload()` persists too, and where a page gives a ticket up
+
+- **Decision:** audit I5. `upload()` saves and locks a multipart ticket as `start()` does. The record is deleted and
+  the lock let go wherever the page gives the ticket up (`letGo` in `client/persist.ts`): the file ends done; its
+  `/abort` is sent (a cancel, a failure of `upload()`, `abort()` or the job's signal on a failed file, pagehide); a
+  cancel, or `abort()` of a failed file, when a `/complete` may have finished it; a retry's new ticket. A failed file
+  of `start()` keeps both for `retry()`. A failure of `upload()` that a `/complete` may have finished keeps its record,
+  so that a later `resume()` can settle it with `/complete`, and lets the lock go: the page has no handle to send it
+  again.
+- **Why:** `upload()` runs on `startJob` and a reload interrupts it as much as `start()`. A record that outlived an
+  `/abort` would list an upload that is gone (spec §3.2).
+- **If wrong:** a `resume()` of an `upload()` file left in doubt finds the record, and `/complete` answers success or
+  `NO_SUCH_UPLOAD`; either settles it.
+- **Status:** in force (resume plan, task 4).
+- **Visible in:** `client/persist.ts`, `client/file-run.ts` (`drop`, `abortFile`, `end`, `runFile`),
+  `client/retry-file.ts` (`requeue`), `client/lifecycle.ts` (pagehide), `client/persist.test.ts`,
+  `client/persist-failures.test.ts`.
+
+### M3-U83: `NO_SUCH_UPLOAD` clears the doubt of an earlier `/complete`
+
+- **Decision:** audit I4. A `/complete` answered `NO_SUCH_UPLOAD` clears `mayBeComplete`, as `PARTS_MISSING` does
+  (ruling S-9), so a `retry()` after a `/complete` that got no answer and then `NO_SUCH_UPLOAD` asks `/upload` for a new
+  ticket (`M3-U74`).
+- **Why:** the server answers `NO_SUCH_UPLOAD` only after HEAD found no object of this upload's `cloudrop-id` and size
+  (`server/complete.ts`, `completedBefore`), so no earlier `/complete` finished the file. Kept sticky, every retry would
+  reuse the dead ticket and fail again.
+- **If wrong:** a server that answered `NO_SUCH_UPLOAD` for a finished upload would make a retry store the file a
+  second time under a new key.
+- **Status:** in force (resume plan, task 4).
+- **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/persist-failures.test.ts`.

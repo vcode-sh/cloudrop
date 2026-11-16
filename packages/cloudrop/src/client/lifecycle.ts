@@ -2,6 +2,7 @@
 // and pagehide while a failed file holds its ticket (spec §4.7, M3-U33).
 
 import type { Entry } from "./file-run.ts";
+import type { Upload } from "./upload.ts";
 
 /**
  * Calls `offline` and `online` on the page's connectivity events until the returned function runs, and one of them at
@@ -34,10 +35,11 @@ function unexpired({ upload }: Entry) {
 }
 
 /**
- * On pagehide, sends `abort` (a keepalive /abort) for every held ticket that has not expired and marks it dropped, so
- * a retry after a back-forward cache restore asks for a new one. Expired tickets are let go on pagehide and on hold.
+ * On pagehide, calls `abort` (drop in file-run.ts: a keepalive /abort, the ticket marked dropped so a retry after a
+ * back-forward cache restore asks for a new one, its record deleted) for every held ticket that has not expired.
+ * Expired tickets are let go on pagehide and on hold.
  */
-export function createLeftovers(abort: (token: string) => Promise<void>): Leftovers {
+export function createLeftovers(abort: (upload: Upload) => void): Leftovers {
   const held = new Set<Entry>();
   // The page adds the same listener once, and removing one it does not hold does nothing.
   const sync = () => {
@@ -50,9 +52,7 @@ export function createLeftovers(abort: (token: string) => Promise<void>): Leftov
   function pagehide() {
     for (const entry of held) {
       const upload = unexpired(entry);
-      if (!upload) continue;
-      upload.dropped = true;
-      void abort(upload.ticket.token);
+      if (upload) abort(upload);
     }
     held.clear();
     sync();

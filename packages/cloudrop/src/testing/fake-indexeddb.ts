@@ -3,7 +3,7 @@
 // As in a browser, events fire later (in microtasks), values are structured-cloned when written and when read,
 // `getAll` returns values in key order, and a transaction completes after its last request or aborts after a failed
 // one, rolling back its writes. Version changes, indexes, cursors and the requests left pending by an abort are not
-// modelled. It is never shipped.
+// modelled. `settled()` waits for the database to go quiet. It is never shipped.
 
 export interface FakeIndexedDb {
   /** For vi.stubGlobal("indexedDB", fake.indexedDB). */
@@ -17,6 +17,12 @@ export interface FakeIndexedDb {
    * `onclose` fires; without, it only stops working (its next transaction() throws InvalidStateError).
    */
   closeConnections(notify: boolean): void;
+  /**
+   * Resolves once no open, request or transaction is pending, checked after a macrotask (setTimeout 0, so a test that
+   * fakes setTimeout cannot use it), when every microtask that could start another has run. Work the store has not
+   * started yet, such as a record still waiting for its file's hash, is not seen.
+   */
+  settled(): Promise<void>;
 }
 
 type Handler = (() => void) | null;
@@ -43,11 +49,13 @@ class FakeTransaction {
   readonly #store: Store;
   readonly #writable: boolean;
   readonly #nextFailure: () => DOMException | null;
+  readonly #ended: () => void;
   readonly #before: Rows;
   #pending = 0;
   #finished = false;
 
-  constructor(name: string, store: Store, mode: string, nextFailure: () => DOMException | null) {
+  constructor(name: string, store: Store, mode: string, nextFailure: () => DOMException | null, ended: () => void) {
+    this.#ended = ended;
     this.#name = name;
     this.#store = store;
     this.#writable = mode === "readwrite";
@@ -100,7 +108,10 @@ class FakeTransaction {
   #completeIfIdle(): void {
     if (this.#pending > 0 || this.#finished) return;
     this.#finished = true;
-    queueMicrotask(() => this.oncomplete?.());
+    queueMicrotask(() => {
+      this.oncomplete?.();
+      this.#ended();
+    });
   }
 
   #abort(error: DOMException): void {
@@ -111,6 +122,7 @@ class FakeTransaction {
     queueMicrotask(() => {
       this.onerror?.();
       this.onabort?.();
+      this.#ended();
     });
   }
 }
@@ -123,6 +135,11 @@ export function fakeIndexedDb(): FakeIndexedDb {
     return name === undefined ? null : new DOMException(`The fake database failed this request (${name}).`, name);
   };
 
+  // Opens and transactions under way, for settled().
+  let pending = 0;
+  const ended = () => {
+    pending -= 1;
+  };
   const connections: ((notify: boolean) => void)[] = [];
   /** A connection to `stores`; `createObjectStore` works only while `upgrading()` holds, as in onupgradeneeded. */
   const connect = (stores: Map<string, Store>, upgrading: () => boolean) => {
@@ -138,7 +155,8 @@ export function fakeIndexedDb(): FakeIndexedDb {
         if (closed) throw new DOMException("The database connection is closing.", "InvalidStateError");
         const store = stores.get(name);
         if (store === undefined) throw new DOMException(`No object store "${name}".`, "NotFoundError");
-        return new FakeTransaction(name, store, mode, nextFailure);
+        pending += 1;
+        return new FakeTransaction(name, store, mode, nextFailure, ended);
       },
       close(): void {
         closed = true;
@@ -154,11 +172,13 @@ export function fakeIndexedDb(): FakeIndexedDb {
   const indexedDB = {
     open(name: string, _version: number): FakeRequest {
       const request = new FakeRequest();
+      pending += 1;
       queueMicrotask(() => {
         const failure = nextFailure();
         if (failure !== null) {
           request.error = failure;
           request.onerror?.();
+          ended();
           return;
         }
         let stores = databases.get(name);
@@ -169,6 +189,7 @@ export function fakeIndexedDb(): FakeIndexedDb {
         if (upgrading) request.onupgradeneeded?.();
         upgrading = false;
         request.onsuccess?.();
+        ended();
       });
       return request;
     },
@@ -185,6 +206,10 @@ export function fakeIndexedDb(): FakeIndexedDb {
     },
     failNext(name, n = 1) {
       for (let i = 0; i < n; i += 1) failures.push(name);
+    },
+    async settled() {
+      do await new Promise((resolve) => setTimeout(resolve, 0));
+      while (pending > 0);
     },
   };
 }

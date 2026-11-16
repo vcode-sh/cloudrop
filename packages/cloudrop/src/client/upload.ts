@@ -12,6 +12,7 @@ import type { Entry } from "./file-run.ts";
 import type { Leftovers } from "./lifecycle.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
+import type { Records } from "./records.ts";
 import { withRetry } from "./retry.ts";
 import type { PutObject } from "./transport.ts";
 
@@ -34,6 +35,10 @@ export interface UploadContext {
    * (M3-U29).
    */
   keepFailed: boolean;
+  /** The browser's store of unfinished multipart uploads (resume spec §3.1); a no-op one with persistence off. */
+  records: Records;
+  /** Keeps one signed-in user's records apart from another's (ruling M3-U79). */
+  namespace: string;
 }
 
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
@@ -55,6 +60,8 @@ export interface Upload {
    * (M3-U33).
    */
   dropped: boolean;
+  /** Lets go of the upload's Web Lock, held while the page keeps the ticket (M3-U73); a no-op when none was taken. */
+  unlock(): void;
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -127,8 +134,9 @@ export async function sendAndComplete(
     const done = await context.endpoints.complete(ticket.token);
     const code = done.error?.code;
     // PARTS_MISSING clears the doubt wherever it arrives: the server sends it only while the multipart upload is still
-    // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9).
-    if (code === "PARTS_MISSING") upload.mayBeComplete = false;
+    // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9). NO_SUCH_UPLOAD
+    // too: the server sends it once it found the upload gone and no object of it stored (server/complete.ts, M3-U83).
+    if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD") upload.mayBeComplete = false;
     // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
     else upload.mayBeComplete ||= code === "NETWORK_ERROR" || code === "SERVER_ERROR";
     return done;

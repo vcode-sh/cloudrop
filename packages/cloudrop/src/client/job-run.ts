@@ -8,6 +8,7 @@ import type { Ticket } from "./endpoints.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
 import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
 import { watchConnectivity } from "./lifecycle.ts";
+import { uploadOf } from "./persist.ts";
 import { withRetry } from "./retry.ts";
 import type { FileOutcome, UploadResult } from "./types.ts";
 import type { Upload, UploadContext } from "./upload.ts";
@@ -102,7 +103,7 @@ async function runEntry(
     // A file cancelled meanwhile ends as cancelled: it holds no ticket the server must be told about.
     return settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : ticket, entry));
   }
-  entry.upload = { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false };
+  entry.upload = uploadOf(job.context, job.args, entry, ticket);
   await job.runUpload(entry.upload);
 }
 

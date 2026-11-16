@@ -2,9 +2,11 @@
 
 import { isList } from "./client/arguments.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
+import { drop } from "./client/file-run.ts";
 import { startJob } from "./client/job.ts";
 import { createLeftovers } from "./client/lifecycle.ts";
 import { createPool } from "./client/pool.ts";
+import { createRecords } from "./client/records.ts";
 import { createPut } from "./client/transport.ts";
 import type { FileOutcome, UploadJob, UploadResult } from "./client/types.ts";
 import type { UploadContext } from "./client/upload.ts";
@@ -61,6 +63,16 @@ export interface ClientOptions {
   concurrency?: number | "auto";
   /** Which PUTs go first when they wait for a connection: "added" (the default) or "smallest-first" by file size. */
   order?: "added" | "smallest-first";
+  /**
+   * Keeps each unfinished multipart upload in the browser's IndexedDB, with its upload token, until the file ends, so
+   * that it can resume after a reload. Default true; false keeps nothing on disk.
+   */
+  persist?: boolean;
+  /**
+   * Keeps one signed-in user's unfinished uploads apart from another's in the same browser: pass the user's id. At most
+   * 256 characters; default "".
+   */
+  namespace?: string;
 }
 
 export interface UploadOptions<TMetadata = unknown> {
@@ -108,11 +120,19 @@ function oneFile(result: UploadResult<unknown>): Result<CompleteResponse<unknown
 /** A path such as /api/cloudrop, or an absolute http(s) URL ending in one; no trailing slash, query or fragment (S17). */
 const BASE_PATH = /^(?:https?:\/\/[^/?#\s]+)?(?:\/[^/?#\s]+)+$/;
 
-export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
-  options: ClientOptions = {},
-): CloudropClient<TCloudrop> {
+/** The options with their defaults; a wrong one throws its configuration error (S17, M3-U41, M3-U42, M3-U79). */
+function readOptions(
+  options: ClientOptions | null,
+): Required<Omit<ClientOptions, "fetch">> & Pick<ClientOptions, "fetch"> {
   // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
-  const { basePath = "/api/cloudrop", fetch, concurrency = "auto", order = "added" } = options ?? {};
+  const {
+    basePath = "/api/cloudrop",
+    fetch,
+    concurrency = "auto",
+    order = "added",
+    persist = true,
+    namespace = "",
+  } = options ?? {};
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError(
       'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
@@ -125,9 +145,20 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   if (order !== "added" && order !== "smallest-first") {
     throw configError('order must be "added" or "smallest-first".');
   }
+  if (typeof persist !== "boolean") throw configError("persist must be true or false.");
+  if (typeof namespace !== "string" || namespace.length > 256) {
+    throw configError("namespace must be a string of at most 256 characters, such as the signed-in user's id.");
+  }
   if (typeof (fetch ?? globalThis.fetch) !== "function") {
     throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
   }
+  return { basePath, fetch, concurrency, order, persist, namespace };
+}
+
+export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
+  options: ClientOptions = {},
+): CloudropClient<TCloudrop> {
+  const { basePath, fetch, concurrency, order, persist, namespace } = readOptions(options);
   // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
@@ -140,8 +171,11 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     pool: createPool(concurrency),
     order,
     nextRank: () => ++rank,
-    leftovers: createLeftovers(endpoints.abort),
+    // Read when a page hides, by when `context` exists.
+    leftovers: createLeftovers((held) => drop(context, held)),
     keepFailed: true,
+    records: createRecords(persist),
+    namespace,
   };
   // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them
   // at run time: the casts below give the route's result type to what the server sent.

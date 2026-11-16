@@ -174,6 +174,71 @@ describe("order (R2: operations apply in the order they were made)", () => {
   });
 });
 
+describe("a record still being made (audit C1: the save holds its place in the queue)", () => {
+  it("a remove made right after it wins, though the record is ready only later", async () => {
+    const records = storeAt();
+    const record = Promise.withResolvers<UploadRecord>();
+    records.save(record.promise);
+    records.remove("u-1");
+    record.resolve(SAVED);
+    await afterQueued(records);
+    expect(fake.stored()).toEqual({});
+  });
+
+  it("is stored once ready, before an operation made after it", async () => {
+    const records = storeAt();
+    const record = Promise.withResolvers<UploadRecord>();
+    records.save(record.promise);
+    const listed = records.list("user-1");
+    record.resolve(SAVED);
+    expect(await listed).toEqual({ data: [SAVED], error: null });
+  });
+
+  it("is dropped when it cannot be made (a file the browser can no longer read), and the store keeps working", async () => {
+    const records = storeAt();
+    const first = Promise.withResolvers<UploadRecord>();
+    const second = Promise.withResolvers<UploadRecord>();
+    records.save(first.promise);
+    records.save(second.promise);
+    second.reject(new DOMException("The file could not be read.", "NotReadableError"));
+    // A task passes while the first save still waits, as a browser's store answers in tasks: Vitest fails the run on a
+    // rejection nobody handled by then.
+    await new Promise((resolve) => setImmediate(resolve));
+    first.resolve(recordOf({ id: "u-0" }));
+    records.save(SAVED);
+    expect((await records.list("user-1")).data?.map(({ id }) => id)).toEqual(["u-0", "u-1"]);
+  });
+});
+
+describe("records of another shape (audit M2: another library version or script of the origin)", () => {
+  /** Writes `value` into R1's store as another script on the origin would. */
+  const putRaw = (value: unknown) =>
+    new Promise<void>((resolve) => {
+      const request = fake.indexedDB.open("cloudrop", 1) as IDBOpenDBRequest;
+      request.onupgradeneeded = () => request.result.createObjectStore("uploads", { keyPath: "id" });
+      request.onsuccess = () => {
+        const transaction = request.result.transaction("uploads", "readwrite");
+        transaction.objectStore("uploads").put(value);
+        transaction.oncomplete = () => resolve();
+      };
+    });
+
+  it.each([
+    { name: "a size that is a string", value: { ...SAVED, id: "u-2", size: "52428800" } },
+    { name: "no token", value: { ...SAVED, id: "u-2", token: undefined } },
+    { name: "only an id and a namespace", value: { id: "u-2", namespace: "user-1" } },
+  ])("are never listed or got and are deleted when seen: $name", async ({ value }) => {
+    await putRaw(SAVED);
+    await putRaw(value);
+    const records = storeAt();
+    expect(await records.get("u-2", "user-1")).toEqual({ data: null, error: null });
+    expect(Object.keys(fake.stored())).toEqual(["u-1"]);
+    await putRaw(value);
+    expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
+    expect(Object.keys(fake.stored())).toEqual(["u-1"]);
+  });
+});
+
 describe("store failures", () => {
   it("a failed save is dropped, and the store keeps working", async () => {
     const records = storeAt();

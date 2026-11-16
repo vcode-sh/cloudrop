@@ -1,6 +1,7 @@
-// Contract: spec §3.5 and ruling R4 of the resume plan. lockUpload takes the Web Lock `cloudrop:upload:<id>` without
-// waiting and holds it until the run's promise settles, either way; it answers false when another tab holds that lock,
-// and true, holding nothing, where the page has no navigator.locks or may not use it.
+// Contract: spec §3.5 and rulings M3-U69 and M3-U73 as audit C2 amends them. lockUpload asks for the Web Lock
+// `cloudrop:upload:<id>` without waiting and holds it until release() is called, which may come before the answer; it
+// answers false when another holder has that lock, and true, holding nothing, where the page has no navigator.locks or
+// may not use it.
 // Oracle: the lock names the fake LockManager says this page holds, and the literal name the ruling fixes.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,44 +22,54 @@ function setup() {
 const everyMicrotask = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("lockUpload", () => {
-  it.each([
-    { name: "finishes", settle: (run: PromiseWithResolvers<string>) => run.resolve("done") },
-    { name: "fails", settle: (run: PromiseWithResolvers<string>) => run.reject(new Error("the run failed")) },
-  ])("holds cloudrop:upload:<id> until the run $name, then lets it go", async ({ settle }) => {
+  it("holds cloudrop:upload:<id> until it is released, then lets it go", async () => {
     const fake = setup();
-    const run = Promise.withResolvers<string>();
 
-    const taken = await lockUpload("7", run.promise);
-    const whileRunning = fake.held();
-    settle(run);
+    const lock = lockUpload("7");
+    const taken = await lock.taken;
+    const whileHeld = fake.held();
+    lock.release();
     await everyMicrotask();
 
-    expect({ taken, whileRunning, afterwards: fake.held() }).toEqual({
+    expect({ taken, whileHeld, afterwards: fake.held() }).toEqual({
       taken: true,
-      whileRunning: ["cloudrop:upload:7"],
+      whileHeld: ["cloudrop:upload:7"],
       afterwards: [],
     });
   });
 
-  it("answers false while another tab holds the upload, without holding it, and true once that tab lets go", async () => {
+  it("lets the lock go once granted when it was released before the answer", async () => {
     const fake = setup();
-    const release = fake.holdElsewhere("cloudrop:upload:7");
-    const run = Promise.withResolvers<void>();
 
-    const refused = await lockUpload("7", run.promise);
+    const lock = lockUpload("7");
+    lock.release();
+    const taken = await lock.taken;
+    await everyMicrotask();
+
+    expect({ taken, held: fake.held() }).toEqual({ taken: true, held: [] });
+  });
+
+  it("answers false while another holder has the upload, without holding it, and true once it lets go", async () => {
+    const fake = setup();
+    const elsewhere = fake.holdElsewhere("cloudrop:upload:7");
+
+    const refused = lockUpload("7");
+    const answer = await refused.taken;
     const heldAfterRefusal = fake.held();
-    const otherUpload = await lockUpload("8", run.promise);
-    release();
-    const retried = await lockUpload("7", run.promise);
+    const otherUpload = await lockUpload("8").taken;
+    elsewhere();
+    const retried = await lockUpload("7").taken;
+    // Releasing the refused request changes nothing for the holder that came after it.
+    refused.release();
+    await everyMicrotask();
 
-    expect({ refused, heldAfterRefusal, otherUpload, retried, held: fake.held() }).toEqual({
-      refused: false,
+    expect({ answer, heldAfterRefusal, otherUpload, retried, held: fake.held() }).toEqual({
+      answer: false,
       heldAfterRefusal: [],
       otherUpload: true,
       retried: true,
       held: ["cloudrop:upload:7", "cloudrop:upload:8"],
     });
-    run.resolve();
   });
 
   it.each([
@@ -67,13 +78,13 @@ describe("lockUpload", () => {
   ])("answers true with $name", async ({ navigator }) => {
     vi.stubGlobal("navigator", navigator);
 
-    expect(await lockUpload("7", new Promise(() => {}))).toBe(true);
+    expect(await lockUpload("7").taken).toBe(true);
   });
 
   it("answers true when the browser refuses the request (a document that is no longer active)", async () => {
     const request = () => Promise.reject(new DOMException("The document is not fully active.", "InvalidStateError"));
     vi.stubGlobal("navigator", { locks: { request } });
 
-    expect(await lockUpload("7", new Promise(() => {}))).toBe(true);
+    expect(await lockUpload("7").taken).toBe(true);
   });
 });

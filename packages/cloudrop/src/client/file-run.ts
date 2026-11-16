@@ -6,6 +6,7 @@
 import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
 import { aborted, withFile } from "./failures.ts";
+import { letGo } from "./persist.ts";
 import { createMeter, createProgress, type Meter, type Progress } from "./progress.ts";
 import type { FileOutcome, FileStatus } from "./types.ts";
 import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
@@ -118,9 +119,10 @@ export function resumeFile(entry: Entry): void {
   entry.wake?.();
 }
 
-/** Sends the /abort that frees `upload`'s parts and deletes its own object, once. */
-function drop(context: UploadContext, upload: Upload): Promise<void> {
+/** Sends the /abort that frees `upload`'s parts and deletes its own object, once, and gives its ticket up. */
+export function drop(context: UploadContext, upload: Upload): Promise<void> {
   upload.dropped = true;
+  letGo(context, upload);
   return context.endpoints.abort(upload.ticket.token);
 }
 
@@ -138,7 +140,9 @@ export function abortFile(context: UploadContext, entry: Entry): void {
   }
   context.leftovers.release(entry);
   settle(entry, "aborted", withFile(aborted(), entry));
-  if (upload && !upload.mayBeComplete && !upload.dropped) void drop(context, upload);
+  if (!upload || upload.dropped) return;
+  if (upload.mayBeComplete) letGo(context, upload);
+  else void drop(context, upload);
 }
 
 /** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */
@@ -155,7 +159,13 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
   settle(entry, failed ? "failed" : "aborted", withFile(failed ? error : aborted(), entry));
   // A /complete that may have succeeded keeps the file rather than delete a recorded one (M3-H15, M3-H16). Otherwise
   // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
-  if (mayBeComplete) return;
+  if (mayBeComplete) {
+    // A cancel ends the upload. A failure of upload() keeps the record for a resume, which only /complete can settle,
+    // and lets the lock go: this page cannot send the file again (M3-U82).
+    if (failed) upload.unlock();
+    else letGo(context, upload);
+    return;
+  }
   const cleanup = drop(context, upload);
   // A failure's /abort finishes in the background: abort() never rejects, so nothing is left unhandled. A cancel waits
   // for it, and `done` with it, so the caller knows the server was told.
@@ -183,6 +193,7 @@ export async function runFile(context: UploadContext, upload: Upload): Promise<v
     const result = await sendAndComplete(context, upload, pass.signal);
     // A completed upload stays completed: /abort with a live token would delete it (ruling M2-X1).
     if (!result.error) {
+      letGo(context, upload);
       entry.result = result.data;
       entry.status = "done";
       return settled(entry);

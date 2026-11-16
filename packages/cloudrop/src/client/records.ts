@@ -27,8 +27,14 @@ export interface UploadRecord {
 }
 
 export interface Records {
-  /** Queued; never rejects; a failure is dropped (an upload never waits for or fails on the store). */
-  save(record: UploadRecord): void;
+  /** False when persistence is off or the runtime has no indexedDB: then nothing is read or written (spec §3.7). */
+  readonly enabled: boolean;
+  /**
+   * Queued in its place when called, also when the record is still being made (its fingerprint is read from the file):
+   * a remove called after it runs after it. Never rejects; a failure, or a record that could not be made (a rejection),
+   * is dropped: an upload never waits for or fails on the store.
+   */
+  save(record: UploadRecord | Promise<UploadRecord>): void;
   remove(id: string): void;
   /** The namespace's record with this id, or null (also when it expired: then it is removed). */
   get(id: string, namespace: string): Promise<Result<UploadRecord | null>>;
@@ -44,6 +50,7 @@ const STORE = "uploads";
 const EXPIRY_MARGIN_MS = 60_000;
 
 const noRecords: Records = {
+  enabled: false,
   save: () => undefined,
   remove: () => undefined,
   get: async () => ok(null),
@@ -60,6 +67,32 @@ function open(factory: IDBFactory): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
   });
 }
+
+/**
+ * The type of each field of a record, checked on every record read: the database is shared with every script and
+ * library version of the origin (M3-U80).
+ */
+const SHAPE = {
+  id: "string",
+  namespace: "string",
+  route: "string",
+  name: "string",
+  size: "number",
+  type: "string",
+  lastModified: "number",
+  fingerprint: "string",
+  token: "string",
+  key: "string",
+  partSize: "number",
+  partCount: "number",
+  expiresAt: "string",
+  savedAt: "number",
+};
+
+const isRecord = (value: unknown): value is UploadRecord =>
+  typeof value === "object" &&
+  value !== null &&
+  Object.entries(SHAPE).every(([field, type]) => typeof (value as Record<string, unknown>)[field] === type);
 
 type Work<T> = (store: IDBObjectStore, settle: (value: T) => void) => void;
 
@@ -110,12 +143,13 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
   // Every operation runs after the one made before it, so a remove made after a save never runs first (R2).
   let queue: Promise<unknown> = Promise.resolve();
 
-  const enqueue = <T>(work: Work<T>): Promise<Result<T>> => {
+  const enqueue = <T>(work: Work<T> | Promise<Work<T>>): Promise<Result<T>> => {
     const done = queue.then(async () => {
+      const ready = await work;
       database ??= connect();
       const connection = await database;
       try {
-        return ok(await transact(connection, work));
+        return ok(await transact(connection, ready));
       } catch (error) {
         // transaction() throws InvalidStateError on a connection that closed without telling us: open a new one next.
         if (error instanceof DOMException && error.name === "InvalidStateError") database = undefined;
@@ -127,40 +161,44 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
     return result;
   };
 
-  // NaN, from an expiresAt that is not a date, compares false: such a record counts as expired.
-  const isLive = (record: UploadRecord): boolean => Date.parse(record.expiresAt) - now() >= EXPIRY_MARGIN_MS;
+  /**
+   * Whether `value`, stored under `id`, is a record this client can use. One that expired, or has another shape, is
+   * deleted. NaN, from an expiresAt that is not a date, compares false: such a record counts as expired.
+   */
+  const usable = (store: IDBObjectStore, id: IDBValidKey, value: unknown): value is UploadRecord => {
+    if (isRecord(value) && Date.parse(value.expiresAt) - now() >= EXPIRY_MARGIN_MS) return true;
+    if (value !== undefined) store.delete(id);
+    return false;
+  };
 
   return {
-    save(record) {
-      void enqueue((store) => {
+    enabled: true,
+    save(pending) {
+      const work = Promise.resolve(pending).then((record) => (store: IDBObjectStore) => {
         store.put(record);
         // Expired records of any namespace are dropped too: their tokens no longer work (spec §3.2).
         onResult(store.getAll(), (all: UploadRecord[]) => {
-          for (const stale of all) if (!isLive(stale)) store.delete(stale.id);
+          for (const stale of all) usable(store, stale.id, stale);
         });
       });
+      // Handled at once: a record that fails while earlier operations still run is no unhandled rejection.
+      // Handled at once: a record that fails while earlier operations still run is no unhandled rejection.
+      work.catch(() => undefined);
+      void enqueue(work);
     },
     remove(id) {
       void enqueue((store) => store.delete(id));
     },
     get: (id, namespace) =>
       enqueue((store, settle) =>
-        onResult(store.get(id), (record: UploadRecord | undefined) => {
-          if (record?.namespace !== namespace) return settle(null);
-          if (isLive(record)) return settle(record);
-          store.delete(id);
-          settle(null);
+        onResult(store.get(id), (record: unknown) => {
+          settle(usable(store, id, record) && record.namespace === namespace ? record : null);
         }),
       ),
     list: (namespace) =>
       enqueue((store, settle) =>
         onResult(store.getAll(), (all: UploadRecord[]) => {
-          const live: UploadRecord[] = [];
-          for (const record of all) {
-            if (record.namespace !== namespace) continue;
-            if (isLive(record)) live.push(record);
-            else store.delete(record.id);
-          }
+          const live = all.filter((record) => usable(store, record.id, record) && record.namespace === namespace);
           settle(live.sort((a, b) => b.savedAt - a.savedAt));
         }),
       ),

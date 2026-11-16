@@ -18,6 +18,7 @@
   "exclude": [
     "**/*.test.ts",
     "src/testing/page-events.ts",
+    "src/testing/persist-fixture.ts",
     "src/testing/storage-contract.ts",
     "src/testing/storage-contract/**"
   ]

@@ -5,6 +5,7 @@
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
 import { allSettled, type Job, launch } from "./job-run.ts";
+import { letGo } from "./persist.ts";
 import { createProgress } from "./progress.ts";
 import type { FileOutcome } from "./types.ts";
 
@@ -14,6 +15,8 @@ const NEEDS_NEW_TICKET = new Set<string | undefined>([
   "INVALID_TOKEN",
   "UPLOAD_REJECTED",
   "VERIFICATION_FAILED",
+  // The upload is gone and nothing of it was stored (M3-U74): its ticket can never finish it.
+  "NO_SUCH_UPLOAD",
 ]);
 
 /**
@@ -32,6 +35,8 @@ function needsTicket({ upload, error }: Entry): boolean {
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
   job.context.leftovers.release(entry);
   if (fresh) {
+    // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
+    if (entry.upload) letGo(job.context, entry.upload);
     entry.upload = null;
     entry.landed.clear();
     entry.progress = createProgress();
