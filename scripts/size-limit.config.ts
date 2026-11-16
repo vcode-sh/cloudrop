@@ -26,8 +26,9 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
-  // Bundled and minified, the size an app ships. Owner decision 2026-11-16: a 9 kB ceiling with headroom for the rest
-  // of M3 instead of raising it plan by plan (6.74 kB after progress plan A); plan B's Task 8 sets it from measurement.
+  // Bundled and minified, the size an app ships. 8.32 kB after progress plan B (6.74 kB after plan A); the measured
+  // size plus 10% would be 9.2 kB, above the owner's 9 kB ceiling for the rest of M3 (2026-11-16, ruling M3-U43), so
+  // the budget is the ceiling: about 0.68 kB is left for the resume plan.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
