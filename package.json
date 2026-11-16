@@ -22,6 +22,6 @@
     "verify": "bun run check && bun run typecheck && bun run test && bun run build && bun run --filter cloudrop-example-next typecheck && bun run package:check"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.8"
+    "@biomejs/biome": "^2.6.8"
   }
 }

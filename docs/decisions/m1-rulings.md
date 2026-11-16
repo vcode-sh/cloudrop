@@ -130,4 +130,6 @@ without a number; they are `M1-N1` to `M1-N3` at the end. Numbers not listed her
   their own `b0f3e9a` pinned the root's `@biomejs/biome` exactly. Contradicted since: the code-quality skill says to pin
   dev dependencies exactly, and the package-check tools added in `e8cd2dc` (`@arethetypeswrong/cli`, `publint`,
   `size-limit`, `@size-limit/file`) are exact pins. Left to the owner: one of the two rules goes.
+  Owner confirmed 2026-11-16; exact pins found then were converted. Caret ranges hold for every dependency of the
+  root, `packages/cloudrop`, `examples/next` and `spikes/r2`, and the code-quality skill now says so.
 - **Visible in:** `packages/cloudrop/package.json`, `.claude/skills/code-quality/references/dependencies.md`.
