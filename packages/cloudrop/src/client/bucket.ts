@@ -1,0 +1,73 @@
+// What the bucket answered to a presigned PUT, and what the client does about it (decision S10).
+
+import type { CloudropError } from "../errors.ts";
+import type { SignedRequest } from "../protocol/types.ts";
+import type { ClientFetch } from "./endpoints.ts";
+import {
+  aborted,
+  bucketUnreachable,
+  linkRefused,
+  signatureMismatch,
+  storageBusy,
+  storageDown,
+  uploadRejected,
+} from "./failures.ts";
+import { parseRetryAfter } from "./retry.ts";
+
+/**
+ * stored: the object or part is in the bucket. opaque: no answer could be read; renew the URL once, wait, retry.
+ * expired: renew the URL once and retry at once. retry: wait at least `retryAfterMs`, then retry. rejected and
+ * aborted: stop. `error` is what the caller returns once it stops trying.
+ */
+export type BucketOutcome =
+  | { kind: "stored" }
+  | { kind: "opaque" | "expired" | "retry"; error: CloudropError; retryAfterMs: number }
+  | { kind: "rejected" | "aborted"; error: CloudropError };
+
+const STORAGE_CODE = /<Code>([A-Za-z]{1,64})<\/Code>/;
+
+/** By status, as the server's driver classifies; the storage code only tells a bad signature from an expired URL. */
+export function classifyAnswer(status: number, storageCode: string | undefined, retryAfterMs: number): BucketOutcome {
+  if (status === 403) {
+    // R2 and Wrangler say ExpiredRequest, RustFS says AccessDenied: every other 403 is worth one renewal.
+    return storageCode === "SignatureDoesNotMatch"
+      ? { kind: "rejected", error: signatureMismatch() }
+      : { kind: "expired", error: linkRefused(), retryAfterMs };
+  }
+  // R2 throttles with 429 and the S3 code ServiceUnavailable (spike Q9), so the status decides.
+  if (status === 429 || status === 503) return { kind: "retry", error: storageBusy(), retryAfterMs };
+  if (status === 501) return { kind: "rejected", error: uploadRejected(status) };
+  if (status === 408 || status >= 500) return { kind: "retry", error: storageDown(), retryAfterMs };
+  return { kind: "rejected", error: uploadRejected(status) };
+}
+
+/** Sends one presigned PUT with exactly the signed headers. Never rejects. */
+export async function putObject(
+  fetch: ClientFetch,
+  target: SignedRequest,
+  body: Blob,
+  signal: AbortSignal,
+): Promise<BucketOutcome> {
+  let response: Response;
+  try {
+    // No cookies: the URL is the credential, and a credentialed request needs CORS rules the bucket does not send.
+    response = await fetch(target.url, { method: "PUT", headers: target.headers, body, credentials: "omit", signal });
+  } catch {
+    // Not only the network: R2's docs say its expired-URL 403 has no CORS headers, which a browser shows as a throw.
+    return signal.aborted
+      ? { kind: "aborted", error: aborted() }
+      : { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 };
+  }
+  // 412: a retried create-only PUT whose first attempt already stored the object (spec §5.4).
+  if (response.ok || response.status === 412) {
+    // Frees the connection; a body that already failed changes nothing.
+    await response.body?.cancel().catch(() => undefined);
+    return { kind: "stored" };
+  }
+  const text = await response.text().catch(() => "");
+  return classifyAnswer(
+    response.status,
+    STORAGE_CODE.exec(text)?.[1],
+    parseRetryAfter(response.headers.get("retry-after")),
+  );
+}
