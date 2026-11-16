@@ -13,5 +13,12 @@
     ]
   },
   "formatter": { "indentStyle": "space", "lineWidth": 120 },
-  "linter": { "rules": { "preset": "recommended" } }
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
+      }
+    }
+  }
 }
