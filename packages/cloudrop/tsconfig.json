@@ -15,5 +15,5 @@
     "skipLibCheck": true
   },
   "include": ["src"],
-  "exclude": ["**/*.test.ts", "src/testing/storage-contract.ts"]
+  "exclude": ["**/*.test.ts", "src/testing/storage-contract.ts", "src/testing/storage-contract/**"]
 }
