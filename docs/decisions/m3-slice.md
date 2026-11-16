@@ -120,10 +120,10 @@ otherwise.
   answer: an expired URL's 403 carries no CORS headers, so Chromium blocks it and `fetch` rejects
   (`docs/research/r2-spike-findings.md`, "Browser, 2026-11-16", row U2, matching R2's CORS documentation). RustFS and
   Wrangler answer a readable 403, so on them the "expired" row runs; only unit tests and live R2 reach the opaque row.
-  Whether R2's other refusals (`403 SignatureDoesNotMatch`, a `400`) are readable from a page is unmeasured: the rows
-  that end in `UPLOAD_REJECTED` are proven on the fake and RustFS only. If R2 sends them without CORS headers too, a
-  browser sees them as opaque, and the file ends in a retryable `NETWORK_ERROR` after up to about 15 s of retries
-  (`r2-spike-findings.md`, "Not verified").
+  R2's other refusals of the URL itself (`403 SignatureDoesNotMatch`, a `400` for an over-long expiry) also come
+  without CORS headers and end in this row's retryable `NETWORK_ERROR` after up to about 15 s of retries; a `412`
+  and a later `400` are readable (`r2-spike-findings.md`, "Browser refusals and checksums, 2026-11-16"). So the opaque
+  row's message says the storage service may have refused the file, not only that the connection failed.
 - **If wrong:** a readable 403 that meant a permission problem costs one extra `/sign` before the file fails.
 - **Status:** in force (`b0690aa`, renewal in `6fd5f14`); owner accepted (M3-O4).
 - **Visible in:** `client/bucket.ts` (`classifyAnswer`, `putObject`), `client/failures.ts`.
