@@ -111,7 +111,8 @@ describe("verifyToken", () => {
     { name: "no signature", token: BODY },
     { name: "an empty signature", token: `${BODY}.` },
     { name: "a third part", token: `${SIGNED_WITH_CURRENT}.x` },
-    { name: "characters outside base64url", token: `${BODY}.DP48bEjy+kinzTrJSeYEw9eFXwdlaazAQE1/HTO8Vd0` },
+    // The valid signature in standard base64 ("_" as "/"): the same 32 bytes, refused only for the "/" character.
+    { name: "characters outside base64url", token: `${BODY}.DP48bEjyJkinzTrJSeYEw9eFXwdlaazAQE1/HTO8Vd0` },
     // Correctly signed with CURRENT (Python's hmac), but not a JSON object: only a holder of the secret can make these.
     { name: "a correctly signed JSON null", token: "bnVsbA.UPMTeJK6Jo-ME4iVa1icIIfVPvbx_cyV5yNnU0CariQ" },
     {

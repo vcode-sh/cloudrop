@@ -101,7 +101,8 @@ later.
   `SERVER_ERROR`, with the reason in the log.
 - **Why:** the client never chooses the key (spec §5.3); a bad app key must not reach storage.
 - **If wrong:** none known.
-- **Status:** in force. M2-X20 adds that a prefix starting with `/` is such a bug.
+- **Status:** in force. M2-X20 adds that a prefix starting with `/` is such a bug. The field is `id` on the wire and in
+  the upload token since M3-O2 (`fa35fe5`); the key rule is unchanged.
 - **Visible in:** spec §5.3, `src/server/key.ts`.
 
 ### M2-D11: Content-Disposition
@@ -138,7 +139,8 @@ later.
 - **Decision:** Same-origin means `Origin` equals the origin of the request URL the handler sees. `trustedOrigins` are
   exact origins, never `"*"`. A request without `Origin` is accepted as a server or native-app call unless
   `Sec-Fetch-Site: cross-site` shows a browser; `Origin: null` is refused. CORS answers carry the exact origin with
-  credentials. A trusted preflight may name its own request headers. No `X-Forwarded-*` header is trusted: behind a proxy, list the public origin.
+  credentials. A trusted preflight may name its own request headers. No `X-Forwarded-*` header is trusted: behind a
+  proxy, list the public origin.
 - **Why:** every browser sends `Origin` on POST; forwarded headers are spoofable unless a proxy is known.
 - **If wrong:** operators behind proxies must list their public origin.
 - **Status:** amended by audit T8-3 (the `Sec-Fetch-Site` refusal) and M2-X33 (a log hint names the origin to list).
@@ -268,7 +270,8 @@ later.
   runs it once in the background and logs each problem.
 - **Why:** a missing CORS or abort-incomplete lifecycle rule is the most common setup failure.
 - **If wrong:** the success path with an admin read token is unmeasured; it follows S3's documented codes.
-- **Status:** amended by M2-X22 and M2-X40 (an unexplained 404 is a non-retryable storage error).
+- **Status:** amended by M2-X22 and M2-X40 (an unexplained 404 is a non-retryable storage error) and by M3-H12 (a
+  `501` read is `unknown` too).
 - **Visible in:** spec §9 and §12, `src/server/bucket-check.ts`, `src/storage/s3/bucket-settings.ts`.
 
 ### M2-D26: Node types for `cloudrop/node`

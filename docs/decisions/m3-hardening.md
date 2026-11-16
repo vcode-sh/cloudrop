@@ -2,7 +2,8 @@
 
 Decisions of the hardening phase between M2 and the M3 slice (2026-11-16). `M3-O<n>` are the owner's answers to the
 questions the M2 reviews and the M3 plan left open. `M3-H<n>` are the controller's rulings, numbered as in the phase's
-ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N built and its review accepted.
+ledger (H1 to H9 and H11), plus `M3-H10` and `M3-H12` for behaviour that lanes N and I built and their reviews
+accepted.
 
 ## Owner decisions
 
@@ -25,8 +26,7 @@ ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N buil
   before the first release the rename is free.
 - **If wrong:** none known; the package is unpublished, and a token signed before the change fails to verify like any
   malformed token.
-- **Status:** decided; supersedes the two names left by M2 (reviews-m2.md, m16). Lane I changes the server, its tests,
-  the spec and `README.md`.
+- **Status:** in force (`fa35fe5`); supersedes the two names left by M2 (reviews-m2.md, m16). M2-D10 points here.
 - **Visible in:** `src/protocol/types.ts`, `src/server/upload.ts`.
 
 ### M3-O3: three client error codes
@@ -54,8 +54,8 @@ ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N buil
 
 ### M3-H1: the controller fixes nothing itself
 
-- **Decision:** In this phase every review finding is fixed by an implementer and reviewed; the controller edits no
-  code or docs itself.
+- **Decision:** In this phase the controller fixes no review finding itself; an implementer fixes it and a review
+  checks it.
 - **Why:** the controller's own fixes in M2 introduced new defects twice, found only by re-review (one is the
   "Controller fixes re-review" row in reviews-m2.md); the owner asked for subagent-driven work.
 - **If wrong:** one more dispatch per small fix.
@@ -75,7 +75,7 @@ ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N buil
   notes are archived outside any worktree first.
 - **Why:** removing them earlier would delete the only copy of the reasons behind M2.
 - **If wrong:** a few gigabytes stay on disk a little longer.
-- **Status:** its condition is met: the decisions landed in `ab0341a`.
+- **Status:** in force; its condition is met (`ab0341a`).
 
 ### M3-H4: source maps stay in the package until M6
 
@@ -120,7 +120,7 @@ ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N buil
 - **Why:** lane N's review showed that a required field makes a hand-built request answer 400 to everything with no
   log line, and it grows the public type; real Node requests always carry it.
 - **If wrong:** a hand-built request without `rawHeaders` cannot detect a duplicated Host.
-- **Status:** decided; supersedes M3-H5. Lane I makes the change.
+- **Status:** in force (`9da2b5b`); supersedes M3-H5.
 - **Visible in:** `src/node.ts`.
 
 ### M3-H9: one lane owns `docs/decisions/`
@@ -145,3 +145,25 @@ ledger (H1 to H9), plus `M3-H10` for the Node adapter behaviour that lane N buil
   now 400 instead of 404.
 - **Status:** in force (`8fe9149`); lane I adds it to `README.md` and the spec.
 - **Visible in:** `src/node.ts`, `src/node-url.test.ts` (one table, 35 rows).
+
+### M3-H11: the second wave's Minors go into one polish lane
+
+- **Decision:** The Minor findings of the second wave's reviews are batched into one docs-and-polish dispatch before
+  `main`, not one fix loop per lane.
+- **Why:** the review skill keeps Minors out of fix loops, and they are all small text edits in few files.
+- **If wrong:** one more short dispatch at the end.
+- **Status:** in force.
+
+### M3-H12: a bucket setting the storage cannot read is `unknown`
+
+- **Decision:** `api.checkBucket` reports a CORS or lifecycle read that the storage answers with `501 Not Implemented`
+  as `unknown`, as M2-D25 does for `STORAGE_DENIED`. Every other failure still fails the call: an unreachable storage,
+  any other 5xx, a malformed answer.
+- **Why:** Wrangler's local R2 answers both reads with `501 NotImplemented` (measured 2026-11-16, recorded in
+  `docs/research/test-backends.md`). That says the read does not exist there, not what the bucket's setting is. Before
+  this, the whole check failed on Wrangler and the development start-up warning said so on every first request.
+- **If wrong:** a storage that answers 501 for a setting it does keep hides a missing CORS or lifecycle rule behind
+  `unknown`; the message says to check the setting where the bucket is configured.
+- **Status:** in force (`5fede9b`); amends M2-D25.
+- **Visible in:** spec §9 (the `checkBucket` row already states it), `src/server/bucket-check.ts` (`settingCheck`),
+  `src/server/bucket-check.test.ts`.
