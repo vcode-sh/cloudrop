@@ -9,9 +9,11 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 - M0 (real-R2 spike) and M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite): done.
 - M2 (the server: `createCloudrop`, routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js
   and Node adapters): done.
-- M3 (the upload engine and the browser client): its first slice is done on this branch. `cloudrop/client` uploads one
-  file per call, as one `PUT` or in parts, with retries, URL renewal and cancel; the scheduler, progress, pause and
-  resume come in later M3 plans. React hooks (`useUpload`) arrive in M4.
+- M3 (the upload engine and the browser client): the first slice and the first progress plan are done on this branch.
+  `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with retries, URL renewal, a
+  connection pool shared by the client, progress, speed and time left, and pause, resume and cancel per file. Automatic
+  concurrency, stall and offline handling and `retry()` come in the next plan, resume after a reload later. React hooks
+  (`useUpload`) arrive in M4.
 
 Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
 
@@ -160,7 +162,8 @@ an admin read token, R2's answers have not been measured yet. In development
 import { createCloudropClient } from "cloudrop/client";
 import type { cloudrop } from "../lib/cloudrop"; // a type import: no server code or secret reaches the browser
 
-const client = createCloudropClient<typeof cloudrop>(); // options: basePath (default "/api/cloudrop"), fetch
+// options: basePath (default "/api/cloudrop"), fetch, concurrency (bucket PUTs at once, 1 to 16, default 4)
+const client = createCloudropClient<typeof cloudrop>();
 
 const controller = new AbortController();
 const { data, error } = await client.upload("avatar", file, { signal: controller.signal });
@@ -168,7 +171,8 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
 
 - `upload(route, file, options?)` sends one `File`. The route name, the metadata (`options.metadata`, required when
   the route's schema requires it) and the result type (`data.data`, what `onComplete` returned) are inferred from
-  `typeof cloudrop`. `const { upload } = createCloudropClient()` works too.
+  `typeof cloudrop`. `const { upload } = createCloudropClient()` works too. Passed a list (an array or `input.files`),
+  `upload()` resolves to the job's result described below.
 - Files up to the server's `multipartThreshold` (64 MiB by default) go in one `PUT`, larger ones in parts, four at a
   time, read with `Blob.slice`. A request is tried up to 6 times with backoff, honouring `Retry-After`; an expired
   upload URL is renewed once; parts that `/complete` reports missing are sent again, at most twice.
@@ -181,7 +185,8 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
   `RouteMetadata`, `RouteResult`, `InferableCloudrop`) are imported from `cloudrop/client`, never from `cloudrop`.
 
 The bucket needs a CORS rule for your page's origin; [`examples/next`](examples/next/README.md#what-any-bucket-needs)
-lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md).
+lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md) and
+[M3-U decisions](docs/decisions/m3-uploader.md).
 
 Troubleshooting: when every upload ends in `NETWORK_ERROR` "The file could not reach the storage service, or the storage
 service refused it" although the connection works, check the bucket's CORS rule first. A rule that misses the page's
@@ -189,12 +194,46 @@ origin, or one of the headers cloudrop signs (or a checksum header you add), blo
 it as a network failure only after the retry budget; the browser console names what was blocked, and
 `cloudrop.api.checkBucket({ origins })` checks the rule when the credentials may read it.
 
+### Several files, progress and pause
+
+```ts
+const job = client.start("files", input.files, { metadata, signal }); // a File, an array or input.files
+const unsubscribe = job.subscribe(() => render(job.getSnapshot())); // or React's useSyncExternalStore
+job.files[0].pause(); job.files[0].resume(); job.files[0].abort();   // one file
+job.pause(); job.resume(); job.abort();                              // every file of the job
+const { data, error } = await job.done;
+```
+
+- `start()` sends every file through one `/upload`, then runs each file on its own: one file failing or being
+  cancelled never stops another. `job.files` and `getSnapshot().files` are in the order the files were passed; each
+  file has an `id` (`"1"`, `"2"`, …) that is unique per client.
+- `getSnapshot()` returns the same object until something changes, so `useSyncExternalStore(job.subscribe,
+  job.getSnapshot)` works. Each file has `status` (`queued`, `uploading`, `paused`, `completing`, `done`, `failed` or
+  `aborted`), `bytes`, `size`, `progress` (0 to 1), `speed` (bytes per second, averaged over about 3 s), `eta`
+  (seconds, null while nothing moves), `error` and `result`. `totals` adds up the files that did not fail or abort and
+  counts the done, failed and aborted ones. Listeners are called at once on a status change, at most every 100 ms
+  while bytes flow, and every second while a file uploads.
+- `pause()` stops a queued or uploading file's requests and keeps the parts that landed; `resume()` sends only the
+  rest, and a single `PUT` starts again. A file that is completing (its bytes all sent) ignores `pause()`. `abort()`
+  is the cancel described above.
+- `job.done`, and `upload()` with a list, resolve to an `UploadResult`: `data.files` holds an outcome per file
+  (`status: "done"` with its `result`, or `"failed"` or `"aborted"` with its `error`), and `error` is the error of the
+  first file, in the order passed, that did not end done. Unlike other results, `data` stays when some files failed;
+  it is null only when nothing started: wrong arguments, or `/upload` refused the whole job (such as
+  `TOO_MANY_FILES`). An error that belongs to one file carries `error.file` (`{ id, name }`).
+- One client shares `concurrency` slots between all its uploads; each bucket `PUT` holds one, files added earlier go
+  first, and one file has at most four parts in flight. Calls to your server take no slot.
+- In a browser, bucket `PUT`s go through `XMLHttpRequest`, which reports bytes while they are sent. Passing `fetch`
+  sends everything through it, `PUT`s included: a part's bytes then count only once it is stored, so progress moves a
+  part at a time. Outside a browser (Node, Bun, Deno, Workers) `PUT`s use `fetch` the same way.
+
 ### Not done yet
 
 - The upload protocol is tested on the in-process fake, on real R2, and from Chromium through the example on RustFS
   and on real R2. Wrangler runs only the storage contract and, in the example, single uploads: its local R2 does not
   implement ListParts, so a multipart upload cannot complete there.
-- The client has no progress events, pause, resume after reload or shared upload queue yet, and no React hooks.
+- The client has no automatic concurrency, smallest-first order, offline handling, `retry()` of a failed file or
+  resume after a reload yet, and no React hooks.
 - No stall detection yet: a request that never answers keeps `upload()` pending until the caller cancels it through
   `options.signal`.
 - How the server's parallel storage calls fit Cloudflare Workers' subrequest limits is unmeasured.

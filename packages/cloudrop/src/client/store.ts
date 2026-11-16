@@ -1,5 +1,5 @@
 // The snapshot a page renders (spec §2.1): the same object until something changes, listeners at most every 100 ms
-// while bytes flow and at once on a status change, and a refresh every second while a file uploads (ruling P7).
+// while bytes flow and at once on a status change, and a refresh every second while a file uploads (ruling M3-U7).
 
 const THROTTLE_MS = 100;
 const REFRESH_MS = 1000;
@@ -34,7 +34,7 @@ export function createStore<T>(build: () => T, active: () => boolean): Store<T> 
       try {
         listener();
       } catch (error) {
-        // The upload and the other listeners go on; the page still sees the error as uncaught (ruling P8).
+        // The upload and the other listeners go on; the page still sees the error as uncaught (ruling M3-U8).
         setTimeout(() => {
           throw error;
         });

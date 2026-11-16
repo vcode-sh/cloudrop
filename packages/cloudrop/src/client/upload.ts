@@ -22,7 +22,7 @@ export interface UploadContext {
   put: PutObject;
   /** The client's connection slots: every bucket PUT holds one (spec §4.4). */
   pool: Pool;
-  /** The next file's rank in the pool, counting from 1 across the client's uploads (ruling P9). */
+  /** The next file's rank in the pool, counting from 1 across the client's uploads (ruling M3-U9). */
   nextRank(): number;
 }
 
@@ -57,9 +57,9 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
   const put = async (target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome> => {
     const release = await context.pool.acquire([rank, partNumber], stop);
     try {
-      // `stop` may also fire between the grant and this line: the slot goes back unused (audit I1).
+      // `stop` may also fire between the grant and this line: the slot goes back unused (ruling M3-U21).
       if (release === null || stop.aborted) return { kind: "aborted", error: aborted() };
-      // Never from paused or a settled status (audit I1): those abort the pass, and `stop` with it.
+      // Never from paused or a settled status (ruling M3-U21): those abort the pass, and `stop` with it.
       if (entry.status === "queued") moveTo(entry, "uploading");
       const body = bodyOf(ticket, file, partNumber);
       const outcome = await context.put(target, body, signal, (sent) => {
@@ -122,7 +122,7 @@ export async function sendAndComplete(
     if (!missing?.length || upload.repairs === REPAIR_ROUNDS) return done;
     upload.repairs++;
     for (const partNumber of missing) entry.landed.delete(partNumber);
-    // Uploading again at once, so a pause applies to the repair (ruling P4).
+    // Uploading again at once, so a pause applies to the repair (ruling M3-U4).
     moveTo(entry, "uploading");
   }
 }

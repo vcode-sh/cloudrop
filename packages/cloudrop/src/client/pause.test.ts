@@ -1,4 +1,4 @@
-// Contract: spec §4.5 and ruling P4 through the real client in a browser (the XHR transport): pause() aborts a queued
+// Contract: spec §4.5 and M3-U4 through the real client in a browser (the XHR transport): pause() aborts a queued
 // or uploading file's PUTs and keeps its token, its landed parts and its bytes; resume() sends only the parts that have
 // not landed (a single PUT again from the start); abort() of a paused file tells the server before `done` settles; a
 // completing or settled file ignores pause and resume; a pause that meets a pool grant sends nothing.
@@ -246,7 +246,7 @@ describe("pause and resume", () => {
     const job = client.start("files", fileOf(8 * MiB + 5));
     await (await xhr.next()).finish();
     await (await xhr.next()).finish();
-    // The first repair's PUT: the file is uploading again, so the pause applies (ruling P4).
+    // The first repair's PUT: the file is uploading again, so the pause applies (ruling M3-U4).
     await xhr.next();
     job.files[0]?.pause();
     const paused = fileAt(job, 0)?.status;

@@ -87,7 +87,7 @@ async function run(
     }),
   );
   const data = { files: entries.map(outcomeOf) };
-  // The first file, in the order passed, that did not end done (ruling P3).
+  // The first file, in the order passed, that did not end done (ruling M3-U3).
   const error = data.files.find((outcome) => outcome.status !== "done")?.error ?? null;
   return error ? { data, error } : { data, error: null };
 }

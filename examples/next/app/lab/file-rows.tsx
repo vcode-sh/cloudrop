@@ -80,7 +80,7 @@ export function FileRows<R>({ job, connections }: { job: UploadJob<R>; connectio
         </thead>
         <tbody>
           {files.map((file, index) => (
-            // job.files and snapshot.files are both in the order the files were passed (ruling P1).
+            // job.files and snapshot.files are both in the order the files were passed (ruling M3-U1).
             <FileRow key={file.id} file={file} handle={job.files[index] as FileHandle} />
           ))}
         </tbody>

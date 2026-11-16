@@ -14,7 +14,7 @@ import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
 export interface Entry {
   readonly id: string;
   readonly file: File;
-  /** The file's place in the pool's queue (ruling P9). */
+  /** The file's place in the pool's queue (ruling M3-U9). */
   readonly rank: number;
   status: FileStatus;
   result: CompleteResponse<unknown> | null;
@@ -42,7 +42,7 @@ export function settle(entry: Entry, status: "failed" | "aborted", error: Cloudr
   entry.changed(true);
 }
 
-/** Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling P4). */
+/** Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling M3-U4). */
 export function pauseFile(entry: Entry): void {
   if (entry.status !== "queued" && entry.status !== "uploading") return;
   entry.status = "paused";

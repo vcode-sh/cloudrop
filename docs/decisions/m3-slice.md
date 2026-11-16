@@ -35,7 +35,8 @@ otherwise.
   `/upload` request (spec §5.4) belong to the scheduler plan.
 - **If wrong:** accepting an array later widens the parameter, a non-breaking change; a hook API built on the
   single-file call in M4 may need reshaping then.
-- **Status:** in force (`bc06db2`); owner accepted (M3-O4). The scheduler plan owns several files and `error.file`.
+- **Status:** superseded by M3-U5 and M3-U10 (`21c96cf`): `upload()` takes one file or a list, and `start()` runs a
+  job of several files. Was in force from `bc06db2`; owner accepted (M3-O4).
 - **Visible in:** `client.ts` (`CloudropClient`), spec §6.4.
 
 ### M3-S2: the signature of `upload()`
@@ -78,7 +79,8 @@ otherwise.
   (`docs/research/2026-11-16-m3-slice-measurements.md` §1, §2). Upload progress needs XHR (spec §3 item 5), which the
   progress plan adds.
 - **If wrong:** an app that must not send cookies to its own upload server has no option to turn them off yet.
-- **Status:** in force (`b0690aa`, `6f533c8`); owner accepted (M3-O4).
+- **Status:** amended by M3-U6 (`a5de46a`): in a browser without a `fetch` option, bucket `PUT`s go through
+  `XMLHttpRequest`, still without cookies. In force otherwise (`b0690aa`, `6f533c8`); owner accepted (M3-O4).
 - **Visible in:** `client/bucket.ts` (`putObject`), `client/endpoints.ts` (`post`).
 
 ### M3-S9: the retry budget
@@ -398,7 +400,7 @@ otherwise.
   before M4 measures the React half would be optimisation without a target, and the client's messages are deliberately
   full sentences.
 - **If wrong:** M4 has about 3.3 kB left for the React bindings. Revisit when `cloudrop/react` exists.
-- **Status:** in force (`653f6a4`); amends M3-S20.
+- **Status:** superseded by M3-U13 (7.4 kB after the progress plan A). Was in force from `653f6a4`; amends M3-S20.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M3-S33: the example signs in through a server route

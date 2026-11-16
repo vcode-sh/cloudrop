@@ -17,8 +17,8 @@ Load the matching skill from `.claude/skills/` before the work:
 
 - Write everything in English.
 - Decisions live in `docs/decisions/`, cited by series id: `M1-R`, `M1-C`, `M1-N`, `M2-D`, `M2-X`, `M2-P`, `M3-O`,
-  `M3-H`, `M3-S` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry there in
-  the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
+  `M3-H`, `M3-S`, `M3-U` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry
+  there in the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
 - `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`. The compiler enforces
   it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
   `src/node.ts` describes Node's request and response by hand for the same reason; `src/node.test.ts` proves real Node

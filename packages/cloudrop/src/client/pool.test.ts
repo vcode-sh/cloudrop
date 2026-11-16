@@ -1,4 +1,4 @@
-// Contract: spec §4.4 and plan A ruling P9: a client's connection slots, granted lower rank first (element by element,
+// Contract: spec §4.4 and ruling M3-U9: a client's connection slots, granted lower rank first (element by element,
 // equal ranks in arrival order), given up by a cancelled waiter, and freed once however often a release is called.
 // Oracle: the orders and counts those rules give, worked by hand.
 

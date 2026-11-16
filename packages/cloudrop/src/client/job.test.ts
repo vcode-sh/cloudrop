@@ -1,7 +1,7 @@
 // Contract: spec §2.2, §4.4 and §4.6 through the real client: start() sends every file through one /upload, runs each
 // file on its own, and settles `done` once with an outcome per file in the order passed; `error` is the first file's
-// that did not end done (ruling P3), carrying `error.file`, and `data` is null only when /upload refused the whole job.
-// One file failing or being cancelled never stops another. Ids count across the jobs of one client (ruling P2).
+// that did not end done (M3-U3), carrying `error.file`, and `data` is null only when /upload refused the whole job.
+// One file failing or being cancelled never stops another. Ids count across the jobs of one client (ruling M3-U2).
 // Oracle: the server's verdicts for the routes below, the bytes the fake bucket stored, and the requests it saw.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

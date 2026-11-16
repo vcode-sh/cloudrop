@@ -91,7 +91,7 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
   ): Promise<Result<CompleteResponse<RouteResult<TCloudrop, TName>>>>;
 }
 
-/** A one-file job's result as that file's Result (ruling P5). */
+/** A one-file job's result as that file's Result (ruling M3-U5). */
 function oneFile(result: UploadResult<unknown>): Result<CompleteResponse<unknown>> {
   if (result.error) return fail(result.error);
   // No error: the job's one file ended done.
@@ -122,7 +122,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
   // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
-  // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling P6).
+  // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling M3-U6).
   let rank = 0;
   const context: UploadContext = {
     endpoints: createEndpoints(basePath, send),

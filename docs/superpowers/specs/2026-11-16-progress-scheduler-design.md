@@ -1,6 +1,7 @@
 # Progress and scheduler: design
 
-Status: approved in conversation 2026-11-16, awaiting the owner's review of this text. Parent spec:
+Status: approved by the owner 2026-11-16. Plan A executed on branch `feat/m3-progress-a` (`a5de46a` to the commit that
+records this line); plan B is next. Parent spec:
 [`2026-11-15-cloudrop-design.md`](2026-11-15-cloudrop-design.md) §6.1, §6.2 and §6.4 (§6.3, resume after reload, is
 out of scope). Builds on `cloudrop/client` as merged at `d3f36a7` (`packages/cloudrop/src/client/`). Decisions taken
 while executing this design go to a new series `M3-U` in `docs/decisions/`.
@@ -111,14 +112,14 @@ Approach chosen: keep the proven per-file logic and add a shared pool around it.
 | `client/pool.ts` | Connection slots shared by the client: queue order, per-file cap, the size (fixed or auto) |
 | `client/job.ts` | `start()`: one `/upload` for the job, runs each file, collects outcomes, pause/resume/abort/retry |
 | `client/lifecycle.ts` | `offline`/`online` and `pagehide` listeners, registered while a job runs (plan B) |
-| `upload.ts`, `parts.ts`, `bucket.ts` (changed) | Take a pool slot per PUT; report bytes to `progress.ts`; stop on pause |
+| `upload.ts`, `parts.ts`, `bucket.ts` (changed) | Take a pool slot per PUT, report bytes, stop on pause |
 
 Each stays near 200 lines (cap 250). The client still imports only `errors.ts`, `input.ts`, `plan.ts` and
 `protocol/types.ts` from outside `client/` (Biome rule unchanged).
 
 Data flow: `start()` → one `/upload` (all files, shared metadata) → per file: queue its PUTs in the pool → each PUT
-runs through `transport.ts` → progress events go to `progress.ts` → `store.ts` publishes → on the last part, `/complete`
-(no slot) → the file's outcome → when all settle, `done` resolves.
+runs through `transport.ts` → progress events go to `progress.ts` → `store.ts` publishes → on the last part,
+`/complete` (no slot) → the file's outcome → when all settle, `done` resolves.
 
 ## 4. Behaviour
 
@@ -143,8 +144,8 @@ holds its earlier `best` the same way. `bytes` is never above `size`, and is `si
 ### 4.3 Speed and ETA
 
 Speed is an exponentially weighted moving average of bytes per second with a time constant of 3 s, updated on each
-progress event (`α = 1 − e^(−Δt/3 s)`), decaying towards 0 when no bytes arrive. ETA = (size − bytes) / speed, `null`
-when speed is 0. Totals use the sum of the files' speeds. A paused or settled file reports speed 0.
+progress event (`α = 1 − e^(−Δt/3 s)`), decaying towards 0 when no bytes arrive. ETA = (size − bytes) / speed,
+`null` when speed is 0. Totals use the sum of the files' speeds. A paused or settled file reports speed 0.
 
 ### 4.4 Pool
 

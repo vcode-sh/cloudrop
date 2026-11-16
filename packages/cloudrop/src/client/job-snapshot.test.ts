@@ -1,7 +1,7 @@
 // Contract: spec §2.1, §4.2 and §4.3 through the real client in a browser (the XHR transport): a job's snapshot shows
 // each file's bytes, which never go backwards, its progress, speed and time left, and totals over the files that did
 // not fail or abort; it is the same object until a publish, listeners hear of bytes at most every 100 ms and of a status
-// at once (ruling P7), and a listener that throws stops nothing (ruling P8). Oracle: the bytes each fake request
+// at once (ruling M3-U7), and a listener that throws stops nothing (ruling M3-U8). Oracle: the bytes each fake request
 // reports, the meter's hand-worked values (progress.test.ts) and the server's verdicts for the routes below.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

@@ -1,6 +1,6 @@
 // One presigned PUT to the bucket. In a browser it goes through XMLHttpRequest, the one web API that reports upload
 // progress; with a fetch option, or where there is no XMLHttpRequest, through fetch, which reports a part's bytes only
-// when it is stored (spec §4.1, plan A ruling P6).
+// when it is stored (spec §4.1, ruling M3-U6).
 
 import type { SignedRequest } from "../protocol/types.ts";
 import { type BucketOutcome, classifyAnswer, putObject, STORAGE_CODE, unreachable } from "./bucket.ts";
@@ -18,7 +18,7 @@ export type PutObject = (
 const putWithXhr: PutObject = (target, body, signal, onBytes) =>
   new Promise((resolve) => {
     if (signal.aborted) return resolve(unreachable(signal));
-    // Read on every PUT, so a page that wraps XMLHttpRequest after the client was created is seen (ruling P6).
+    // Read on every PUT, so a page that wraps XMLHttpRequest after the client was created is seen (ruling M3-U6).
     const xhr = new globalThis.XMLHttpRequest();
     const cancel = () => xhr.abort();
     const settle = (outcome: BucketOutcome) => {
@@ -48,7 +48,7 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
     xhr.send(body);
   });
 
-/** XMLHttpRequest when there is one and no fetch option was passed; otherwise `send` (ruling P6). */
+/** XMLHttpRequest when there is one and no fetch option was passed; otherwise `send` (ruling M3-U6). */
 export function createPut(fetchOption: ClientFetch | undefined, send: ClientFetch): PutObject {
   if (fetchOption === undefined && typeof globalThis.XMLHttpRequest === "function") return putWithXhr;
   return async (target, body, signal, onBytes) => {
