@@ -13,15 +13,16 @@ export interface PageEvents {
 export function pageEvents(): PageEvents {
   const target = new EventTarget();
   const held: { type: string; listener: EventListenerOrEventListenerObject }[] = [];
+  const indexOf = (type: string, listener: EventListenerOrEventListenerObject) =>
+    held.findIndex((entry) => entry.type === type && entry.listener === listener);
+  // As a page does: the same listener is added once, and removing one that is not held does nothing.
   vi.stubGlobal("addEventListener", (type: string, listener: EventListenerOrEventListenerObject) => {
-    held.push({ type, listener });
+    if (indexOf(type, listener) === -1) held.push({ type, listener });
     target.addEventListener(type, listener);
   });
   vi.stubGlobal("removeEventListener", (type: string, listener: EventListenerOrEventListenerObject) => {
-    held.splice(
-      held.findIndex((entry) => entry.type === type && entry.listener === listener),
-      1,
-    );
+    const at = indexOf(type, listener);
+    if (at !== -1) held.splice(at, 1);
     target.removeEventListener(type, listener);
   });
   return {

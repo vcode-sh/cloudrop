@@ -22,7 +22,7 @@ export interface Entry {
   /** The bytes sent so far; a new ticket starts a new count (Q14). */
   progress: Progress;
   /** How fast they are sent. */
-  meter: Meter;
+  readonly meter: Meter;
   /** Fires on abort() of the running file or the job, and when the job's signal fires. */
   readonly cancel: AbortController;
   /** The current sending pass: pause() aborts it, and so does a cancel. */

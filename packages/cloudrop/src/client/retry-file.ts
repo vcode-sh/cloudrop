@@ -4,8 +4,8 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
-import { allSettled, type Job, launch, runUpload } from "./job-run.ts";
-import { createMeter, createProgress } from "./progress.ts";
+import { allSettled, type Job, launch } from "./job-run.ts";
+import { createProgress } from "./progress.ts";
 
 /** Failures that a new attempt with the same ticket cannot fix (Q9). */
 const NEEDS_NEW_TICKET = new Set<string | undefined>([
@@ -26,14 +26,14 @@ function needsTicket({ upload, error }: Entry): boolean {
   return upload.dropped || Date.parse(upload.ticket.expiresAt) <= Date.now() || NEEDS_NEW_TICKET.has(error?.code);
 }
 
-/** Queues a failed file again. A new ticket starts from no parts and no bytes (Q14). */
+/** Queues a failed file again. A new ticket starts from no parts and no bytes (M3-U36); the speed starts from 0 when
+ * the file sends again, as on every start. */
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
   job.context.leftovers.release(entry);
   if (fresh) {
     entry.upload = null;
     entry.landed.clear();
     entry.progress = createProgress();
-    entry.meter = createMeter(Date.now());
   } else if (entry.upload) {
     // The same ticket repairs from round 0 again (I5), and sends again the parts its last /complete found missing.
     entry.upload.repairs = 0;
@@ -57,7 +57,7 @@ export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<C
   if (failed.length > 0) job.listen();
   for (const entry of failed) {
     const { upload } = entry;
-    if (upload) entry.run = runUpload(job, upload).finally(job.idle);
+    if (upload) entry.run = job.runUpload(upload).finally(job.idle);
   }
   const refused = fresh.length > 0 ? launch(job, fresh) : null;
   await allSettled(entries);

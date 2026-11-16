@@ -19,12 +19,11 @@ export interface Job {
   readonly entries: readonly Entry[];
   /** Fires on abort() of the job and when the caller's signal fires: it stops an /upload in flight. */
   readonly signal: AbortSignal;
-  /** Ends every file (Q16). */
+  /** Ends every file (ruling M3-U38). */
   abort(): void;
-  /** Brackets each run of a file: `begin` when it starts, `finish` when it ends. */
-  begin(): void;
-  finish(): void;
-  /** Hears the caller's signal from now on (a run starts), or stops once no file runs or holds its ticket (Q16). */
+  /** Runs `upload` until its file settles, with the page's connectivity watched meanwhile. */
+  runUpload(upload: Upload): Promise<void>;
+  /** Hears the caller's signal from now on (a run starts), or stops once no file runs or holds its ticket (M3-U38). */
   listen(): void;
   idle(): void;
 }
@@ -40,19 +39,17 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
   const controller = new AbortController();
   const { signal } = controller;
   const abort = () => controller.abort();
-  // The caller's signal may outlive the job: the listener that holds it goes once nothing is left to cancel.
-  let heard = false;
+  // The caller's signal may outlive the job: the listener that holds it goes once nothing is left to cancel. A signal
+  // adds the same listener once however often listen() runs, and removing one it does not hold does nothing.
   const idle = () => {
-    if (!heard || entries.some(busy)) return;
-    heard = false;
-    args.signal.removeEventListener("abort", abort);
+    if (!entries.some(busy)) args.signal.removeEventListener("abort", abort);
   };
   signal.addEventListener("abort", () => {
     for (const entry of entries) abortFile(context, entry);
     idle();
   });
   // The page's connectivity is watched from the first run's start to the last one's end. Offline pauses every file
-  // that can pause; online resumes only those it paused (Q6, Q17).
+  // that can pause; online resumes only those it paused (rulings M3-U28, M3-U39).
   let running = 0;
   let unwatch = () => {};
   const offline = () => {
@@ -67,28 +64,20 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
     entries,
     signal,
     abort,
-    begin() {
+    runUpload(upload) {
       running += 1;
       if (running === 1) unwatch = watchConnectivity(offline, online);
-    },
-    finish() {
-      running -= 1;
-      if (running === 0) unwatch();
+      return runFile(context, upload).finally(() => {
+        running -= 1;
+        if (running === 0) unwatch();
+      });
     },
     listen() {
-      if (heard) return;
-      heard = true;
       args.signal.addEventListener("abort", abort);
       if (args.signal.aborted) abort();
     },
     idle,
   };
-}
-
-/** Runs `upload` until its file settles, with the job's connectivity watched meanwhile. */
-export function runUpload(job: Job, upload: Upload): Promise<void> {
-  job.begin();
-  return runFile(job.context, upload).finally(job.finish);
 }
 
 /** One file's share of an /upload answer. `whole`: the /upload asked for every file of the job. */
@@ -112,7 +101,7 @@ async function runEntry(
   // readTickets answered one ticket per file, so `ticket` is never undefined here.
   if (!ticket) return;
   entry.upload = { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false };
-  await runUpload(job, entry.upload);
+  await job.runUpload(entry.upload);
 }
 
 /**
@@ -144,7 +133,7 @@ export function resultOf(files: FileOutcome<unknown>[]): UploadResult<unknown> {
   return error ? { data: { files }, error } : { data: { files }, error: null };
 }
 
-/** The first run: `done` settles once every file first settled, with those outcomes, whatever a retry did (Q13). */
+/** The first run: `done` settles once every file first settled, with those outcomes, whatever a retry did (M3-U35). */
 export function firstRun(job: Job): Promise<UploadResult<unknown>> {
   const { entries } = job;
   job.listen();

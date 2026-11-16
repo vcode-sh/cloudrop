@@ -37,14 +37,12 @@ function unexpired({ upload }: Entry) {
  */
 export function createLeftovers(abort: (token: string) => Promise<void>): Leftovers {
   const held = new Set<Entry>();
-  let listening = false;
+  // The page adds the same listener once, and removing one it does not hold does nothing.
   const sync = () => {
     for (const entry of held) if (!unexpired(entry)) held.delete(entry);
-    const wanted = held.size > 0;
     // No page hides where the global has no addEventListener (Node).
-    if (wanted === listening || typeof globalThis.addEventListener !== "function") return;
-    listening = wanted;
-    if (wanted) addEventListener("pagehide", pagehide);
+    if (typeof globalThis.addEventListener !== "function") return;
+    if (held.size > 0) addEventListener("pagehide", pagehide);
     else removeEventListener("pagehide", pagehide);
   };
   function pagehide() {
