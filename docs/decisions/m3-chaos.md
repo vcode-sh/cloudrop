@@ -63,7 +63,9 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   nightly.
 - **Status:** decided (plan Tasks 5 and 6; the spike's result gets its own entry).
 - **Source:** chaos design §3.1; research §5 Q3.
-- **Visible in:** the `*.chaos.integration.test.ts` files, `examples/next/app/chaos.browser.test.ts`.
+- **Visible in:** the `*.chaos.integration.test.ts` files, `examples/next/app/chaos.browser.test.ts`; the Node
+  lane's real-time stall and throttle rows run nightly in `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`
+  (`M3-K10`).
 
 ### M3-K4: the server's storage faults are in scope
 
@@ -75,7 +77,7 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   or a retryable error) that later changes; the row then changes with it.
 - **Status:** decided (plan Task 5b, design §4 rows 13 and 14).
 - **Source:** chaos design §1, §4; research §5 Q5.
-- **Visible in:** `packages/cloudrop/src/chaos/stalls-and-server.chaos.integration.test.ts`.
+- **Visible in:** `packages/cloudrop/src/chaos/server-faults.chaos.integration.test.ts`.
 
 ### M3-K5: expired URLs are synthesized 403 answers
 
@@ -134,3 +136,27 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 - **Status:** decided (plan Task 2; the live bucket waits on the owner).
 - **Source:** chaos design §5; research §2.3, §5 Q4.
 - **Visible in:** `examples/next/scripts/setup-rustfs.ts`, `README.md` (CORS section), `examples/next/README.md`.
+
+## Execution rulings
+
+`M3-K9` is reserved for the result of the `page.clock` spike (`M3-K3`).
+
+### M3-K10: the Node lane's real-time stall and throttle rows run nightly
+
+- **Decision:** design §4 rows 10 and 11 in the Node lane, the black-holed single PUT given up after its fetch
+  allowance (64 KiB: 30 640 ms) and the part still moving after 30 s (1 MiB at 32 KiB/s: 32 s), run in the nightly
+  `soak` project, not in the `chaos` lane on every pull request. Rows 12 and 17 and every other Node row stay in the
+  pull-request lane.
+- **Why:** each row waits out about 31 s of real time, and `M3-K3` keeps real-time stall rows out of every pull
+  request. Vitest gives a 2-vCPU private-repository `ubuntu-latest` runner one worker (`availableParallelism − 1`),
+  so the chaos files run one after another and the two rows alone would add about 63 s to every pull request (Task 5b
+  review I1). The allowance itself is pinned on every change, exactly and without waiting: `client/transport.test.ts`
+  ("gives a fetch PUT 30 s plus its size at 100 KiB/s") advances fake timers to 40 239 ms and 40 240 ms for 1 MiB.
+  The nightly rows add the end-to-end proof that nothing else on the way (undici, the proxy, RustFS) cuts such a PUT.
+- **If wrong:** a regression that only real sockets show, such as a request timeout below 32 s elsewhere in the path,
+  surfaces a day late, in the nightly job. Row 11 runs at 32 KiB/s rather than the design's 64 KiB/s: 16 s would pass
+  even if the allowance lost its size share.
+- **Status:** in force (Task 5b fix round 1).
+- **Source:** chaos design §3.1, §4 rows 10 and 11; plan audit C2 ("or it moves to the soak project"); Task 5b review
+  I1 and M1.
+- **Visible in:** `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`, `bun run test:chaos:soak`.
