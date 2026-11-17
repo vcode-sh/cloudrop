@@ -27,17 +27,17 @@ function withImportedChunks(entry: string): string[] {
 const summed = { disablePlugins: ["@size-limit/esbuild"] };
 
 export default [
-  // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17:
-  // cloudrop 36.7 kB, next 1.01 kB, node 3.1 kB.
+  // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17 after
+  // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB.
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
-  // The database adapters, summed with their chunks: the SQL core (src/store/sql) and route() (for store.route) count
-  // toward each adapter that imports them. Measured 2026-11-17: sql 12.79 kB (core and four executors; 9.62 kB before
-  // the core and route() became chunks shared with the ORM adapters); drizzle 14.86 kB after its fix rounds (its own
-  // file 3.36 kB, with libsql and D1 batches), budgeted 17 kB (M5-T48); prisma 12.18 kB (its own file 0.88 kB, the
-  // core 8.59 kB, route() with errors and input 2.78 kB), budgeted 16 kB for headroom (M4-F24, M5-T58).
-  { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "14 kB", ...summed },
+  // The database adapters, summed with their chunks: the SQL core (src/store/sql) with the adapters' route helper, and
+  // route() (for store.route), count toward each adapter that imports them. Measured 2026-11-17 after M5's final fix
+  // round: sql 13.72 kB (its own file 1.34 kB, the shared core chunk 9.36 kB), budgeted 18 kB (M5-T97); drizzle
+  // 15.7 kB (its own file 3.31 kB), budgeted 17 kB (M5-T48); prisma 12.78 kB (its own file 0.72 kB), budgeted 16 kB
+  // (M4-F24, M5-T58).
+  { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "18 kB", ...summed },
   {
     name: "cloudrop/adapters/drizzle",
     path: withImportedChunks("adapters/drizzle.js"),
@@ -53,7 +53,8 @@ export default [
     ...summed,
   },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
-  // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB.
+  // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
+  // after its final fix round (M5-T69).
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),

@@ -234,8 +234,10 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   `completed` or `completing` row, a cleaned one, and a missing one answer `ok` with nothing deleted and no `onAbort`.
 - **Why:** spec §5.6 runs the delete for every `failed` row, but the sweep ends a stuck completion as `failed` with
   `cleaned_at` set and keeps its object because its `onComplete` may have recorded it (§6). Without the `cleaned_at`
-  condition, the client's own `/abort` after its retries ran out would delete that object. An expired row is always
-  cleaned already, so nothing else changes.
+  condition, the client's own `/abort` after its retries ran out would delete that object. (The sentence that stood
+  here, "an expired row is always cleaned already", has been false since M5-T64: the expire pass ends a row before
+  cleaning it, so a failed cleanup leaves `expired` uncleaned, and `/abort` deletes for such a row, as the decision
+  says. Corrected in the final fix round.)
 - **If wrong:** a cleaned row whose late object appeared after the cleanup is left to nobody; the URL lifetime (15 min)
   is shorter than the cleanup's minimum age, so none can.
 - **Status:** decided; refines spec §5.6.
@@ -432,6 +434,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   surface, for 4.7 kB of server code that a browser never ships.
 - **If wrong:** a lazy chunk, or a `cloudrop/store` entry, can be added later without an API change in the first case.
 - **Status:** decided; it extends M5-T33.
+- **Amended 2026-11-17 (final fix round):** after task E moved `route()` into a shared chunk and the final fix round,
+  `cloudrop` bundled is 27.19 kB (+4.81 kB against 22.38 kB) and summed 46.08 kB.
 - **Source:** task B fix round 1, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
 
@@ -604,6 +608,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Visible in:** `packages/cloudrop/package.json`, `tsdown.config.ts`, `scripts/size-limit.config.ts`, `biome.json`.
 - **Amended 2026-11-17 (fix round 1):** the adapters' fence also allows `server/route` (for `routeFor`, M5-T77). The
   `biome.json` hunks that only re-wrapped existing objects were reverted, so the file's diff is the two fences.
+- **Superseded in parts (pointer added in the final fix round):** the drizzle budget is 17 kB (M5-T48), prisma's
+  16 kB (M5-T58) and sql's 18 kB (M5-T97); the peer range is `>=0.45.0 <1 || >=1.0.0-rc.5 <2` (M5-T51); the core is
+  no longer inlined into `adapters/sql.js` but a chunk the three adapters share (M5-T93).
 
 ### M5-T43: one contract target for every SQL store, with failure injection that survives rollback
 
@@ -790,6 +797,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   (through the fixture's own connection) after the first `batch` or `execute` that fails. The four atomicity cases
   now run on libsql, and "reserve, with a quota, that fails at its usage write" kills probe F4 there too.
   `transaction` stays its only gap.
+- **Amended by M5-T85 (pointer added in the final fix round):** Drizzle over D1 runs its batches through the binding
+  Drizzle keeps as `$client`.
 
 ### M5-T47: `cloudropTables({ dialect, tables? })`, with explicit types, matched against the DDL
 
@@ -815,6 +824,10 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   `cloudropSqliteTables(options?)`, with options `{ tables? }` (`CloudropTablesOptions`). Each lives in its own module
   and imports only its dialect's Drizzle core, so an app's schema file bundles one of them. The db-lane comparison
   now includes each index's uniqueness (§3: the `key` index is not unique). Spec §3 and §7 are amended to match.
+- **Amended 2026-11-17 (final fix round):** `CloudropPostgresTables` is now `CloudropPgTables` (M5-T94). The
+  one-dialect claim holds for bundled apps only: `adapters/drizzle.js` imports both `drizzle-orm/pg-core` and
+  `drizzle-orm/sqlite-core`, so a bundler with `sideEffects: false` keeps a schema file to one, while unbundled Node
+  loads both, harmlessly.
 
 ### M5-T48: `cloudrop/adapters/drizzle` is 13.76 kB summed; its ceiling is 15 kB (M4-F24)
 
@@ -831,6 +844,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Amended 2026-11-17 (fix round 1):** after the libsql/D1 batch path, the single-`Client` check and the longer
   TSDoc, the entry is 3.36 kB and the sum 14.86 kB (7.81 kB bundled and minified, against 6.65 kB for
   `adapters/sql`). The ceiling is now 17 kB, about the headroom prisma has at 16 kB for 12.37 kB.
+- **Amended 2026-11-17 (final fix round):** after M5-T85's D1 chunk, task E's shared `route()` chunk and the final
+  fix round, the sum is 15.7 kB (entry 3.31 kB), under the unchanged 17 kB.
 
 ### M5-T49: a single node-postgres `Client` is refused
 
@@ -1295,3 +1310,17 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `scripts/test-browser.sh`, `scripts/test-browser-live.ts`.
+
+### M5-T97: `cloudrop/adapters/sql` is budgeted 18 kB summed (M4-F24)
+
+- **Decision:** the sql ceiling goes from 14 kB to 18 kB. Measured after the final fix round: 13.72 kB summed (its
+  own file 1.34 kB, the core chunk it shares with the ORM adapters 9.36 kB, `route()` 1.51 kB, errors 0.88 kB, input
+  0.39 kB, D1 0.34 kB), up from 13.21 kB. The size config's comments now carry the current numbers for every entry.
+- **Why:** final review M9 and its sizes table: the entry sat at 94% of its ceiling, and the summed budget counts
+  comments, so the next documented growth of the core would have crossed it. S1 and S2 removed code, but the
+  `transaction` option's TSDoc, the two shared messages and the reconcile comments added more text than that.
+  M4-F24 makes a ceiling a guard against accidents, with headroom like drizzle's 17 kB and prisma's 16 kB.
+- **If wrong:** a ceiling only; lower it when the core shrinks.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts`.
