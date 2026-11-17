@@ -14,7 +14,9 @@ const statements = (sql: string) =>
 
 /** The ```sql block after `<!-- ddl:<dialect> -->` in the store guide. */
 function guideBlock(dialect: Dialect): string {
-  const block = new RegExp(`<!-- ddl:${dialect} -->\\n\`\`\`sql\\n([\\s\\S]*?)\`\`\``).exec(read("docs/guide/store.md"));
+  const block = new RegExp(`<!-- ddl:${dialect} -->\\n\`\`\`sql\\n([\\s\\S]*?)\`\`\``).exec(
+    read("docs/guide/store.md"),
+  );
   if (!block?.[1]) throw new Error(`docs/guide/store.md has no sql block after <!-- ddl:${dialect} -->.`);
   return block[1];
 }

@@ -47,16 +47,18 @@ Load the matching skill from `.claude/skills/` before the work:
 ## Gates
 
 - `bun run verify` for every change: check (Biome, file size, complexity), typecheck, test, build and package checks.
-- `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes.
+- `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes. `test:wrangler` also
+  runs the store contract on Wrangler's local D1 (`d1Executor`, Drizzle over D1): run it for those paths too.
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
 - `scripts/check-drizzle-versions.sh` for Drizzle adapter changes: it type-checks the adapter against drizzle-orm 1.0
   in a temporary copy of the package (CI job `drizzle-1`); the workspace installs 0.45.
 - `bun run test:db` for store and adapter changes: Postgres 18 in Docker (port 19500, `CLOUDROP_POSTGRES_PORT`) and
   SQLite through `node:sqlite`; it generates the Prisma test clients and fails when Docker is missing.
 - `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a
-  fault-injecting proxy, and the lane fails when Docker is missing.
+  fault-injecting proxy, stateless and with a store, and the lane fails when Docker is missing.
 - `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
-  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`).
+  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in two
+  passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store.
   `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`
   allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with `content-type`, `content-disposition`,
   `if-none-match`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme` and `x-amz-meta-cloudrop-id` and exposes

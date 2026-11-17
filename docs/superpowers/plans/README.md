@@ -1,6 +1,7 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `main` after M4a (audit fixes, developer experience, `cloudrop/react`). This file is the one place
+Updated 2026-11-17 on `feat/m5-store` after M5 (the database store); `main` is at M4a until the branch's review and
+fast-forward. This file is the one place
 that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
 done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
 in [`docs/decisions/`](../../decisions/README.md).
@@ -14,7 +15,7 @@ in [`docs/decisions/`](../../decisions/README.md).
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*`, Next and Node adapters | **Done** 2026-11-16 (closed at `2483890`, then the hardening phase, `ca91b33`) |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
 | M4 | `cloudrop/react`, shadcn registry, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (shadcn registry, Hono and Vite examples) not started |
-| M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | In progress on `feat/m5-store` |
+| M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | **Done** on `feat/m5-store` 2026-11-17 (tasks A–F); closes with the whole-branch review, then a fast-forward to `main` |
 | M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
 | M7 | Docs, 0.x beta, 1.0 | Not started |
 
@@ -31,6 +32,7 @@ in [`docs/decisions/`](../../decisions/README.md).
 | [M3 progress plan B](2026-11-16-m3-progress-plan-b.md) ([audit](2026-11-16-m3-progress-plan-b.audit.md)) | Done, `fbc5c15..220332c` | `concurrency: "auto"`, `order: "smallest-first"`, stalled PUTs, offline and online, `retry()` with the failed-file rule and `pagehide`, 16 MiB parts from 256 MiB, the lab's controls; decisions `M3-U23`..`M3-U59` |
 | [M3 resume](2026-11-16-m3-resume.md) ([audit](2026-11-16-m3-resume.audit.md)), design [`2026-11-16-resume-design.md`](../specs/2026-11-16-resume-design.md) | Done, `57144e0..11eb34d` | Records in IndexedDB, edge-hash fingerprint, a Web Lock per upload, `resumable()`, `resume(upload, file)`, `forget()`, the `/complete` probe, `persist` and `namespace`; R2's browser refusals measured; the lab's resume rows; decisions `M3-U60`..`M3-U91` |
 | [M3 chaos](2026-11-17-m3-chaos.md) ([audit](2026-11-17-m3-chaos.audit.md)), design [`2026-11-17-chaos-design.md`](../specs/2026-11-17-chaos-design.md) | Done, from `11eb34d`, merged to `main` 2026-11-17 | A fault-injecting proxy in front of RustFS; `test:chaos` on every pull request (Node rows 1–8, 12–14, 17), the browser rows through the proxy in `test:browser` (stall under Playwright's clock), a nightly `test:chaos:soak` (seeded random faults, a mid-run abort, the real-time stall and throttle rows); the lab shows a stall as a stall; one client fix the soak found (`M3-U92`: a retryable refusal at `/upload` is asked again within the attempt budget); decisions `M3-K1`..`M3-K11`, `M3-U92` |
+| M5 (no plan file: tasks A–F, C0 in the design's §9), design [`2026-11-17-m5-store-design.md`](../specs/2026-11-17-m5-store-design.md) | Done on `feat/m5-store` 2026-11-17 | `createCloudrop({ store, quota, completionLeaseMs })`: a row before signing, `onComplete` once (exactly once for writes through `tx` on Postgres), hard quota, `QUOTA_EXCEEDED`, revocation, `/abort` that never deletes a completed file, `api.file/usage/revokeUploads/deleteFile/reconcile/sweep`; `cloudrop/adapters/sql` (node-postgres, postgres.js, `node:sqlite`, D1), `/drizzle` (drizzle-orm `>=0.45.0 <1 \|\| >=1.0.0-rc.5 <2`), `/prisma` (Prisma 7); `test:db`, D1 in `test:wrangler`, store rows in `test:chaos` and the browser lanes, the example's opt-in SQLite store, the [store guide](../../guide/store.md); decisions `M5-T16`..`M5-T89` |
 | M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
 
 ## State of `main` after M4a (2026-11-17)
@@ -70,12 +72,18 @@ M4a is done (design §7 lists what it left out). M4b: a shadcn registry (`Upload
 starting point). A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to
 a later opt-in (`M3-U65`).
 
-### Recommended before the M5 plugins (owner decision)
+### M6: the plugins
 
-A database `store` interface usable from Prisma and Drizzle: a pending row before signing, exactly-once `onComplete`,
-an orphan sweep and quota. The product-fit review of 2026-11-17 found it the need shared by app-b, app-c and app-a,
-worth more than any single plugin (design §7). Also recorded there: a bucket-setup command for R2 and S3-compatible
-services, a React Native client with background transfer, per-route `Cache-Control`, batches over 100 files.
+`contentChecks`, `limits`, `images` and `checksums` (base spec §8). `limits()` keeps rate limits and the quotas a store
+does not count; a storage quota is the store's `quota` (M5). Still recorded from the product-fit review of
+2026-11-17: a bucket-setup command for R2 and S3-compatible services, a React Native client with background transfer,
+per-route `Cache-Control`, batches over 100 files.
+
+### After M5 (from its tasks' concerns)
+
+- A core-wide `tables.schema` for tables outside `public`, instead of the search path (`M5-T59`).
+- An idempotency key on `/upload`, so a lost answer stops holding its reservation (M5 spec §5.7).
+- The store paths behind their own entry, if the 4.7 kB they add to stateless server apps matters (`M5-T69`).
 
 ### Owner steps
 
