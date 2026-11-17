@@ -151,8 +151,9 @@ The home page is what an app's upload UI looks like when it is built on the head
 - **`components/upload/unfinished-uploads.tsx`:** after a reload, the multipart uploads this browser can continue, each
   with **Pick again**: the same file resumes and sends only the parts the bucket lacks, another file is refused and
   shows as a failed row. **Discard** on a row, and **Discard all**, call `useResumable`'s `discard()`: the server aborts
-  the upload (with a store, its row ends and its reserved bytes are free again) and the browser's record is deleted,
-  without the file. A discard that fails shows its message, and the upload stays listed.
+  the upload (with a store, its row ends and its reserved bytes are free again) but keeps a file that already landed,
+  and the browser's record is deleted, without the file. A discard that fails shows its message, and the upload stays
+  listed. Focus moves to the next row's Discard, or to the drop zone when the panel empties.
 
 ## Lab page
 
@@ -245,9 +246,9 @@ message, and **Retry** stores it. With a 20 MiB upload's PUTs held, Enter on Pau
 Enter on **Cancel** moves focus to the row, shows Cancelled and sends `/abort`. A 20 MiB file whose parts 2 and 3 are
 held is reloaded after part 1: the unfinished-uploads panel lists it, another file picked there is refused with
 `INVALID_INPUT`, and the same file resumes with only parts 2 and 3 and reads back equal. Of two uploads left unfinished,
-**Discard** on one sends `/abort` (answered 200) and a reload lists only the other, which still resumes. The faults come
-from Playwright's routing of the bucket's requests, so these rows run on R2 too; their helpers are in
-`app/home-page.ts`.
+Enter on one row's **Discard** sends `/abort` (answered 200) and moves focus to the other row's Discard, and a reload
+lists only the other, which still resumes. The faults come from Playwright's routing of the bucket's requests, so these
+rows run on R2 too; their helpers are in `app/home-page.ts`.
 
 `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
 parts, a dropped bucket PUT as renewed and retried, a PUT whose answer was dropped as sent again and answered `412` with
@@ -278,9 +279,9 @@ whose `/complete` answer was held is resumed after a reload: the resume's `/comp
 user's usage grows by the file's size once, and `onComplete` recorded it once. A 51 MiB file is refused with
 `QUOTA_EXCEEDED` after `/upload` alone, and the usage does not change. `app/upload.store.browser.test.ts`, in the same
 pass, leaves a 20 MiB upload unfinished on the home page, whose reserved bytes then show in the usage, and **Discard**
-frees them: the usage equals what it was before. The first pass runs every other file on the stateless example. Run them
-from the repository root; install the shell once from this directory with `bunx playwright install --only-shell
-chromium`.
+frees them: the usage equals what it was before, and focus is on the drop zone. The first pass runs every other file on
+the stateless example. Run them from the repository root; install the shell once from this directory with `bunx
+playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards.

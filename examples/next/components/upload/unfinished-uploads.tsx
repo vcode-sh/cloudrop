@@ -14,7 +14,10 @@ import {
 } from "@/components/ui/attachment";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useResumable, useUpload } from "@/lib/upload";
+import { FILES_INPUT_ID } from "./drop-zone";
 import { formatBytes } from "./file-status";
+
+const discardId = (upload: ResumableUpload<"files">): string => `discard-${upload.id}`;
 
 const until = (expiresAt: string): string =>
   new Date(expiresAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -29,6 +32,8 @@ export function UnfinishedUploads() {
   const { resume } = useUpload("files");
   // The message of the last discard that failed, such as an unreachable server: its upload stays listed for a retry.
   const [problem, setProblem] = useState<string | null>(null);
+  // The ids being discarded: a second press would find the first one's lock and report UPLOAD_IN_USE.
+  const [discarding, setDiscarding] = useState<ReadonlySet<string>>(new Set());
   if (uploads.length === 0) return null;
 
   const pickAgain = (upload: ResumableUpload<"files">) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -39,8 +44,16 @@ export function UnfinishedUploads() {
     if (file) void resume(upload, file);
   };
   const discardEach = async (chosen: readonly ResumableUpload<"files">[]) => {
+    // A discarded row unmounts, and the whole panel with the last one: focus first moves to what stays, the next row's
+    // Discard or else the drop zone, so a keyboard user is not sent back to the top of the page.
+    const at = uploads.indexOf(chosen[0] as ResumableUpload<"files">);
+    const stays = chosen.length === 1 ? (uploads[at + 1] ?? uploads[at - 1]) : undefined;
+    document.getElementById(stays ? discardId(stays) : FILES_INPUT_ID)?.focus();
+    const ids = chosen.map(({ id }) => id);
     setProblem(null);
+    setDiscarding((now) => new Set([...now, ...ids]));
     const answers = await Promise.all(chosen.map((upload) => discard(upload)));
+    setDiscarding((now) => new Set([...now].filter((id) => !ids.includes(id))));
     setProblem(answers.find((answer) => answer.error)?.error?.message ?? null);
   };
 
@@ -88,7 +101,12 @@ export function UnfinishedUploads() {
                     onChange={pickAgain(upload)}
                   />
                 </label>
-                <AttachmentAction aria-label={`Discard ${upload.name}`} onClick={() => void discardEach([upload])}>
+                <AttachmentAction
+                  id={discardId(upload)}
+                  aria-label={`Discard ${upload.name}`}
+                  disabled={discarding.has(upload.id)}
+                  onClick={() => void discardEach([upload])}
+                >
                   <IconTrash />
                 </AttachmentAction>
               </AttachmentActions>
@@ -96,7 +114,7 @@ export function UnfinishedUploads() {
           </li>
         ))}
       </ul>
-      <Button variant="ghost" size="sm" onClick={() => void discardEach(uploads)}>
+      <Button variant="ghost" size="sm" disabled={discarding.size > 0} onClick={() => void discardEach(uploads)}>
         Discard all
       </Button>
     </section>

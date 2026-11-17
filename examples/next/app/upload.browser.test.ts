@@ -198,7 +198,7 @@ test("after a reload, the unfinished panel resumes with the same file and sends 
   await expectStored(key, file.path);
 });
 
-test("Discard drops one unfinished upload without its file, and the other still resumes", async ({
+test("Discard drops one unfinished upload without its file, focus moves to the other's Discard, and it still resumes", async ({
   page,
 }, testInfo) => {
   const kept = await onDiskFile(testInfo, 20);
@@ -209,9 +209,11 @@ test("Discard drops one unfinished upload without its file, and the other still 
   const abort = page.waitForResponse((response) => response.url() === `${ORIGIN}/api/cloudrop/abort`);
   await unfinishedList(page)
     .getByRole("button", { name: `Discard ${dropped.name}` })
-    .click();
+    .focus();
+  await page.keyboard.press("Enter");
   expect((await abort).status()).toBe(200);
   await expect(unfinishedList(page).getByRole("listitem")).toHaveCount(1);
+  await expect(unfinishedList(page).getByRole("button", { name: `Discard ${kept.name}` })).toBeFocused();
 
   // The browser's record is gone too: a reload lists only the upload that was kept.
   await page.reload();

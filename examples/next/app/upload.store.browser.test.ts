@@ -15,7 +15,9 @@ async function usage(page: Page): Promise<Extract<UsageInfo, { store: true }>> {
   return info;
 }
 
-test("Discard ends the upload's row: the bytes it reserved are free again", async ({ page }, testInfo) => {
+test("Discard ends the upload's row: the bytes it reserved are free again, and focus moves to the drop zone", async ({
+  page,
+}, testInfo) => {
   const file = await onDiskFile(testInfo, 20);
   await signIn(page);
   const before = await usage(page);
@@ -24,8 +26,11 @@ test("Discard ends the upload's row: the bytes it reserved are free again", asyn
 
   await unfinishedList(page)
     .getByRole("button", { name: `Discard ${file.name}` })
-    .click();
+    .focus();
+  await page.keyboard.press("Enter");
+  // The last row went, and the panel with it: focus is on what stays, the drop zone's input.
   await expect(page.getByRole("heading", { name: "Unfinished uploads" })).toHaveCount(0);
+  await expect(page.getByLabel("Files to upload")).toBeFocused();
 
   expect(whileUnfinished.reservedBytes).toBe(before.reservedBytes + 20_971_520);
   expect(await usage(page)).toEqual(before);

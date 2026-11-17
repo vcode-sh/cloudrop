@@ -922,6 +922,8 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
   listed upload, both through `useResumable`'s `discard()` (`M4-B16`): each upload is aborted on the server, which with
   a store ends its row and frees its reservation. A failed discard shows its message in a `role="alert"` line and the
   upload stays listed. `lib/upload.ts` is back to `createUploadHooks<typeof cloudrop>()`, the lazy client of `M4-B1`.
+  While an upload's discard runs, its Discard button, and Discard all, are disabled: a second press would find the
+  first one's lock and show `UPLOAD_IN_USE` although nothing is being sent (fix round 2, re-review N4).
 - **Why:** with `discard()` in the hooks, nothing in the app needs the client. Discard all goes through `discard()`
   rather than `forget()` so that it means what Discard on one row means; `forget()`, which aborts nothing, stays for
   sign-out. Supersedes `M4-E9`.
@@ -936,7 +938,9 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
 
 - **Decision:** Pause and Resume are one button whose label and icon follow the status, so React keeps the element and
   its focus. Retry and Cancel, which remove their own button, move focus to the row (`<li tabIndex={-1}>`, with a
-  visible outline) before they act. The spinner spins only under `motion-safe`.
+  visible outline) before they act. The spinner spins only under `motion-safe`. In the unfinished-uploads panel,
+  Discard first moves focus to the next row's Discard (else the previous row's), and Discard all, or the last row's
+  Discard, to the drop zone's input, since the panel unmounts with its last row (fix round 2, re-review N3).
 - **Why:** with two conditional buttons, Enter on Pause unmounted the focused button and focus fell to `<body>`, so the
   next Tab started from the top of the page and a screen reader heard nothing (review I1). The row keeps focus inside
   the list and reads the row's new state.

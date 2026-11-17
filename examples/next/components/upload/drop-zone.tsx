@@ -3,6 +3,9 @@
 import { IconUpload } from "@tabler/icons-react";
 import { useUpload } from "@/lib/upload";
 
+/** The drop zone's input, where focus goes when the unfinished-uploads panel it was in disappears. */
+export const FILES_INPUT_ID = "files-to-upload";
+
 /**
  * A label around a hidden file input: a click anywhere on it opens the file picker, Tab reaches the input and Enter or
  * Space opens the picker, and files dropped on it upload. The input stays in the page (sr-only, not display: none), so
@@ -21,7 +24,7 @@ export function DropZone() {
       <span className="text-muted-foreground text-xs">
         Text, PDF, images, audio, video and other binary files, up to 100 MB each
       </span>
-      <input {...getInputProps()} aria-label="Files to upload" className="sr-only" />
+      <input {...getInputProps()} id={FILES_INPUT_ID} aria-label="Files to upload" className="sr-only" />
     </label>
   );
 }
