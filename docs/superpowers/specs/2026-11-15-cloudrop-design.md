@@ -261,6 +261,7 @@ refuses it, which deletes the object. The 1.1 database adapters close this windo
 | No progress for 30 s | Abort that request and retry the part |
 | `offline` event | Pause; resume on `online` |
 | Other 4xx, expired token | Fail the file with a code, for example `UPLOAD_EXPIRED` |
+| `/upload` rejects one file with a retryable error (`STORAGE_ERROR`, `RATE_LIMITED`) | Ask `/upload` again for that file alone, within the same 6 attempts and backoff; pause and cancel end the wait (`M3-U92`) |
 
 A failing part does not abort its siblings. A file fails only when a part exhausts its attempts; `retry()` then sends
 only the missing parts.

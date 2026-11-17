@@ -97,11 +97,15 @@ export function settle(entry: Entry, status: "failed" | "aborted", error: Cloudr
   settled(entry);
 }
 
-/** Resolves when resume() or a cancel wakes the paused `entry`; waking it again later does nothing. */
-export const woken = (entry: Entry): Promise<void> =>
-  new Promise((resolve) => {
-    entry.wake = resolve;
-  });
+/** Holds a paused `entry` until resume() or a cancel wakes it; a file that is not paused goes on at once. */
+export async function held(entry: Entry): Promise<void> {
+  while (entry.status === "paused" && !entry.cancel.signal.aborted) {
+    // Waking it again later does nothing.
+    await new Promise<void>((resolve) => {
+      entry.wake = resolve;
+    });
+  }
+}
 
 /**
  * Stops a queued or uploading file's PUTs; a completing or settled file ignores it (ruling M3-U4). `byNetwork` marks a
@@ -197,7 +201,7 @@ export async function runFile(context: UploadContext, upload: Upload): Promise<C
   const { cancel } = entry;
   while (!cancel.signal.aborted) {
     if (entry.status === "paused") {
-      await woken(entry);
+      await held(entry);
       continue;
     }
     const pass = new AbortController();

@@ -6,7 +6,7 @@ import { CloudropError, fail, type Result } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
 import type { Ticket } from "./endpoints.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
-import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle, woken } from "./file-run.ts";
+import { abortFile, type Entry, held, outcomeOf, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { letGo, uploadOf } from "./persist.ts";
 import { createProgress } from "./progress.ts";
@@ -124,24 +124,21 @@ async function startOver(job: Job, entry: Entry): Promise<void> {
 async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
   const { signal } = entry.cancel;
   if (refusal.retryable && attempt < MAX_ATTEMPTS && !signal.aborted) {
+    // In one bracket: watching again would call online(), which resumes a file offline paused (M3-U48).
     await job.watch(async () => {
       // pauseFile and a cancel abort the pass, which here is the wait.
       const wait = new AbortController();
       entry.pass = wait;
       if (entry.status !== "paused") await pause(retryDelay(attempt, retryAfterOf(refusal)), wait.signal);
-      while (entry.status === "paused" && !signal.aborted) await woken(entry);
+      await held(entry);
     });
-    if (!signal.aborted) {
-      await launch(job, [entry], attempt + 1);
-      return entry.run;
-    }
+    await launch(job, [entry], { reask: true, first: attempt + 1 });
+    return entry.run;
   }
   settle(entry, signal.aborted ? "aborted" : "failed", withFile(signal.aborted ? aborted() : refusal, entry));
 }
 
-/**
- * One file's share of an /upload answer, given at `attempt`. `whole`: the /upload asked for every file of the job.
- */
+/** One file's share of an /upload answer, given at `attempt`. `whole`: the /upload asked for every file of the job. */
 async function runEntry(
   job: Job,
   entry: Entry,
@@ -166,23 +163,58 @@ async function runEntry(
 }
 
 /**
- * Asks one /upload for tickets for `entries`, from attempt `first` of the budget, then runs every file at once (the
- * pool decides who sends); each `entry.run` settles with its file. Resolves with the /upload's refusal when it asked
- * for every file of the job.
+ * Calls `ask` through the retry budget, from attempt `next()`, with `entry`'s pause and cancel ending the backoff. A
+ * pause holds the file, then asks at once with the count kept (M3-U92). A cancel's ABORTED is returned as it is.
  */
-export async function launch(job: Job, entries: readonly Entry[], first = 1): Promise<CloudropError | null> {
-  const { context, args, signal } = job;
+async function askAlone<T>(
+  job: Job,
+  entry: Entry,
+  ask: (attempt: number) => Promise<Result<T>>,
+  next: () => number,
+): Promise<Result<T>> {
+  const { signal } = entry.cancel;
+  for (;;) {
+    if (entry.status === "paused") await job.watch(() => held(entry));
+    if (signal.aborted) return fail(aborted());
+    // pauseFile and a cancel abort the pass, which here is the backoff.
+    const pass = new AbortController();
+    entry.pass = pass;
+    const answer = await withRetry(ask, pass.signal, next());
+    // ABORTED without a cancel is a pause that ended the backoff.
+    if (answer.error?.code !== "ABORTED" || signal.aborted) return answer;
+  }
+}
+
+/**
+ * An /upload for one file, which that file's cancel and pause stop rather than the job's signal (M3-U92). `reask`:
+ * after a refusal, so never the whole job, whose /upload has answered; `first`: the attempt of the budget it starts at.
+ */
+export interface Alone {
+  reask: boolean;
+  first: number;
+}
+
+/**
+ * Asks one /upload for tickets for `entries`, then runs every file at once (the pool decides who sends); each
+ * `entry.run` settles with its file. Resolves with the /upload's refusal when it asked for every file of the job.
+ * `alone` asks for its one file on that file's own signals: a cancel stops the request and its backoff, a pause ends
+ * the backoff and holds the file, and resume() asks at once with the attempt count kept.
+ */
+export async function launch(job: Job, entries: readonly Entry[], alone?: Alone): Promise<CloudropError | null> {
+  const { context, args } = job;
   const files = entries.map((entry) => entry.file);
-  let attempt = first;
+  const own = alone && entries[0];
+  // job.abort() and the caller's signal cancel every file, so a file's own signal hears them too.
+  const signal = own ? own.cancel.signal : job.signal;
+  let attempt = (alone?.first ?? 1) - 1;
   const ask = (at: number) => {
     attempt = at;
     return context.endpoints.start(args.route, files, args.metadata, signal);
   };
-  const started = withRetry(ask, signal, first).then((answer) =>
+  const started = (own ? askAlone(job, own, ask, () => attempt + 1) : withRetry(ask, signal)).then((answer) =>
     answer.error && signal.aborted ? fail(aborted()) : answer,
   );
-  // A file asking again (M3-U92) is never the whole job: the job's /upload already answered.
-  const whole = first === 1 && entries.length === job.entries.length;
+  const whole = !alone?.reask && entries.length === job.entries.length;
   entries.forEach((entry, index) => {
     entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole, attempt)).finally(job.idle);
   });

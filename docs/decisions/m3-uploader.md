@@ -788,8 +788,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   job's error) turns it `aborted` and sends nothing.
 - **Why:** spec §4.5: `abort()` ends a file aborted, and only a done file ignores it. There is nothing to free.
 - **If wrong:** the snapshot says `aborted` where `done` said `failed`, as for every aborted failed file (`M3-U35`).
-- **Status:** in force (`4f1887a`). `M3-U92` applies it to a file waiting to ask `/upload` again: a cancel ends it
-  `aborted` and sends nothing.
+- **Status:** in force (`4f1887a`). `M3-U92` applies it to a file waiting to ask `/upload` again, also in the backoff
+  after a re-ask that failed as a whole: a cancel ends it `aborted` at once and sends nothing more.
 - **Visible in:** `client/file-run.ts` (`abortFile`).
 
 ### M3-U52: the errors of a retry's refused `/upload`
@@ -1487,11 +1487,16 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   answer's `Retry-After`. The `Retry-After` of an answer that rejected a file applies to that file's error, also on a
   `200`. Once the attempts run out the file ends `failed` with its last error, which names the file; a later `retry()`
   asks for a new ticket (`M3-U31`). A refusal that is not retryable (the policy's, a storage refusal, the `SERVER_ERROR`
-  of a driver that threw) ends the file at once after one `/upload`, as before. While it waits the file stays `queued`
-  with no bytes, as a part waiting to retry leaves its file's status and bytes alone. `pause()` and `offline` end the
-  wait and hold the file `paused` (`M3-U28`, `M3-U39`); `resume()` or `online` asks at once, and the attempt count goes
-  on from where it was. The file's `abort()`, `job.abort()` and the caller's signal end it `aborted` without a request
-  (`M3-U51`).
+  of a driver that threw) ends the file at once after one `/upload`, as before. A re-ask, like the new-ticket `/upload`
+  of a `retry()` that asks for one file, runs on that file's own signals instead of the job's: its wait after a refusal
+  and its backoff after an `/upload` that failed as a whole are one wait. While it waits the file stays `queued` with no
+  bytes, as a part waiting to retry leaves its file's status and bytes alone. `pause()` and `offline` end the wait and
+  hold the file `paused`, also when the file was paused before the answer came (`M3-U28`, `M3-U39`); `resume()` or
+  `online` asks at once, and the attempt count goes on from where it was. A pause does not stop an `/upload` already
+  sent: a ticket it brings waits paused, as the job's own `/upload` does. The file's `abort()`, `job.abort()` and the
+  caller's signal end the file `aborted` at once and send nothing more: they end the wait and abort an `/upload` in
+  flight (`M3-U51`). For a job of one file, a cancel during its `job.retry()`'s new-ticket `/upload` therefore answers
+  `{ data: null, error }` with `ABORTED`, as the job's types say for an `/upload` for every file that was cancelled.
 - **Why:** before, a retryable refusal ended the file at once, while a failure of the whole `/upload` (`M3-U49`) and
   every bucket `PUT` went through the retry budget: a 503 from `CreateMultipartUpload` failed the file although asking
   again a moment later would have started it. Asking for the refused file alone keeps the other files from being asked
@@ -1499,9 +1504,16 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   without holding the others.
 - **If wrong:** a burst of storage refusals across a job of many files sends one `/upload` per refused file on each
   round instead of one for all, so `authorize` and the route's checks run once per file. The server sends no
-  `Retry-After` of its own on a `200`, so only a proxy or app that adds one is honoured. Unlike a part, whose new pass
-  after `resume()` starts a fresh budget, a file that waited for `/upload` keeps its count across a pause.
-- **Status:** in force (this change).
-- **Visible in:** `client/job-run.ts` (`refused`, `launch`, `Job.watch`), `client/endpoints.ts` (`start`, `post`),
-  `client/retry.ts` (`withRetry`'s `first`), `client/file-run.ts` (`woken`), `client/upload-refusals.test.ts`, README
-  ("Client").
+  `Retry-After` of its own on a `200`, so only a proxy or app that adds one is honoured. The follow-up: the storage
+  driver keeps the bucket's `Retry-After` on its error, and `handleUpload` sets the `200`'s `Retry-After` to the largest
+  among its rejected tickets, which the client already applies; no change to the wire protocol. A cancel that aborts a
+  re-ask in flight may leave a ticket the server issued, whose multipart upload the bucket's lifecycle rule removes.
+  Unlike a part, whose new pass after `resume()` starts a fresh budget, a file that waited for `/upload` keeps its count
+  across a pause.
+- **Status:** in force (`d53b592`). Since task 8's fix round 1, a one-file `/upload` runs on the file's own signals:
+  before, the backoff after a re-ask that failed as a whole ran on the job's signal, so a cancel there still sent an
+  `/upload` and its `/abort`, and a pause did not stop it (review Important 1); a one-file `retry()`'s new-ticket
+  `/upload` had the same gap.
+- **Visible in:** `client/job-run.ts` (`refused`, `askAlone`, `launch`'s `Alone`, `Job.watch`), `client/retry-file.ts`
+  (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts` (`withRetry`'s `first`),
+  `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`, README ("Client").
