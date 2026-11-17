@@ -10,7 +10,7 @@ credentials and permissions cloudrop needs, and what `checkBucket` can and canno
 | --- | --- |
 | A CORS rule allowing `PUT` from your page's origin | Browsers upload to the bucket directly, from your page's origin. Without the rule, the browser blocks every upload. |
 | The four headers cloudrop signs, in the rule's allowed headers | `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`. A preflight fails if one is missing. |
-| `ETag` in the exposed headers | `checkBucket` asks for it. |
+| `ETag` in the exposed headers | Only `checkBucket` needs it: its CORS check reports a problem without it. The client never reads `ETag`; the server gets part ETags from the bucket when it completes an upload. |
 | `Retry-After` in the exposed headers (recommended) | Lets the client wait as long as the bucket asks after a `429` or `503`. |
 | A lifecycle rule that aborts incomplete multipart uploads | Parts of an upload that never finished are removed instead of staying stored. |
 
@@ -150,7 +150,7 @@ const { data: report, error } = await cloudrop.api.checkBucket({ origins: ["http
 | Check | `ok` when | Reported `unknown` when |
 | --- | --- | --- |
 | `cors` | Every origin may `PUT` with the four signed headers, and `ETag` is exposed. | The credentials may not read CORS (R2 object tokens), the storage cannot report it (Wrangler's local R2 answers `501`), or no origin was given. |
-| `lifecycle` | An enabled rule for the whole bucket aborts incomplete multipart uploads. | As for `cors`. |
+| `lifecycle` | An enabled rule for the whole bucket aborts incomplete multipart uploads. | The credentials may not read lifecycle rules, or the storage cannot report them. Origins do not matter here. |
 | `publicAccess` | No private route stores files on a bucket with a `publicUrl`. | Never: this check reads only your configuration. |
 
 What it does not check:

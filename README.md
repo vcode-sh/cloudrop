@@ -25,8 +25,9 @@ browser client sends the bytes, retries what fails, shows progress, and picks up
    for a few minutes, without any credentials.
 2. The browser sends the bytes straight to the bucket with that URL. A large file goes as a **multipart upload**: cut
    into parts that are sent in parallel and joined by the bucket at the end.
-3. The browser tells your server it is done. The server checks the stored object's size and type against what was
-   declared, deletes a file that does not match, and runs your `onComplete`.
+3. The browser tells your server it is done. The server checks what the bucket holds against what was declared, then
+   runs your `onComplete`. A single upload of the wrong size or type is deleted; a part of the wrong size is sent
+   again.
 
 ## Features
 
@@ -142,7 +143,8 @@ Browsers upload to the bucket directly, so the bucket must allow it:
   in the bucket.
 
 The exact rules for R2 and S3, the Wrangler commands and the token permissions: [Bucket setup](docs/guide/bucket-setup.md).
-In development, the server checks the bucket on its first request and logs what is missing.
+In development, the server checks the bucket on its first request and logs what is missing; that check does not
+cover `Retry-After`.
 
 ## Documentation
 

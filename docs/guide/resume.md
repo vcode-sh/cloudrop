@@ -82,7 +82,7 @@ of R2's two billed operation classes.
 
 - **All parts there, or a `/complete` that finished before the reload:** the file ends done without a `PUT`. The route's
   `afterVerify` and `onComplete` run again then, so make them idempotent by `file.id`, as for any retried request.
-- **Parts missing:** exactly those are sent, then `/complete` again. The parts that landed count in `bytes` from that
+- **Parts missing:** exactly those are sent, then `/complete` again. The parts already stored in the bucket count in `bytes` from that
   answer; before it, `bytes` is 0.
 - **The upload is gone** (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`): the file is `queued` again, asks
   `/upload` once for a new ticket with the record's route and metadata, and sends the whole file under a new key, its

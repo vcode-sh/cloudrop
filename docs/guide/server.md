@@ -27,8 +27,9 @@ export const cloudrop = createCloudrop({
 });
 ```
 
-`createCloudrop` checks every option at once and throws a `CloudropError` with code `INVALID_CONFIG` for a mistake. Its
-message names the option and the fix. A misconfigured server fails when it starts, not on a user's first upload.
+`createCloudrop` checks every option when it is called and throws a `CloudropError` with code `INVALID_CONFIG` for the
+first mistake it finds, checking the options in a fixed order. Its message names the option and the fix. A
+misconfigured server fails when it starts, not on a user's first upload.
 
 | Option | What it does | Default |
 | --- | --- | --- |
@@ -150,10 +151,14 @@ const photo = route({
 The server chooses every key; the client's file name never reaches it. The name appears only in the stored
 `Content-Disposition` header. Keys from `prefix` and `key` are checked the same way: `.` and `..` segments, empty
 segments, a leading `/`, control characters and keys over 1024 bytes are refused, and Unicode is normalized to NFC.
+`prefix` must also return a string without a leading `/`.
 
-A custom `key` must be unique. A rejected or aborted upload's object is deleted by key after a `HEAD` shows the object is
-this upload's, and that delete is not conditional: another file stored under the same key between the two requests
-would be deleted.
+A bad key is a bug in your route, not the user's mistake: the check throws, `/upload` answers `SERVER_ERROR` (HTTP 500)
+and the server logs which route built the key and why it was refused.
+
+A custom `key` must be unique. A rejected or aborted upload's object is deleted by key once a `HEAD`, or a create-only
+completion, shows the object is this upload's. That delete is not conditional: another file stored under the same key
+between the two requests would be deleted.
 
 ### Private and public routes
 
@@ -192,12 +197,17 @@ It is signed, not encrypted: the browser can read it.
 
 What happens in `/upload`:
 
-1. The request is checked (body at most 64 KiB, JSON, an allowed origin).
-2. The route's metadata schema validates the metadata.
-3. `authorize` runs.
-4. Each file's size and type are checked against the route. File names are normalized to NFC before they are counted
-   (1 to 255 Unicode code points) and stored.
-5. Only then is anything signed.
+1. The handler checks the request: `POST`, an allowed origin, `Content-Type: application/json`, a body of at most
+   64 KiB.
+2. The route must exist (`UNKNOWN_ROUTE`), the number of files must be within `maxFiles` (`TOO_MANY_FILES`), and each
+   file entry needs a name, size and type. File names are normalized to NFC before they are counted (1 to 255 Unicode
+   code points) and stored.
+3. The route's metadata schema validates the metadata (`INVALID_METADATA`).
+4. `authorize` runs (`UNAUTHORIZED`).
+5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
+   built. A refused file does not stop the others.
+6. Plugins' `beforeUpload` hooks run.
+7. Only then is anything signed.
 
 Then the rules that follow from a stateless token:
 
@@ -217,12 +227,19 @@ What `/complete` verifies, which is the real guarantee:
 - **Multipart:** the bucket's list of parts. Every part's size must match the plan; completion uses the server's part
   list, never the client's. A missing or wrong-sized part answers `PARTS_MISSING` with its number, and the client sends
   it again.
-- A wrong size or type deletes the object and answers `VERIFICATION_FAILED`. An object another upload wrote under the
-  same key is never deleted: it answers `VERIFICATION_FAILED` (single `PUT`) or `ALREADY_EXISTS` (multipart).
+- For a single `PUT`, a wrong size or type deletes the object and answers `VERIFICATION_FAILED`. A multipart upload's
+  type is set by the server when it creates the upload, so only part sizes can be wrong, and those are sent again.
+- An object another upload wrote under the same key is never deleted: it answers `VERIFICATION_FAILED` (single `PUT`)
+  or `ALREADY_EXISTS` (multipart).
 
-What the upload URLs sign, so the bucket itself refuses anything else: the exact size and type, `If-None-Match: *` on a
-single `PUT` (a URL can never overwrite an object), the upload id in `x-amz-meta-cloudrop-id`, and a
-`Content-Disposition` that is `inline` for raster images, video and audio, and `attachment` for everything else,
+What the server signs or sets, so the bucket itself refuses anything else:
+
+- **A single `PUT` URL** signs the exact size and type, `If-None-Match: *` (a URL can never overwrite an object), the
+  upload id in `x-amz-meta-cloudrop-id`, and the `Content-Disposition`.
+- **A multipart upload** gets its type, upload id and `Content-Disposition` from the server when it is created. Each
+  part URL signs only that part's exact size.
+
+The `Content-Disposition` is `inline` for raster images, video and audio, and `attachment` for everything else,
 including HTML, SVG and XML. That keeps an uploaded HTML or SVG file from running as a page on a public bucket domain.
 
 Why it works this way: the M2 decisions in [docs/decisions](../decisions/README.md) and
@@ -264,6 +281,10 @@ const quota: CloudropPlugin = {
 };
 ```
 
+A `beforeUpload` refusal refuses every file of the job with its code and message. cloudrop has no quota code, so this
+example uses `UNAUTHORIZED` with a message that says what to do. A page that branches on `UNAUTHORIZED` should show
+`error.message` rather than assume the user must sign in (see [Errors](errors.md#upload-endpoint-errors)).
+
 Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. cloudrop's own
 plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive in M5.
 
@@ -304,20 +325,35 @@ import { toNodeHandler } from "cloudrop/node";
 import { cloudrop } from "./lib/cloudrop";
 
 http.createServer(toNodeHandler(cloudrop)).listen(3000);
-
-// Express: mount it at the path, before any body parser.
-app.use("/api/cloudrop", toNodeHandler(cloudrop));
 ```
 
-Mount it before any body parser: a parser that reads the body first leaves nothing for cloudrop to read.
+With Express (installed separately), mount it at the path, before any body parser:
+
+```ts
+import express from "express";
+import { toNodeHandler } from "cloudrop/node";
+import { cloudrop } from "./lib/cloudrop";
+
+const app = express();
+app.use("/api/cloudrop", toNodeHandler(cloudrop));
+app.use(express.json()); // body parsers after cloudrop
+app.listen(3000);
+```
+
+A parser that reads the body first leaves nothing for cloudrop to read.
 
 `toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and the scheme from the connection,
-never from `X-Forwarded-*` or `:scheme`. It answers `400` rather than guess an origin such as `localhost` when that host
-is missing, sent twice, malformed (userinfo, a path, an invalid port) or names another origin in `host` than in
-`:authority`, since the origin decides the same-origin check. It also answers `400` to a request target that is not a
-path, such as the absolute form `POST http://host/api/cloudrop/upload`: browsers send that form only to proxies, and
-accepting it would let the target choose the origin. A hand-built request without `rawHeaders` is read from `headers`
-alone.
+never from `X-Forwarded-*` or `:scheme`, because that origin decides the same-origin check. Rather than guess an origin
+such as `localhost`, it answers `400` when:
+
+- the request has no `Host` (or `:authority`);
+- `Host` is sent twice;
+- the host is malformed: it carries userinfo, a path or an invalid port;
+- `host` and `:authority` name different origins;
+- the request target is not a path, such as the absolute form `POST http://host/api/cloudrop/upload`. Browsers send that
+  form only to proxies, and accepting it would let the target choose the origin.
+
+A hand-built request without `rawHeaders` is read from `headers` alone.
 
 ### Any runtime with Request and Response
 
@@ -383,8 +419,9 @@ It checks:
 - **`lifecycle`:** whether an enabled rule aborts incomplete multipart uploads across the bucket.
 - **`publicAccess`:** whether a private route stores files on a bucket with a public URL.
 
-A check comes back `unknown` when the credentials may not read that setting (an R2 object token cannot), when the
-storage cannot report it (Wrangler's local R2 answers `501 NotImplemented`), or when no origin was given. With an R2
+`cors` and `lifecycle` come back `unknown` when the credentials may not read that setting (an R2 object token cannot)
+or the storage cannot report it (Wrangler's local R2 answers `501 NotImplemented`). `cors` is also `unknown` when no
+origin was given; `lifecycle` does not depend on origins. With an R2
 admin read token, R2's answers have not been measured yet. Any other storage failure fails the call.
 
 In development (`NODE_ENV=development`, exactly), the handler's first request runs this check once in the background

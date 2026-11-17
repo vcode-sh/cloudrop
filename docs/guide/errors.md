@@ -20,8 +20,8 @@ Every public call returns `{ data, error }` instead of throwing for an expected 
 ```ts
 const { data, error } = await upload("avatar", file);
 if (error) {
-  if (error.code === "UNAUTHORIZED") redirectToSignIn(); // your app's sign-in flow
-  else showError(error.message); // your app's error display
+  if (error.code === "FILE_TOO_LARGE") showError("Pick a file under 5 MB."); // your app's error display
+  else showError(error.message);
 }
 ```
 
@@ -30,7 +30,7 @@ Messages never contain credentials, presigned URLs or raw storage responses. The
 
 **The client has already retried.** A retryable error that reaches your code has been through the client's attempts
 (up to 6 per request, with backoff). Offer the user a retry button rather than retrying in a loop: `retry()` on a job or
-file reuses what already landed (see [Client](client.md#retry)).
+file reuses what is already stored in the bucket (see [Client](client.md#retry)).
 
 **Configuration errors are thrown.** `INVALID_CONFIG` is the one code that is thrown instead of returned: it needs a
 code change, not a retry.
@@ -54,7 +54,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 
 | Code | HTTP | Retryable | What it means | What to do |
 | --- | --- | --- | --- | --- |
-| `UNAUTHORIZED` | 401 | No | `authorize` returned `unauthorized()`, or a plugin refused with this code. The message is the one `authorize` gave. | Ask the user to sign in, then upload again. |
+| `UNAUTHORIZED` | 401 | No | `authorize` returned `unauthorized()`, or a plugin refused with this code. The message is the one `authorize` or the plugin gave. | Show the message. After `authorize` refused, the user usually needs to sign in; a plugin may refuse for another reason, such as a quota. |
 | `ORIGIN_NOT_ALLOWED` | 403 | No | The request came from an origin the handler does not accept. | Add the page's origin to `trustedOrigins`. Behind a proxy, add the app's public origin (see [Troubleshooting](troubleshooting.md#every-request-gets-origin_not_allowed)). |
 | `METHOD_NOT_ALLOWED` | 405 | No | The request was not `POST` (or an `OPTIONS` preflight). | Send `POST`. Check that nothing else is mounted at the same path. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | No | The body was not sent as `Content-Type: application/json`. | Send JSON. The cloudrop client always does; check a proxy or custom client. |
@@ -88,7 +88,9 @@ These come from `cloudrop/client`. The first four never come from the server.
 | `ABORTED` | No | The upload was cancelled through `abort()` or the `signal`. | Nothing, unless the user wants to start again. |
 | `UPLOAD_IN_USE` | No | `resume()` found the upload held in this page or another tab. | Finish or cancel it there, then try again. |
 | `RATE_LIMITED` | Yes | The bucket answered `429` or `503` to every attempt, or a proxy in front of your server answered `429`. | Try again in a moment. |
-| `STORAGE_ERROR` | Yes / No | Retryable: the bucket failed (a `5xx` or `408`) on every attempt. Not retryable: the browser's storage for unfinished uploads could not be read or written (from `resumable()`, `forget()` or `resume()`). | Retry the upload. A browser storage failure never stops uploads; only resuming after a reload may not work. |
+| `STORAGE_ERROR` (from the bucket) | Yes | The bucket answered a `PUT` with `408` or a `5xx` other than `501` on every attempt. A `501` ends the file with `UPLOAD_REJECTED` instead. | Retry the upload. |
+| `STORAGE_ERROR` (from your server) | Yes / No | Your server's call to the storage service failed or was refused, as in the [endpoint table](#upload-endpoint-errors): such as bad credentials, or Wrangler's local R2 refusing a multipart completion. | When retryable, retry. Otherwise check the server log. |
+| `STORAGE_ERROR` (browser storage) | No | The browser's storage for unfinished uploads could not be read or written. Only `resumable()`, `forget()` and `resume()` answer it. | Nothing for the upload: a browser storage failure never stops uploads; only resuming after a reload may not work. |
 | `SERVER_ERROR` | When HTTP 500+ | Your server sent an answer the client cannot read: a wrong `basePath`, a proxy's error page, or another cloudrop version. | Check that `basePath` points at the cloudrop handler and that server and client run the same cloudrop version. |
 | `NOT_FOUND` | No | `resume()` found no unexpired record of that upload: it finished, was cancelled or expired, or persistence is off. | Start the upload again with `start()` or `upload()`. |
 | `INVALID_INPUT` | No | Wrong arguments: no route name, no `File`, options that are not an object, a `signal` that is not an `AbortSignal`, metadata that JSON cannot encode, a different file passed to `resume()`, or a wrong argument to `forget()`. | Fix the call. For `resume()`, ask the user to pick the same file again. |

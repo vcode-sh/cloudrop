@@ -9,7 +9,7 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
 - `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
   answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
 
-Files up to 8 MB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
+Files up to 8 MiB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
 
 The demo sign-in must never ship: any visitor can set that cookie to any name and upload under that user's prefix. A
 real application reads its own signed session in `authorize`.
@@ -72,7 +72,7 @@ CLOUDROP_S3_ACCESS_KEY_ID=cloudrop-local
 CLOUDROP_S3_SECRET_ACCESS_KEY=cloudrop-local-secret
 ```
 
-No CORS rule is needed: Wrangler lets any `localhost` page upload. A file above 8 MB fails at the end with
+No CORS rule is needed: Wrangler lets any `localhost` page upload. A file above 8 MiB fails at the end with
 `STORAGE_ERROR: The storage service refused the request. Contact the site owner if this keeps happening.`: Wrangler's
 local R2 does not implement ListParts, which the server needs to verify a multipart upload (the server log says "The
 storage service does not support this request"). The client then sends `/abort`, which removes the parts; if a run
@@ -130,9 +130,9 @@ rule it already has):
   goes offline the client pauses the files that are queued or uploading, which then show `paused`, and resumes them when
   it is back online; a job started offline pauses at once.
 - **Retry:** once a run has ended, **Retry** in a failed file's row calls that handle's `retry()`, and **Retry** in the
-  totals row calls `job.retry()`. A failed file keeps its ticket and the parts that landed, so a retry sends only the
-  missing parts and `/complete`; after an error the ticket cannot fix (`UPLOAD_REJECTED`, `UPLOAD_EXPIRED`,
-  `INVALID_TOKEN`, `VERIFICATION_FAILED`) or once the ticket expired, it asks `/upload` for a new ticket and a new key,
+  totals row calls `job.retry()`. A failed file keeps its ticket and the parts already stored in the bucket, so a retry sends
+  only the missing parts and `/complete`; after an error the ticket cannot fix (`UPLOAD_REJECTED`, `UPLOAD_EXPIRED`,
+  `INVALID_TOKEN`, `VERIFICATION_FAILED`, `NO_SUCH_UPLOAD`) or once the ticket expired, it asks `/upload` for a new ticket and a new key,
   and the file's bytes start again from 0. The retry's requests join the same table and the summary shows the files'
   latest outcomes, with the time counted from Upload.
 - **Unfinished uploads:** the multipart uploads this browser saved and has not finished, from
@@ -220,6 +220,7 @@ directory with `bunx playwright install --only-shell chromium`.
 - A lifecycle rule that aborts incomplete multipart uploads, so parts of an upload that never finished do not stay
   in the bucket.
 
-In development the server checks the bucket once and logs a warning for each of these that is missing. The exact rules
-for R2 (in Wrangler's format too) and S3, the commands that set them and the token permissions:
-[Bucket setup](../../docs/guide/bucket-setup.md).
+In development the server checks the bucket once and logs a warning when the CORS rule misses the origin, a signed
+header or `ETag`, when the lifecycle rule is missing, or when a private route stores files on a public bucket. It does
+not check `Retry-After`. The exact rules for R2 (in Wrangler's format too) and S3, the commands that set them and the
+token permissions: [Bucket setup](../../docs/guide/bucket-setup.md).

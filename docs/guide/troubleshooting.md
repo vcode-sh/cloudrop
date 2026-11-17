@@ -71,7 +71,9 @@ refused the request. Contact the site owner if this keeps happening." The server
 support this request".
 
 **Wrangler's local R2 does not implement `ListParts`**, which the server needs to verify a multipart upload. Use RustFS
-or real R2 to test multipart uploads. The client sends `/abort` after the failure, which removes the parts.
+or real R2 to test multipart uploads. After the failure, `upload()` sends `/abort` at once, which removes the parts. A
+file of `start()` keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or the ticket's expiry; call
+`job.abort()` to remove them sooner.
 `checkBucket` there reports CORS and lifecycle as `unknown`, since Wrangler cannot report bucket settings. Details:
 [`examples/next`](../../examples/next/README.md#run-with-wrangler-single-uploads-only).
 

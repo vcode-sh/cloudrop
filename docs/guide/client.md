@@ -21,7 +21,7 @@ each route's `onComplete` returns.
 
 | Option | What it does | Default |
 | --- | --- | --- |
-| `basePath` | Where the server's handler is mounted: a path on this page's origin, or an absolute URL such as `"https://api.example.com/api/cloudrop"`. No trailing slash, query or fragment. | `"/api/cloudrop"` |
+| `basePath` | Where the server's handler is mounted: a path on this page's origin, or an absolute URL such as `"https://api.example.com/api/cloudrop"`. No trailing slash, query or fragment. For a handler on another origin, list the page's origin in the server's `trustedOrigins`, or every call gets `ORIGIN_NOT_ALLOWED`. | `"/api/cloudrop"` |
 | `fetch` | Replaces the global `fetch`, for tests and runtimes that bring their own. Passing it also sends bucket `PUT`s through it (see [Transports](#transports-xhr-or-fetch)). | global `fetch` |
 | `concurrency` | How many bucket `PUT`s the client sends at once, across all its uploads: `"auto"` or a whole number from 1 to 16 (see [Concurrency and order](#concurrency-and-order)). | `"auto"` |
 | `order` | Which `PUT`s go first when they wait for a connection: `"added"` or `"smallest-first"`. | `"added"` |
@@ -60,7 +60,9 @@ Pass a list, such as an array or `input.files`, and `upload()` resolves to an `U
 settled:
 
 ```ts
-const { data, error } = await client.upload("files", input.files);
+const files = input.files; // a FileList, or null when the input has none
+if (!files || files.length === 0) return;
+const { data, error } = await client.upload("files", files);
 
 for (const outcome of data?.files ?? []) {
   if (outcome.status === "done") console.log(outcome.name, outcome.result.file.key);
@@ -81,17 +83,21 @@ for (const outcome of data?.files ?? []) {
 `start()` gives you a handle to follow and control the upload while it runs:
 
 ```ts
-const job = client.start("files", input.files, { metadata, signal }); // a File, an array or input.files
+const files = input.files; // a FileList, or null when the input has none
+if (!files || files.length === 0) return;
+const job = client.start("files", files, { metadata, signal }); // a File, an array or a FileList
 const unsubscribe = job.subscribe(() => render(job.getSnapshot()));
 
-job.files[0].pause(); job.files[0].resume(); job.files[0].abort(); // one file
+const first = job.files[0];
+first?.pause(); first?.resume(); first?.abort(); // one file
 job.pause(); job.resume(); job.abort();                            // every file of the job
 
 const { data, error } = await job.done;
 const again = await job.retry(); // or job.files[0].retry(): the failed files again
 ```
 
-`render` stands for your own rendering code.
+`input`, `metadata`, `signal` and `render` stand for your page's file input, the route's metadata, an optional
+`AbortSignal` and your own rendering code.
 
 - `start()` sends every file through one `/upload`, then runs each file on its own: one file failing or being
   cancelled never stops another.
@@ -135,18 +141,22 @@ uploads.
 
 ```text
 queued -> uploading -> completing -> done
+completing -> uploading                     (/complete reported parts missing)
 queued or uploading -> paused -> (resume) -> queued
 any status that is not final -> failed or aborted
 ```
 
 A file is `queued` until its first bucket `PUT` gets a connection, `uploading` while its bytes go to the bucket, and
-`completing` once every byte is sent and `/complete` runs. A resumed file is `queued` again until it gets a connection.
+`completing` once every byte is sent and `/complete` runs. When `/complete` reports parts missing, the file goes back to
+`uploading` to send them. A file resumed after `pause()` is `queued` again until it gets a connection. A file resumed
+after a reload starts `queued` while its record is checked, then goes to `completing`, since its first request is
+`/complete` (see [Resume after reload](resume.md#the-server-is-asked-first)).
 
 ### Pause and resume
 
-- `pause()` stops a queued or uploading file's requests and keeps the parts that landed. A file that is completing (its
-  bytes all sent) ignores it.
-- `resume()` sends only the parts that have not landed. A single `PUT` starts again from the beginning.
+- `pause()` stops a queued or uploading file's requests and keeps the parts already stored in the bucket. A file that
+  is completing (its bytes all sent) ignores it.
+- `resume()` sends only the parts not yet stored in the bucket. A single `PUT` starts again from the beginning.
 - `job.pause()` and `job.resume()` do that for every file.
 
 ### Cancel
@@ -162,7 +172,8 @@ The one exception: a file after a `/complete` that may have succeeded is kept, n
 - `job.files[n].retry()` sends a failed file again and resolves with its outcome.
 - `job.retry()` does that for every failed file and resolves with an `UploadResult` of the job's current outcomes once
   every file has settled. Its `data` is `null` when its `/upload` for every file was refused, as with `done`.
-- A retry reuses the file's ticket when it can, so the parts that landed are not sent again and the bytes stay counted.
+- A retry reuses the file's ticket when it can, so the parts already stored in the bucket are not sent again and the
+  bytes stay counted.
 - It asks `/upload` for a new ticket when the old one expired or was given up, or when the failure was one a new attempt
   with the same ticket cannot fix: `UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UPLOAD_REJECTED`, `VERIFICATION_FAILED`,
   `NO_SUCH_UPLOAD`, or a file that never got a ticket. `job.retry()` asks for all of those files in one `/upload`. On a
@@ -177,6 +188,8 @@ The one exception: a file after a `/complete` that may have succeeded is kept, n
 - Files up to the server's `multipartThreshold` (64 MiB by default) go in one `PUT`. Larger ones go in parts of 8 MiB
   (16 MiB from 256 MiB, larger only when a file would need over 10,000 parts), read with `Blob.slice`, at most four
   parts of one file at a time.
+- Every part except the last has exactly the same size. R2 requires equal part sizes in a multipart upload, so the
+  server plans one part size per file and the client cuts the file by that plan.
 - A request is tried up to 6 times with backoff: a random wait up to 0.5 s, then up to 1 s, 2 s and so on, at most 20 s.
   When the answer carries `Retry-After`, the wait is at least that long (at most 20 s).
 - An expired upload URL is renewed once.
@@ -241,7 +254,8 @@ size at 100 KiB/s.
 - **Cancelling** returns `ABORTED` and tells the server to clean up with `/abort`.
 - **A file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so `upload()`
   answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
-- **A failed file of `start()`** keeps its ticket and the parts that landed, so `retry()` can reuse them, until
+- **A failed file of `start()`** keeps its ticket and the parts already stored in the bucket, so `retry()` can reuse
+  them, until
   `abort()` of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours). `abort()` and
   `pagehide` tell the server with `/abort`; after expiry, the bucket's lifecycle rule removes unfinished parts. A failed
   single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not retry.
