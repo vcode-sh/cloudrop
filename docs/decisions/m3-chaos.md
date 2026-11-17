@@ -110,8 +110,11 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   M6's release gate.
 - **Why:** §13 makes chaos tests a 1.0 release gate; a soak running every night from M3 finds a rare failure long
   before the release instead of at it.
-- **If wrong:** a flaky soak sends nightly noise; the printed seed makes each failure replayable, so a flake is a bug
-  to fix rather than a row to drop.
+- **If wrong:** a flaky soak sends nightly noise. The seed in the test's title fixes the files and the fault stream,
+  but requests draw from that stream in the order they reach the proxy, and parts run concurrently, so a replay gets
+  the same mix of faults, not always the same fault on the same request. A red run therefore prints its own trace (each
+  request's label, fault, outcome and bytes), so a flake is a bug to fix from that trace rather than a row to drop.
+  Exact replay (a fault drawn per request, whatever the arrival order) is a proxy follow-up.
 - **Status:** decided (plan Task 7).
 - **Source:** chaos design §3, §4 row 18; research §4 row 18, §5 Q8.
 - **Visible in:** `packages/cloudrop/src/chaos/uploads.soak.integration.test.ts` (its own Vitest project `soak`, so
