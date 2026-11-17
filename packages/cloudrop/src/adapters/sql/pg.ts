@@ -4,7 +4,7 @@
 
 import type { SqlRow, SqlStatement, TransactionalSqlExecutor } from "../../store/sql/executor.ts";
 
-/** What the executor calls on a node-postgres pool or client; `onComplete` receives the transaction's client as `tx`. */
+/** What the executor calls on a node-postgres pool or client; `onComplete` gets the transaction's client as `tx`. */
 export interface PgQueryable {
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
 }
@@ -29,8 +29,8 @@ async function inOrder(client: PgQueryable, statements: readonly SqlStatement[])
 }
 
 /**
- * An executor over a node-postgres pool: `sqlStore(pgExecutor(new Pool({ connectionString })))`. Leave the connections at
- * Postgres's default isolation, READ COMMITTED: the store's guarantees rely on it (set no
+ * An executor over a node-postgres pool: `sqlStore(pgExecutor(new Pool({ connectionString })))`. Leave the
+ * connections at Postgres's default isolation, READ COMMITTED: the store's guarantees rely on it (set no
  * `default_transaction_isolation`).
  */
 export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> {
