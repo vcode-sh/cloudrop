@@ -295,9 +295,8 @@ await client.forget();
   gives the name and size to ask for. `start()` and `upload()` never match a file against a record: the same file
   passed to them is uploaded again under a new key.
 - **The same file** means equal name, size, `lastModified` and type, and an equal SHA-256 of its first and last 64 KiB
-  (of the whole file up to 128 KiB). On a page that is not a secure context, such as plain HTTP on a LAN address, there
-  is no `crypto.subtle`, and only the first four are compared. It is a heuristic: a file changed only in the middle,
-  with the same timestamp, passes.
+  (of the whole file up to 128 KiB). It is a heuristic: a file changed only in the middle, with the same timestamp,
+  passes.
 - **`resume(upload, file, options?)`** returns an `UploadJob` of one file with everything a job of `start()` has:
   `subscribe`, `getSnapshot`, `pause`, `resume`, `abort`, `retry` and `done`. The route and the metadata come from the
   record; `signal` is the only option. Its one file is `queued` while the record, the file and the lock are checked.
@@ -334,8 +333,9 @@ await client.forget();
 - **Two tabs.** The page that holds an upload's ticket holds a Web Lock on it (`cloudrop:upload:<id>`) as long as it
   keeps the ticket: while the file runs, while a failed file waits for `retry()`, and until the server answered the
   `/abort` that gives it up. `resume()` of an upload held in another tab, or in this page, ends with `UPLOAD_IN_USE` and
-  sends nothing: finish or cancel it there. `resumable()` still lists held uploads. Without Web Locks (a page that is
-  not a secure context) two tabs may send the same parts: the stored file is still right, but the bytes are wasted.
+  sends nothing: finish or cancel it there. `resumable()` still lists held uploads. A record is saved only once its
+  lock is held: without the lock, a second holder could complete an upload whose `/abort` this page then sends,
+  deleting the stored file.
 - **Namespace and sign-out.** Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by
   default): a client sees only its namespace's records, and the namespace is fixed when the client is created, so create
   a new client when the user changes. Call `forget()` at sign-out: it deletes the namespace's records and resolves
@@ -345,9 +345,12 @@ await client.forget();
   the browser profile for up to 24 hours, and another user signed in on the same profile and namespace could finish
   them. They stay the first user's files, since `authorize` runs only in `/upload`: re-check the session in `onComplete`
   when that matters.
-- **Off, or no storage.** With `persist: false`, or where there is no `indexedDB` (Node, Bun, Deno, Workers), nothing
-  is read or written: `resumable()` resolves `[]`, `resume()` ends with `NOT_FOUND` and `forget()` with
-  `{ forgotten: 0 }`. `resumable()` and `forget()` never reject; when the browser's storage fails they resolve
+- **Off, or no storage.** Resuming needs a secure context (HTTPS, or `localhost` in development), where browsers have
+  Web Locks. With `persist: false`, or where there is no `indexedDB` (Node, Bun, Deno, Workers) or no Web Locks (a page
+  served over plain HTTP, such as a LAN address), nothing is read or written: `resumable()` resolves `[]`, `resume()`
+  ends with `NOT_FOUND` and `forget()` with `{ forgotten: 0 }`. The same goes where the browser refuses the lock (a
+  document no longer active, an opaque origin): that upload keeps no record, and still uploads. The client looks for
+  `indexedDB` and Web Locks once, when it is created: create it after any polyfill for them. `resumable()` and `forget()` never reject; when the browser's storage fails they resolve
   `STORAGE_ERROR`. A storage failure never fails, pauses or slows an upload. Records live in the origin's best-effort
   storage, which a browser may evict under pressure; cloudrop never calls `navigator.storage.persist()`, since Firefox
   would prompt the user for it, so call it yourself if you want persistent storage.

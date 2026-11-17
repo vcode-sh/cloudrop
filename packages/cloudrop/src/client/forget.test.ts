@@ -2,7 +2,7 @@
 // client. resumable() lists the namespace's unexpired records newest first, as exactly M3-U77's fields, by route when
 // asked, and deletes the expired ones. forget() deletes the namespace's records or, with { all: true }, every one,
 // refuses any other argument, and leaves a running upload running. A failed store is STORAGE_ERROR; with persistence
-// off or no indexedDB nothing is kept and nothing can be resumed.
+// off, no indexedDB or no Web Locks (M3-U88) nothing is kept and nothing can be resumed.
 // Oracle: what the fake IndexedDB holds, the requests the fixture saw, literal records and literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -154,17 +154,28 @@ describe("forget()", () => {
 });
 
 describe.each([
-  { name: "persist is false", options: { persist: false }, noIndexedDb: false },
-  { name: "the runtime has no indexedDB", options: {}, noIndexedDb: true },
-])("when $name (spec §3.7)", ({ options, noIndexedDb }) => {
-  it("resumable() lists [], forget() counts 0 and resume() is NOT_FOUND without a request", async () => {
-    const { client, fixture } = persistFixture({ options, noIndexedDb });
+  { name: "persist is false", setup: { options: { persist: false } } },
+  { name: "the runtime has no indexedDB", setup: { noIndexedDb: true } },
+  {
+    name: "the runtime has no Web Locks, as a page that is not a secure context (M3-U88)",
+    setup: { webLocks: "missing" as const },
+  },
+])("when $name (spec §3.7)", ({ setup }) => {
+  it("resumable() lists [], forget() counts 0 and resume() is NOT_FOUND without a request, a record left as it is", async () => {
+    const { client, db, locks, fixture } = persistFixture(setup);
+    // Saved after the client was created, by a store that has indexedDB and Web Locks: the client looked for them once,
+    // when it was created (M3-U89), so it reads nothing even now.
+    vi.stubGlobal("indexedDB", db.indexedDB);
+    vi.stubGlobal("navigator", { locks: locks.locks });
+    createRecords(true).save(recordOf("x"));
+    await db.settled();
     const upload = { ...recordOf("x"), route: "files" };
     expect({
       resumable: await client.resumable(),
       forget: await client.forget({ all: true }),
       resume: brief((await client.resume(upload, fourParts()).done).error),
       sent: fixture.requests,
+      stored: Object.keys(db.stored()),
     }).toEqual({
       resumable: { data: [], error: null },
       forget: { data: { forgotten: 0 }, error: null },
@@ -173,6 +184,7 @@ describe.each([
         message: "This upload can no longer be resumed: it finished, was cancelled or expired. Start it again.",
       },
       sent: [],
+      stored: ["x"],
     });
   });
 });

@@ -1,7 +1,7 @@
-// Contract: spec §3.5 and rulings M3-U69 and M3-U73 as audit C2 amends them. lockUpload asks for the Web Lock
-// `cloudrop:upload:<id>` without waiting and holds it until release() is called, which may come before the answer; it
-// answers false when another holder has that lock, and true, holding nothing, where the page has no navigator.locks or
-// may not use it.
+// Contract: spec §3.5 and rulings M3-U69, M3-U73 and M3-U88. lockUpload asks for the Web Lock `cloudrop:upload:<id>`
+// without waiting and holds it until release() is called, which may come before the answer; it answers false when
+// another holder has that lock, this page included, and undefined, holding nothing, where the page has no
+// navigator.locks or the browser refuses the request.
 // Oracle: the lock names the fake LockManager says this page holds, and the literal name the ruling fixes.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,18 +22,20 @@ function setup() {
 const everyMicrotask = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("lockUpload", () => {
-  it("holds cloudrop:upload:<id> until it is released, then lets it go", async () => {
+  it("holds cloudrop:upload:<id> until it is released, refusing this page meanwhile, then lets it go", async () => {
     const fake = setup();
 
     const lock = lockUpload("7");
     const taken = await lock.taken;
     const whileHeld = fake.held();
+    const again = await lockUpload("7").taken;
     lock.release();
     await everyMicrotask();
 
-    expect({ taken, whileHeld, afterwards: fake.held() }).toEqual({
+    expect({ taken, whileHeld, again, afterwards: fake.held() }).toEqual({
       taken: true,
       whileHeld: ["cloudrop:upload:7"],
+      again: false,
       afterwards: [],
     });
   });
@@ -75,16 +77,16 @@ describe("lockUpload", () => {
   it.each([
     { name: "a navigator without locks (a page over plain HTTP)", navigator: {} },
     { name: "no navigator at all", navigator: undefined },
-  ])("answers true with $name", async ({ navigator }) => {
+  ])("answers undefined with $name", async ({ navigator }) => {
     vi.stubGlobal("navigator", navigator);
 
-    expect(await lockUpload("7").taken).toBe(true);
+    expect(await lockUpload("7").taken).toBeUndefined();
   });
 
-  it("answers true when the browser refuses the request (a document that is no longer active)", async () => {
-    const request = () => Promise.reject(new DOMException("The document is not fully active.", "InvalidStateError"));
-    vi.stubGlobal("navigator", { locks: { request } });
+  it("answers undefined when the browser refuses the request (a document that is no longer active)", async () => {
+    const fake = setup();
+    fake.refuse();
 
-    expect(await lockUpload("7").taken).toBe(true);
+    expect(await lockUpload("7").taken).toBeUndefined();
   });
 });

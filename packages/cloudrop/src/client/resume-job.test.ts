@@ -2,7 +2,8 @@
 // the real client after a simulated reload: a resumed job is any job. It pauses and resumes while it sends the missing
 // parts; a cancel sends /abort with the record's token and lets the record and the lock go; a failure keeps both, and
 // retry() asks /complete again, with the free PARTS_MISSING still unused and the start over still applying. In the page
-// that holds an upload's ticket, resume() of it is UPLOAD_IN_USE, and once that page gives the ticket up, NOT_FOUND.
+// that holds an upload's ticket, a failed file or a resume() running, resume() of it is UPLOAD_IN_USE, and once that
+// page gives the ticket up, NOT_FOUND.
 // Oracle: the requests the fixture saw and the bodies it read, the tickets /upload answered, what the fake IndexedDB
 // holds, the locks the fake LockManager holds, and the bucket's object hashed by node:crypto against the file's bytes.
 
@@ -153,6 +154,20 @@ describe("a resumed file whose probe got no answer (M9)", () => {
 });
 
 describe("in the page that holds the upload's ticket (audit C2)", () => {
+  it("a second resume() of one upload while the first runs is UPLOAD_IN_USE, and sends nothing", async () => {
+    const setup = await reloaded(gate(partThree));
+    const first = setup.client.resume(setup.upload, fourParts());
+    const second = setup.client.resume(setup.upload, fourParts());
+    const [one, two] = await Promise.all([first.done, second.done]);
+    await setup.drained();
+
+    expect({ first: one.data?.files[0]?.status, second: two.error?.code, sent: setup.sent() }).toEqual({
+      first: "done",
+      second: "UPLOAD_IN_USE",
+      sent: ["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
+    });
+  });
+
   it("resume() of a failed file it keeps is UPLOAD_IN_USE; once abort() gave the ticket up, NOT_FOUND", async () => {
     const setup = persistFixture({
       fault: (call) => (call.label === "PUT part 2" ? errorResponse(400, "InvalidArgument", "Invalid.") : undefined),

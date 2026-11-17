@@ -279,8 +279,9 @@ Design: [`2026-11-16-resume-design.md`](2026-11-16-resume-design.md); decisions 
   Single-PUT uploads are not persisted (`M3-U64`). A record carries the client's `namespace` (default `""`), and a
   client never sees another namespace's records (`M3-U62`, `M3-U79`).
 - The fingerprint is the SHA-256 of the first and last 64 KiB (of the whole file up to 128 KiB). A picked file matches
-  when its name, size, `lastModified`, type and fingerprint equal the record's; without `crypto.subtle` (a page that is
-  not a secure context) the hash is left out. A match is a heuristic until `checksums()` (M5) (`M3-U68`).
+  when its name, size, `lastModified`, type and fingerprint equal the record's. A match is a heuristic until
+  `checksums()` (M5) (`M3-U68`). Resuming needs a secure context, where `crypto.subtle` and Web Locks exist: without
+  Web Locks nothing is persisted (`M3-U88`).
 - `client.resumable(route?)` lists unfinished uploads, newest first, without their token, key or metadata. The app
   passes the file the user picked again to `client.resume(upload, file)`, which returns an `UploadJob` of that file
   (`M3-U63`, `M3-U76`, `M3-U77`). The client asks `/complete` first, with the saved token, and sends only what it

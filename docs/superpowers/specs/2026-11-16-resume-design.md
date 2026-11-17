@@ -47,7 +47,7 @@ const forgotten = await client.forget();                                // Resul
   `abort`, `retry`, `done`. Its one file's id is the client's next sequence number, as for any job (`M3-U2`). Options:
   `signal` only; the route and metadata come from the record.
 - `resumable()` and `forget()` never reject. `resumable()` resolves `ok([])` when persistence is off or the runtime has
-  no `indexedDB`; `forget()` resolves `ok({ forgotten: 0 })` there.
+  no `indexedDB` or no Web Locks (§3.7); `forget()` resolves `ok({ forgotten: 0 })` there.
 - `forget()` deletes every record of the client's namespace (the sign-out call). `forget({ all: true })` deletes every
   record of every namespace of this origin.
 - New client error code `UPLOAD_IN_USE` (client-only, beside `ABORTED`): the upload is being sent by another tab of
@@ -60,9 +60,9 @@ const forgotten = await client.forget();                                // Resul
 | Case | Code | Message (exact wording is the plan's) |
 |---|---|---|
 | `file` is not a `File`, or `upload` is not an object with a string `id` | `INVALID_INPUT` | what to pass |
-| no record with that `id` in this namespace, or it expired | `NOT_FOUND` | the upload can no longer be resumed; start it again |
+| no record with that `id` in this namespace, or it expired, or persistence is unavailable (§3.7) | `NOT_FOUND` | the upload can no longer be resumed; start it again |
 | `file` does not match the record (§3.3) | `INVALID_INPUT` | pick the same file the upload started with |
-| another tab holds the upload (§3.5) | `UPLOAD_IN_USE` | it is being sent in another tab; finish or close it there |
+| another tab, or this page, holds the upload (§3.5) | `UPLOAD_IN_USE` | it is being sent in this browser; finish or cancel it there |
 
 Every other outcome is the job's normal `UploadResult`.
 
@@ -99,9 +99,8 @@ Never a presigned URL, an ETag or a part list. A single-PUT ticket is never save
 
 `resume(upload, file)` accepts `file` only when `name`, `size`, `lastModified` and `type` equal the record's and its
 fingerprint equals the record's. The fingerprint is the hex SHA-256 of the file's first 64 KiB followed by its last
-64 KiB (the whole file when it is at most 128 KiB), computed with `crypto.subtle`. Where `crypto.subtle` is missing (a
-page served over plain HTTP on a LAN address), the fingerprint is the empty string on both sides and matching rests on
-name, size, `lastModified` and type. A match is a heuristic: an edit in the middle of a file with the same edges and
+64 KiB (the whole file when it is at most 128 KiB), computed with `crypto.subtle`, which every page that can resume has:
+resuming needs a secure context (§3.7, `M3-U88`). A match is a heuristic: an edit in the middle of a file with the same edges and
 timestamp is not seen (M5's `checksums()` will close it). Hashing two 64 KiB slices costs well under a millisecond.
 
 ### 3.4 Resuming: ask the server first
@@ -125,10 +124,15 @@ A probe answered with `NETWORK_ERROR` or `SERVER_ERROR` sets `mayBeComplete` as 
 
 ### 3.5 Two tabs
 
-Every run of a persisted upload (from `start()`, `resume()` or `retry()`) holds a Web Lock named
-`cloudrop:upload:<id>` from its first request to its settling, where `navigator.locks` exists. `resume()` asks for the
-lock without waiting; when another tab holds it, the job ends with `UPLOAD_IN_USE` and sends nothing. Without
-`navigator.locks` two tabs may send the same parts: harmless to the result (the server verifies), but wasted bytes.
+A persisted upload holds a Web Lock named `cloudrop:upload:<id>` for as long as the page keeps its ticket alive
+(`M3-U73`): from the ticket's arrival (`start()`, `upload()`, a retry's new ticket) or a `resume()` whose checks passed,
+until the page gives the ticket up. Its record is saved only once the lock is held. `resume()` asks for the lock without
+waiting; when another holder has it, another tab or this page, the job ends with `UPLOAD_IN_USE` and sends nothing.
+
+The lock is the only thing that keeps a second holder from completing an upload whose ticket a failed entry still
+holds. That entry's `/abort` (pagehide, a cancel, the job's signal) would then delete the finished object: data loss
+after the client reported success, not wasted bytes. So where there are no Web Locks, or the browser refuses the
+request, nothing is persisted (§3.7, `M3-U88`).
 
 ### 3.6 `resumable()`
 
@@ -138,8 +142,11 @@ server.
 
 ### 3.7 Off and unsupported
 
-`persist: false`, or no `indexedDB` in the runtime: nothing is read or written, `resumable()` returns `[]`,
-`resume()` ends with `NOT_FOUND`, `forget()` returns 0. The library never calls `navigator.storage.persist()` (Firefox
+`persist: false`, or a runtime without `indexedDB` or without Web Locks (`navigator.locks`, which exists only in a
+secure context: HTTPS or `localhost`): nothing is read or written, `resumable()` returns `[]`, `resume()` ends with
+`NOT_FOUND`, `forget()` returns 0. The client looks for both once, when it is created (`M3-U89`). Where the browser
+refuses a lock request (a document no longer active, an opaque origin), a new ticket gets no record and `resume()` ends
+with `NOT_FOUND` (`M3-U88`). The library never calls `navigator.storage.persist()` (Firefox
 would prompt); an app that wants persistent storage calls it itself.
 
 ## 4. Security
@@ -183,8 +190,8 @@ lazily). The client still imports only `errors.ts`, `input.ts`, `plan.ts` and `p
   it holds no URL; deleted on done, on abort, on pagehide of a failed file, on expiry; kept for a failed file; the probe
   completes a finished upload with no PUT; `PARTS_MISSING` sends exactly the missing parts and does not consume a
   repair round; expired/invalid token takes one new `/upload` and replaces the record; mismatched name, size,
-  `lastModified`, type and edge bytes are refused; no `crypto.subtle` falls back; `UPLOAD_IN_USE` when the lock is
-  held; namespaces never mix; `forget()` and `forget({ all: true })`; store errors never fail an upload and are
+  `lastModified`, type and edge bytes are refused; no Web Locks, or a refused lock request, keeps nothing;
+  `UPLOAD_IN_USE` when the lock is held; namespaces never mix; `forget()` and `forget({ all: true })`; store errors never fail an upload and are
   reported by `resumable()`/`forget()`; `persist: false` and no `indexedDB` do nothing; ordered operations (a delete
   right after a save wins).
 - **Browser lane (RustFS and R2):** a multipart upload interrupted by a reload, the same file picked again, only the

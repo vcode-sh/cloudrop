@@ -1,16 +1,12 @@
 // Contract: spec §3.3 of the resume design. The fingerprint is the hex SHA-256 of the file's first 64 KiB followed by
-// its last 64 KiB, or of the whole file up to 128 KiB, and "" where crypto.subtle is missing; a picked file is the
-// record's file only when its name, size, lastModified, type and fingerprint all equal the record's.
+// its last 64 KiB, or of the whole file up to 128 KiB; a picked file is the record's file only when its name, size,
+// lastModified, type and fingerprint all equal the record's.
 // Oracle: SHA-256 from node:crypto (not WebCrypto, which the code uses) over byte ranges written as literal offsets.
 
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { fingerprintOf, isSameFile } from "./fingerprint.ts";
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 const sha256 = (...ranges: Uint8Array[]) => {
   const hash = createHash("sha256");
@@ -66,17 +62,6 @@ describe("fingerprintOf", () => {
     const edited = await fingerprintOf(fileOf(changedAt(204_800, offset)));
 
     expect(edited === original).toBe(same);
-  });
-
-  it("is empty where crypto.subtle is missing, and the match then rests on the other facts", async () => {
-    vi.stubGlobal("crypto", {});
-    const file = fileOf(offsetBytes(1000));
-    const record = { name: file.name, size: 1000, type: file.type, lastModified: file.lastModified, fingerprint: "" };
-
-    expect({ fingerprint: await fingerprintOf(file), same: await isSameFile(record, file) }).toEqual({
-      fingerprint: "",
-      same: true,
-    });
   });
 });
 

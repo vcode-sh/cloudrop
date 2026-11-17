@@ -17,38 +17,43 @@ import type { Job } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";
 import type { Upload, UploadContext } from "./upload.ts";
 
-/** `entry`'s upload under the ticket that just arrived; a persisted one is saved and locked at once. */
+/** `entry`'s upload under the ticket that just arrived; a persisted one is locked at once, and saved once locked. */
 export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): Upload {
   const { records, namespace } = context;
-  // A single PUT cannot resume, and with persistence off nothing could resume it: neither is saved nor locked.
-  const persisted = ticket.kind === "multipart" && records.enabled;
-  if (persisted) {
+  // A single PUT cannot resume, and with persistence off nothing could resume it: neither is saved nor locked. The
+  // upload does not wait for the lock: no other holder can know an id /upload just made (ruling M3-U81).
+  let unlock = () => {};
+  if (ticket.kind === "multipart" && records.enabled) {
+    const lock = lockUpload(ticket.id);
+    unlock = lock.release;
     const { file } = entry;
-    // Queued now, while the file's edges are hashed: a letGo of a file that ends at once is queued after it (M3-U80).
-    // A file the browser can no longer read rejects, and the store drops the save.
+    // Queued now, while the lock is asked for and then the file's edges are hashed: a letGo of a file that ends at once
+    // is queued after it (M3-U80). Saved only under the lock (M3-U88): a record no lock guards could be resumed while
+    // this page still holds the ticket, whose /abort would then delete the finished object. A refused lock, or a file
+    // the browser can no longer read, rejects, and the store drops the save.
     records.save(
-      fingerprintOf(file).then((fingerprint) => ({
-        id: ticket.id,
-        namespace,
-        route: args.route,
-        // What /upload received: a structured clone would keep what JSON leaves out, and throw on a function (I12).
-        metadata: args.metadata === undefined ? undefined : JSON.parse(JSON.stringify(args.metadata)),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        lastModified: file.lastModified,
-        fingerprint,
-        token: ticket.token,
-        key: ticket.key,
-        partSize: ticket.partSize,
-        partCount: ticket.partCount,
-        expiresAt: ticket.expiresAt,
-        savedAt: Date.now(),
-      })),
+      lock.taken
+        .then((taken) => (taken ? fingerprintOf(file) : Promise.reject()))
+        .then((fingerprint) => ({
+          id: ticket.id,
+          namespace,
+          route: args.route,
+          // What /upload received: a structured clone would keep what JSON leaves out, and throw on a function (I12).
+          metadata: args.metadata === undefined ? undefined : JSON.parse(JSON.stringify(args.metadata)),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          lastModified: file.lastModified,
+          fingerprint,
+          token: ticket.token,
+          key: ticket.key,
+          partSize: ticket.partSize,
+          partCount: ticket.partCount,
+          expiresAt: ticket.expiresAt,
+          savedAt: Date.now(),
+        })),
     );
   }
-  // Without waiting for the answer: no other holder can know an id /upload just made (ruling M3-U81).
-  const unlock = persisted ? lockUpload(ticket.id).release : () => {};
   return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe: false };
 }
 

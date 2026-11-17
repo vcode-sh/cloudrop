@@ -1,7 +1,7 @@
 // Contract: resume spec §2.1, §3.3 and §3.6 with rulings M3-U72 and M3-U76 and the plan audit's I7, through the real
 // client after a simulated reload. resume() refuses, before any request and leaving the record as it was, wrong
-// arguments, an upload with no unexpired record in the namespace, a store it cannot read, a different file and an
-// upload another tab holds; a cancel while it checks ends it ABORTED the same way, and a refused job stops hearing its
+// arguments, an upload with no unexpired record in the namespace or a lock the browser refuses (M3-U88), a store it
+// cannot read, a different file and an upload another tab holds; a cancel while it checks ends it ABORTED the same way, and a refused job stops hearing its
 // signal.
 // Oracle: what the fake IndexedDB holds, the locks the fake LockManager holds, the requests the fixture saw and literal
 // messages. Each field of the file match is refused in fingerprint.test.ts; here one fact and the edge bytes stand for
@@ -115,6 +115,13 @@ describe("resume() refuses before any request, leaving the record as it was", ()
       name: "a record of another namespace",
       change: (setup: Setup) => {
         setup.client = setup.reload({ namespace: "user-12" });
+        return setup.upload;
+      },
+    },
+    {
+      name: "a browser that refuses the lock, where nothing can be resumed (M3-U88)",
+      change: (setup: Setup) => {
+        setup.locks.refuse();
         return setup.upload;
       },
     },

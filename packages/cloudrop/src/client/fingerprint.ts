@@ -4,12 +4,10 @@
 const EDGE = 64 * 1024;
 
 /**
- * Hex SHA-256 of the first 64 KiB then the last 64 KiB (the whole file up to 128 KiB); "" without crypto.subtle.
- * Rejects only when the browser can no longer read the file.
+ * Hex SHA-256 of the first 64 KiB then the last 64 KiB (the whole file up to 128 KiB). Rejects only when the browser
+ * can no longer read the file. Persistence runs only in a secure context, where crypto.subtle exists (M3-U88).
  */
 export async function fingerprintOf(file: File): Promise<string> {
-  // Missing on a page served over plain HTTP from a LAN address: matching then rests on the other facts.
-  if (!globalThis.crypto?.subtle) return "";
   const edges = file.size <= 2 * EDGE ? file : new Blob([file.slice(0, EDGE), file.slice(-EDGE)]);
   const digest = await crypto.subtle.digest("SHA-256", await edges.arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");

@@ -2,8 +2,9 @@
 // retry's new ticket replaces the record under the new id and moves the lock; NO_SUCH_UPLOAD makes retry() ask for a
 // new ticket, also after a /complete that got no answer (M3-U74, M3-U83); upload() persists too, deleting the record
 // with its /abort and keeping it, without the lock, when a /complete may have finished the file (M3-U82); a store that
-// fails in any way, or a file the browser can no longer read, changes nothing the upload sends; with persistence off or
-// no indexedDB nothing is hashed, stored or locked.
+// fails in any way, or a file the browser can no longer read, changes nothing the upload sends; with persistence off,
+// no indexedDB, no Web Locks or a browser that refuses every lock request (M3-U88) nothing is hashed, stored or
+// locked, and the file is still stored.
 // Oracle: what the fake IndexedDB holds, the locks the fake LockManager says this page holds, the tickets /upload
 // answered, the requests the fixture saw and the object the fake bucket stored.
 
@@ -151,12 +152,15 @@ describe("the store never changes what an upload sends (spec §3.2)", () => {
 type Setup = ReturnType<typeof persistFixture>;
 
 describe.each([
-  { name: "persist is false", options: { persist: false }, noIndexedDb: false },
-  { name: "the runtime has no indexedDB", options: {}, noIndexedDb: true },
-])("when $name", ({ options, noIndexedDb }) => {
+  { name: "persist is false", setup: { options: { persist: false } } },
+  { name: "the runtime has no indexedDB", setup: { noIndexedDb: true } },
+  { name: "the runtime has no Web Locks (M3-U88)", setup: { webLocks: "missing" as const } },
+  // Fails closed: a record no lock guards could be resumed while this page still holds the ticket (M3-U88).
+  { name: "the browser refuses every lock request (M3-U88)", setup: { webLocks: "refused" as const } },
+])("when $name", ({ setup: given }) => {
   it("hashes, stores and locks nothing while a multipart file runs", async () => {
     const held = gate((call) => call.label === "PUT part 3");
-    const setup = persistFixture({ fault: held.fault, options, noIndexedDb });
+    const setup = persistFixture({ fault: held.fault, ...given });
     const job = setup.client.start("files", threeParts());
     await held.reached;
     await setup.drained();

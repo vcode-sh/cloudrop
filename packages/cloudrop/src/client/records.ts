@@ -28,7 +28,10 @@ export interface UploadRecord {
 }
 
 export interface Records {
-  /** False when persistence is off or the runtime has no indexedDB: then nothing is read or written (spec §3.7). */
+  /**
+   * False when persistence is off or the runtime has no indexedDB or no Web Locks: then nothing is read or written
+   * (spec §3.7, M3-U88).
+   */
   readonly enabled: boolean;
   /**
    * Queued in its place when called, also when the record is still being made (its fingerprint is read from the file):
@@ -112,9 +115,13 @@ const onResult = <T>(request: IDBRequest<T>, use: (result: T) => void): void => 
   request.onsuccess = () => use(request.result);
 };
 
-/** A store over globalThis.indexedDB; a no-op one (lists [], counts 0) when `enabled` is false or there is none. */
+/**
+ * A store over globalThis.indexedDB; a no-op one (lists [], counts 0) when `enabled` is false or the runtime has no
+ * indexedDB or no navigator.locks, looked for once, now (M3-U89). Without Web Locks another holder could complete an
+ * upload that this page's /abort then deletes, so nothing is kept (M3-U88).
+ */
 export function createRecords(enabled: boolean, now: () => number = () => Date.now()): Records {
-  const factory: IDBFactory | undefined = enabled ? globalThis.indexedDB : undefined;
+  const factory: IDBFactory | undefined = enabled && globalThis.navigator?.locks ? globalThis.indexedDB : undefined;
   if (factory == null) return noRecords;
 
   // Opened on the first operation and kept. A failed open, or a connection the browser closed (site data cleared, a

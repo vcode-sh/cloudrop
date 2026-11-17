@@ -123,14 +123,17 @@ export interface PersistSetup {
   options?: ClientOptions;
   /** A runtime without indexedDB, such as a Worker of an old browser. */
   noIndexedDb?: boolean;
+  /** No navigator.locks, as on a page that is not a secure context, or one whose every request the browser refuses. */
+  webLocks?: "missing" | "refused";
 }
 
-export function persistFixture({ hash, fault = () => undefined, options, noIndexedDb }: PersistSetup = {}) {
+export function persistFixture({ hash, fault = () => undefined, options, noIndexedDb, webLocks }: PersistSetup = {}) {
   const db = fakeIndexedDb();
   const locks = fakeLocks();
   vi.stubGlobal("indexedDB", noIndexedDb ? undefined : db.indexedDB);
   // Node 24 has a real navigator.locks (audit M5): every test holds the fake's instead.
-  vi.stubGlobal("navigator", { locks: locks.locks });
+  vi.stubGlobal("navigator", webLocks === "missing" ? {} : { locks: locks.locks });
+  if (webLocks === "refused") locks.refuse();
   const subtle = crypto.subtle;
   const digest = subtle.digest.bind(subtle);
   // Every hash started and every request the fault let through, for drained().
@@ -172,8 +175,8 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
       },
     },
   );
-  // Each multipart ticket of a persisting client hashes its file exactly once (audit C1, M3-U80).
-  const persisting = options?.persist !== false && !noIndexedDb;
+  // Each multipart ticket of a persisting client hashes its file exactly once, once locked (audit C1, M3-U80, M3-U88).
+  const persisting = options?.persist !== false && !noIndexedDb && !webLocks;
   const expectedHashes = () => (persisting ? issued.filter((ticket) => ticket.kind === "multipart").length : 0);
   return {
     db,

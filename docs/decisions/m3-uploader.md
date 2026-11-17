@@ -1059,8 +1059,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   accepted, and the object stored mixes parts of the two files, which the server's size checks accept; without
   `crypto.subtle` the edges are not compared either. `checksums()` (M5) closes it. Where the platform does not know a
   file's `lastModified`, the File API returns the current time, so no file matches and every resume is refused.
-- **Status:** in force (`7535e86`; a runtime with no `crypto` global at all is treated as one without
-  `crypto.subtle` since `64b3333`).
+- **Status:** in force without its fallback: `M3-U88` removed the empty fingerprint for a runtime without
+  `crypto.subtle`. Persistence now needs Web Locks, which exist only in secure contexts, as `crypto.subtle` does, so
+  the fallback could no longer run; the README and spec §3.3 say that resuming needs a secure context (`7535e86`; the
+  fallback `64b3333`, removed by `M3-U88`).
 - **Visible in:** `client/fingerprint.ts`.
 
 ### M3-U69: a Web Lock keeps two tabs from sending one upload
@@ -1073,8 +1075,9 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Why:** a lock is shared by every tab and worker of the origin (MDN, "Web Locks API"; Baseline since March 2022),
   for about 50 B. Two tabs resuming one record would send the same parts twice and race at `/complete`, where a part
   sent again during the call makes a listed ETag stale and answers a retryable `STORAGE_ERROR` (spec §5.4).
-- **If wrong:** Web Locks exist only in secure contexts. Without them two tabs may send the same parts: harmless to
-  the result, since the server verifies, but wasted bytes.
+- **If wrong:** Web Locks exist only in secure contexts. This entry first said that without them two tabs may send
+  the same parts, harmless to the result; the final review's C1 proved that false (a second holder completes the
+  upload and the first holder's `/abort` deletes it), so persistence now needs Web Locks (`M3-U88`).
 - **Status:** in force (`7535e86`, `2fe56b7`, `8770518`, `2075eac`). A lock is the origin's, not the tab's, so the
   page that holds it is refused too; the message says so since `64b3333`. Task 5 shortened it to "This upload is
   being sent in this browser, in this tab or another. Finish or cancel it there, then try again." for size.
@@ -1140,7 +1143,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   done or aborted, its `/abort` is answered (not merely sent: the Task 4 review's I-1), a retry's new ticket replaces
   it, or the page unloads. A failed file of
   `start()` keeps it, so a same-ticket retry needs no second request, which Web Locks would refuse to the page that
-  holds it. Without `navigator.locks`, and with persistence off, nothing is locked.
+  holds it. Without `navigator.locks`, and with persistence off, nothing is locked or saved (`M3-U88`).
 - **Why:** `ifAvailable` never queues behind another tab, which would leave a job waiting with no status to show. A
   lock released when a run settled would let `resume()` in this page or another finish the upload while the failed
   entry still holds a live token, whose later `/abort` (pagehide, cancel, the job's signal) would delete the finished
@@ -1152,7 +1155,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Status:** in force (`2fe56b7`, `8770518`, `2075eac`; how a ticket's lock is taken, `M3-U81`). `resume()` takes
   the lock as its last check and hands it to the rebuilt upload, which keeps it as a ticket from `/upload` does; a
   cancel while it checks lets it go. Supersedes the draft ruling that a retry refused the lock fails with
-  `UPLOAD_IN_USE`: a retry never asks again.
+  `UPLOAD_IN_USE`: a retry never asks again. Since `M3-U88` a ticket's record is saved only once its lock is held, and
+  a request the browser refuses saves nothing and makes `resume()` end `NOT_FOUND`.
 - **Visible in:** `client/locks.ts`, `client/persist.ts`.
 
 ### M3-U74: a resumed upload that is gone starts over in the same run
@@ -1198,7 +1202,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Decision:** R7 (resume design §2, §2.1). `resume(upload, file)` checks the arguments (`INVALID_INPUT`: `file` is
   a `File` and `upload` an object with a string `id`), then the record (`NOT_FOUND`: it exists in the client's
   namespace and has not expired), then the file (`INVALID_INPUT`, `M3-U68`), then the lock (`UPLOAD_IN_USE`,
-  `M3-U73`). The first failure ends the job with `{ data: null, error }` before any request. The only option is
+  `M3-U73`; `NOT_FOUND` when the browser refuses the request, `M3-U88`). The first failure ends the job with `{ data: null, error }` before any request. The only option is
   `signal`; the route and metadata come from the record, and the file's id is the client's next sequence number
   (`M3-U2`). As audit I7 asks: wrong arguments are refused at once with a job of no file, as `start()` refuses them,
   the options in `start()`'s words; otherwise the job has one file, `queued` while the checks run, its id taken when
@@ -1283,7 +1287,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 ### M3-U81: a ticket's lock is asked for without waiting for the answer
 
 - **Decision:** a ticket from `/upload` asks for its lock when it arrives and sends at once, without waiting for the
-  answer; a refusal is ignored. Its `release` can be called before the answer, and the lock is then let go as soon as
+  answer. Its record waits for the answer: since `M3-U88` a refused or failed request saves no record, and the upload
+  goes on. Its `release` can be called before the answer, and the lock is then let go as soon as
   it is granted.
 - **Why:** an id `/upload` just made is unknown to every other holder: a record of it exists only after the lock was
   asked for, and the lock manager answers requests in order. Waiting would delay every multipart file for nothing.
@@ -1379,3 +1384,44 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** none known; a client import of `plan.ts` brings the rules back, which the size budget shows.
 - **Status:** in force (`1ecd19f`).
 - **Visible in:** `src/part-size.ts`, `src/plan.ts`, `client/answers.ts`, `client/upload.ts`, `biome.json`.
+
+## Final review rulings
+
+### M3-U88: persistence needs Web Locks, and a refused lock keeps nothing
+
+- **Decision:** controller ruling on the resume work's final review, C1, option 1. Resuming after a reload needs a
+  secure context (HTTPS or `localhost`). The client keeps records only where the runtime has both `indexedDB` and
+  `navigator.locks`; without Web Locks it behaves as without `indexedDB` (spec §3.7): nothing is saved,
+  `resumable()` resolves `[]`, `resume()` ends `NOT_FOUND` and `forget()` counts 0. Where the browser refuses a lock
+  request (a document no longer active, an opaque origin), the client fails closed: a ticket's record is saved only
+  once its lock is held, so a refused request leaves no record and the upload goes on unchanged, and `resume()` ends
+  `NOT_FOUND`, as where nothing can be resumed. `UPLOAD_IN_USE` stays for a lock another holder has, this page
+  included: Web Locks refuse a second `ifAvailable` request from the page that holds the lock. The fingerprint's
+  fallback without `crypto.subtle` (`M3-U68`) is removed: `crypto.subtle` and Web Locks both exist only in secure
+  contexts, so it could no longer run.
+- **Why:** the lock was the only guard against a second holder, in this page or another tab, completing an upload
+  whose ticket a failed entry still holds; that entry's `/abort` (pagehide, a cancel, the job's signal) then deletes
+  the finished object. The review reproduced it on the fake bucket without `navigator.locks`: `resume()` ended done,
+  and pagehide's `/abort` deleted the object. Spec §3.5 and `M3-U69` called the case harmless; it is data loss after
+  the client reported success. Web Locks are Baseline since March 2022 (MDN, "Web Locks API"), so the secure context
+  is the only real limit.
+- **If wrong (known cost):** a page served over plain HTTP from a LAN address, as a self-hosted RustFS or MinIO setup
+  often is, cannot resume after a reload; its uploads still work. A record is written a moment later, once the lock's
+  answer has come; the upload never waits for it.
+- **Status:** in force. Amends `M3-U68` (no fallback), `M3-U69` and spec §3.5 (the "harmless" claim), `M3-U73`,
+  `M3-U76` and `M3-U81` (a refused request is no longer ignored).
+- **Visible in:** `client/records.ts` (`createRecords`), `client/locks.ts`, `client/persist.ts` (`uploadOf`),
+  `client/resume.ts` (`check`), `client/fingerprint.ts`, `testing/fake-locks.ts` (`refuse`), `client/forget.test.ts`,
+  `client/persist-failures.test.ts`, `client/resume-checks.test.ts`, `client/resume-job.test.ts`.
+
+### M3-U89: the client looks for `indexedDB` and Web Locks once, when it is created
+
+- **Decision:** the resume plan's task 1 open point, kept as built. `createCloudropClient` decides once, when it
+  creates its store, whether it persists: it reads `globalThis.indexedDB` and `navigator.locks` then. A page that
+  installs either later, such as a polyfill loaded after the client, gets no persistence from that client; a client
+  created afterwards has it. The README says to create the client after any such polyfill.
+- **Why:** one check keeps every later call free of feature tests and gives a client one answer for its life: a store
+  that appeared midway would list records that earlier uploads of the same client never saved.
+- **If wrong:** an app that loads a polyfill late creates its client after it, or creates a second one.
+- **Status:** in force (`7f2a7b1` for `indexedDB`; Web Locks since `M3-U88`).
+- **Visible in:** `client/records.ts` (`createRecords`), `client/forget.test.ts`.

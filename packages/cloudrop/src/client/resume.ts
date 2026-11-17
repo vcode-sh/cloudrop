@@ -64,7 +64,10 @@ async function check(
   if (!record) return error ?? notResumable();
   if (!(await isSameFile(record, file))) return notSameFile();
   const lock = lockUpload(id);
-  return (await lock.taken) ? { record, unlock: lock.release } : uploadInUse();
+  const taken = await lock.taken;
+  if (taken) return { record, unlock: lock.release };
+  // Where the browser refuses Web Locks, nothing can be resumed (M3-U88).
+  return taken === false ? uploadInUse() : notResumable();
 }
 
 /**
