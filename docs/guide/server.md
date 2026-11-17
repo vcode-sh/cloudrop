@@ -188,7 +188,7 @@ authorize: async ({ request }) => {
 - `unauthorized()` refuses the upload with `UNAUTHORIZED`. Its message reaches the user; the default is "Sign in to
   upload files here."
 - `forbidden()` refuses a signed-in user who may not upload (a quota, a plan, a role) with `FORBIDDEN`. The default
-  message is "You are not allowed to upload files here."
+  message is "You are not allowed to upload files here. Ask the site owner for access if you think this is wrong."
 - A public route must say so: `authorize: allowAnyone`. Public uploads are never a default.
 - `prefix`, `key` and `onComplete` go in `route()`'s second argument. TypeScript types their context from what
   `authorize` returns, in whatever order the options are written.

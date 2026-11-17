@@ -22,7 +22,8 @@ export interface Refusal {
 }
 
 const SIGN_IN_MESSAGE = "Sign in to upload files here.";
-const NOT_ALLOWED_MESSAGE = "You are not allowed to upload files here.";
+const NOT_ALLOWED_MESSAGE =
+  "You are not allowed to upload files here. Ask the site owner for access if you think this is wrong.";
 
 /** For a caller who is not signed in. */
 export function unauthorized(message: string = SIGN_IN_MESSAGE): Refusal {

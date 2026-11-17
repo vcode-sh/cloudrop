@@ -31,12 +31,16 @@ describe("POST /upload: authorization comes first", () => {
     expect(fixture.storageCalls).toEqual([]);
   });
 
-  it("refuses forbidden() without a message with a sentence that says the user may not upload", async () => {
+  it("refuses forbidden() without a message with a sentence that says what happened and what to do", async () => {
     const fixture = serverFixture({ files: route({ accept: "*/*", maxSize: "1GB", authorize: () => forbidden() }) });
     const { status, body } = await upload(fixture, { route: "files", files: [png()] });
     expect({ status, error: body.error }).toEqual({
       status: 403,
-      error: { code: "FORBIDDEN", message: "You are not allowed to upload files here.", retryable: false },
+      error: {
+        code: "FORBIDDEN",
+        message: "You are not allowed to upload files here. Ask the site owner for access if you think this is wrong.",
+        retryable: false,
+      },
     });
   });
 
