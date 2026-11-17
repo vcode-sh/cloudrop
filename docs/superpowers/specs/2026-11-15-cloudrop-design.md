@@ -49,7 +49,7 @@ customize the client (base path, persistence, concurrency, plugins); hooks accep
 
 ## 2. Scope
 
-**1.0:** headless client, React bindings, UI components through a shadcn registry, R2 plus generic S3-compatible
+**1.0:** headless client, React bindings, examples that build an upload UI on them (no component registry, `M4-E1`), R2 plus generic S3-compatible
 storage, stateless server with a `store` interface reserved for later adapters, four plugins (content checks,
 checksums, limits, images), and an essential server file API.
 
@@ -105,7 +105,7 @@ Internal modules, each testable on its own and reachable only through its interf
 
 Metadata schemas use Standard Schema, so users bring zod, valibot or arktype and cloudrop depends on none.
 
-Repository: Bun workspaces with `packages/cloudrop`, `packages/registry` (shadcn components), `apps/docs`,
+Repository: Bun workspaces with `packages/cloudrop`, `apps/docs`,
 `examples/{next,hono,workers,vite-react}`. Tests sit next to the source they test; the storage contract suite is
 `packages/cloudrop/src/testing/storage-contract.ts`, with its case groups under `src/testing/storage-contract/`, run by
 one colocated lane file per backend (`src/storage/s3-driver.*.test.ts`). The S3 driver is `src/storage/s3-driver.ts`,
@@ -538,7 +538,7 @@ parallelism cap is tuned for Workers yet.
 | M1 | `storage`: SigV4 signer, `r2` and `s3` drivers, fake, contract suite, Wrangler and RustFS lanes |
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*` |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy |
-| M4 | `react`, shadcn registry, examples |
+| M4 | `react`, examples that build an upload UI on the hooks (no shadcn registry, `M4-E1`) |
 | M5 | Database store: `createCloudrop({ store })`, rows before signing, `onComplete` once, hard quota, revocation, sweep; adapters for SQL executors, Drizzle and Prisma ([design](2026-11-17-m5-store-design.md)); moved ahead of the plugins by the owner, 2026-11-17 |
 | M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` |
 | M7 | Docs, 0.x beta, 1.0 |

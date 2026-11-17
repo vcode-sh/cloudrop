@@ -4,8 +4,9 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
 
 - `lib/cloudrop.ts` creates the server with one route, `files`, that only a signed-in user may use.
 - `app/api/cloudrop/[...all]/route.ts` mounts it: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);`.
-- `app/page.tsx` uploads with `useUpload` from `lib/upload.ts`, which creates the `cloudrop/react` hooks. They import
-  only the server's type, so the server module and its secret never reach the browser bundle.
+- `app/page.tsx` is an upload UI built on `useUpload` and `useResumable` from `lib/upload.ts`, which creates the
+  `cloudrop/react` hooks ("Home page" below). They import only the server's type, so the server module and its secret
+  never reach the browser bundle.
 - `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
   answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
 - `lib/store.ts` is the opt-in database store, off unless `CLOUDROP_EXAMPLE_STORE` is set ("Run with a database
@@ -35,8 +36,8 @@ bun run setup:rustfs
 bun run dev
 ```
 
-Open <http://localhost:5173>. Choose a file before signing in to see the `UNAUTHORIZED` answer, then select
-"Sign in as the demo user" (the page reloads) and choose a file again.
+Open <http://localhost:5173>. Drop or choose a file before signing in: its row shows `UNAUTHORIZED: Sign in as the demo
+user first.` Then select "Sign in as the demo user" (the page reloads) and upload again.
 
 `bun run setup:rustfs` creates the bucket `cloudrop-example`, sets its CORS rule (exposing `ETag` and `Retry-After`),
 checks that a browser preflight from `http://localhost:5173` is allowed, sets a lifecycle rule that aborts incomplete
@@ -130,10 +131,31 @@ before the `request_key` column existed stops the start with "no such column: re
 
 The [store guide](../../docs/guide/store.md) explains each of these and what changes in production.
 
+## Home page
+
+The home page is what an app's upload UI looks like when it is built on the headless hooks. cloudrop ships no
+components (decision `M4-E1`); the [React guide](../../docs/guide/react.md#build-your-upload-ui) walks through this page.
+
+- **Stack:** shadcn on Base UI (`components.json`: style `base-luma`, icon library `tabler`), Tailwind v4 through
+  `@tailwindcss/postcss`, and `@tabler/icons-react`. `components/ui/` holds the CLI's `attachment`, `button` and
+  `progress` as generated: they are not edited by hand and Biome skips them. `app/globals.css` is imported by
+  `app/page.tsx` alone, so Tailwind's base styles never reach `/lab`.
+- **`components/upload/drop-zone.tsx`:** a label with `getDropProps()` around a hidden input with `getInputProps()`.
+  Click it or drop files on it; Tab reaches the input and Enter opens the file picker.
+- **`components/upload/upload-list.tsx` and `upload-row.tsx`:** a row per file as an `Attachment`, its state mapped from
+  the file's status (`file-status.ts`), with its bar, bytes, speed, time left, the stored key or the error's code and
+  message, and the buttons its status allows: Pause, Resume, Retry, Cancel. Above the rows, the totals with Pause all,
+  Resume all, Retry failed, Cancel all and Clear finished. A visually hidden status line tells screen readers the count
+  and the progress in steps of 10 %.
+- **`components/upload/unfinished-uploads.tsx`:** after a reload, the multipart uploads this browser can continue, each
+  with **Pick again**: the same file resumes and sends only the parts the bucket lacks, another file is refused and
+  shows as a failed row. **Discard all** calls `client.forget()` on the client `lib/upload.ts` shares with the hooks:
+  it deletes the browser's records, not the uploads, whose parts the bucket's lifecycle rule removes.
+
 ## Lab page
 
 <http://localhost:5173/lab> shows how an upload works, request by request and byte by byte. It uses the same
-`cloudrop/client` as the quickstart page; the library itself is unchanged.
+`cloudrop/client` as the home page; the library itself is unchanged.
 
 - **Setup:** the demo sign-in, and which storage the server uploads to and its host, from `app/api/lab-info/route.ts`.
 - **Your storage:** with a database store, the bytes used and reserved against the quota and the finished uploads with
@@ -213,8 +235,14 @@ The numbers come from one browser on one network: they show how the client behav
 
 ## The browser tests
 
-`app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file chosen
-twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
+`app/upload.browser.test.ts` drives the home page from Chromium's headless shell: a 14-byte file picked and sent in one
+`PUT`, a 20 MiB file dropped on the zone and sent in three parts, and the same file chosen twice, by a click and by the
+keyboard, each row showing the key it was stored under and the object read back. A file chosen before sign-in shows
+`UNAUTHORIZED` and the server's message; a file the bucket answers with 400 shows `UPLOAD_REJECTED` and its message, and
+**Retry** stores it; **Cancel** during a 20 MiB upload whose PUTs are held shows Cancelled and sends `/abort`. A 20 MiB
+file whose parts 2 and 3 are held is reloaded after part 1: the unfinished-uploads panel lists it, another file picked
+there is refused with `INVALID_INPUT`, and the same file resumes with only parts 2 and 3 and reads back equal. The faults
+come from Playwright's routing of the bucket's requests, so these rows run on R2 too. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
 parts, a dropped bucket PUT as renewed and retried, a PUT whose answer was dropped as sent again and answered `412` with
 the note "already stored", a cancel during a delay as nothing sent, a paused file resumed with each part stored once,
 and three files in one job, and that no signed URL reaches the page. Three rows throttle uploads to 4 MiB/s through

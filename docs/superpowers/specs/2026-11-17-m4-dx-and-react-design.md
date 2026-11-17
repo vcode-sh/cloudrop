@@ -26,7 +26,7 @@ test and a code audit. Decisions are recorded as `M4-F` (fixes and developer exp
 Goals: every audit finding fixed or ruled on; the ordering trap gone; `next build` without secrets; the friction above
 removed; `cloudrop/react` with hooks that make a progress UI a few lines; less code where behaviour stays identical.
 
-Non-goals (§7): the database store, React Native, a bucket-setup CLI, shadcn registry components and the
+Non-goals (§7): the database store, React Native, a bucket-setup CLI, the example home page's upload UI and the
 `examples/{hono,vite-react}` apps (M4b), per-route `Cache-Control`, more than 100 files per `/upload`.
 
 ## 3. Client fixes (`M4-F1` to `M4-F9`)
@@ -169,8 +169,9 @@ return (
 
 1. **Database `store` interface** (pending row before signing, exactly-once `onComplete`, orphan sweep, quota) usable
    from Prisma and Drizzle: recommended to move ahead of the M5 plugins; owner decision.
-2. **M4b:** shadcn registry (`UploadButton`, `Dropzone`, `FileList`), `examples/hono` and `examples/vite-react` (the
-   cold-developer apps are a starting point).
+2. **M4b:** the Next example's home page as a real upload UI on the hooks, `examples/hono` and `examples/vite-react` (the
+   cold-developer apps are a starting point). No shadcn registry: the hooks stay headless and the examples show how to
+   build the UI (`M4-E1`, 2026-11-17).
 3. A bucket-setup command for R2 and S3-compatible services.
 4. React Native client with background transfer (app-c); per-route `Cache-Control`; batches over 100 files.
 

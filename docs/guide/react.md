@@ -5,7 +5,8 @@ with progress and controls, and `useResumable` for continuing large uploads afte
 [`cloudrop/client`](client.md): every upload is a client job, and the hooks only render it.
 
 This page covers setup, a one-file input, a list of several files with progress and controls, drag and drop, resume
-after a reload, what each hook returns, and how the hooks behave under server rendering, StrictMode and unmounting.
+after a reload, building a full upload UI on the hooks, what each hook returns, and how the hooks behave under server
+rendering, StrictMode and unmounting.
 
 ## Set up
 
@@ -233,6 +234,99 @@ not through the hooks, is not followed: call `refresh()` after it.
 `files`, which every component on the hook's route shows. A browser never gives a page a file back after a reload, so
 the user has to pick it. What counts as the same file, and what the server is asked first:
 [Resume after reload](resume.md).
+
+## Build your upload UI
+
+cloudrop ships no components. A ready-made upload widget would bring its own look and icon set into your app, and the
+hooks already hold everything a UI needs: build it from your own components, in your own style. The home page of
+[`examples/next`](../../examples/next) is a full upload UI built this way, with shadcn on Base UI, Tailwind and Tabler
+icons, in four components of 25 to 90 lines under `components/upload/`. Each calls `useUpload("files")` itself, and
+they show one list because every hook of the factory shares the route's files.
+
+**Drop zone.** A `<label>` with `getDropProps()` around a visually hidden input with `getInputProps()`: a click
+anywhere opens the file picker, Tab reaches the input and Enter opens the picker, and dropped files upload. Hide the
+input with an `sr-only` class, not `display: none`, so it keeps its keyboard focus and its name.
+
+```tsx
+const { isDragOver, getDropProps, getInputProps } = useUpload("files", { multiple: true });
+return (
+  <label {...getDropProps()} data-drag-over={isDragOver || undefined} className="… has-focus-visible:ring-3">
+    <IconUpload aria-hidden />
+    <span>{isDragOver ? "Drop to upload" : "Drop files here, or click to choose"}</span>
+    <input {...getInputProps()} aria-label="Files to upload" className="sr-only" />
+  </label>
+);
+```
+
+**File states.** Most design systems draw a file in a handful of states. The example maps the client's seven statuses
+on the five of shadcn's `Attachment` and keeps the difference in the line under the name:
+
+| `file.status` | Attachment state | Line under the name |
+| --- | --- | --- |
+| `queued` | `idle` | size, waiting for a connection |
+| `uploading` | `uploading` | bytes of size, speed, time left |
+| `paused` | `idle` | paused at n % |
+| `completing` | `processing` | all bytes sent, finishing |
+| `done` | `done` | size, `stored as` the key from `file.result.data` |
+| `failed` | `error` | `file.error.code: file.error.message`, never cut short |
+| `aborted` | `idle` | Cancelled |
+
+**File list.** One row per entry of `files`, with the controls its status allows. A file's object changes only when that
+file does, so a `memo` row renders again only for its own progress.
+
+```tsx
+export const UploadRow = memo(function UploadRow({ file }: { file: FileItem }) {
+  const moving = file.status === "queued" || file.status === "uploading";
+  return (
+    <li>
+      <Attachment state={attachmentState(file.status)}>
+        <AttachmentTitle>{file.name}</AttachmentTitle>
+        <AttachmentDescription>{statusLine(file)}</AttachmentDescription>
+        {(moving || file.status === "paused") && (
+          <Progress value={Math.floor(file.progress * 100)} aria-label={`${file.name} progress`} />
+        )}
+        {moving && <AttachmentAction aria-label={`Pause ${file.name}`} onClick={file.pause}>…</AttachmentAction>}
+        {file.status === "paused" && <AttachmentAction aria-label={`Resume ${file.name}`} onClick={file.resume}>…</AttachmentAction>}
+        {file.status === "failed" && <AttachmentAction aria-label={`Retry ${file.name}`} onClick={() => void file.retry()}>…</AttachmentAction>}
+        {file.status !== "done" && file.status !== "aborted" && <AttachmentAction aria-label={`Cancel ${file.name}`} onClick={file.abort}>…</AttachmentAction>}
+      </Attachment>
+    </li>
+  );
+});
+```
+
+`FileItem` is `UploadItem<RouteResult<typeof cloudrop, "files">>`. Above the rows, `totals` gives one bar and a line
+such as "2 of 3 uploaded, 12.0 MiB of 40.0 MiB", and the hook's `pause`, `resume`, `abort`, `retry` and `clear` act on
+every file. For screen readers, keep a visually hidden `role="status"` line rendered from the start, and change it in
+coarse steps (the example rounds `totals.progress` down to 10 %): a polite region fed every progress event would never
+stop talking.
+
+**Unfinished uploads.** After a reload, `useResumable("files").uploads` lists what can be continued. A browser never
+hands a file back, so each row has a file input; the picked file goes to `resume(upload, file)` and the resumed upload
+joins `files` like any other. A different file is refused before any request and shows as a failed row.
+
+```tsx
+const { uploads } = useResumable("files");
+const { resume } = useUpload("files");
+// For each upload:
+<input
+  type="file"
+  aria-label={`Pick ${upload.name} again to resume`}
+  onChange={(event) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (file) void resume(upload, file);
+  }}
+/>
+```
+
+The hooks offer no way to drop one listed upload without its file. The example's **Discard all** calls `forget()` on a
+client it shares with the hooks (`createUploadHooks({ client })`) and then `refresh()`; that deletes this browser's
+records, and the bucket's abort-incomplete-multipart rule removes the parts.
+
+None of this depends on shadcn, Tailwind or Tabler. Radix, Base UI, MUI, Chakra, plain CSS, any icon set: the hooks
+give data and functions, and the UI is yours. Why there is no registry: `M4-E1` in
+[m4-dx.md](../decisions/m4-dx.md).
 
 ## What the hooks return
 

@@ -13,7 +13,7 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M1 | `storage`: SigV4 signer, `r2` and `s3` drivers, fake R2, contract suite, Wrangler and RustFS lanes | **Done** 2026-11-15 (closed at `ca28497`; plan below) |
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*`, Next and Node adapters | **Done** 2026-11-16 (closed at `2483890`, then the hardening phase, `ca91b33`) |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
-| M4 | `cloudrop/react`, shadcn registry, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (shadcn registry, Hono and Vite examples) not started |
+| M4 | `cloudrop/react`, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (the Next home page as an upload UI, Hono and Vite React examples) in progress; no shadcn registry (`M4-E1`) |
 | M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | **Done** 2026-11-17 (tasks C0, A–F, a whole-branch review and its fix round), merged to `main` |
 | M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
 | M7 | Docs, 0.x beta, 1.0 | Not started |
@@ -74,11 +74,13 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### M4b: the shadcn registry and examples (spec §14)
+### M4b: examples and UI guidance (spec §14), in progress
 
-M4a is done (design §7 lists what it left out). M4b: a shadcn registry (`UploadButton`, `Dropzone`, `FileList` over
-`cloudrop/react`) and `examples/hono` and `examples/vite-react` (the two cold-developer apps of 2026-11-17 are a
-starting point). A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to
+M4a is done (design §7 lists what it left out). M4b: the Next example's home page as a real upload UI built on the
+headless hooks with shadcn on Base UI and Tabler icons, the "Build your upload UI" section of the React guide, and
+`examples/hono` and `examples/vite-react` (the two cold-developer apps of 2026-11-17 are a starting point). There is no
+shadcn registry: generated components would impose a style and an icon set, and an app builds its own from the hooks in
+minutes (`M4-E1`). A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to
 a later opt-in (`M3-U65`).
 
 ### M6: the plugins
