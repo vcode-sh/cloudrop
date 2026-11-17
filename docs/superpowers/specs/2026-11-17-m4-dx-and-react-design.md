@@ -13,8 +13,9 @@ test and a code audit. Decisions are recorded as `M4-F` (fixes and developer exp
   cross-origin deployments (cookies, `trustedOrigins`, which origin the bucket CORS lists); `s3()` reads no environment
   variables; no AWS CLI recipe for CORS and lifecycle on S3-compatible services; the npm tarball has no README or
   LICENSE; the README says nothing usable is published; re-picking the same file fires no `change` event.
-- **Product fit** (app-b, app-c and a Bun + Hono + Drizzle app): the Hono app waits on cloudrop for uploads; app-b's server-routed image flows
-  and 2 GB single-PUT video are good targets; app-c needs React Native and tus, out of scope. The strongest cross-project
+- **Product fit** (the owner's reference apps: a Prisma app, a React Native app and a Bun + Hono + Drizzle app): the Hono
+  app waits on cloudrop for uploads; the Prisma app's server-routed image flows and 2 GB single-PUT video are good
+  targets; the React Native app needs React Native and tus, out of scope. The strongest cross-project
   need is a database `store` (pending row before signing, exactly-once completion, orphan sweep) that works with Prisma
   and Drizzle: recorded for the roadmap (§7), not built here.
 - **Client audit:** no corrupting race. Findings F1 to F8 and simplifications S1 to S9 (§3).
@@ -173,7 +174,7 @@ return (
    cold-developer apps are a starting point). No shadcn registry: the hooks stay headless and the examples show how to
    build the UI (`M4-E1`, 2026-11-17).
 3. A bucket-setup command for R2 and S3-compatible services.
-4. React Native client with background transfer (app-c); per-route `Cache-Control`; batches over 100 files.
+4. React Native client with background transfer (for a React Native app); per-route `Cache-Control`; batches over 100 files.
 
 ## 8. Work breakdown and gates
 

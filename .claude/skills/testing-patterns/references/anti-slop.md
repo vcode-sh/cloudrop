@@ -64,8 +64,8 @@ to `size < 2`. A one-byte row tells them apart.
 
 Use it when it is not obvious that a test can go red.
 
-1. Work on files you own exclusively; for anything shared, use an isolated worktree at
-   `~/projects/.worktrees/cloudrop/<slug>` (never `/tmp`, never nested in the repo).
+1. Work on files you own exclusively; for anything shared, use an isolated worktree beside the repository, such as
+   `../.worktrees/cloudrop/<slug>` (never `/tmp`, never nested in the repo).
 2. Back up the file, make **one** plausible one-line mutation in the production code (flip a guard, drop a field,
    widen a check, change an off-by-one in a part boundary).
 3. Run the focused test (`bun run --cwd packages/cloudrop test src/foo.test.ts`). Record which test fails and why.

@@ -14,9 +14,9 @@ named as on-disk sizes, and each section says which commands were recorded and w
 
 ## Method
 
-All scratch work lived in `~/projects/.worktrees/cloudrop/scratch-m3-measure/` and was deleted afterwards, with the
-harness and its logs. What the scratch work ran is therefore known only from this document and the lane P report
-(`.superpowers/sdd/2026-11-16-hardening/lane-P-report.md`); where neither records a command, the section says so.
+All scratch work lived in a separate worktree and was deleted afterwards, with the harness and its logs. What the
+scratch work ran is therefore known only from this document and the hardening round's lane P report (kept outside the
+repository); where neither records a command, the section says so.
 
 - **Server:** cloudrop's built `packages/cloudrop/dist` at `9df61ef`: `createCloudrop` with `s3()`, one route `files`
   (`text/plain`, `application/octet-stream`, 100 MB), `multipartThreshold: "8MB"`, mounted with `toNodeHandler` on

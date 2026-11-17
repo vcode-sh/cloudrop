@@ -797,7 +797,7 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
   vendored files are under the 250-line cap, so `scripts/check-file-size.ts` is unchanged. `examples/next/biome.json`
   extends the root and turns on Biome's `tailwindDirectives`, so it parses `app/globals.css`. The CLI needs an import
   alias, so the example's `tsconfig.json` maps `@/*` to its root.
-- **Why:** the owner's apps (app-a, app-c) use this stack; an example in the same stack is one they can copy from.
+- **Why:** the owner's reference apps use this stack; an example in the same stack is one they can copy from.
   Vendored files stay as the CLI writes them, so a later `shadcn add` or update applies cleanly.
 - **If wrong:** the components are app code; swapping the kit touches `components/upload/` only.
 - **Status:** in force.

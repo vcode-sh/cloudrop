@@ -115,8 +115,8 @@ URLs ([cond]).
 | ListParts on that upload id | 404 `NoSuchUpload` (the upload was aborted, as documented) |
 
 The unsigned case matters for security. A client holding a URL that signs only `host` can *add* `If-None-Match`,
-which only makes its own write fail. It cannot remove a signed one. app-d measured the multipart Complete
-behaviour on 2026-11-04 (`docs/spikes/r2-conditional-complete.md` in that repo); this run agrees.
+which only makes its own write fail. It cannot remove a signed one. An earlier R2 spike in another of the owner's
+repositories (private) measured the multipart Complete behaviour on 2026-11-04; this run agrees.
 
 ### Q4. Multipart part-size rules
 
@@ -193,7 +193,7 @@ HEAD without `x-amz-checksum-mode` returns no checksum. With `x-amz-checksum-mod
   value was silently replaced.
 - **Uploads with no checksum algorithm.** Every Complete still returns a full-object `x-amz-checksum-crc64nvme`.
 
-This agrees with app-d's 2026-11-04 finding (`docs/spikes/r2-integrity.md` in that repo): part checksums are
+This agrees with the earlier spike's 2026-11-04 finding (another of the owner's repositories): part checksums are
 validated, and a wrong top-level CRC32C on Complete is accepted. This run extends it to CRC64NVME FULL_OBJECT and to
 wrong per-part values in the Complete XML.
 
@@ -721,8 +721,8 @@ regions or load. Each run deleted its objects (1, 6, 10, 4 and 2) and aborted it
   abort.
 - Parallelism above 8 parts, sustained load, and any limit over a longer window.
 - What Complete does when a listed part lacks a checksum on a CRC32C upload (part 3 in Q5 was left out of the Complete).
-- Composite checksums with more than 2 parts, SHA-1/SHA-256/CRC32 algorithms, and `Content-MD5` (app-d measured
-  Content-MD5 rejection on PUT and UploadPart).
+- Composite checksums with more than 2 parts, SHA-1/SHA-256/CRC32 algorithms, and `Content-MD5` (the earlier spike
+  measured Content-MD5 rejection on PUT and UploadPart).
 - Checksums on copied objects and `cf-copy-destination-if-*` on copy. (`UploadPartCopy` with `x-amz-copy-source-range` was verified later by the contract's live lane: [test-backends.md](test-backends.md).)
 - Jurisdiction endpoints, virtual-host addressing with the own presigner (the SDK runs used path style), Infrequent
   Access storage class.
@@ -761,7 +761,7 @@ bun run spike.ts q5 q16            # selected questions only (q4 runs too when q
 bun run verify-empty.ts spike/cloudrop-<hex>/   # independent read-only emptiness check
 ```
 
-Credentials are read from `CLOUDROP_R2_ENV_FILE`, which defaults to the app-d `.env.local`. Only the five
+Credentials are read from the file `CLOUDROP_R2_ENV_FILE` names; the scripts stop when it is not set. Only the five
 literal `BB_R2_*=` lines are parsed, and the file is never sourced. Output, including the redacted evidence file
 `spikes/r2/.out/evidence.json` (git-ignored), passes through a redactor that replaces the account id, bucket, public
 host, access key id and secret, and strips signatures. The work budget is 15 minutes. SIGINT, SIGTERM, errors and
@@ -780,5 +780,5 @@ token in use expires 2026-12-04.
 - [limits]: https://developers.cloudflare.com/r2/platform/limits/ (2026-10-30)
 - [errors]: https://developers.cloudflare.com/r2/api/error-codes/ (2026-11-10)
 - [pricing]: https://developers.cloudflare.com/r2/pricing/ (2026-10-30)
-- Prior real-R2 evidence reused (app-d repo, not modified): `docs/spikes/r2-integrity.md`,
-  `docs/spikes/r2-conditional-complete.md`, `docs/acceptance/m1.md`
+- Prior real-R2 evidence reused, not modified: an integrity spike, a conditional-Complete spike and an acceptance
+  record in another of the owner's repositories (private).

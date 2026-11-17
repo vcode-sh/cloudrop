@@ -7,15 +7,16 @@ under the standing instruction to follow the best recommendations without check-
 
 ## 1. Why, and the evidence
 
-The product-fit review of 2026-11-17 found that in the owner's apps (app-b on Prisma, app-c and a Bun + Hono app on Drizzle) the
-hard part of uploads is not the transfer but the database around it. app-b and app-c each built, by hand, the same
+The product-fit review of 2026-11-17 found that in the owner's reference apps (one on Prisma, a React Native app and a
+Bun + Hono app on Drizzle) the hard part of uploads is not the transfer but the database around it. The Prisma app and
+the React Native app each built, by hand, the same
 shape: a row per upload written before anything is signed, a guarded state transition at completion so the app's
 completion work runs once, quota reserved and committed atomically, and a sweep that ends what was never finished.
 Their incidents are the design's test cases:
 
-- app-b deleted a pending row when an early `/complete` saw no object yet, leaving the later PUT as an orphan; it
+- The Prisma app deleted a pending row when an early `/complete` saw no object yet, leaving the later PUT as an orphan; it
   reused a status column as a lock token; its quota check at presign could be overshot before confirm.
-- app-c ran storage calls inside a database transaction holding row locks; deleted 2,522 live objects when a reference
+- The React Native app's backend ran storage calls inside a database transaction holding row locks; deleted 2,522 live objects when a reference
   table was missing from its sweep; held reserved bytes until physical deletion.
 - Both treat a lost acknowledgement (storage completed, database not updated) as the case to survive.
 
