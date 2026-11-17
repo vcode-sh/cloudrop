@@ -180,8 +180,9 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
  * Registers the lane's hooks in the calling file or describe block and returns its fixture, usable from the first
  * test: started once before all (teardown registered with it), `Math.random` stubbed to 0 for every test (M3-K3),
  * and reset after each, so every test starts with no rules, empty logs and an empty prefix. A request still in flight
- * at the reset lands in the next test's logs: a row that triggers a background /abort waits for it with `waitForEntry`
- * before it ends (audit M1).
+ * at the reset lands in the next test's logs, so a row that triggers a background /abort waits for it before it ends
+ * (audit M1): for `POST /abort 200` in `appRequests()`, which lands after the /abort's last storage call, not for that
+ * call's proxy entry, which the proxy logs while the handler is still answering.
  */
 export function useChaosFixture(): ChaosFixture {
   const fixture = {} as ChaosFixture;
