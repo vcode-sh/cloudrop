@@ -1,18 +1,27 @@
 // Spec §4 row 18 (M3-K7): jobs of 20 single and multipart files through start() while the proxy faults requests at
-// random (resets mid-body, 503 SlowDown, latency). Every file must end done with its exact bytes, or failed with a code
-// a fault of that kind documents. One job retries under the same faults, then abort() must leave only the done files;
-// the other retries with the faults off, which must finish every file (plan audit M9, C3).
+// random (resets mid-body, 503 SlowDown, latency), with real backoff waits. Every file must end done with its exact
+// bytes, or failed with a code a fault of that kind documents. One job is aborted while its first run still sends,
+// with one file already failed and holding its upload: abort() must free every upload and leave only the done files,
+// besides the orphan M3-S14 accepts. The other retries with the faults off, which must finish every file (plan audit
+// M9, C3).
 // Run with `bun run test:chaos:soak`; set CLOUDROP_CHAOS_SEED to the seed in a test's title to run with the same
 // files and the same fault stream. Requests draw from that stream in the order they reach the proxy, and parts run
 // concurrently, so a replay gets the same mix of faults but not always the same fault on the same request: a red
 // run prints the requests and faults it saw.
-import { afterEach, expect, test, vi } from "vitest";
-import type { FileOutcome, UploadJob, UploadResult } from "../client/types.ts";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { FileOutcome, FileStatus, UploadJob, UploadResult } from "../client/types.ts";
 import { MiB } from "../rules.ts";
+import { BAD_SIGNATURE } from "../testing/chaos-bodies.ts";
 import { chaosFile, useChaosFixture } from "../testing/chaos-fixture.ts";
 import type { ChaosRandom } from "../testing/chaos-proxy.ts";
 
 const chaos = useChaosFixture();
+
+// The fixture stubs Math.random to 0 for rows that need exact timing windows (M3-K3). The soak waits real jitter, so a
+// bug that needs time between attempts, such as a slot freed or a URL renewed during a backoff, can show here.
+beforeEach(() => {
+  vi.mocked(Math.random).mockRestore();
+});
 
 function soakSeed(): number {
   const given = process.env.CLOUDROP_CHAOS_SEED;
@@ -47,8 +56,9 @@ const FAULTS: Omit<ChaosRandom, "seed"> = { resetRate: 0.35, busyRate: 0.2, late
 
 // What a file may fail with under these faults, and the retryable each code documents: a PUT that got no answer
 // (spec §6.2), SlowDown from the bucket or relayed by the server, and the server's own storage call cut (storageFailure).
-// Most come from /upload: a file whose storage call failed gets a rejected ticket and fails at once (M2-D13), and
-// retry() asks /upload again for it (M3-U31). A file that holds a ticket keeps it on retry for each of these codes.
+// A file whose storage call failed in /upload gets a rejected ticket and asks /upload again within its attempts
+// (M3-U92); it fails with the refusal once they are spent, and retry() asks /upload again for it (M3-U31). A file that
+// holds a ticket keeps it on retry for each of these codes.
 const FAULT_ERRORS: Record<string, boolean> = { NETWORK_ERROR: true, RATE_LIMITED: true, STORAGE_ERROR: true };
 
 /** Starts a job of the soak's files under the seeded faults; `files[i]` is the file of `SIZES[i]`. */
@@ -59,17 +69,23 @@ function startSoakJob(): { files: File[]; job: UploadJob<null> } {
 }
 
 /**
- * The per-file oracle: a done file holds its exact bytes, a failed one has a listed code with its documented retryable
- * and no storage text in its message (spec §7). Returns the outcomes, in file order.
+ * The per-file oracle: a done file holds its exact bytes, a failed or aborted one has a code of `endings` with its
+ * documented retryable, ABORTED exactly when it ended aborted, and no storage text in its message (spec §7). Returns
+ * the outcomes, in file order.
  */
-async function expectOutcomes(files: File[], result: UploadResult<null>): Promise<FileOutcome<null>[]> {
+async function expectOutcomes(
+  files: File[],
+  result: UploadResult<null>,
+  endings: Record<string, boolean> = FAULT_ERRORS,
+): Promise<FileOutcome<null>[]> {
   const outcomes = result.data?.files ?? [];
   expect(outcomes.map((outcome) => outcome.name)).toEqual(files.map((file) => file.name));
   const wrong = outcomes.flatMap((outcome) => {
     if (outcome.status === "done") return [];
     const { code, retryable, message } = outcome.error;
-    const listed = outcome.status === "failed" && FAULT_ERRORS[code] === retryable;
-    return listed && !/SlowDown|<|127\.0\.0\.1/.test(message) ? [] : [{ name: outcome.name, code, retryable, message }];
+    const listed = endings[code] === retryable && (outcome.status === "aborted") === (code === "ABORTED");
+    if (listed && !/SlowDown|<|127\.0\.0\.1/.test(message)) return [];
+    return [{ name: outcome.name, status: outcome.status, code, retryable, message }];
   });
   expect(wrong).toEqual([]);
   for (const [index, file] of files.entries()) {
@@ -88,27 +104,58 @@ function expectFaultsInjected(): void {
   expect(faulted.length, "requests the proxy reset or answered 503").toBeGreaterThan(0);
 }
 
-test(`retry() and abort() under seeded faults leave each file whole or failed retryably, and only done files stored (seed ${seed})`, async () => {
-  const { files, job } = startSoakJob();
-  const first = await expectOutcomes(files, await job.done);
-  expectFaultsInjected();
-  // A done file's upload is completed; an upload still open under its key belongs to nobody.
-  const firstDone = doneKeys(first);
-  expect((await chaos.uploadsLeft()).filter((upload) => firstDone.includes(upload.key))).toEqual([]);
+const settled: readonly FileStatus[] = ["done", "failed", "aborted"];
 
-  const outcomes = await expectOutcomes(files, await job.retry());
-  // Off before the aborts, or a faulted /abort leaves its upload behind (audit M9).
+test(`abort() while a seeded faulty run still sends frees every upload, a failed file's too, and keeps the done files (seed ${seed})`, async () => {
+  // The first part 3 to arrive is refused for good: its file fails at once and keeps its upload for retry() (M3-U31).
+  chaos.proxy.set([
+    {
+      match: { kind: "presigned", operation: "UploadPart", part: 3 },
+      fault: { kind: "answer", status: 403, body: BAD_SIGNATURE },
+    },
+  ]);
+  const { files, job } = startSoakJob();
+  const snapshot = () => job.getSnapshot().files;
+  // Up to 30 s: faults and real backoff waits slow the run down.
+  await vi.waitFor(
+    () => {
+      expect(chaos.appRequests()).toContain("POST /complete 200");
+      expect(snapshot().map((file) => file.error?.code)).toContain("UPLOAD_REJECTED");
+    },
+    { timeout: 30_000, interval: 10 },
+  );
+  // Off before the abort, or a faulted /abort leaves its upload behind (audit M9).
   chaos.proxy.random(null);
+  const sending = snapshot().filter((file) => !settled.includes(file.status)).length;
   job.abort();
 
-  // abort() frees each failed file's kept upload (M3-U32). No retry above took a new ticket over a kept upload, since
-  // every listed code keeps it (M3-U31), so M3-U55 leaves nothing either: any upload still open is a leak.
-  await vi.waitFor(() => chaos.expectNoUploadsLeft(), { timeout: 10_000, interval: 50 });
-  expect((await chaos.objectsLeft()).toSorted()).toEqual(doneKeys(outcomes).toSorted());
+  const outcomes = await expectOutcomes(files, await job.done, {
+    ...FAULT_ERRORS,
+    UPLOAD_REJECTED: false,
+    ABORTED: false,
+  });
+  expectFaultsInjected();
+  expect(sending, "files still sending when abort() ran").toBeGreaterThan(0);
+  const codes = outcomes.flatMap((outcome) => (outcome.status === "done" ? [] : [outcome.error.code]));
+  expect(codes.filter((code) => code === "UPLOAD_REJECTED")).toEqual(["UPLOAD_REJECTED"]);
+  // abort() frees the refused file's kept upload (M3-U32) and every running file's ticket (M3-U38); a failed file's
+  // /abort runs in the background. The only object it may leave outside the done files is one of a single PUT it cut
+  // after the bytes reached the bucket, which can land after its /abort's HEAD (M3-S14): at most one per cut PUT.
+  const keys = doneKeys(outcomes);
+  let orphans = 0;
+  await vi.waitFor(
+    async () => {
+      await chaos.expectNoUploadsLeft();
+      orphans = (await chaos.objectsLeft()).filter((key) => !keys.includes(key)).length;
+      const cut = chaos.proxy.log().filter((entry) => entry.label === "PUT object" && entry.outcome === "aborted");
+      expect(orphans, `objects outside the done files, ${cut.length} single PUTs cut`).toBeLessThanOrEqual(cut.length);
+    },
+    { timeout: 10_000, interval: 50 },
+  );
   const statuses = outcomes.map((outcome) => (outcome.status === "done" ? "done" : "aborted"));
-  expect(job.getSnapshot().files.map((file) => file.status)).toEqual(statuses);
+  expect(snapshot().map((file) => file.status)).toEqual(statuses);
   const aborted = statuses.filter((status) => status === "aborted").length;
-  console.info(`Chaos soak seed ${seed}: ${files.length - firstDone.length} failed at first, ${aborted} aborted.`);
+  console.info(`Chaos soak seed ${seed}: ${sending} still sending at abort(), ${aborted} aborted, ${orphans} orphans.`);
 });
 
 test(`retry() with the faults off finishes every file a seeded faulty run failed (seed ${seed})`, async () => {
