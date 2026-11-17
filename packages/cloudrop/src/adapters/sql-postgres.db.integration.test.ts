@@ -139,6 +139,47 @@ describe("Postgres under lock contention", () => {
     },
   );
 
+  test.for(executors)(
+    "$name: a keyed reserve waits for the lost attempt's row before it locks usage, so a revoke holding that row ends",
+    async ({ executor, backendPid }) => {
+      // Every writer locks file rows before the owner's usage row. A transaction holds the lost attempt's row (through
+      // attach) while the retry's reserve starts, then revokes, which needs the usage row. A reserve that locked usage
+      // first would deadlock here: Postgres aborts one side with 40P01 after its 1 s deadlock_timeout.
+      const { store, transaction } = await transactionalStore(executor);
+      const key = "request-key-0000000001";
+      const reserve = (id: string) =>
+        store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, requestKey: key, files: [file(id, 60)] }, NOW);
+      expect(await reserve("lost")).toEqual(["reserved"]);
+      const held = gate();
+      const attached = gate();
+      let holder: unknown;
+      const revoking = transaction(async (tx, inner) => {
+        holder = await backendPid(tx);
+        expect(await inner.attach("lost", "upload-1", NOW)).toBe(true);
+        attached.open();
+        await held.opened;
+        return inner.revoke("u-1", NOW);
+      });
+      await attached.opened;
+      const retried = reserve("retry");
+      try {
+        await untilBlockedBy(holder);
+      } finally {
+        held.open();
+      }
+      expect(await Promise.allSettled([revoking, retried])).toEqual([
+        { status: "fulfilled", value: 1 },
+        { status: "fulfilled", value: ["reserved"] },
+      ]);
+      // The revoke ended the lost row and released its 60 bytes; the retry found it no longer pending.
+      expect((await rawTables(db).files()).map(({ id, status }) => [id, status])).toEqual([
+        ["lost", "aborted"],
+        ["retry", "pending"],
+      ]);
+      expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
+    },
+  );
+
   test("an app statement through tx may wait longer than the claim's 2 s lock timeout", async () => {
     // Takes 2.5 s by design: the app's lock is held past the claim's timeout.
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));

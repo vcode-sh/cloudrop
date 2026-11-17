@@ -479,7 +479,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   refused entirely leaves no usage row (M5-T18).
 - **If wrong:** the new-owner race with a limit costs one client retry. Creating the usage row first, in a separate
   statement, would remove it but break the single-statement rule and leave zero rows behind (M5-T18).
-- **Status:** decided.
+- **Status:** decided; amended after M5 (M5-T101, task I fix round 1): with a request key, the statement first locks
+  the superseded file rows, then the usage row, the order every other writer takes.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/postgres.ts`.
 - **Amended 2026-11-17 (fix round 1):** the new-owner race no longer reaches the client. A unique violation (`23505`)
@@ -1400,6 +1401,13 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     so the lazy schema check names a missing `request_key`.
   - Plugins hear no `onAbort` for superseded rows (rows carry no auth JSON), the same known cost as the sweep and
     `revoke` (M5 spec §5.7).
+  - Lock order on Postgres: file rows, then the owner's usage row, as `end`, `complete` and `revoke` take them. The
+    freed sum sits in the projection of the `locked` CTE, which the scan computes before `FOR UPDATE` locks the usage
+    row, so `superseded` waits for a row another transaction holds before the statement takes the usage row. The
+    first version subtracted it in `decided`, after the lock, and deadlocked (40P01) against a transaction that held
+    the lost attempt's row and then revoked; `sql-postgres.db.integration.test.ts` pins it on both Postgres drivers
+    (fix round 1; red with 40P01 on the old statement). The owner predicate is null-safe equality in both dialects
+    (`IS NOT DISTINCT FROM`, SQLite's `IS`).
   - Only rows committed before the retry's `reserve` are superseded. A first attempt still running when its retry
     arrives (its `authorize` slow past the client's 30 s) writes its rows after the retry's: on Postgres the
     superseding `UPDATE` cannot see rows committed after its snapshot, and on SQLite the batches simply run in that
@@ -1450,12 +1458,12 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 ### M5-T104: the key grows the SQL adapters by about 5 % (M4-F24)
 
 - **Decision:** re-measured with size-limit: `cloudrop` 46.08 → 46.27 kB (+0.4 %), `cloudrop (bundled)` 27.19 →
-  27.29 kB, `cloudrop/client` 11.03 → 11.09 kB (+0.5 %), `cloudrop/adapters/sql` 13.72 → 14.37 kB (+4.7 %),
-  `cloudrop/adapters/drizzle` 15.7 → 16.44 kB (+4.7 %), `cloudrop/adapters/prisma` 12.78 → 13.43 kB (+5.1 %, declared
-  here). Baselines are the sizes recorded after M5's final fix round. Budgets unchanged.
+  27.29 kB, `cloudrop/client` 11.03 → 11.09 kB (+0.5 %), `cloudrop/adapters/sql` 13.72 → 14.4 kB (+5.0 %),
+  `cloudrop/adapters/drizzle` 15.7 → 16.47 kB (+4.9 %), `cloudrop/adapters/prisma` 12.78 → 13.47 kB (+5.4 %, declared
+  here), as measured after fix round 1. Baselines are the sizes recorded after M5's final fix round. Budgets unchanged.
 - **Why:** the summed budgets count the unminified SQL core, its statements and its comments; the superseding SQL is
   in both dialects and reaches every adapter.
-- **If wrong:** drizzle has 0.56 kB left under its 17 kB budget; the next change to the SQL core or the Drizzle tables
+- **If wrong:** drizzle has 0.53 kB left under its 17 kB budget; the next change to the SQL core or the Drizzle tables
   may need a budget decision.
 - **Status:** decided.
 - **Source:** task I, 2026-11-17.

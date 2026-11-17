@@ -35,13 +35,14 @@ const inputJson = (files: readonly NewFile[]): string =>
 /**
  * A retry of a request whose answer was lost ends that attempt's pending rows in the reserve's statement: the CTE that
  * does it, and the bytes it frees. Every CTE reads one snapshot, so the counters read beside it still hold those bytes
- * and the freed sum is taken off them. No key: no CTE, nothing freed.
+ * and the freed sum is taken off them. `key` and `who` are bound placeholders (`who` may be `NULL`). No key: no CTE,
+ * nothing freed.
  */
-function superseding(b: Binder, files: string, key: string | null, owner: string | null, at: string) {
+function superseding(files: string, key: string | null, who: string, at: string) {
   if (key === null) return { cte: "", freed: "0" };
   const cte = `, superseded AS (
     UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
-    WHERE request_key = ${b.text(key)} AND ${owner === null ? "owner IS NULL" : `owner = ${b.text(owner)}`}
+    WHERE request_key = ${key} AND owner IS NOT DISTINCT FROM ${who}
       AND route IN (SELECT route FROM input) AND status = 'pending'
     RETURNING size
   )`;
@@ -87,7 +88,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
         b.text(requestKey),
       ];
       const who = owner === null ? "NULL" : b.text(owner);
-      const { cte, freed } = superseding(b, files, requestKey, owner, at);
+      const { cte, freed } = superseding(files, requestKey === null ? null : key, who, at);
       const head = `input AS (SELECT * FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS}))${cte}`;
       const values = `input.id, input.route, input.key, ${who}, 'pending', input.name, input.type, input.size,
         input.metadata, ${expires}, ${at}, ${at}, ${key}`;
@@ -108,10 +109,16 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
           : "";
       // The usage row is locked before any decision, so concurrent reserves of one owner queue and each sees the
       // counters the previous one committed. `decided` walks the files in order, adding each that fits.
+      // Lock order: file rows, then the usage row, as in every other writer (end, complete, revoke). The freed sum sits
+      // in `locked`'s projection, which the scan computes before FOR UPDATE locks the row, so `superseded` waits for a
+      // row another transaction holds before this statement takes the usage row; the other order deadlocks (40P01).
+      // With no usage row there is no pending row of the owner to free.
       const sql = `WITH RECURSIVE ${head},
-        locked AS (SELECT reserved_bytes + active_bytes AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE),
+        locked AS (
+          SELECT reserved_bytes + active_bytes - ${freed} AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE
+        ),
         decided (ord, used, reserved) AS (
-          SELECT 0, coalesce((SELECT used FROM locked), 0) - ${freed}, false
+          SELECT 0, coalesce((SELECT used FROM locked), 0), false
           UNION ALL
           SELECT input.ord, decided.used + CASE WHEN ${fits} THEN input.size ELSE 0 END, ${fits}
           FROM decided JOIN input ON input.ord = decided.ord + 1
