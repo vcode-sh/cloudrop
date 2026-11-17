@@ -79,7 +79,11 @@ async function resumeRun(job: Job, id: string): Promise<UploadResult<unknown>> {
   const { context, args } = job;
   const [entry] = job.entries as [Entry];
   job.listen();
-  const checked = await check(context, id, entry.file);
+  // A run from the start: a retry() meanwhile waits for the checks, and this function's own continuation runs first,
+  // settling the file or giving it its upload's run before retry() looks again (final review I2).
+  const checking = check(context, id, entry.file);
+  entry.run = checking.then(() => {});
+  const checked = await checking;
   const refuse = (status: "failed" | "aborted", error: CloudropError) => {
     settle(entry, status, error);
     job.idle();

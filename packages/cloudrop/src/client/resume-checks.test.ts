@@ -249,6 +249,21 @@ describe("while resume() checks (audit I7)", () => {
     });
   });
 
+  // Before the fix the file had no run of its own while it was checked, and retry() waited on a settled promise in a
+  // loop of microtasks that starved the store, the hash and the lock: the tab froze (final review I2).
+  it("answers retry() called meanwhile once the checks end, with only the resumed upload's requests", async () => {
+    const setup = await reloaded(gate(partThree));
+    const job = setup.client.resume(setup.upload, fourParts());
+    const [retried, done] = await Promise.all([job.retry(), job.done]);
+    await setup.drained();
+
+    expect({ retried: retried.data?.files[0]?.status, done: done.data?.files[0]?.status, sent: setup.sent() }).toEqual({
+      retried: "done",
+      done: "done",
+      sent: ["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
+    });
+  });
+
   it("ends ABORTED, sending nothing, when its signal was already aborted", async () => {
     const setup = await reloaded(gate(partThree));
     const before = setup.db.stored();
