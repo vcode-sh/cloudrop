@@ -76,6 +76,16 @@ function refusal(plugin: CloudropPlugin, hook: string, value: unknown): Cloudrop
   );
 }
 
+/** The onAbort context of each file, all from one request: one route, one metadata, one auth. */
+export function abortContexts(
+  request: { route: string; metadata: unknown; auth: unknown },
+  files: readonly PluginFile[],
+  reason: AbortContext["reason"],
+): AbortContext[] {
+  const { route, metadata, auth } = request;
+  return files.map((file) => ({ route, file, metadata, auth, reason }));
+}
+
 /** onAbort for each file on each plugin, in plugin order. A failing onAbort is logged and never stops the others. */
 export async function runOnAbort(
   plugins: readonly CloudropPlugin[],
@@ -104,17 +114,7 @@ export async function runBeforeUpload(
 ): Promise<CloudropError | undefined> {
   for (const [index, plugin] of plugins.entries()) {
     const release = (reason: AbortContext["reason"]) =>
-      runOnAbort(
-        plugins.slice(0, index),
-        context.files.map((file) => ({
-          route: context.route,
-          file,
-          metadata: context.metadata,
-          auth: context.auth,
-          reason,
-        })),
-        logger,
-      );
+      runOnAbort(plugins.slice(0, index), abortContexts(context, context.files, reason), logger);
     let refused: CloudropError | undefined;
     try {
       refused = refusal(plugin, "beforeUpload", await plugin.server?.beforeUpload?.(context));

@@ -156,7 +156,7 @@ const bodyTooLarge = (): CloudropError =>
 /** The parsed JSON body, read up to MAX_BODY_BYTES; a longer body is cancelled, not read to the end. */
 export async function readJson(request: Request): Promise<Result<unknown>> {
   if (Number(request.headers.get("content-length")) > MAX_BODY_BYTES) return fail(bodyTooLarge());
-  const chunks: Uint8Array[] = [];
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
   let length = 0;
   try {
     const reader = request.body?.getReader();
@@ -171,12 +171,7 @@ export async function readJson(request: Request): Promise<Result<unknown>> {
   } catch {
     return fail(invalidInput("The request body could not be read. Send the request again."));
   }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
+  const bytes = await new Blob(chunks).arrayBuffer();
   try {
     return ok(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   } catch {

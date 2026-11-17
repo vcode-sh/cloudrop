@@ -7,7 +7,7 @@ import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
-import { type AbortContext, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
+import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
 import { isUnauthorized, unauthorized } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
@@ -133,11 +133,9 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     ),
   );
   // Files that beforeUpload accepted but could not be started: release what plugins reserved for them.
-  const failed = prepared.flatMap((file, index): AbortContext[] =>
-    file instanceof CloudropError || tickets[index]?.kind !== "rejected"
-      ? []
-      : [{ route: route.name, file, metadata, auth, reason: "failed" }],
+  const failed = prepared.filter(
+    (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
   );
-  await runOnAbort(plugins, failed, config.logger);
+  await runOnAbort(plugins, abortContexts({ route: route.name, metadata, auth }, failed, "failed"), config.logger);
   return ok({ files: tickets });
 }

@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../errors.ts";
 import { sizeOfPart } from "../plan.ts";
 import type { SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { PresignedRequest, StorageDriver } from "../storage/driver.ts";
+import { allOk } from "../storage/s3/responses.ts";
 import { contentDisposition } from "./key.ts";
 import { type MultipartToken, type UploadTokenPayload, uploadExpired } from "./token.ts";
 
@@ -77,10 +78,5 @@ export async function presignParts(
       return result.error ? result : ok({ partNumber, ...toWire(result.data) });
     }),
   );
-  const parts: SignedPart[] = [];
-  for (const result of signed) {
-    if (result.error) return fail(result.error);
-    parts.push(result.data);
-  }
-  return ok(parts);
+  return allOk(signed);
 }
