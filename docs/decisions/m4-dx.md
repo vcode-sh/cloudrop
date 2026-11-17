@@ -76,6 +76,18 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `server/complete.ts`, `server/presign.ts`, `server/http.ts` (`readJson`), `server/plugins.ts`
   (`abortContexts`), `server/token-request.ts` (`tokenAbortContexts`), `server/upload.ts`, `server/abort.ts`.
 
+### M4-F14: a bundled-and-minified budget for `cloudrop`
+
+- **Decision:** `scripts/size-limit.config.ts` adds "cloudrop (bundled)": `dist/index.js` bundled and minified with
+  every export, gzip, limit 23.5 kB (21.33 kB measured plus about 10%), beside the summed 36 kB budget, which stays.
+- **Why:** audit F14. The summed budget counts the published files with their doc comments and messages (34.08 kB
+  now); what a Workers app ships is the bundle, which the summed figure overstates by about 60%.
+- **If wrong:** an app that imports only part of the server ships less than this budget, so it bounds the worst case,
+  not the typical one.
+- **Status:** in force.
+- **Source:** design §4, audit F14.
+- **Visible in:** `scripts/size-limit.config.ts`.
+
 <!-- Task B appends its entries above this line. -->
 
 ### API, configuration and documentation (design §5, `M4-F15` to `M4-F21`)
