@@ -1032,7 +1032,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** under storage pressure a browser may evict the origin's data, records included; those uploads can no
   longer be resumed, and their parts wait for the bucket's lifecycle rule.
 - **Status:** in force (`7f2a7b1`; the README `d63579c`).
-- **Visible in:** `client/records.ts` (no such call), `README.md`.
+- **Visible in:** `client/records.ts` (no such call), `docs/guide/resume.md`.
 
 ### M3-U67: an expired upload starts over with a new ticket
 
@@ -1533,4 +1533,4 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Visible in:** `client/launch.ts` (`refused`, `askAlone`, `launch`'s `Alone`), `client/job-run.ts` (`startOver`,
   `Job.watch`), `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts`
   (`withRetry`'s `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`,
-  `client/upload-refusals-wait.test.ts`, `client/resume.test.ts` (the start over's backoff rows), README ("Client").
+  `client/upload-refusals-wait.test.ts`, `client/resume.test.ts` (the start over's backoff rows), `docs/guide/client.md` ("When /upload refuses one file").

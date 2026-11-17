@@ -68,9 +68,7 @@ stays deferred to a later opt-in (`M3-U65`).
 
 ### Owner steps
 
-- **Live bucket CORS:** add `Retry-After` to the `ExposeHeaders` of the test bucket's rule `cloudrop-browser-tests`, so
-  a page can honour R2's `Retry-After: 5` on a 429 (`M3-K8`). Agents never write bucket settings; until then the client
-  follows its own backoff there. The README's CORS section already recommends it to users.
+- None open. The live bucket's rule `cloudrop-browser-tests` exposes `Retry-After` since 2026-11-17 (`M3-K8`).
 
 ### Open decisions for the owner
 
@@ -103,7 +101,7 @@ stays deferred to a later opt-in (`M3-U65`).
 
 - The findings' "Browser, 2026-11-16" row U2 was measured the same way as the section with the erratum (a routed
   page), so its preflight `204` may be Playwright's too; its conclusion (the expired URL's answer is opaque) stands.
-- The README says Deno has no `indexedDB`; not measured on this machine (no Deno installed).
+- The resume guide says Deno has no `indexedDB`; not measured on this machine (no Deno installed).
 - Wording: the slice plan quotes the old `NETWORK_ERROR` message (around line 551), a historical plan left as
   written.
 - Plan B, parked: no unit row observes that `job.abort()` removes the listener on the caller's signal (`M3-U54`);

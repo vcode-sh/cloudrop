@@ -612,6 +612,10 @@ of 300 requests was never approached: 30 burst requests in all over three runs, 
 `Retry-After: 5`, but the rule's `ExposeHeaders` (`ETag` and the two checksum headers) does not list `Retry-After`, so
 neither API returns it to the page. The body code is `ServiceUnavailable`, as Q9 measured outside a browser.
 
+*Update 2026-11-17:* the owner had `Retry-After` added to the rule's `ExposeHeaders` (`M3-K8`). A GET of a missing key
+from both test origins now answers `access-control-expose-headers: ETag,Retry-After,x-amz-checksum-crc32c,
+x-amz-checksum-crc64nvme`, so a page can read the `429`'s `Retry-After`. T1 was not re-run.
+
 **Playwright answers preflights itself when a route is set.** A first run (23:54:05) routed `http://localhost:5173/` to
 the blank page with `page.route`, as [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16) did.
 D1, D2, N1 and T1 came out exactly as above, but H1 and H2 **succeeded** (`200`, stored, readable). The reason is in

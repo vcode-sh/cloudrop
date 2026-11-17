@@ -147,9 +147,11 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   bucket's rule does not expose it). The client already honours it wherever it can read it.
 - **If wrong:** a bucket without the rule still works and waits with jitter only, which may retry sooner than the
   bucket asked.
-- **Status:** decided (plan Task 2; the live bucket waits on the owner).
+- **Status:** decided (plan Task 2). Done on the live bucket 2026-11-17: at the owner's request its rule
+  `cloudrop-browser-tests` was set with `wrangler r2 bucket cors set`, and a GET from both test origins answered
+  `Access-Control-Expose-Headers: ETag,Retry-After,x-amz-checksum-crc32c,x-amz-checksum-crc64nvme`.
 - **Source:** chaos design §5; research §2.3, §5 Q4.
-- **Visible in:** `examples/next/scripts/setup-rustfs.ts`, `README.md` (CORS section), `examples/next/README.md`.
+- **Visible in:** `examples/next/scripts/setup-rustfs.ts`, `docs/guide/bucket-setup.md`, `examples/next/README.md`.
 
 ## Execution rulings
 

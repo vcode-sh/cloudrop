@@ -32,7 +32,7 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 - **Why:** owner decision (audit owner decision 1).
 - **If wrong:** a revoked session completes its token's upload until expiry unless the app re-checks.
 - **Status:** in force.
-- **Visible in:** `src/server/route.ts` (`onComplete` TSDoc), README "Uploads and the token".
+- **Visible in:** `src/server/route.ts` (`onComplete` TSDoc), `docs/guide/server.md` ("The upload token and what it allows").
 
 ### M2-X4: Node 24 and Biome schema 2.6.8
 
@@ -255,7 +255,7 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 - **If wrong:** an aborted upload can land and complete again unless an app's `afterVerify` refuses it.
 - **Status:** in force. The docs lane found the "sign again" part holds for single PUT only (an aborted multipart
   upload is gone).
-- **Visible in:** spec §5.5 and §8, README "Uploads and the token".
+- **Visible in:** spec §5.5 and §8, `docs/guide/server.md` ("The upload token and what it allows").
 
 ### M2-X28: a failed cleanup keeps the reservation; an own-object 412 is a retry
 

@@ -42,7 +42,7 @@ later.
 - **Why:** stateless endpoints; the token already binds the owner.
 - **If wrong:** a revoked session finishes uploads already started, unless the app re-checks in `onComplete`.
 - **Status:** in force, confirmed by the owner (M2-X3). The `onComplete` TSDoc says to re-check sessions there.
-- **Visible in:** spec §5.2, `src/server/route.ts` (TSDoc), README "Uploads and the token".
+- **Visible in:** spec §5.2, `src/server/route.ts` (TSDoc), `docs/guide/server.md` ("The upload token and what it allows").
 
 ### M2-D5: secrets
 
