@@ -320,11 +320,16 @@ With a store only (without one each resolves `INVALID_CONFIG`):
   `transaction: true`: an app row written through `tx` is absent after a throw; concurrent completions run one
   `onComplete`.
 - **`bun run test:db`**: Postgres 18 in Docker (label `cloudrop.test`, port `19500`, `CLOUDROP_POSTGRES_PORT`) and SQLite
-  via `node:sqlite`; fails, never skips, without Docker. D1 runs the contract in the Wrangler lane.
+  via `node:sqlite`; fails, never skips, without Docker. D1 runs the contract in the Wrangler lane. (Amended
+  2026-11-17, M5-T84, M5-T85: through Wrangler's `getPlatformProxy`, for `sqlStore(d1Executor(env.DB))` and
+  `drizzleStore(drizzle(env.DB))`, gaps `transaction` and `failureInjection`.)
 - **Chaos lane:** rows with a store: faults on `/complete` and overlapping retries still run `onComplete` once and leave
-  usage exact.
+  usage exact. (Amended 2026-11-17, M5-T86: `sqlStore` over in-memory `node:sqlite`; also a revoke mid-upload and the
+  sweep after closed tabs.)
 - **Example:** `examples/next` gains an opt-in store through `cloudrop/adapters/sql` and `node:sqlite` (no native build),
-  showing `owner`, `quota` and `afterComplete`; a browser row proves a reload-and-resume completes once.
+  showing `owner`, `quota` and `afterComplete`; a browser row proves a reload-and-resume completes once. (Amended
+  2026-11-17, M5-T87: the browser lanes run a second Playwright pass with the store on; a second row proves the quota
+  refusal.)
 
 ## 9. Work breakdown
 

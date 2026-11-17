@@ -12,12 +12,12 @@ and the `testing-patterns` skill in `.claude/skills/testing-patterns/`.
 | `bun run verify` | Every gate: check (Biome, file size, complexity), typecheck, unit tests, build, the example's typecheck and package checks | Nothing beyond `bun install` |
 | `bun run test` | The unit lane, on the in-process fake R2 | Nothing |
 | `bun run test:rustfs` | The storage contract on RustFS | Docker |
-| `bun run test:wrangler` | The storage contract on Wrangler's local R2 | Nothing (Wrangler is a dev dependency) |
+| `bun run test:wrangler` | The storage contract on Wrangler's local R2, the store contract on its local D1 | Nothing (Wrangler is a dev dependency) |
 | `bun run test:live` | The storage contract and the upload protocol on real R2 | R2 credentials |
-| `bun run test:db` | The database store's fixtures and contract on Postgres 18 and SQLite (`node:sqlite`) | Docker |
-| `bun run test:chaos` | The upload protocol on RustFS behind a fault-injecting proxy | Docker |
+| `bun run test:db` | The database store's contract through every adapter on Postgres 18 and SQLite, and the handler on Postgres | Docker |
+| `bun run test:chaos` | The upload protocol on RustFS behind a fault-injecting proxy, stateless and with a store | Docker |
 | `bun run test:chaos:soak` | The nightly seeded soak on the same setup | Docker |
-| `bun run test:browser` | The example in Chromium's headless shell, uploading to RustFS | Docker, Playwright's headless shell |
+| `bun run test:browser` | The example in Chromium's headless shell, uploading to RustFS, stateless and then with its store | Docker, Playwright's headless shell |
 | `bun run test:browser:live` | The same browser tests on real R2 | R2 credentials, Playwright's headless shell, the bucket's CORS rule |
 
 Which lanes a change needs:
@@ -26,7 +26,7 @@ Which lanes a change needs:
 - **Storage-layer changes:** `test:rustfs`, `test:wrangler` and `test:live`.
 - **Server changes:** `test:live`, which also runs the upload protocol against real R2.
 - **Client and server changes:** `test:chaos`.
-- **Store and adapter changes:** `test:db`.
+- **Store and adapter changes:** `test:db`, and `test:wrangler` for the D1 paths (`d1Executor`, Drizzle over D1).
 - **Client and example changes:** `test:browser`.
 
 A lane whose service or credentials are missing **fails** with a message that names what to set. It never skips.
@@ -66,6 +66,12 @@ Starts `wrangler dev` with its local R2 on port **18787**, runs the contract, th
 Set `CLOUDROP_WRANGLER_PORT` to use another port. Wrangler's local R2 lacks some features, such as `ListParts` and
 checksum checks, so the cases that need them are skipped there with a reason naming the gap. That is the only kind of
 skip allowed.
+
+The same lane runs the store contract on Wrangler's local D1, through `sqlStore(d1Executor(env.DB))` and through
+`drizzleStore(drizzle(env.DB))`. The fixture's `wrangler.jsonc` declares the `DB` binding, and `src/testing/db/d1.ts`
+reaches it from Node through Wrangler's `getPlatformProxy`, in memory, so the contract runs in Vitest unchanged and the
+executors get the binding a Worker would. D1 declares two gaps: `transaction` (no interactive transaction) and
+`failureInjection` (no user functions for the one-shot trigger).
 
 ## Live R2 lane
 
@@ -118,7 +124,11 @@ The real server and client run on RustFS, port **19300**, behind a fault-injecti
 proxy injects resets, black holes, throttling, `429`/`503`/`500` answers, readable and opaque `403`s and cut answers.
 Each row checks that the upload ends with the file's exact bytes and nothing left open, or with a documented code.
 
-- `test:chaos` runs the `*.chaos.integration.test.ts` files (Vitest project `chaos`).
+- `test:chaos` runs the `*.chaos.integration.test.ts` files (Vitest project `chaos`). `store.chaos.integration.test.ts`
+  gives the server a database store (`useChaosFixture({ store: true })`: `sqlStore` over in-memory `node:sqlite`) and
+  loses `/complete` answers on the way back to the client (`faultApp`): a reset, a deadline that passes while
+  `onComplete` runs, a gateway `503`. Its rows check that `onComplete` ran once and the owner's usage is exact, that a
+  revoke stops an upload at its next call, and that the sweep after closed tabs leaves no orphan object or open upload.
 - `test:chaos:soak` runs the nightly `*.soak.integration.test.ts` files (Vitest project `soak`): seeded random faults, a
   mid-run abort, and the real-time stall and throttle rows. To replay a run, set `CLOUDROP_CHAOS_SEED` to the seed in a
   test's title.
@@ -145,8 +155,10 @@ bun run test:browser:live
 
 `test:browser` starts its own RustFS container on port **19100**, starts the chaos proxy in front of it on port
 **19110**, builds cloudrop, and has Playwright build and serve [`examples/next`](../../examples/next/README.md) on port
-**5173**. It removes the container and stops the proxy afterwards. It needs Docker, no credentials, and leaves any
-`.env.local` alone.
+**5173**. It runs Playwright twice: the stateless example with every row but `*.store.browser.test.ts`, then the
+example with its database store (`CLOUDROP_EXAMPLE_STORE` set to a database file of the run's own, a quota of 50 MB)
+with those rows alone; extra arguments reach both passes. It removes the container and the store's database and stops
+the proxy afterwards. It needs Docker, no credentials, and leaves any `.env.local` alone.
 
 | Port | What | Override |
 | --- | --- | --- |
@@ -158,9 +170,9 @@ What the browser tests cover is described in [the example's README](../../exampl
 
 ### On live R2
 
-`test:browser:live` runs the same tests on a real bucket, with the credentials `test:live` reads. It builds cloudrop,
-serves the example on port 5173, uploads under a random `live-test/cloudrop-<hex>/` prefix and deletes that prefix at
-the end. The chaos rows are left out: R2 routes by its own host, so the proxy cannot stand in front of it.
+`test:browser:live` runs the same tests on a real bucket, in the same two passes, with the credentials `test:live`
+reads. It builds cloudrop, serves the example on port 5173, uploads under a random `live-test/cloudrop-<hex>/` prefix
+and deletes that prefix and the store's database at the end. The chaos rows are left out: R2 routes by its own host, so the proxy cannot stand in front of it.
 
 The test bucket's CORS rule, `cloudrop-browser-tests`, must allow:
 

@@ -117,11 +117,24 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 | `INVALID_PART` | No | Parts are missing or have the wrong size at completion. | Upload them again, then complete. In `/complete`, the handler answers a retryable `STORAGE_ERROR` instead. |
 | `CHECKSUM_MISMATCH` | No | The uploaded bytes do not match their checksum. | Upload them again. |
 
+## Database store file API errors
+
+With a [database store](store.md), `cloudrop.api.file`, `usage`, `revokeUploads`, `deleteFile`, `reconcile` and `sweep`
+answer these. Without a store each answers `INVALID_CONFIG`: "api.<name> needs a database store. Pass store to
+createCloudrop."
+
+| Code | Retryable | What it means | What to do |
+| --- | --- | --- | --- |
+| `NOT_FOUND` | No | `deleteFile` found no completed file with this id: it never completed, or the store has no row for it. | Check the id; it is the `file.id` the upload returned. |
+| `INVALID_INPUT` | No | An id or owner that is not 1 to 255 characters, a sweep `limit` outside 1 to 1,000, or a `graceMs` under 15 minutes. | Fix the argument; the message names it. |
+| `SERVER_ERROR` | Yes | The database failed or could not be reached ("The server could not reach its upload records."). The server log has the database's error. | Try again. A sweep leaves a failed row for its next run and counts it in `failed`. |
+| `STORAGE_ERROR`, `RATE_LIMITED` | Varies | `deleteFile` or `sweep` could not delete an object or abort a multipart upload. | As in the driver table above. The row stays as it was, so calling again finishes the work. |
+
 ## Configuration errors
 
 | Code | Thrown by | What to do |
 | --- | --- | --- |
-| `INVALID_CONFIG` | `createCloudrop`, `route`, `r2`, `s3`, `createCloudropClient`, `toNextHandler`, `toNodeHandler`, and a plugin's `extendRoute` | Fix the option the message names. A missing setting names its environment variable when there is one. |
+| `INVALID_CONFIG` | `createCloudrop`, `route`, `r2`, `s3`, `createCloudropClient`, `toNextHandler`, `toNodeHandler`, a plugin's `extendRoute`, and the store adapters (`sqlStore`, `drizzleStore`, `prismaStore`); a store also throws it on its first call when a table or column is missing, which the handler logs while answering a retryable `SERVER_ERROR` | Fix the option the message names. A missing setting names its environment variable when there is one; a missing column names its table. |
 
 Settings read from the environment (`CLOUDROP_SECRET`, `CLOUDROP_R2_*`, `CLOUDROP_S3_*`) are reported on the first
 request instead of thrown, and `INVALID_CONFIG` then arrives in a result: the handler logs it (again only when the

@@ -54,6 +54,9 @@ npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
   the missing parts are sent.
 - **Server-side checks.** Authorization is required on every route. Size and type are checked before signing and
   verified again on the stored object.
+- **An optional database store.** A row per upload before anything is signed, `onComplete` once per file, a quota per
+  user that concurrent uploads cannot overshoot, uploads you can revoke, and a sweep that cleans up after abandoned
+  ones. Adapters for Postgres and SQLite drivers, Cloudflare D1, Drizzle and Prisma.
 - **Zero runtime dependencies.** Only web-platform APIs, so the server runs on Node.js 24+, Bun, Deno and Cloudflare
   Workers. React is an optional peer dependency, used only by `cloudrop/react`.
 
@@ -63,12 +66,14 @@ Pre-release: the API may change before 0.1.
 
 - **Done:** M0 (a spike against real R2), M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite), M2 (the
   server: routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js and Node adapters), M3
-  (the upload engine and the browser client) and M4a (fixes from a code audit, `route(policy, callbacks)`, settings
-  read from the environment on the first request, `forbidden()`, and the `cloudrop/react` hooks).
+  (the upload engine and the browser client), M4a (fixes from a code audit, `route(policy, callbacks)`, settings
+  read from the environment on the first request, `forbidden()`, and the `cloudrop/react` hooks) and M5 (the
+  database store and its SQL, Drizzle and Prisma adapters).
 - **Tested on:** the upload protocol runs against an in-process fake R2, real R2, and RustFS behind a fault-injecting
   proxy, and from Chromium through the example on RustFS and on real R2. Wrangler's local R2 runs the storage contract
-  and single uploads only: it does not implement `ListParts`, so a multipart upload cannot complete there.
-- **Next:** M4b (shadcn registry components, Hono and Vite React examples), then M5 (plugins: content checks, limits,
+  and single uploads only: it does not implement `ListParts`, so a multipart upload cannot complete there. The store
+  runs its contract on Postgres 18, SQLite and Wrangler's local D1, through every adapter.
+- **Next:** M4b (shadcn registry components, Hono and Vite React examples), then M6 (plugins: content checks, limits,
   images, checksums).
 
 Where the project stands and what comes next: [docs/superpowers/plans/README.md](docs/superpowers/plans/README.md).
@@ -187,6 +192,38 @@ const { data, error } = await upload("avatar", file); // never rejects for an ex
 A working version of these files, with a demo sign-in, runs against a local RustFS container without any
 credentials: [`examples/next`](examples/next/README.md).
 
+## Keep a record of uploads
+
+The server above is stateless: the signed token carries everything, and `onComplete` runs at least once per file. Pass
+a store to keep one row per upload in your own database, in two tables you create once:
+
+```ts
+import { createCloudrop, r2, route } from "cloudrop";
+import { pgExecutor, sqlStore } from "cloudrop/adapters/sql";
+import pg from "pg";
+
+const store = sqlStore(pgExecutor(new pg.Pool({ connectionString: process.env.DATABASE_URL })));
+
+export const cloudrop = createCloudrop({
+  storage: r2(),
+  store,
+  quota: () => 1024 ** 3, // bytes each owner may keep
+  routes: {
+    avatar: route(
+      { accept: "image/*", maxSize: "5MB", authorize }, // authorize as in the quickstart
+      { owner: ({ userId }) => userId },
+    ),
+  },
+});
+```
+
+With a store, `onComplete` runs once per file (exactly once for its database writes through `tx` on Postgres), each
+owner's files count toward a quota, `api.revokeUploads` stops a signed-out user's uploads, and `api.sweep` cleans up
+after abandoned ones. The adapters are subpaths of the same package: `cloudrop/adapters/sql` (node-postgres,
+postgres.js, `node:sqlite`, Cloudflare D1), `cloudrop/adapters/drizzle` (`drizzle-orm` 0.45 up to 1.x, from 1.0.0-rc.5, an optional peer)
+and `cloudrop/adapters/prisma` (Prisma 7); install only the driver you already use. Setup, the tables and what each
+mode guarantees: [Database store](docs/guide/store.md).
+
 ## Set up your bucket
 
 Browsers upload to the bucket directly, so the bucket must allow it:
@@ -207,6 +244,7 @@ cover `Retry-After`.
 | Page | What it covers |
 | --- | --- |
 | [Server](docs/guide/server.md) | `createCloudrop`, storage drivers, routes, the upload token, mounting, origins, `cloudrop.api` |
+| [Database store](docs/guide/store.md) | The optional store: adapters, tables, `owner`, `quota`, `onComplete` once, revocation, the sweep |
 | [Client](docs/guide/client.md) | `createCloudropClient`, `upload()` and `start()`, progress, pause, retry, concurrency, offline |
 | [React](docs/guide/react.md) | `cloudrop/react`: `useUpload` and `useResumable` for inputs, drop zones, progress lists and resume |
 | [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies across sites, proxies, building without secrets |
@@ -215,7 +253,7 @@ cover `Retry-After`.
 | [Errors](docs/guide/errors.md) | Every error code, where it comes from and what to do |
 | [Troubleshooting](docs/guide/troubleshooting.md) | Symptoms and their usual causes |
 | [Testing](docs/guide/testing.md) | For contributors: every test lane and what it needs |
-| [`examples/next`](examples/next/README.md) | A Next.js app that uploads to RustFS, Wrangler or R2, with a lab page |
+| [`examples/next`](examples/next/README.md) | A Next.js app that uploads to RustFS, Wrangler or R2, with a lab page and an opt-in SQLite store |
 | [`docs/decisions`](docs/decisions/README.md) | Why the code is the way it is |
 | [`docs/research`](docs/research) | Measured R2 and backend behaviour ([test backends](docs/research/test-backends.md)) |
 
@@ -232,7 +270,8 @@ cover `Retry-After`.
 bun install
 bun run verify             # check, typecheck, test, build, the example's typecheck and package checks
 bun run test:rustfs        # storage contract on RustFS in Docker
-bun run test:wrangler      # storage contract on Wrangler's local R2
+bun run test:wrangler      # storage contract on Wrangler's local R2, store contract on its local D1
+bun run test:db            # store contract and adapters on Postgres 18 in Docker and SQLite
 bun run test:live          # storage contract and upload protocol on real R2 (credentials: CLOUDROP_R2_ENV_FILE)
 bun run test:chaos         # upload protocol on RustFS behind a fault-injecting proxy (needs Docker)
 bun run test:chaos:soak    # the nightly seeded soak on the same setup

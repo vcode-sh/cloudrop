@@ -3,7 +3,8 @@
 This page covers everything that runs on your server: creating the server with `createCloudrop`, choosing a storage
 driver, defining routes and who may use them, what the upload token is and what it allows, mounting the handler in your
 framework, which origins may call it, and the `cloudrop.api` file operations. For the browser side, see
-[Client](client.md).
+[Client](client.md). To keep a row per upload in your database (`onComplete` once, quotas, revocation, cleanup), see
+[Database store](store.md).
 
 ## Create the server
 
@@ -46,6 +47,9 @@ checked when `createCloudrop` runs too, so a dev server fails as soon as the ser
 | `multipartThreshold` | Files larger than this go in parts. Bytes or a size such as `"64MB"`. | 64 MiB |
 | `plugins` | Plugins with server hooks (see [Hooks](#hooks)). | `[]` |
 | `logger` | Where failures inside the handler and configuration warnings go: any object with `error(message, error)` and `warn(message)`, such as `console` or a pino logger. | `console` |
+| `store` | A database store, such as `sqlStore(...)` from `cloudrop/adapters/sql` (see [Database store](store.md)). | none: stateless |
+| `quota` | With a store: each owner's limit in bytes, or `null` for none, asked once per `/upload`. | none |
+| `completionLeaseMs` | With a store and no transaction: how long a `/complete` holds its file while `onComplete` runs. Longer than your slowest `onComplete`. | 300000 |
 
 Generate a secret with `openssl rand -base64 32`. Use a different secret for every deployment: a token verifies
 wherever its secret is configured.
@@ -168,6 +172,8 @@ const photo = route(
 | `key` | The whole key instead of `<prefix>/<ulid><ext>`. Pass `prefix` or `key`, not both. A custom key must be unique (see below). |
 | `visibility` | `"public"` or `"private"`. `"public"` needs the storage's `publicUrl`. Default: `"public"` when the storage has a `publicUrl`, otherwise `"private"`. |
 | `onComplete` | Runs inside `/complete` once the file is verified. What it returns reaches the client as `data.data`, as JSON. |
+| `owner` | With a store: who the file counts against for `quota` and `api.usage`, such as a user or team id, or `null`. |
+| `afterComplete` | With a store: runs once the completion is recorded, at most once and best effort; the place for emails and webhooks. |
 
 A route that takes any type of file says so with `accept: "*/*"`. The extension check still applies to the types
 cloudrop knows, so `photo.png` sent as `image/jpeg` is still refused, and a file the browser gives no type is stored as
@@ -324,6 +330,9 @@ Then the rules that follow from a stateless token:
 - **A removed route.** `/abort` still cleans up, and runs `onAbort`, after a deploy removed or renamed the token's route.
   `/sign` and `/complete` refuse such a token with `UNKNOWN_ROUTE`.
 
+A [database store](store.md) changes the first and third rules: `api.revokeUploads` ends a user's unfinished uploads
+at their next call, and `/abort` never deletes a completed file.
+
 What `/complete` verifies, which is the real guarantee:
 
 - **Single `PUT`:** a `HEAD` of the object. Its size, type and upload id must match the token.
@@ -353,7 +362,9 @@ Why it works this way: the M2 decisions in [docs/decisions](../decisions/README.
 ### onComplete
 
 `onComplete` is a route option. It runs inside `/complete`, after the file is verified, at least once per file. Its JSON
-result reaches the client as `data.data`; without `onComplete`, `data.data` is `null`.
+result reaches the client as `data.data`; without `onComplete`, `data.data` is `null`. With a [database store](store.md)
+it runs once per file, and on a transactional store its writes through `tx` commit with the upload; `owner` and
+`afterComplete` are store callbacks, described there.
 
 ### Plugin hooks
 
@@ -387,14 +398,17 @@ const quota: CloudropPlugin = {
 A `beforeUpload` refusal refuses every file of the job with its code and message. `FORBIDDEN` says the user is signed
 in but may not upload this; the message says what to do (see [Errors](errors.md#upload-endpoint-errors)).
 
-Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. cloudrop's own
-plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive in M5.
+Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. A database store's
+`quota` reserves and releases bytes for you, with no plugin (see [Database store](store.md#owners-and-quota)).
+cloudrop's own plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive in M6.
 
 ### Make hooks idempotent
 
 Hooks can run more than once. A retried or replayed request repeats `afterVerify` and `onComplete` (on `/complete`) and
 `onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Make their side effects
-idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate.
+idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate. A
+database store answers a finished upload's retries from its row instead (see
+[what it guarantees](store.md#what-it-guarantees)).
 
 The client also sends a slow call again. A `/complete` slower than 120 s, or an `/upload` slower than 30 s, counts as no
 answer and is retried (see [Stalled requests](client.md#stalled-requests)), so keep `onComplete` and `authorize` well
@@ -544,6 +558,9 @@ Same-origin versus cross-origin setups, cookies across sites and which origin th
 | `copy(from, to)` | Copies an object. |
 | `deletePrefix(prefix)` | Empties a folder prefix ending in `/`, such as `"users/42/"`, then lists it again to prove it is empty. For erasure requests. |
 | `checkBucket({ origins? })` | Reports the bucket's CORS rule, lifecycle rule and public-access conflicts (see below). |
+
+With a store, `api` also has `file`, `usage`, `revokeUploads`, `deleteFile`, `reconcile` and `sweep` (see
+[Database store](store.md#file-operations)).
 
 `getUrl` signs at the start of an `expiresIn` window and the URL stays valid for two windows, so every viewer in one
 window gets the same, cacheable URL.

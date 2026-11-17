@@ -54,7 +54,9 @@ storage, stateless server with a `store` interface reserved for later adapters, 
 checksums, limits, images), and an essential server file API.
 
 **1.1:** database adapters, starting with Drizzle: a files table, exactly-once `onComplete`, cross-device resume,
-orphan cleanup and built-in quota.
+orphan cleanup and built-in quota. (Amended 2026-11-17, M5-T15: the database store and its SQL, Drizzle and Prisma
+adapters shipped as milestone M5, before the plugins and before 1.0; see the
+[M5 store spec](2026-11-17-m5-store-design.md). Cross-device resume stays later.)
 
 **Later, not designed here:** Vue and Svelte bindings, a Cloudflare Worker R2-binding driver, server-side streaming
 multipart for large server uploads.
@@ -74,7 +76,7 @@ One npm package, `cloudrop`, with subpath exports. One install and one version; 
 | `cloudrop/react` | `useUpload`, `useDropzone` | React 18 and 19 (optional peer) |
 | `cloudrop/plugins` | `contentChecks`, `checksums`, `limits`, `images` (server halves) | Server |
 | `cloudrop/client/plugins` | Client halves of the same plugins | Browser |
-| `cloudrop/adapters/drizzle` | 1.1 | Server |
+| `cloudrop/adapters/sql`, `cloudrop/adapters/drizzle`, `cloudrop/adapters/prisma` | The database store's adapters (M5): `sqlStore` with executors for node-postgres, postgres.js, `node:sqlite` and D1; `drizzleStore`, `cloudropPgTables`, `cloudropSqliteTables`; `prismaStore` | Server |
 
 `cloudrop/client` exports the wire types of the four endpoints and the route inference types `RouteName`,
 `RouteMetadata`, `RouteResult` and `InferableCloudrop` (M3-O1 as scoped by M3-H13; 31 names with
@@ -153,7 +155,8 @@ export const cloudrop = createCloudrop({
   `POST http://host/api/cloudrop/upload`, answers `400` too: browsers send that form only to proxies, and accepting it
   would let the target choose the origin. `rawHeaders`, which shows a second Host, is read when the request has it.
 - `onComplete` runs inside the client's `/complete` request and its return value reaches the client, typed. Delivery
-  is at-least-once with a stable `file.id`; the docs say so. The 1.1 adapters make it exactly-once.
+  is at-least-once with a stable `file.id`; the docs say so. With a database store it runs once per file, exactly once
+  for its database writes through `tx` on Postgres (amended 2026-11-17, M5-T7; M5 store spec §5.5).
 - `createCloudrop` warns about private routes on a bucket with a public domain. In development
   (`NODE_ENV === "development"` exactly) the first request also runs `api.checkBucket()` once in the background and
   logs missing bucket CORS (`ExposeHeaders: ETag`) and a missing abort-incomplete lifecycle rule.
@@ -200,7 +203,9 @@ The server decides; the client cannot.
   expiry, and are renewed through `/sign`, in batches (default 20 parts).
 - The token is the authority for its whole lifetime: `authorize` runs only in `/upload`, so a session revoked
   mid-upload can still finish that upload. `onComplete` receives the request, so an application that needs it
-  re-checks the session there. Nothing revokes a live token (§5.5).
+  re-checks the session there. Nothing revokes a live token (§5.5). (Amended 2026-11-17, M5-T3, M5-T10: a token
+  issued with a database store carries `stored: true`, and `api.revokeUploads({ owner })` ends that owner's unfinished
+  uploads at their next `/sign` or `/complete`; M5 store spec §5.1, §6.)
 - Verification accepts any secret in the `secret` array, so secrets rotate without breaking live uploads.
 
 ### 5.3 Keys
@@ -386,7 +391,9 @@ that reserves and releases makes both idempotent by `file.id`.
   its CRC64NVME of the whole file with the value R2 stores on every write (§12).
 - **`limits()`**: `rateLimit` per owner; quota through `reserve` at `/upload`, `commit` at `/complete` and `release`
   at `/abort` or by the reservation's own expiry, so quota cannot be overshot between signing and completion. A
-  failing limiter rejects (fail-closed). In 1.0 the app supplies the callbacks; in 1.1 the database adapter does.
+  failing limiter rejects (fail-closed). The app supplies the callbacks. (Amended 2026-11-17, M5-T9: a database store's
+  `quota` reserves at `/upload`, commits at `/complete` and releases on abort, refusal, revocation, expiry and deletion,
+  so a storage quota needs no plugin; `limits()` keeps rate limits and quotas the store does not count.)
 - **`images()`**: client-side resize and compression in a Worker (OffscreenCanvas); server-side dimension checks
   (`minWidth`, `maxWidth`, …) parsed from file headers (PNG, JPEG, WebP, AVIF, GIF), no native dependencies.
 
