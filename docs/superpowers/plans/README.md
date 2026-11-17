@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `feat/m3-chaos` after the chaos plan, which closes M3. This file is the one place
+Updated 2026-11-17 on `main` after the chaos plan, which closes M3. This file is the one place
 that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
 done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
 in [`docs/decisions/`](../../decisions/README.md).
@@ -30,9 +30,9 @@ in [`docs/decisions/`](../../decisions/README.md).
 | [M3 progress plan A](2026-11-16-m3-progress-plan-a.md) ([audit](2026-11-16-m3-progress-plan-a.audit.md)), design [`2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md) | Done, `27e9152..a003cdb` | XHR progress, the snapshot, one connection pool per client, several files per job with a result per file, pause, resume and cancel, the lab; decisions `M3-U1`..`M3-U22` |
 | [M3 progress plan B](2026-11-16-m3-progress-plan-b.md) ([audit](2026-11-16-m3-progress-plan-b.audit.md)) | Done, `fbc5c15..220332c` | `concurrency: "auto"`, `order: "smallest-first"`, stalled PUTs, offline and online, `retry()` with the failed-file rule and `pagehide`, 16 MiB parts from 256 MiB, the lab's controls; decisions `M3-U23`..`M3-U59` |
 | [M3 resume](2026-11-16-m3-resume.md) ([audit](2026-11-16-m3-resume.audit.md)), design [`2026-11-16-resume-design.md`](../specs/2026-11-16-resume-design.md) | Done, `57144e0..11eb34d` | Records in IndexedDB, edge-hash fingerprint, a Web Lock per upload, `resumable()`, `resume(upload, file)`, `forget()`, the `/complete` probe, `persist` and `namespace`; R2's browser refusals measured; the lab's resume rows; decisions `M3-U60`..`M3-U91` |
-| [M3 chaos](2026-11-17-m3-chaos.md) ([audit](2026-11-17-m3-chaos.audit.md)), design [`2026-11-17-chaos-design.md`](../specs/2026-11-17-chaos-design.md) | Done from `11eb34d`, on `feat/m3-chaos` | A fault-injecting proxy in front of RustFS; `test:chaos` on every pull request (Node rows 1–8, 12–14, 17), the browser rows through the proxy in `test:browser` (stall under Playwright's clock), a nightly `test:chaos:soak` (seeded random faults, a mid-run abort, the real-time stall and throttle rows); the lab shows a stall as a stall; one client fix the soak found (`M3-U92`: a retryable refusal at `/upload` is asked again within the attempt budget); decisions `M3-K1`..`M3-K11`, `M3-U92` |
+| [M3 chaos](2026-11-17-m3-chaos.md) ([audit](2026-11-17-m3-chaos.audit.md)), design [`2026-11-17-chaos-design.md`](../specs/2026-11-17-chaos-design.md) | Done, from `11eb34d`, merged to `main` 2026-11-17 | A fault-injecting proxy in front of RustFS; `test:chaos` on every pull request (Node rows 1–8, 12–14, 17), the browser rows through the proxy in `test:browser` (stall under Playwright's clock), a nightly `test:chaos:soak` (seeded random faults, a mid-run abort, the real-time stall and throttle rows); the lab shows a stall as a stall; one client fix the soak found (`M3-U92`: a retryable refusal at `/upload` is asked again within the attempt budget); decisions `M3-K1`..`M3-K11`, `M3-U92` |
 
-## State of `feat/m3-chaos` after the chaos plan (2026-11-17)
+## State of `main` after the chaos plan (2026-11-17)
 
 - **Gates:** `bun run verify` passes: 1325 unit tests, 1 skipped (a pre-existing skip). `test:chaos` 16/16 (Node,
   RustFS behind the proxy), `test:chaos:soak` 4/4 (seeded soak and the real-time rows), `test:browser` 35/35 on RustFS
