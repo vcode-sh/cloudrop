@@ -5,17 +5,18 @@
 import Database from "better-sqlite3";
 import type { ExtractTablesWithRelations } from "drizzle-orm";
 import { drizzle as betterSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as libsql } from "drizzle-orm/libsql";
 import { type NodePgQueryResultHKT, drizzle as nodePostgres } from "drizzle-orm/node-postgres";
 import { PgDialect, type PgTransaction, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle as pgProxy } from "drizzle-orm/pg-proxy";
 import { type PostgresJsQueryResultHKT, drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
-import { drizzle as sqliteProxy } from "drizzle-orm/sqlite-proxy";
 import pg from "pg";
-import { afterAll, describe, expect, expectTypeOf, test } from "vitest";
+import { afterAll, describe, expect, expectTypeOf, onTestFinished, test } from "vitest";
 import type { FileStatus } from "../server/store.ts";
+import { schemaStatements } from "../testing/db/schema.ts";
 import { drizzleSql } from "./drizzle/statement.ts";
-import { cloudropTables, drizzleStore } from "./drizzle.ts";
+import { cloudropPgTables, cloudropSqliteTables, drizzleStore } from "./drizzle.ts";
 
 const appUploads = pgTable("app_uploads", { fileId: text("file_id").primaryKey(), owner: text("owner").notNull() });
 const schema = { appUploads };
@@ -27,6 +28,7 @@ const sqliteConnection = new Database(":memory:");
 afterAll(() => sqliteConnection.close());
 const sqliteDb = betterSqlite({ client: sqliteConnection });
 const policy = { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) } as const;
+const NOW = new Date("2026-11-17T10:20:30.123Z");
 
 const invalidConfig = (message: string) => expect.objectContaining({ code: "INVALID_CONFIG", message });
 
@@ -40,11 +42,14 @@ describe("drizzleStore", () => {
     );
   });
 
-  test("refuses an asynchronous Drizzle SQLite database and points D1 users to d1Executor", () => {
-    const asyncDb = sqliteProxy(async () => ({ rows: [] }));
-    // @ts-expect-error: the types accept only synchronous SQLite databases.
-    expect(() => drizzleStore(asyncDb, { dialect: "sqlite" })).toThrow(
-      invalidConfig(expect.stringContaining("needs a synchronous SQLite driver such as better-sqlite3")),
+  test("refuses a single node-postgres Client, whose one connection every request would share", () => {
+    // Drizzle runs BEGIN on a Client's only connection, so another request's reserve would join (and roll back with)
+    // an onComplete transaction.
+    const client = new pg.Client();
+    expect(() => drizzleStore(nodePostgres({ client }), { dialect: "postgres", transaction: true })).toThrow(
+      invalidConfig(
+        "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle(new Pool({ connectionString })), or use postgres.js.",
+      ),
     );
   });
 
@@ -62,16 +67,39 @@ describe("drizzleStore", () => {
     expect([typeof transactional.transaction, typeof transactional.route]).toEqual(["function", "function"]);
   });
 
-  test("names the problem when a driver's execute() answers neither rows nor { rows }", async () => {
-    // pg-proxy hands back whatever the callback calls rows; this one answers the shape Drizzle's AWS Data API driver
-    // uses.
+  test("names the shape when a driver's execute() answers neither rows nor { rows }", async () => {
+    // pg-proxy hands back whatever the callback calls rows; this one answers the shape of Drizzle's AWS Data API driver.
     const store = drizzleStore(
-      pgProxy(async () => ({ rows: { records: [] } as never })),
+      pgProxy(async () => ({ rows: { records: [], numberOfRecordsUpdated: 0 } as never })),
       { dialect: "postgres" },
     );
     await expect(store.get("f-1")).rejects.toThrow(
-      "This Drizzle driver's execute() answered neither rows nor { rows }.",
+      invalidConfig(
+        "This Drizzle driver's execute() answered { records, numberOfRecordsUpdated }, not rows or { rows }. Use drizzleStore with node-postgres or postgres.js, or build an executor for cloudrop/adapters/sql.",
+      ),
     );
+  });
+
+  test("tells a write from a read by its RETURNING clause, not by a table named returning", async () => {
+    // better-sqlite3 refuses `all` for a statement that answers no rows, such as the usage upsert of a reserve.
+    const connection = new Database(":memory:");
+    onTestFinished(() => {
+      connection.close();
+    });
+    const tables = { files: "uploads", usage: "returning" };
+    for (const statement of schemaStatements("sqlite", tables)) connection.exec(statement);
+    const store = drizzleStore(betterSqlite({ client: connection }), { dialect: "sqlite", tables });
+    const file = {
+      id: "f-1",
+      route: "files",
+      key: "a.txt",
+      name: "a.txt",
+      type: "text/plain",
+      size: 5,
+      metadata: null,
+    };
+    expect(await store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, files: [file] }, NOW)).toEqual(["reserved"]);
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 5, activeBytes: 0, files: 0 });
   });
 });
 
@@ -96,11 +124,12 @@ describe("drizzleSql", () => {
   });
 });
 
-describe("cloudropTables", () => {
-  test("refuses a table name the store would refuse, naming the option", () => {
-    expect(() => cloudropTables({ dialect: "postgres", tables: { files: "my files" } })).toThrow(
-      invalidConfig(expect.stringContaining("The files table name")),
-    );
+describe("cloudropPgTables and cloudropSqliteTables", () => {
+  test.for([
+    { name: "cloudropPgTables", tables: () => cloudropPgTables({ tables: { files: "my files" } }) },
+    { name: "cloudropSqliteTables", tables: () => cloudropSqliteTables({ tables: { files: "my files" } }) },
+  ])("$name refuses a table name the store would refuse, naming the option", ({ tables }) => {
+    expect(tables).toThrow(invalidConfig(expect.stringContaining("The files table name")));
   });
 });
 
@@ -126,6 +155,9 @@ drizzleStore(postgresJs.mock(), { dialect: "postgres", transaction: true }).rout
     return null;
   },
 });
+
+// An asynchronous SQLite database with an atomic batch (libsql, D1) is accepted.
+expectTypeOf(drizzleStore(libsql.mock(), { dialect: "sqlite" }).reserve).toBeFunction();
 
 // @ts-expect-error: without transaction: true there is no tx, so no store.route.
 void drizzleStore(postgresDb, { dialect: "postgres" }).route;
@@ -160,8 +192,8 @@ type FileRow = {
 };
 type UsageRow = { owner: string; reservedBytes: number; activeBytes: number; files: number; updatedAt: Date };
 
-const postgresTables = cloudropTables({ dialect: "postgres" });
-const sqliteTables = cloudropTables({ dialect: "sqlite", tables: { files: "uploads" } });
+const postgresTables = cloudropPgTables();
+const sqliteTables = cloudropSqliteTables({ tables: { files: "uploads" } });
 expectTypeOf<typeof postgresTables.files.$inferSelect>().toEqualTypeOf<FileRow>();
 expectTypeOf<typeof postgresTables.usage.$inferSelect>().toEqualTypeOf<UsageRow>();
 expectTypeOf<typeof sqliteTables.files.$inferSelect>().toEqualTypeOf<FileRow>();

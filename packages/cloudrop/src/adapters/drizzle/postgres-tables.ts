@@ -24,7 +24,7 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import type { FileStatus } from "../../server/store.ts";
-import type { StoreTables } from "../../store/sql/tables.ts";
+import { type CloudropTablesOptions, tableNames } from "./tables.ts";
 
 type Text<TName extends string> = PgTextBuilderInitial<TName, [string, ...string[]]>;
 type Count<TName extends string> = NotNull<PgBigInt53BuilderInitial<TName>>;
@@ -67,7 +67,7 @@ type Table<TColumns extends Record<string, ColumnBuilderBase>> = PgTableWithColu
   dialect: "pg";
 }>;
 
-/** `cloudropTables({ dialect: "postgres" })`: the files and usage tables as Drizzle `pg-core` tables. */
+/** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables. */
 export interface CloudropPostgresTables {
   files: Table<FileColumns>;
   usage: Table<UsageColumns>;
@@ -76,7 +76,17 @@ export interface CloudropPostgresTables {
 const time = <TName extends string>(name: TName) => timestamp(name, { withTimezone: true, mode: "date" });
 const count = <TName extends string>(name: TName) => bigint(name, { mode: "number" }).notNull();
 
-export function postgresTables(names: Required<StoreTables>): CloudropPostgresTables {
+/**
+ * The store's tables as Drizzle `pg-core` tables, for an app's schema and migrations (drizzle-kit picks them up from
+ * the schema file that exports them) and for typed reads: `db.select().from(files)`. Write to them only through the
+ * store, which keeps `usage` in step with `files`.
+ *
+ * ```ts
+ * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables();
+ * ```
+ */
+export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropPostgresTables {
+  const names = tableNames(options);
   const files = pgTable(
     names.files,
     {

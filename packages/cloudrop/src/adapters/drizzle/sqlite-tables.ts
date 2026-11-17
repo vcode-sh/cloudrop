@@ -14,7 +14,7 @@ import {
   text,
 } from "drizzle-orm/sqlite-core";
 import type { FileStatus } from "../../server/store.ts";
-import type { StoreTables } from "../../store/sql/tables.ts";
+import { type CloudropTablesOptions, tableNames } from "./tables.ts";
 
 type Text<TName extends string> = SQLiteTextBuilderInitial<TName, [string, ...string[]], number | undefined>;
 type Count<TName extends string> = NotNull<SQLiteIntegerBuilderInitial<TName>>;
@@ -57,7 +57,7 @@ type Table<TColumns extends Record<string, ColumnBuilderBase>> = SQLiteTableWith
   dialect: "sqlite";
 }>;
 
-/** `cloudropTables({ dialect: "sqlite" })`: the files and usage tables as Drizzle `sqlite-core` tables. */
+/** `cloudropSqliteTables()`: the files and usage tables as Drizzle `sqlite-core` tables. */
 export interface CloudropSqliteTables {
   files: Table<FileColumns>;
   usage: Table<UsageColumns>;
@@ -66,7 +66,17 @@ export interface CloudropSqliteTables {
 const time = <TName extends string>(name: TName) => integer(name, { mode: "timestamp_ms" });
 const count = <TName extends string>(name: TName) => integer(name, { mode: "number" }).notNull();
 
-export function sqliteTables(names: Required<StoreTables>): CloudropSqliteTables {
+/**
+ * The store's tables as Drizzle `sqlite-core` tables, for an app's schema and migrations (drizzle-kit picks them up from
+ * the schema file that exports them) and for typed reads: `db.select().from(files)`. Write to them only through the
+ * store, which keeps `usage` in step with `files`.
+ *
+ * ```ts
+ * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropSqliteTables();
+ * ```
+ */
+export function cloudropSqliteTables(options: CloudropTablesOptions = {}): CloudropSqliteTables {
+  const names = tableNames(options);
   const files = sqliteTable(
     names.files,
     {
