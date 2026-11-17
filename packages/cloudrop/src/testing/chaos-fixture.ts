@@ -6,7 +6,10 @@
 
 import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import type { ClientFetch } from "../client/endpoints.ts";
-import { type ClientOptions, type CloudropClient, createCloudropClient } from "../client.ts";
+import type { UploadJob } from "../client/types.ts";
+import { type ClientOptions, createCloudropClient } from "../client.ts";
+import type { Result } from "../errors.ts";
+import type { CompleteResponse } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { createCloudrop } from "../server/cloudrop.ts";
 import { allowAnyone, route } from "../server/route.ts";
@@ -20,7 +23,7 @@ import {
   openUploads,
   rustfsEndpoint,
 } from "./chaos-bucket.ts";
-import { type ChaosEntry, type ChaosProxy, startChaosProxy } from "./chaos-proxy.ts";
+import { type ChaosProxy, startChaosProxy } from "./chaos-proxy.ts";
 import { APP_ORIGIN, type RecordingLogger, recordingLogger, SECRET } from "./server-fixture.ts";
 
 /** One presigned PUT: below the fixture's 8 MiB multipart threshold. */
@@ -50,17 +53,25 @@ function chaosCloudrop(storage: StorageDriver, prefix: string, logger: Recording
   });
 }
 
-export type ChaosCloudrop = ReturnType<typeof chaosCloudrop>;
+type ChaosCloudrop = ReturnType<typeof chaosCloudrop>;
+
+/** The calls the rows make, on the "files" route, which takes no metadata and returns no result of its own. */
+export interface ChaosClient {
+  start(route: "files", files: File | File[]): UploadJob<null>;
+  upload(route: "files", file: File): Promise<Result<CompleteResponse<null>>>;
+}
 
 export interface ChaosFixture {
   proxy: ChaosProxy;
-  cloudrop: ChaosCloudrop;
   /** What the server logged: rows check that storage text stays out of messages and reaches the logger. */
   logger: RecordingLogger;
   /** "chaos/<uuid>/": every key of this fixture starts with it. */
   prefix: string;
-  /** A client of the "files" route on the fetch transport, persisting nothing unless `options` says so. */
-  client(options?: Omit<ClientOptions, "fetch" | "basePath">): CloudropClient<ChaosCloudrop>;
+  /**
+   * A client of the "files" route on the fetch transport, persisting nothing unless `options` says so. Its calls end
+   * with the test: reset() cancels them, and the client's requests from then on fail before they leave it.
+   */
+  client(options?: Omit<ClientOptions, "fetch" | "basePath">): ChaosClient;
   /** What reached the bucket through the proxy, in start order: "PUT part 2 reset", "CompleteMultipartUpload 200". */
   bucketRequests(): string[];
   /**
@@ -72,20 +83,18 @@ export interface ChaosFixture {
   appErrors(): unknown[];
   /** Waits up to `timeoutMs` until `appRequests()` holds `call`, such as "POST /abort 200" (a background /abort). */
   waitForApp(call: string, timeoutMs?: number): Promise<void>;
-  /** The first log entry `matches` accepts, waiting up to `timeoutMs` for it (a background /abort lands late, M1). */
-  waitForEntry(matches: (entry: ChaosEntry) => boolean, timeoutMs?: number): Promise<ChaosEntry>;
   /** The object under `key` is exactly `file`: size and SHA-256, read from RustFS directly. */
   expectStored(key: string, file: Blob): Promise<void>;
   /** Multipart uploads open under the prefix, from RustFS directly. */
   uploadsLeft(): Promise<OpenUpload[]>;
   /** Keys of the objects stored under the prefix, from RustFS directly: `[]` proves nothing was stored. */
   objectsLeft(): Promise<string[]>;
+  /** No multipart upload is open under the prefix. */
+  expectNoUploadsLeft(): Promise<void>;
   /**
-   * No multipart upload is open under the prefix, except under the `allow`ed keys: those M3-U55 leaves to the
-   * lifecycle rule, such as a retry's first ticket (audit C3).
+   * Cancels the test's client calls, so a red row's job cannot reach the next row's logs, then clears the rules,
+   * random mode, held requests, the prefix's uploads and objects, the logs and the logger.
    */
-  expectNoUploadsLeft(options?: { allow?: readonly string[] }): Promise<void>;
-  /** Clears the rules, random mode, held requests, the prefix's uploads and objects, the logs and the logger. */
   reset(): Promise<void>;
   /** Clears the prefix and stops the proxy. */
   stop(): Promise<void>;
@@ -109,7 +118,7 @@ export function chaosFile(size: number, seed = 1): File {
 }
 
 /** Starts the proxy in front of the lane's RustFS and a server on it; fails with what to run when RustFS is absent. */
-export async function startChaosFixture(): Promise<ChaosFixture> {
+async function startChaosFixture(): Promise<ChaosFixture> {
   const endpoint = rustfsEndpoint();
   await createBucket(endpoint);
   const direct = chaosStorage(endpoint);
@@ -121,25 +130,41 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
 
   const appRequests: string[] = [];
   const appErrors: unknown[] = [];
-  const fetch: ClientFetch = async (url, init) => {
-    if (!url.startsWith(BASE_PATH)) return globalThis.fetch(url, init);
-    init.signal?.throwIfAborted();
-    const headers = { ...Object.fromEntries(new Headers(init.headers)), origin: APP_ORIGIN };
-    const response = await cloudrop.handler(new Request(url, { method: init.method, body: init.body, headers }));
-    appRequests.push(`${init.method ?? "GET"} ${url.slice(BASE_PATH.length)} ${response.status}`);
-    // A clone, so the client still reads the body; the handler answers every error with cloudrop's JSON body.
-    if (!response.ok) appErrors.push(await response.clone().json());
-    return response;
-  };
+  // One per test: reset() aborts it, which cancels the test's calls. A cancelled job still sends its /abort, for a file
+  // failed with a kept upload too, so a client's fetch refuses everything once its test has ended.
+  let testRun = new AbortController();
+  const fetchUntil =
+    (ended: AbortSignal): ClientFetch =>
+    async (url, init) => {
+      ended.throwIfAborted();
+      if (!url.startsWith(BASE_PATH)) return globalThis.fetch(url, init);
+      init.signal?.throwIfAborted();
+      const headers = { ...Object.fromEntries(new Headers(init.headers)), origin: APP_ORIGIN };
+      const response = await cloudrop.handler(new Request(url, { method: init.method, body: init.body, headers }));
+      appRequests.push(`${init.method ?? "GET"} ${url.slice(BASE_PATH.length)} ${response.status}`);
+      // A clone, so the client still reads the body; the handler answers every error with cloudrop's JSON body.
+      if (!response.ok) appErrors.push(await response.clone().json());
+      return response;
+    };
   const uploadsLeft = () => openUploads(endpoint, prefix);
 
   return {
     proxy,
-    cloudrop,
     logger,
     prefix,
-    client: (options) =>
-      createCloudropClient<ChaosCloudrop>({ persist: false, ...options, fetch, basePath: BASE_PATH }),
+    client(options) {
+      const { signal } = testRun;
+      const client = createCloudropClient<ChaosCloudrop>({
+        persist: false,
+        ...options,
+        fetch: fetchUntil(signal),
+        basePath: BASE_PATH,
+      });
+      return {
+        start: (route, files) => client.start(route, files, { signal }),
+        upload: (route, file) => client.upload(route, file, { signal }),
+      };
+    },
     bucketRequests: () => proxy.log().map((entry) => `${entry.label} ${entry.outcome}`),
     appRequests: () => [...appRequests],
     appErrors: () => [...appErrors],
@@ -150,15 +175,6 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
         },
         { timeout: timeoutMs, interval: 10 },
       ),
-    waitForEntry: (matches, timeoutMs = 5000) =>
-      vi.waitFor(
-        () => {
-          const found = proxy.log().find(matches);
-          if (!found) throw new Error(`No such request reached the bucket. Seen: ${proxy.log().length} requests.`);
-          return found;
-        },
-        { timeout: timeoutMs, interval: 10 },
-      ),
     expectStored: (key, file) => expectStoredFile(direct, key, file),
     uploadsLeft,
     async objectsLeft() {
@@ -166,11 +182,12 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
       if (listed.error) throw listed.error;
       return listed.data.items.map((item) => item.key);
     },
-    async expectNoUploadsLeft({ allow = [] } = {}) {
-      const left = await uploadsLeft();
-      expect(left.filter((upload) => !allow.includes(upload.key))).toEqual([]);
+    async expectNoUploadsLeft() {
+      expect(await uploadsLeft()).toEqual([]);
     },
     async reset() {
+      testRun.abort(new Error("The chaos test has ended."));
+      testRun = new AbortController();
       proxy.set([]);
       proxy.random(null);
       proxy.release();
@@ -195,10 +212,10 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
 /**
  * Registers the lane's hooks in the calling file or describe block and returns its fixture, usable from the first
  * test: started once before all (teardown registered with it), `Math.random` stubbed to 0 for every test (M3-K3),
- * and reset after each, so every test starts with no rules, empty logs and an empty prefix. A request still in flight
- * at the reset lands in the next test's logs, so a row that triggers a background /abort waits for it before it ends
- * (audit M1) with `waitForApp("POST /abort 200")`: that call is recorded after the /abort's last storage call, while
- * the call's proxy entry (`waitForEntry`) is logged as the handler is still answering.
+ * and reset after each, so every test starts with no rules, empty logs and an empty prefix. A request already in
+ * flight at the reset still lands in the next test's logs, so a row that triggers a background /abort waits for it
+ * before it ends (audit M1) with `waitForApp("POST /abort 200")`: that call is recorded after the /abort's last storage
+ * call, while the call's proxy entry is logged as the handler is still answering.
  */
 export function useChaosFixture(): ChaosFixture {
   const fixture = {} as ChaosFixture;

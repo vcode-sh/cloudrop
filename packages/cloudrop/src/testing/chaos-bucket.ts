@@ -9,7 +9,7 @@ import { s3 } from "../storage/presets.ts";
 import { EMPTY_SHA256, sha256Hex, signRequest } from "../storage/sigv4.ts";
 import { xmlBlocks, xmlText } from "../storage/xml.ts";
 
-export const BUCKET = "chaos";
+const BUCKET = "chaos";
 // The disposable container's keys from scripts/rustfs.sh: test-only, never a real account.
 const credentials = { accessKeyId: "cloudrop-test", secretAccessKey: "cloudrop-test-secret" };
 const region = "us-east-1";
