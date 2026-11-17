@@ -54,7 +54,11 @@ const DEFAULT_GRACE_MS = 3_600_000;
  * row's deadline or end once the sweep may clean it up.
  */
 const MIN_GRACE_MS = URL_LIFETIME_SECONDS * 1000;
-const CURSOR = /^(expire|cleanup):(.*)$/s;
+/**
+ * The pass, then the store's own cursor: `<milliseconds>:<id>` as `stale` promises, empty for the cleanup pass's
+ * start. A cursor that was edited is refused here, before the store sees it.
+ */
+const CURSOR = /^(expire|cleanup):((?:\d{1,15}:.+)?)$/s;
 
 type Pass = "expire" | "cleanup";
 

@@ -144,7 +144,8 @@ export interface CloudropStore<TTx = never> {
    * `aborted`, `rejected`, `failed`, `expired` and `deleted` rows with `cleaned_at` null and `ended_at < before`, by
    * `ended_at`.
    * At most `limit` records; `cursor` continues after the previous page (keyset, so rows that leave the set between
-   * pages skip nothing) and is null on the last page. A cursor is opaque and valid only for its own kind.
+   * pages skip nothing) and is null on the last page. A cursor is `<milliseconds>:<id>`, the last row's time and id
+   * (the sweep refuses any other before calling the store), and is valid only for its own kind.
    */
   stale(input: {
     kind: "expire" | "cleanup";
@@ -165,7 +166,10 @@ export interface CloudropStore<TTx = never> {
    * then, and stamps `updated_at` with the database's clock, as no time is passed.
    */
   reconcile(owner: string): Promise<boolean>;
-  /** One page of the owners that have counters, in the database's order of owner; `cursor` as for `stale`. */
+  /**
+   * One page of the owners that have counters, in the database's order of owner; `cursor` continues after the
+   * previous page (keyset) and is null on the last page.
+   */
   owners(cursor: string | null, limit: number): Promise<{ owners: string[]; cursor: string | null }>;
   /**
    * Runs `run` in one interactive database transaction and commits when it resolves; a throw rolls back every write

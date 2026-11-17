@@ -269,7 +269,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   without knowing about passes.
 - **If wrong:** renaming `graceMs` later is breaking; decide before 1.0.
 - **Status:** decided; amended 2026-11-17 (fix round 1): the expire pass takes the row first (M5-T64), and a failing
-  row no longer stops the call (M5-T65). `graceMs` is at least 15 minutes (M5-T64).
+  row no longer stops the call (M5-T65). `graceMs` is at least 15 minutes (M5-T64). Amended in the final fix round:
+  the cursor's tail is checked before any store call (M5-T95).
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
 
@@ -1264,3 +1265,18 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `src/adapters/drizzle.ts`, `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/prisma.ts`,
   `src/store/sql/store.ts`, `src/adapters/drizzle.test.ts`, `src/adapters/prisma.test.ts`.
+
+### M5-T95: a malformed sweep cursor answers `INVALID_INPUT` before any store call
+
+- **Decision:** `CloudropStore.stale`'s cursor is declared `<milliseconds>:<id>` (the last row's time and id), which
+  both the SQL core and the memory store already produce. `sweep` accepts `expire:` or `cleanup:` followed by such a
+  cursor, or by nothing (the start of the cleanup pass), with at most 15 digits; anything else answers `INVALID_INPUT`
+  ("cursor must be one an earlier sweep returned. Leave it out to start over.") and calls no store method. The SQL
+  core's own `decodeCursor` check stays for a store called directly.
+- **Why:** final review M7. A tail the store could not decode reached it: SQL stores threw, and the sweep answered a
+  retryable `SERVER_ERROR` that blamed the database; the memory store answered `ok` with nothing done. Retrying could
+  not help. Observed RED: the two new rows in `sweep.test.ts` got no error from the memory store.
+- **If wrong:** a third-party store with another cursor format must adopt this one; the interface now says so.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/server/sweep.ts`, `src/server/store.ts` TSDoc, `src/server/sweep.test.ts`.
