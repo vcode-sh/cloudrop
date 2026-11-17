@@ -112,7 +112,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       // Lock order: file rows, then the usage row, as in every other writer (end, complete, revoke). The freed sum sits
       // in `locked`'s projection, which the scan computes before FOR UPDATE locks the row, so `superseded` waits for a
       // row another transaction holds before this statement takes the usage row; the other order deadlocks (40P01).
-      // With no usage row there is no pending row of the owner to free.
+      // With no usage row the owner has no reserved bytes to free.
       const sql = `WITH RECURSIVE ${head},
         locked AS (
           SELECT reserved_bytes + active_bytes - ${freed} AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE
