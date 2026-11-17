@@ -29,19 +29,26 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
+const TRUSTED = "https://admin.example.com";
+
 function server() {
   const fake = createFakeR2({ bucket: "uploads", credentials });
   const logger = recordingLogger();
-  const cloudrop = createCloudrop({ storage: r2({ bucket: "uploads", fetch: fake.fetch }), routes, logger });
-  const post = async () => {
+  const storage = r2({ bucket: "uploads", fetch: fake.fetch });
+  const cloudrop = createCloudrop({ storage, routes, logger, trustedOrigins: [TRUSTED] });
+  const post = async (origin = APP_ORIGIN) => {
     const response = await cloudrop.handler(
       new Request(`${APP_ORIGIN}/api/cloudrop/upload`, {
         method: "POST",
-        headers: { "content-type": "application/json", origin: APP_ORIGIN },
+        headers: { "content-type": "application/json", origin },
         body: JSON.stringify(uploadBody),
       }),
     );
-    return { status: response.status, body: (await response.json()) as { error?: { code: string } } };
+    return {
+      status: response.status,
+      allowOrigin: response.headers.get("access-control-allow-origin"),
+      body: (await response.json()) as { error?: { code: string } },
+    };
   };
   return { cloudrop, logger, post };
 }
@@ -67,6 +74,27 @@ describe("configuration from the environment", () => {
         error: expect.objectContaining({ code: "INVALID_CONFIG", message: MISSING }),
       },
     ]);
+  });
+
+  it("lets a trusted origin read the 500, so its page can show the error", async () => {
+    const { post } = server();
+    expect(await post(TRUSTED)).toMatchObject({ status: 500, allowOrigin: TRUSTED });
+  });
+
+  // Routing, method and preflight need no environment: they answer as on a configured server, and nothing is logged.
+  it.for([
+    {
+      name: "a preflight",
+      path: "upload",
+      init: { method: "OPTIONS", headers: { origin: TRUSTED, "access-control-request-method": "POST" } },
+      status: 204,
+    },
+    { name: "an unknown endpoint", path: "nowhere", init: { method: "POST" }, status: 404 },
+    { name: "a GET", path: "upload", init: { method: "GET" }, status: 405 },
+  ])("answers $name with $status without reading the environment", async ({ path, init, status }) => {
+    const { cloudrop, logger } = server();
+    const response = await cloudrop.handler(new Request(`${APP_ORIGIN}/api/cloudrop/${path}`, init));
+    expect({ status: response.status, logged: logger.errors }).toEqual({ status, logged: [] });
   });
 
   it("gives cloudrop.api calls the INVALID_CONFIG with what is missing", async () => {
