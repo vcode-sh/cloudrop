@@ -5,22 +5,22 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
-import type { EndpointInput, ServerConfig } from "./config.ts";
+import type { EndpointConfig, EndpointInput } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
-import { isUnauthorized, unauthorized } from "./route.ts";
+import { isRefusal, refusalError } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 import { prepareFile, readRequest } from "./upload-request.ts";
 
 /** One file's ticket: create the multipart upload if needed, sign the first URLs and the token. */
 async function startFile(
-  config: ServerConfig,
+  config: EndpointConfig,
   base: Omit<UploadTokenPayload, "uploadId" | "partSize">,
 ): Promise<FileTicket> {
   const { storage, logger } = config;
-  const { signing } = await config.tokenKeys;
+  const { signing } = config.tokenKeys;
   const expiresAt = new Date(base.exp * 1000).toISOString();
   const ticket = { id: base.id, key: base.key, expiresAt };
   const rejected = (error: CloudropError): FileTicket => ({
@@ -60,7 +60,7 @@ async function startFile(
 
 /** A custom StorageDriver may throw: that file is rejected and released like a storage failure, and the others go on. */
 async function startFileSafely(
-  config: ServerConfig,
+  config: EndpointConfig,
   base: Omit<UploadTokenPayload, "uploadId" | "partSize">,
 ): Promise<FileTicket> {
   try {
@@ -79,17 +79,13 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (validated.error) return validated;
   const { value: metadata, json: metadataJson } = validated.data;
   const auth = await route.definition.authorize({ request, metadata });
-  if (isUnauthorized(auth)) {
-    // A refusal built by plain JavaScript or another copy of cloudrop may lack a message; it still refuses.
-    const message = typeof auth.message === "string" && auth.message !== "" ? auth.message : unauthorized().message;
-    return fail(new CloudropError("UNAUTHORIZED", message));
-  }
+  if (isRefusal(auth)) return fail(refusalError(auth));
   // Only a plain object whose JSON is an object authorizes: a Response or an Error is an object too, and reading one
   // as the user would sign uploads for a refused request. The token carries this one JSON snapshot, measured and
   // signed as the same text, because a toJSON may answer differently each time it runs. JSON.stringify throws for a
   // BigInt or a cycle, which the handler reports.
   if (!isPlainObject(auth)) {
-    throw new TypeError(`Route "${route.name}": authorize must return a plain object or unauthorized().`);
+    throw new TypeError(`Route "${route.name}": authorize must return a plain object, unauthorized() or forbidden().`);
   }
   const ownerJson: string | undefined = JSON.stringify(auth);
   if (ownerJson?.[0] !== "{") {

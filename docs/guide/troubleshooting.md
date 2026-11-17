@@ -100,11 +100,20 @@ answer its `/abort`. Finish or cancel it there, then try again. See [Two tabs](r
 The picked file is not the one the upload started with: the name, size, `lastModified`, type or the hash of its first
 and last 64 KiB differ. Ask the user to pick the same file again.
 
-## The build fails with INVALID_CONFIG
+## Every request answers 500 SERVER_ERROR
 
-`next build` loads your server module, so `CLOUDROP_SECRET` and the storage settings must be set at build time, from
-`.env.local` or the environment. A Docker build stage without secrets must pass them as build secrets. See
-[the example](../../examples/next/README.md#the-build-needs-the-settings).
+Every upload fails with `SERVER_ERROR` ("The server could not handle the upload"), `cloudrop.api` calls return
+`INVALID_CONFIG`, and the server log has one line starting with
+`cloudrop: every request answers 500 until this is fixed.`
+
+**A setting that comes from the environment is missing or invalid.** cloudrop reads `CLOUDROP_SECRET` and the storage
+presets' variables (`CLOUDROP_R2_*`, `CLOUDROP_S3_*`) on the first request, not when the server is created, so a build
+needs no secrets and the server starts without them. The log line names every missing setting with its variable, and an
+invalid value with the variable that holds it. Set them where the running server reads its environment: the next
+request reads them again, so no restart is needed. Once they are complete they are kept until the process restarts.
+
+With `NODE_ENV=development` the same settings are checked when the server is created, so `next dev` fails at start
+instead.
 
 ## checkBucket reports unknown
 

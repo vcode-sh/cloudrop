@@ -14,22 +14,27 @@ import { createCloudrop, r2, route, unauthorized } from "cloudrop";
 export const cloudrop = createCloudrop({
   storage: r2({ bucket: "media" }),
   routes: {
-    avatar: route({
-      accept: "image/*",
-      maxSize: "5MB",
-      authorize: async ({ request }) => {
-        const user = await getUser(request); // your app's session lookup
-        return user ? { userId: user.id } : unauthorized();
+    avatar: route(
+      {
+        accept: "image/*",
+        maxSize: "5MB",
+        authorize: async ({ request }) => {
+          const user = await getUser(request); // your app's session lookup
+          return user ? { userId: user.id } : unauthorized();
+        },
       },
-      prefix: ({ userId }) => `users/${userId}/avatars`,
-    }),
+      { prefix: ({ userId }) => `users/${userId}/avatars` },
+    ),
   },
 });
 ```
 
 `createCloudrop` checks every option when it is called and throws a `CloudropError` with code `INVALID_CONFIG` for the
 first mistake it finds, checking the options in a fixed order. Its message names the option and the fix. A
-misconfigured server fails when it starts, not on a user's first upload.
+misconfigured server fails when it starts, not on a user's first upload. Settings that come from the environment
+(`CLOUDROP_SECRET` and the storage variables) are read on the first request instead, so a build needs no secrets; one
+still missing then makes every request answer 500 and logs `INVALID_CONFIG` once. With `NODE_ENV=development` they are
+checked at start too.
 
 | Option | What it does | Default |
 | --- | --- | --- |
@@ -74,7 +79,7 @@ const storage = r2({ bucket: "media" });
 
 | Option | Default |
 | --- | --- |
-| `bucket` | Required. The exact bucket name. |
+| `bucket` | env `CLOUDROP_R2_BUCKET`. The exact bucket name. |
 | `accountId` | env `CLOUDROP_R2_ACCOUNT_ID`. 32 hexadecimal characters, from the R2 overview page in the Cloudflare dashboard. |
 | `accessKeyId` | env `CLOUDROP_R2_ACCESS_KEY_ID` |
 | `secretAccessKey` | env `CLOUDROP_R2_SECRET_ACCESS_KEY` |
@@ -82,25 +87,22 @@ const storage = r2({ bucket: "media" });
 | `publicUrl` | Where the bucket is served publicly: a custom domain or `r2.dev` URL, a path allowed, such as `"https://cdn.example.com/files"`. |
 | `fetch` | Replaces the global `fetch`. |
 
-When a setting is missing, `r2()` throws one `INVALID_CONFIG` error that lists everything missing at once.
+An option that is unset or empty falls back to its variable. One `INVALID_CONFIG` error lists everything missing at
+once, on the first request (at start in development). An option you pass is checked when `r2()` is called.
 
 ### Any S3-compatible service
 
 ```ts
 import { s3 } from "cloudrop";
 
-const storage = s3({
-  endpoint: "https://s3.us-east-1.amazonaws.com",
-  region: "us-east-1",
-  bucket: "media",
-  accessKeyId: process.env.S3_ACCESS_KEY_ID as string, // your own variable names
-  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY as string,
-});
+// Reads CLOUDROP_S3_ENDPOINT, CLOUDROP_S3_REGION, CLOUDROP_S3_BUCKET, CLOUDROP_S3_ACCESS_KEY_ID and
+// CLOUDROP_S3_SECRET_ACCESS_KEY for any setting not passed.
+const storage = s3({ endpoint: "https://s3.us-east-1.amazonaws.com", region: "us-east-1" });
 ```
 
-`s3()` reads nothing from the environment: pass `endpoint`, `region`, `bucket`, `accessKeyId` and `secretAccessKey`
-yourself. `endpoint` is an `http` or `https` URL with no query or fragment; a path in it is kept as a prefix of every
-request, for a service behind a proxy path. `publicUrl` and `fetch` work as for `r2()`.
+`s3()` takes `endpoint`, `region`, `bucket`, `accessKeyId` and `secretAccessKey`, each from its option or its variable,
+as `r2()` does. `endpoint` is an `http` or `https` URL with no query or fragment; a path in it is kept as a prefix of
+every request, for a service behind a proxy path. `publicUrl` and `fetch` work as for `r2()`.
 
 Which permissions the credentials need: [Bucket setup](bucket-setup.md#credentials-and-permissions).
 
@@ -112,22 +114,26 @@ A route is one kind of upload: what files it accepts, how large, who may upload,
 import { route, unauthorized } from "cloudrop";
 import { z } from "zod"; // any Standard Schema library: zod, valibot, arktype
 
-const photo = route({
-  accept: ["image/png", "image/jpeg", "image/webp"],
-  maxSize: "10MB",
-  maxFiles: 20,
-  metadata: z.object({ albumId: z.string() }),
-  authorize: async ({ request, metadata }) => {
-    const user = await getUser(request); // your app's session lookup
-    if (!user) return unauthorized();
-    return { userId: user.id };
+const photo = route(
+  {
+    accept: ["image/png", "image/jpeg", "image/webp"],
+    maxSize: "10MB",
+    maxFiles: 20,
+    metadata: z.object({ albumId: z.string() }),
+    authorize: async ({ request, metadata }) => {
+      const user = await getUser(request); // your app's session lookup
+      if (!user) return unauthorized();
+      return { userId: user.id };
+    },
   },
-  prefix: ({ userId, metadata }) => `users/${userId}/albums/${metadata.albumId}`,
-  onComplete: async ({ file, userId }) => {
-    await savePhoto({ id: file.id, key: file.key, userId }); // your app's database write
-    return { key: file.key };
+  {
+    prefix: ({ userId, metadata }) => `users/${userId}/albums/${metadata.albumId}`,
+    onComplete: async ({ file, userId }) => {
+      await savePhoto({ id: file.id, key: file.key, userId }); // your app's database write
+      return { key: file.key };
+    },
   },
-});
+);
 ```
 
 | Option | What it does |
@@ -170,7 +176,7 @@ link.
 ## Authorize uploads
 
 Every route needs `authorize`. It receives `{ request, metadata }` and returns either a plain object with the facts
-later steps need, or `unauthorized()`:
+later steps need, or `unauthorized()` or `forbidden()`:
 
 ```ts
 authorize: async ({ request }) => {
@@ -181,9 +187,11 @@ authorize: async ({ request }) => {
 
 - `unauthorized()` refuses the upload with `UNAUTHORIZED`. Its message reaches the user; the default is "Sign in to
   upload files here."
+- `forbidden()` refuses a signed-in user who may not upload (a quota, a plan, a role) with `FORBIDDEN`. The default
+  message is "You are not allowed to upload files here. Ask the site owner for access if you think this is wrong."
 - A public route must say so: `authorize: allowAnyone`. Public uploads are never a default.
-- Write `authorize` before `prefix`, `key` and `onComplete`. TypeScript types their context from its result, in the
-  order the options are written.
+- `prefix`, `key` and `onComplete` go in `route()`'s second argument. TypeScript types their context from what
+  `authorize` returns, in whatever order the options are written.
 - What `authorize` returns is signed into the upload token, which the browser can read. Return ids, never secrets.
 - The client sends cookies with every call to your server (`credentials: "include"`), so `authorize` can read the
   session from `request`.
@@ -203,7 +211,7 @@ What happens in `/upload`:
    file entry needs a name, size and type. File names are normalized to NFC before they are counted (1 to 255 Unicode
    code points) and stored.
 3. The route's metadata schema validates the metadata (`INVALID_METADATA`).
-4. `authorize` runs (`UNAUTHORIZED`).
+4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
    built. A refused file does not stop the others.
 6. Plugins' `beforeUpload` hooks run.
@@ -272,7 +280,7 @@ const quota: CloudropPlugin = {
   server: {
     beforeUpload: async ({ files, auth }) => {
       const ok = await reserveQuota(auth, files); // your app's quota check
-      return ok ? undefined : new CloudropError("UNAUTHORIZED", "You are out of storage. Delete some files first.");
+      return ok ? undefined : new CloudropError("FORBIDDEN", "You are out of storage. Delete some files first.");
     },
     onAbort: async ({ file }) => {
       await releaseQuota(file.id); // your app's cleanup, idempotent by file.id
@@ -281,9 +289,8 @@ const quota: CloudropPlugin = {
 };
 ```
 
-A `beforeUpload` refusal refuses every file of the job with its code and message. cloudrop has no quota code, so this
-example uses `UNAUTHORIZED` with a message that says what to do. A page that branches on `UNAUTHORIZED` should show
-`error.message` rather than assume the user must sign in (see [Errors](errors.md#upload-endpoint-errors)).
+A `beforeUpload` refusal refuses every file of the job with its code and message. `FORBIDDEN` says the user is signed
+in but may not upload this; the message says what to do (see [Errors](errors.md#upload-endpoint-errors)).
 
 Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. cloudrop's own
 plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive in M5.
@@ -313,9 +320,8 @@ import { cloudrop } from "../../../../lib/cloudrop";
 export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 ```
 
-`next build` loads `lib/cloudrop.ts`, so `CLOUDROP_SECRET` and the storage settings must be set at build time too. A
-build without them fails with `INVALID_CONFIG`. See
-[the example](../../examples/next/README.md#the-build-needs-the-settings).
+`next build` loads `lib/cloudrop.ts`. Settings from the environment are read on the first request, so the build needs
+no secrets.
 
 ### Node http, http2 and Express
 

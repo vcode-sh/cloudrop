@@ -119,20 +119,24 @@ export const cloudrop = createCloudrop({
   basePath: '/api/cloudrop',
   trustedOrigins: ['https://app.example.com'],
   routes: {
-    avatar: route({
-      accept: ['image/png', 'image/jpeg', 'image/webp'],
-      maxSize: '5MB',
-      maxFiles: 1,
-      metadata: z.object({ albumId: z.string() }),       // any Standard Schema
-      authorize: async ({ request, metadata }) => {      // required, and first: the callbacks below infer from it
-        const user = await getUser(request)
-        if (!user) return unauthorized()
-        return { user }
+    avatar: route(
+      {
+        accept: ['image/png', 'image/jpeg', 'image/webp'],
+        maxSize: '5MB',
+        maxFiles: 1,
+        metadata: z.object({ albumId: z.string() }),     // any Standard Schema
+        visibility: 'public',                            // or 'private'
+        authorize: async ({ request, metadata }) => {    // required; unauthorized() or forbidden() refuses
+          const user = await getUser(request)
+          if (!user) return unauthorized()
+          return { user }
+        },
       },
-      prefix: ({ user }) => `users/${user.id}/avatars`,
-      visibility: 'public',                              // or 'private'
-      onComplete: async ({ file, user, metadata }) => ({ url: file.url }), // typed result returned to the client
-    }),
+      {                                                  // optional; typed from authorize's result (M4-F15)
+        prefix: ({ user }) => `users/${user.id}/avatars`,
+        onComplete: async ({ file, user, metadata }) => ({ url: file.url }), // typed result returned to the client
+      },
+    ),
   },
   plugins: [contentChecks(), limits({ ... }), images(), checksums()],
 })

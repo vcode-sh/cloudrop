@@ -54,7 +54,8 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 
 | Code | HTTP | Retryable | What it means | What to do |
 | --- | --- | --- | --- | --- |
-| `UNAUTHORIZED` | 401 | No | `authorize` returned `unauthorized()`, or a plugin refused with this code. The message is the one `authorize` or the plugin gave. | Show the message. After `authorize` refused, the user usually needs to sign in; a plugin may refuse for another reason, such as a quota. |
+| `UNAUTHORIZED` | 401 | No | `authorize` returned `unauthorized()`, or a plugin refused with this code. The message is the one `authorize` or the plugin gave. | Show the message; the user usually needs to sign in. |
+| `FORBIDDEN` | 403 | No | `authorize` returned `forbidden()`, or a plugin refused with this code: the user is signed in but may not upload this, such as over a quota or on the wrong plan. | Show the message, which says what to do. Signing in again does not help. |
 | `ORIGIN_NOT_ALLOWED` | 403 | No | The request came from an origin the handler does not accept. | Add the page's origin to `trustedOrigins`. Behind a proxy, add the app's public origin (see [Troubleshooting](troubleshooting.md#every-request-gets-origin_not_allowed)). |
 | `METHOD_NOT_ALLOWED` | 405 | No | The request was not `POST` (or an `OPTIONS` preflight). | Send `POST`. Check that nothing else is mounted at the same path. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | No | The body was not sent as `Content-Type: application/json`. | Send JSON. The cloudrop client always does; check a proxy or custom client. |
@@ -119,7 +120,13 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 
 | Code | Thrown by | What to do |
 | --- | --- | --- |
-| `INVALID_CONFIG` | `createCloudrop`, `r2`, `s3`, `createCloudropClient`, `toNextHandler`, `toNodeHandler`, and a plugin's `extendRoute` | Fix the option the message names. A missing setting names its environment variable when there is one. |
+| `INVALID_CONFIG` | `createCloudrop`, `route`, `r2`, `s3`, `createCloudropClient`, `toNextHandler`, `toNodeHandler`, and a plugin's `extendRoute` | Fix the option the message names. A missing setting names its environment variable when there is one. |
+
+Settings read from the environment (`CLOUDROP_SECRET`, `CLOUDROP_R2_*`, `CLOUDROP_S3_*`) are reported on the first
+request instead of thrown, and `INVALID_CONFIG` then arrives in a result: the handler logs it (again only when the
+message changes) and answers every request with `SERVER_ERROR` 500, every `cloudrop.api` call returns
+`{ data: null, error }` with it, and a storage preset's own methods return it until its settings are complete. See
+[Every request answers 500](troubleshooting.md#every-request-answers-500-server_error).
 
 Why errors work this way: the error decisions in [docs/decisions](../decisions/README.md) and the design's
 [failure classifier](../superpowers/specs/2026-11-15-cloudrop-design.md#62-failure-classifier).

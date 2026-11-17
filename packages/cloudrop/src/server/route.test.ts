@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isUnauthorized, unauthorized } from "./route.ts";
+import { allowAnyone, forbidden, isRefusal, route, unauthorized } from "./route.ts";
 
-describe("isUnauthorized", () => {
+describe("isRefusal", () => {
   it.for([
     { name: "unauthorized()", value: unauthorized("Sign in first."), refused: true },
+    { name: "forbidden()", value: forbidden("Your plan stores 1 GB."), refused: true },
     // What a second installed copy of cloudrop returns: its own module, the same registered symbol.
     {
       name: "a refusal from another copy of cloudrop",
@@ -25,6 +26,44 @@ describe("isUnauthorized", () => {
       refused: false,
     },
   ])("recognises $name: $refused", ({ value, refused }) => {
-    expect(isUnauthorized(value)).toBe(refused);
+    expect(isRefusal(value)).toBe(refused);
+  });
+});
+
+// JavaScript callers get no type error for an option in the wrong argument; the option would silently do nothing.
+describe("route() options in the wrong argument", () => {
+  const policy = { accept: "*/*", maxSize: 1, authorize: allowAnyone };
+
+  it.for([
+    {
+      name: "prefix in the policy",
+      // @ts-expect-error: prefix is typed from authorize's result, so it belongs in the second argument.
+      make: () => route({ ...policy, prefix: () => "users" }),
+      message:
+        "route(): prefix belongs in the second argument, which holds prefix, key and onComplete: route({ accept, maxSize, authorize }, { prefix }).",
+    },
+    {
+      name: "onComplete in the policy",
+      // @ts-expect-error: onComplete belongs in the second argument.
+      make: () => route({ ...policy, onComplete: () => null }),
+      message:
+        "route(): onComplete belongs in the second argument, which holds prefix, key and onComplete: route({ accept, maxSize, authorize }, { onComplete }).",
+    },
+    {
+      name: "accept in the callbacks",
+      // @ts-expect-error: accept belongs in the first argument.
+      make: () => route(policy, { accept: "image/*" }),
+      message:
+        "route(): accept belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key and onComplete.",
+    },
+    {
+      name: "authorize in the callbacks",
+      // @ts-expect-error: authorize belongs in the first argument.
+      make: () => route(policy, { authorize: allowAnyone }),
+      message:
+        "route(): authorize belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key and onComplete.",
+    },
+  ])("throws INVALID_CONFIG for $name, naming where it belongs", ({ make, message }) => {
+    expect(make).toThrow(expect.objectContaining({ code: "INVALID_CONFIG", message }));
   });
 });

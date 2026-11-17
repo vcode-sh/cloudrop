@@ -18,7 +18,12 @@ export interface Cloudrop<TRoutes extends Record<string, Route> = Record<string,
   readonly api: FileApi;
 }
 
-/** Checks every option now and throws INVALID_CONFIG for a mistake, so a misconfigured server fails at start-up. */
+/**
+ * Checks every option now and throws INVALID_CONFIG for a mistake, so a misconfigured server fails at start-up.
+ * Settings from the environment (CLOUDROP_SECRET, a storage preset's variables) are read on the first request instead,
+ * so a build needs no secrets; one still missing then makes every request answer 500 and every api call INVALID_CONFIG
+ * until it is set. With NODE_ENV=development they are checked now too.
+ */
 export function createCloudrop<TRoutes extends Record<string, Route>>(
   options: CloudropOptions<TRoutes>,
 ): Cloudrop<TRoutes> {

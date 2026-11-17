@@ -31,38 +31,46 @@ const optionalSchema: StandardSchema<{ a: string } | undefined, { a: string } | 
   },
 };
 
-const avatar = route({
-  accept: "image/*",
-  maxSize: "5MB",
-  metadata: albumSchema,
-  authorize: async ({ request, metadata }) => {
-    expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: Date }>();
-    const user = await getUser(request);
-    return user ? { user } : unauthorized();
+const avatar = route(
+  {
+    accept: "image/*",
+    maxSize: "5MB",
+    metadata: albumSchema,
+    authorize: async ({ request, metadata }) => {
+      expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: Date }>();
+      const user = await getUser(request);
+      return user ? { user } : unauthorized();
+    },
   },
-  prefix: ({ user, metadata }) => {
-    expectTypeOf(user).toEqualTypeOf<User>();
-    return `users/${user.id}/${metadata.albumId}`;
+  {
+    prefix: ({ user, metadata }) => {
+      expectTypeOf(user).toEqualTypeOf<User>();
+      return `users/${user.id}/${metadata.albumId}`;
+    },
+    onComplete: async ({ user, metadata, file }) => {
+      // onComplete reads the token's JSON copy: Dates are strings there, and the types say so.
+      expectTypeOf(user).toEqualTypeOf<{ id: string; joined: string }>();
+      expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: string }>();
+      return { url: file.url, at: new Date() };
+    },
   },
-  onComplete: async ({ user, metadata, file }) => {
-    // onComplete reads the token's JSON copy: Dates are strings there, and the types say so.
-    expectTypeOf(user).toEqualTypeOf<{ id: string; joined: string }>();
-    expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: string }>();
-    return { url: file.url, at: new Date() };
-  },
-});
+);
 
 const notes = route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone });
 
-const optional = route({
-  accept: "*/*",
-  maxSize: 1,
-  metadata: optionalSchema,
-  authorize: allowAnyone,
-  onComplete: ({ metadata }) => {
-    expectTypeOf(metadata).toEqualTypeOf<{ a: string } | undefined>();
+const optional = route(
+  {
+    accept: "*/*",
+    maxSize: 1,
+    metadata: optionalSchema,
+    authorize: allowAnyone,
   },
-});
+  {
+    onComplete: ({ metadata }) => {
+      expectTypeOf(metadata).toEqualTypeOf<{ a: string } | undefined>();
+    },
+  },
+);
 
 const cloudrop = createCloudrop({
   storage: r2({
@@ -106,58 +114,87 @@ describe("type inference for the client", () => {
     route({ accept: "*/*", maxSize: 1 });
   });
 
-  it("infers the authorize result for every callback written after it", () => {
-    route({
-      accept: "*/*",
-      maxSize: 1,
-      authorize: ({ request }) => ({ teamId: request.url }),
-      prefix: ({ teamId }) => {
-        expectTypeOf(teamId).toEqualTypeOf<string>();
-        return teamId;
+  it("types every callback from authorize, whatever order the options are written in", () => {
+    // One object used to infer left to right: a callback written before authorize fixed its context at object.
+    const contextOf = route(
+      { authorize: ({ request }) => ({ teamId: request.url }), maxSize: 1, accept: "*/*" },
+      {
+        onComplete: ({ teamId, metadata }) => {
+          expectTypeOf(teamId).toEqualTypeOf<string>();
+          expectTypeOf(metadata).toEqualTypeOf<undefined>();
+        },
+        prefix: ({ teamId, file }) => {
+          expectTypeOf(teamId).toEqualTypeOf<string>();
+          expectTypeOf(file).toEqualTypeOf<{ id: string; name: string; size: number; type: string; ext: string }>();
+          return teamId;
+        },
       },
-      onComplete: ({ teamId }) => {
-        expectTypeOf(teamId).toEqualTypeOf<string>();
+    );
+    route(
+      { accept: "*/*", maxSize: 1, authorize: () => ({ teamId: "t" }) },
+      {
+        key: ({ teamId }) => {
+          expectTypeOf(teamId).toEqualTypeOf<string>();
+          return teamId;
+        },
+        onComplete: ({ teamId }) => expectTypeOf(teamId).toEqualTypeOf<string>(),
       },
-    });
+    );
+    expectTypeOf(contextOf).toEqualTypeOf<Route<undefined, null>>();
+  });
+
+  it("types the schema's output in authorize and the callbacks when metadata is written after authorize", () => {
+    const albums = route(
+      {
+        authorize: ({ metadata }) => {
+          expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: Date }>();
+          return { userId: metadata.albumId };
+        },
+        metadata: albumSchema,
+        maxSize: 1,
+        accept: "*/*",
+      },
+      {
+        onComplete: ({ userId, metadata }) => {
+          expectTypeOf(userId).toEqualTypeOf<string>();
+          expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: string }>();
+          return { userId };
+        },
+        key: ({ userId, metadata }) => {
+          expectTypeOf(metadata).toEqualTypeOf<{ albumId: string; takenAt: Date }>();
+          return `${userId}/${metadata.albumId}`;
+        },
+      },
+    );
+    expectTypeOf(albums).toEqualTypeOf<Route<{ albumId: string }, { userId: string }>>();
   });
 
   it("types onComplete's metadata as undefined without a schema", () => {
-    route({
-      accept: "*/*",
-      maxSize: 1,
-      authorize: allowAnyone,
-      onComplete: ({ metadata }) => {
-        expectTypeOf(metadata).toEqualTypeOf<undefined>();
+    route(
+      { accept: "*/*", maxSize: 1, authorize: allowAnyone },
+      {
+        onComplete: ({ metadata }) => {
+          expectTypeOf(metadata).toEqualTypeOf<undefined>();
+        },
       },
-    });
+    );
   });
 
   it("gives the client the resolved value when the result type is a promise", () => {
     // Explicit generics: inferring from an async onComplete already unwraps Awaitable<TResult>, so TResult would be
     // { id: string } and the row would pass without route()'s Awaited. Only a TResult that is a promise proves it.
-    const resolves = route<object, undefined, Promise<{ id: string }>>({
-      accept: "*/*",
-      maxSize: 1,
-      authorize: allowAnyone,
-      onComplete: async () => ({ id: "1" }),
-    });
+    const resolves = route<object, undefined, Promise<{ id: string }>>(
+      { accept: "*/*", maxSize: 1, authorize: allowAnyone },
+      { onComplete: async () => ({ id: "1" }) },
+    );
     expectTypeOf(resolves).toEqualTypeOf<Route<undefined, { id: string }>>();
   });
 
   it("gives the client null when onComplete returns nothing, as /complete sends it", () => {
-    const returnsNothing = route({ accept: "*/*", maxSize: 1, authorize: allowAnyone, onComplete: () => {} });
-    const returnsUndefined = route({
-      accept: "*/*",
-      maxSize: 1,
-      authorize: allowAnyone,
-      onComplete: () => undefined,
-    });
-    const returnsObjectOrUndefined = route({
-      accept: "*/*",
-      maxSize: 1,
-      authorize: allowAnyone,
-      onComplete: (): { id: string } | undefined => undefined,
-    });
+    const policy = { accept: "*/*", maxSize: 1, authorize: allowAnyone };
+    const returnsNothing = route(policy, { onComplete: () => {} });
+    const returnsUndefined = route(policy, { onComplete: () => undefined });
+    const returnsObjectOrUndefined = route(policy, { onComplete: (): { id: string } | undefined => undefined });
     expectTypeOf(returnsNothing).toEqualTypeOf<Route<undefined, null>>();
     expectTypeOf(returnsUndefined).toEqualTypeOf<Route<undefined, null>>();
     expectTypeOf(returnsObjectOrUndefined).toEqualTypeOf<Route<undefined, { id: string } | null>>();

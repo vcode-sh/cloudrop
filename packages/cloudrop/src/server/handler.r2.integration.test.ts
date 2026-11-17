@@ -49,7 +49,7 @@ describe("upload protocol on live R2", () => {
       // A fresh secret per run: no token from this run is valid anywhere else.
       secret: toHex(crypto.getRandomValues(new Uint8Array(32))),
       // Every key lands under the run prefix, which teardown deletes.
-      routes: { live: route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone, prefix: () => prefix }) },
+      routes: { live: route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone }, { prefix: () => prefix }) },
       multipartThreshold: "8MB",
     });
   });

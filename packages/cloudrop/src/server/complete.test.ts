@@ -19,15 +19,19 @@ afterEach(() => {
 describe("POST /complete: single PUT", () => {
   it("verifies the stored object and returns the file and onComplete's JSON result", async () => {
     const received: unknown[] = [];
-    const profile = route({
-      accept: "text/plain",
-      maxSize: "1KB",
-      authorize: () => ({ userId: "42", since: new Date("2026-01-01T00:00:00Z") }),
-      onComplete: ({ userId, since, file, metadata }) => {
-        received.push({ userId, since, metadata });
-        return { stored: file.key, at: new Date("2026-11-15T12:00:01Z") };
+    const profile = route(
+      {
+        accept: "text/plain",
+        maxSize: "1KB",
+        authorize: () => ({ userId: "42", since: new Date("2026-01-01T00:00:00Z") }),
       },
-    });
+      {
+        onComplete: ({ userId, since, file, metadata }) => {
+          received.push({ userId, since, metadata });
+          return { stored: file.key, at: new Date("2026-11-15T12:00:01Z") };
+        },
+      },
+    );
     const fixture = serverFixture({ profile });
     const ticket = await fixture.single("profile", TEXT);
     expect((await fixture.send(ticket.put, hello)).status).toBe(200);
@@ -43,13 +47,10 @@ describe("POST /complete: single PUT", () => {
   });
 
   it("gives a public route's file its percent-encoded public URL", async () => {
-    const shared = route({
-      accept: "*/*",
-      maxSize: "1GB",
-      authorize: allowAnyone,
-      visibility: "public",
-      prefix: () => "team files",
-    });
+    const shared = route(
+      { accept: "*/*", maxSize: "1GB", authorize: allowAnyone, visibility: "public" },
+      { prefix: () => "team files" },
+    );
     const fixture = serverFixture({ shared }, { publicUrl: true });
     const ticket = await fixture.single("shared", TEXT);
     await fixture.send(ticket.put, hello);
@@ -73,7 +74,7 @@ describe("POST /complete: single PUT", () => {
 
   it("completes again when retried, running onComplete each time (at-least-once)", async () => {
     let calls = 0;
-    const counted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, onComplete: () => ++calls });
+    const counted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { onComplete: () => ++calls });
     const fixture = serverFixture({ counted });
     const ticket = await fixture.single("counted", TEXT);
     await fixture.send(ticket.put, hello);
@@ -176,14 +177,14 @@ describe("POST /complete: plugins and onComplete", () => {
 
   it("keeps the verified object when onComplete throws, and asks the client to retry", async () => {
     const failure = new Error("database unavailable");
-    const failing = route({
-      accept: "*/*",
-      maxSize: "1GB",
-      authorize: allowAnyone,
-      onComplete: () => {
-        throw failure;
+    const failing = route(
+      { accept: "*/*", maxSize: "1GB", authorize: allowAnyone },
+      {
+        onComplete: () => {
+          throw failure;
+        },
       },
-    });
+    );
     const fixture = serverFixture({ failing });
     const ticket = await fixture.single("failing", TEXT);
     await fixture.send(ticket.put, hello);
@@ -200,7 +201,10 @@ describe("POST /complete: plugins and onComplete", () => {
 
   // Only JSON reaches the client: a BigInt or a cycle is the application's bug, reported as an onComplete problem.
   it("keeps the verified object and asks for a retry when onComplete returns a value JSON cannot encode", async () => {
-    const counting = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, onComplete: () => ({ n: 1n }) });
+    const counting = route(
+      { accept: "*/*", maxSize: "1GB", authorize: allowAnyone },
+      { onComplete: () => ({ n: 1n }) },
+    );
     const fixture = serverFixture({ counting });
     const ticket = await fixture.single("counting", TEXT);
     await fixture.send(ticket.put, hello);

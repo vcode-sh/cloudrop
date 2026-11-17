@@ -13,6 +13,7 @@ export type CloudropErrorCode =
   | "CHECKSUM_MISMATCH"
   // Upload endpoints (spec §5, §7).
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
   | "ORIGIN_NOT_ALLOWED"
   | "METHOD_NOT_ALLOWED"
   | "UNSUPPORTED_MEDIA_TYPE"

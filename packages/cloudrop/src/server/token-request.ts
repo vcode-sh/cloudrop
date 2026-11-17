@@ -1,6 +1,6 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
-import type { RouteConfig, ServerConfig } from "./config.ts";
+import type { EndpointConfig, RouteConfig } from "./config.ts";
 import { type AbortContext, abortContexts } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import { type UploadTokenPayload, verifyToken } from "./token.ts";
@@ -8,11 +8,11 @@ import { type UploadTokenPayload, verifyToken } from "./token.ts";
 /** The verified token of a `/sign`, `/complete` or `/abort` body. */
 export async function readToken(
   body: unknown,
-  config: ServerConfig,
+  config: EndpointConfig,
   options: { allowExpired?: boolean } = {},
 ): Promise<Result<UploadTokenPayload>> {
   if (!isPlainObject(body)) return fail(invalidInput('Send a JSON object with the upload token: { "token": "..." }.'));
-  return verifyToken(body.token, (await config.tokenKeys).all, nowSeconds(), options);
+  return verifyToken(body.token, config.tokenKeys.all, nowSeconds(), options);
 }
 
 /**
@@ -21,7 +21,7 @@ export async function readToken(
  */
 export async function readTokenRequest(
   body: unknown,
-  config: ServerConfig,
+  config: EndpointConfig,
 ): Promise<Result<{ token: UploadTokenPayload; route: RouteConfig }>> {
   const verified = await readToken(body, config);
   if (verified.error) return verified;

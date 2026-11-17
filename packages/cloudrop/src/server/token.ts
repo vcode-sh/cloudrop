@@ -65,8 +65,8 @@ export interface TokenKeys {
 }
 
 /**
- * Imported once, at configuration time, as non-extractable keys: no request imports a key, and nothing after start-up
- * needs the plaintext secret. Measured 2026-11-15 (Ryzen 9 9950X3D, 20,000 verifications): 6.3 us per verify with the
+ * Imported once, when the secret is read (at construction, or on the first request when it comes from CLOUDROP_SECRET),
+ * as non-extractable keys: no later request imports a key, and nothing after that needs the plaintext secret. Measured 2026-11-15 (Ryzen 9 9950X3D, 20,000 verifications): 6.3 us per verify with the
  * imported key against 7.2 us importing per call on Bun 1.4.4, 13.5 against 17.8 us on Node 24.22.2.
  */
 export async function importTokenKeys([current, ...previous]: readonly [string, ...string[]]): Promise<TokenKeys> {

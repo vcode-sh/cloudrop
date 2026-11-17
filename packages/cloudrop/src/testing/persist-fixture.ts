@@ -149,16 +149,15 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
   const issued: Issued[] = [];
   // The ids of the files whose onComplete ran, in order: a probe of a finished upload runs it again (audit M8).
   const completed: string[] = [];
-  const files = route({
-    accept: "*/*",
-    maxSize: "100MB",
-    metadata: anyMetadata,
-    authorize: allowAnyone,
-    onComplete: ({ file }) => {
-      completed.push(file.id);
-      return null;
+  const files = route(
+    { accept: "*/*", maxSize: "100MB", metadata: anyMetadata, authorize: allowAnyone },
+    {
+      onComplete: ({ file }) => {
+        completed.push(file.id);
+        return null;
+      },
     },
-  });
+  );
   const fixture = clientFixture(
     { files },
     {

@@ -274,20 +274,10 @@ describe("readConfig defaults", () => {
 
   it("signs tokens with the secret from CLOUDROP_SECRET", async () => {
     vi.stubEnv("CLOUDROP_SECRET", SECRET);
-    const { signing } = await readConfig({ storage, routes: { files } }).tokenKeys;
-    const token = await signToken(payload, signing);
+    const ready = await readConfig({ storage, routes: { files } }).ready();
+    if (ready.error) throw ready.error;
+    const token = await signToken(payload, ready.data.signing);
     expect((await verifyToken(token, [await importTokenKey(SECRET)], 1)).data).toEqual(payload);
-  });
-
-  it("refuses to start when CLOUDROP_SECRET is empty and no secret is passed", () => {
-    vi.stubEnv("CLOUDROP_SECRET", "");
-    expect(() => readConfig({ storage, routes: { files } })).toThrow(
-      expect.objectContaining({
-        code: "INVALID_CONFIG",
-        message:
-          "Missing the upload token secret. Set CLOUDROP_SECRET or pass secret to createCloudrop(); generate one with `openssl rand -base64 32`.",
-      }),
-    );
   });
 
   it("makes a route public when the storage has a publicUrl, and private otherwise", () => {

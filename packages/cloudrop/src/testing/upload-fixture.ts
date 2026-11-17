@@ -23,17 +23,19 @@ export const albumSchema: StandardSchema<{ albumId: string }> = {
 };
 
 /** Signed-in users ("x-user") upload up to two images of at most 1 MB into their album's folder. */
-export const avatar: Route<{ albumId: string }, null> = route({
-  accept: ["image/png", "image/jpeg"],
-  maxSize: "1MB",
-  maxFiles: 2,
-  metadata: albumSchema,
-  authorize: ({ request, metadata }) =>
-    request.headers.get("x-user")
-      ? { userId: request.headers.get("x-user") as string, albumId: metadata.albumId }
-      : unauthorized(),
-  prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}`,
-});
+export const avatar: Route<{ albumId: string }, null> = route(
+  {
+    accept: ["image/png", "image/jpeg"],
+    maxSize: "1MB",
+    maxFiles: 2,
+    metadata: albumSchema,
+    authorize: ({ request, metadata }) =>
+      request.headers.get("x-user")
+        ? { userId: request.headers.get("x-user") as string, albumId: metadata.albumId }
+        : unauthorized(),
+  },
+  { prefix: ({ userId, metadata }) => `users/${userId}/${metadata.albumId}` },
+);
 
 export const files: Route<undefined, null> = route({ accept: "*/*", maxSize: "100GB", authorize: allowAnyone });
 
