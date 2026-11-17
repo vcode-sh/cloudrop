@@ -13,6 +13,7 @@ import {
   b64,
   crc32c,
   crc64nvme,
+  envFilePath,
   hex,
   loadEnv,
   md5hex,
@@ -26,7 +27,6 @@ import {
 } from "./lib.ts";
 
 const MiB = 1024 * 1024;
-const ENV_FILE = process.env.CLOUDROP_R2_ENV_FILE ?? "~/projects/linux-apps/app-d/.env.local";
 const ORIGIN = "http://localhost:5173";
 const WORK_BUDGET_MS = 15 * 60_000;
 
@@ -41,7 +41,7 @@ if (process.argv.includes("--self-check")) {
   process.exit(c === "e3069283" && n === "ae8b14860a799888" ? 0 : 1);
 }
 
-const env = loadEnv(ENV_FILE);
+const env = loadEnv(envFilePath());
 registerRedactions(env);
 const host = s3Host(env);
 const prefix = `spike/cloudrop-${randomBytes(16).toString("hex")}/`;

@@ -1,9 +1,9 @@
 // Independent, read-only check that spike prefixes hold no objects and no multipart uploads.
 // Usage: bun run verify-empty.ts spike/cloudrop-<hex>/ [...]
 import { AwsClient } from "aws4fetch";
-import { loadEnv, redact, registerRedactions, s3Host } from "./lib.ts";
+import { envFilePath, loadEnv, redact, registerRedactions, s3Host } from "./lib.ts";
 
-const env = loadEnv(process.env.CLOUDROP_R2_ENV_FILE ?? "~/projects/linux-apps/app-d/.env.local");
+const env = loadEnv(envFilePath());
 registerRedactions(env);
 const aws = new AwsClient({ accessKeyId: env.accessKeyId, secretAccessKey: env.secretAccessKey, service: "s3", region: "auto", retries: 0 });
 const base = `https://${s3Host(env)}/${env.bucket}`;

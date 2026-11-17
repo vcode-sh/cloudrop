@@ -22,6 +22,14 @@ const ENV_KEYS = {
   BB_R2_SECRET_ACCESS_KEY: "secretAccessKey",
 } as const;
 
+/** The credentials file named by CLOUDROP_R2_ENV_FILE. There is no default path: a run reads only the file it is given. */
+export function envFilePath(): string {
+  const path = process.env.CLOUDROP_R2_ENV_FILE;
+  if (path) return path;
+  console.error("CLOUDROP_R2_ENV_FILE is not set. Point it at a file with the five BB_R2_* lines and re-run.");
+  process.exit(1);
+}
+
 /** Parses only literal KEY=VALUE lines for the five known keys. Never evaluates shell code. */
 export function loadEnv(path: string): R2Env {
   const out: Partial<Record<keyof R2Env, string>> = {};
