@@ -341,7 +341,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   (`EndpointConfig.tokenKeys`). Every option that needs no environment value, and every value passed explicitly
   (including `secret`), is still checked at construction. With `NODE_ENV === "development"` exactly, the environment
   is read at construction too, so `next dev` fails at start. A value missing at request time:
-  1. The handler answers `SERVER_ERROR` 500 (with CORS headers for a trusted origin) and logs once
+  1. The handler answers `SERVER_ERROR` 500, retryable, "The upload server is not ready. Try again in a moment."
+     (with CORS headers for a trusted origin) and logs once
      `cloudrop: every request answers 500 until this is fixed. <message>` with the `INVALID_CONFIG` as the error; it
      logs again only when the message changes (a partial fix). Preflight, 404 and 405 answers need no environment.
   2. `cloudrop.api.*` resolve `{ data: null, error }` with that `INVALID_CONFIG`.
@@ -362,16 +363,21 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   broken server and saves a restart once it is fixed; memoizing after success keeps the hot path free of environment
   reads and key imports.
 - **If wrong:** a misconfigured production server starts and fails on its first request instead of at boot, which a
-  health check that hits the handler catches; development still fails at start.
+  health check that hits the handler catches; development still fails at start. The 500 is retryable (final review
+  M6): a non-retryable one made a file in flight when a deploy went live without a variable give its ticket up, send
+  `/abort` and delete its resume record (`M4-F1` keeps a record only for a retryable failure), so fixing the variable
+  could not recover it. The cost: a server that stays broken is asked up to six times per request, the client's retry
+  budget.
 - **Size:** M4-F15 to M4-F18 together take the summed `cloudrop` budget from 34.09 to 36.66 kB gzip (published files
   with their doc comments) and the bundled one from 21.32 to 22.32 kB, measured 2026-11-17 after the fix round. The
   bundled budget (23.5 kB, M4-F14) holds; the summed one rises from 36 to 40 kB, the measured size plus about 10% as
   `scripts/size-limit.config.ts` prescribes. `readSetting` lives in `storage/lazy-driver.ts`, not `errors.ts`, which
   would have put it in the chunk `cloudrop/next` and `cloudrop/node` import (+0.15 kB each, measured).
-- **Status:** in force. Amends M3-H14.
+- **Status:** in force. Amends M3-H14; the retryable 500 is the final review's M6.
 - **Source:** design §5.2.
 - **Visible in:** `server/environment.ts`, `server/config.ts` (`ready`, `EndpointConfig`), `server/handler.ts`,
-  `server/api.ts`, `server/cloudrop.ts` (TSDoc), `server/environment.test.ts`, `storage/lazy-driver.ts`
+  `server/api.ts`, `server/cloudrop.ts` (TSDoc), `server/environment.test.ts`, `client/persist-failures.test.ts` (the
+  deploy missing its environment), `storage/lazy-driver.ts`
   (`readSetting`), `scripts/size-limit.config.ts`.
 
 ### M4-F17: `r2()` and `s3()` read every setting from the environment, lazily

@@ -47,7 +47,7 @@ function server() {
     return {
       status: response.status,
       allowOrigin: response.headers.get("access-control-allow-origin"),
-      body: (await response.json()) as { error?: { code: string } },
+      body: (await response.json()) as { error?: { code: string; message: string; retryable: boolean } },
     };
   };
   return { cloudrop, logger, post };
@@ -61,12 +61,19 @@ function setEnvironment(): void {
 }
 
 describe("configuration from the environment", () => {
-  it("answers every request 500 until the environment is set, logging what is missing once", async () => {
+  it("answers every request a retryable 500 until the environment is set, logging what is missing once", async () => {
     const { logger, post } = server();
     const answers = [await post(), await post()];
-    expect(answers.map(({ status, body }) => [status, body.error?.code])).toEqual([
-      [500, "SERVER_ERROR"],
-      [500, "SERVER_ERROR"],
+    // Retryable: an upload in flight when a deploy goes live with a missing variable keeps its ticket and resume record
+    // through the client's retries, and a fixed environment recovers it (M4-F16).
+    const notReady = {
+      code: "SERVER_ERROR",
+      message: "The upload server is not ready. Try again in a moment.",
+      retryable: true,
+    };
+    expect(answers.map(({ status, body }) => [status, body.error])).toEqual([
+      [500, notReady],
+      [500, notReady],
     ]);
     expect(logger.errors).toEqual([
       {

@@ -74,7 +74,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `ALREADY_EXISTS` | 409 | No | Another file already has this multipart upload's key. | Start a new upload. With a custom `key`, make keys unique. |
 | `RATE_LIMITED` | 503 | Yes | The storage service was throttling while the server called it. | Try again in a moment. |
 | `STORAGE_ERROR` | 502 | Sometimes | The server's call to the storage service failed (retryable), or the storage refused it (not retryable). Your server log has the details. | When retryable, try again. Otherwise check the server log: often credentials, permissions or the bucket name. |
-| `SERVER_ERROR` | 500 | Sometimes | Something in the server failed: your `authorize`, `onComplete` or a plugin threw, or cloudrop hit a bug. Retryable when the file is stored but `onComplete` or a hook did not finish. | Check the server log. When retryable, try again. |
+| `SERVER_ERROR` | 500 | Sometimes | Something in the server failed: your `authorize`, `onComplete` or a plugin threw, or cloudrop hit a bug. Retryable when the file is stored but `onComplete` or a hook did not finish, and while an environment setting is missing. | Check the server log. When retryable, try again. |
 | `NOT_FOUND` | 404 | No | There is no cloudrop endpoint at the requested path. | Check that `basePath` matches on the server and the client. |
 | `INVALID_INPUT` | 400 | No | The request body is malformed: not a JSON object, no route name, no files, a bad file entry, wrong part numbers. The Node adapter also answers it for a request it cannot read. | Use the cloudrop client, or fix the request your own client sends. |
 
@@ -124,7 +124,7 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 
 Settings read from the environment (`CLOUDROP_SECRET`, `CLOUDROP_R2_*`, `CLOUDROP_S3_*`) are reported on the first
 request instead of thrown, and `INVALID_CONFIG` then arrives in a result: the handler logs it (again only when the
-message changes) and answers every request with `SERVER_ERROR` 500, every `cloudrop.api` call returns
+message changes) and answers every request with a retryable `SERVER_ERROR` 500, every `cloudrop.api` call returns
 `{ data: null, error }` with it, and a storage preset's own methods return it until its settings are complete. See
 [Every request answers 500](troubleshooting.md#every-request-answers-500-server_error).
 

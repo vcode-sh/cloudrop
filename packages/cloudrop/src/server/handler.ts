@@ -97,7 +97,11 @@ async function answer(request: Request, config: ServerConfig, report: Reporters)
     const ready = await config.ready();
     if (ready.error) {
       report.notReady(ready.error);
-      return errorResponse(serverError(), origin.cors);
+      // Retryable: the environment is read again on each request, so a fix recovers the uploads in flight (M4-F16).
+      const notReady = new CloudropError("SERVER_ERROR", "The upload server is not ready. Try again in a moment.", {
+        retryable: true,
+      });
+      return errorResponse(notReady, origin.cors);
     }
     const result = await ENDPOINTS[endpoint]({
       request,

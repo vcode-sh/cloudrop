@@ -1,18 +1,22 @@
 // Contract: resume spec §3.2, §3.4 and §3.7 with the plan audit's I4, I5, I12 and M6, through the real client: a
 // retry's new ticket replaces the record under the new id and moves the lock; NO_SUCH_UPLOAD makes retry() ask for a
 // new ticket, also after a /complete that got no answer (M3-U74, M3-U83); upload() persists too, deleting the record
-// with its /abort and keeping it, without the lock, when a /complete may have finished the file (M3-U82); a store that
-// fails in any way, or a file the browser can no longer read, changes nothing the upload sends; with persistence off,
-// no indexedDB, no Web Locks or a browser that refuses every lock request (M3-U88) nothing is hashed, stored or
-// locked, and the file is still stored.
+// with its /abort and keeping it, without the lock, when a /complete may have finished the file (M3-U82) or a server
+// missing its environment answers (M4-F16); a store that fails in any way, or a file the browser can no longer read,
+// changes nothing the upload sends; with persistence off, no indexedDB, no Web Locks or a browser that refuses every
+// lock request (M3-U88) nothing is hashed, stored or locked, and the file is still stored.
 // Oracle: what the fake IndexedDB holds, the locks the fake LockManager says this page holds, the tickets /upload
 // answered, the requests the fixture saw and the object the fake bucket stored.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
+import { createCloudrop } from "../server/cloudrop.ts";
+import { allowAnyone, route } from "../server/route.ts";
+import { r2 } from "../storage/presets.ts";
 import type { FaultCall } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { gate, noSuchUpload, persistFixture, smallFile, threeParts, unreachable } from "../testing/persist-fixture.ts";
+import { APP_ORIGIN, recordingLogger } from "../testing/server-fixture.ts";
 
 const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 /** More store requests than any row here makes: every one of them fails. */
@@ -26,8 +30,24 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
+
+/**
+ * Answers `call` as a deploy that went live without its environment does: a new server, so nothing of the running
+ * one's configuration is cached, whose every setting is left to the environment and none is set (M4-F16).
+ */
+function fromServerWithoutEnvironment(call: FaultCall): Promise<Response> {
+  for (const name of ["CLOUDROP_SECRET", "CLOUDROP_R2_ACCOUNT_ID", "CLOUDROP_R2_ACCESS_KEY_ID"]) vi.stubEnv(name, "");
+  const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone });
+  const redeployed = createCloudrop({ storage: r2(), routes: { files }, logger: recordingLogger() });
+  const [method, path] = call.label.split(" ");
+  const headers = { "content-type": "application/json", origin: APP_ORIGIN };
+  return redeployed.handler(
+    new Request(`${APP_ORIGIN}/api/cloudrop${path}`, { method, headers, body: call.init.body }),
+  );
+}
 
 describe("a retry's new ticket", () => {
   it("replaces the record and the lock under the new id; both go when the file is done", async () => {
@@ -107,6 +127,17 @@ describe("upload() persists too (audit I5)", () => {
       fault: (call: FaultCall) =>
         call.label === "PUT part 2" ? errorResponse(400, "InvalidArgument", "Invalid argument.") : undefined,
       expected: { code: "UPLOAD_REJECTED", aborted: true, stored: 0 },
+    },
+    {
+      // The bucket calls part 2's URL expired, and /sign reaches a deploy that went live without its environment. Its
+      // 500 is retryable, so the client keeps the ticket through its retries, and the record once they run out.
+      name: "a multipart file whose /sign reaches a deploy missing its environment keeps the record (M4-F16)",
+      file: threeParts,
+      fault: (call: FaultCall) => {
+        if (call.label === "PUT part 2") return errorResponse(403, "ExpiredRequest", "Request has expired");
+        return call.label === "POST /sign" ? fromServerWithoutEnvironment(call) : undefined;
+      },
+      expected: { code: "SERVER_ERROR", aborted: false, stored: 1 },
     },
     {
       name: "a /complete that may have finished keeps the record for a resume, sending no /abort",
