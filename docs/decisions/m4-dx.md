@@ -399,7 +399,12 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   building the driver once with valid stand-ins for the settings the environment will supply: every check stays in
   `createS3Driver` and the presets, in one place, instead of a second per-setting copy that could drift. `rules` and
   `publicUrl` need no environment value, so route checks at construction still see them.
-- **If wrong:** an app that relied on an empty `bucket` throwing at construction now learns at the first request.
+- **If wrong:** an app that relied on an empty `bucket` throwing at construction now learns at the first request. A lazy
+  driver that the app copies or wraps (`{ ...r2(), put }`) is not found in the `WeakMap`: with a storage setting
+  missing, `ready()` succeeds, every upload fails with `STORAGE_ERROR` and the logger records `cloudrop: a storage
+  request failed.` with the `INVALID_CONFIG` on every request, not the single not-ready line; nothing reaches the
+  browser (final review M5, probed). `docs/guide/server.md` says to pass the driver as returned; a public readiness
+  member on `StorageDriver` would close it, at the cost of the contract this entry keeps.
 - **Status:** in force.
 - **Source:** design §5.3.
 - **Visible in:** `storage/presets.ts`, `storage/lazy-driver.ts`, `storage/presets-env.test.ts`,
