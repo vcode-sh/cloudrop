@@ -21,9 +21,13 @@ const endedOf = (job: UploadJob<unknown>) => {
 
 export function createJobTracker(): JobTracker {
   const listeners = new Set<() => void>();
-  const changed = () => {
-    for (const listener of listeners) listener();
-  };
+  // In a microtask: a file cancelled while its /complete is in doubt settles, which publishes, and only then does the
+  // client delete its record and release its claim (end() and letGo in client/file-run.ts and persist.ts). A read
+  // started inside the publish would be queued before that removal and list the deleted record.
+  const changed = () =>
+    queueMicrotask(() => {
+      for (const listener of listeners) listener();
+    });
   return {
     track(job) {
       let ended = endedOf(job);

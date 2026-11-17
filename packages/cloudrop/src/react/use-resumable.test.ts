@@ -10,7 +10,16 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUploadHooks } from "../react.ts";
-import { fourParts, gate, nth, partThree, persistFixture, reloaded, threeParts } from "../testing/persist-fixture.ts";
+import {
+  firstOf,
+  fourParts,
+  gate,
+  nth,
+  partThree,
+  persistFixture,
+  reloaded,
+  threeParts,
+} from "../testing/persist-fixture.ts";
 import { failing, fast } from "../testing/react-fixture.ts";
 
 const ids = (uploads: readonly { id: string }[] | null | undefined) => uploads?.map(({ id }) => id);
@@ -116,6 +125,41 @@ describe("useResumable", () => {
       after: [],
       kept: [],
     });
+  });
+
+  it("lists nothing once a retried file is cancelled while its /complete is in doubt", async () => {
+    const broken = failing((call) => call.label === "PUT part 2");
+    // The retry's /complete is held, then gets no answer: it may have finished, so the cancel sends no /abort and the
+    // client deletes the record and releases the upload right after the file settles aborted (M3-H16, end() in
+    // client/file-run.ts).
+    const complete = Promise.withResolvers<void>();
+    const lose = Promise.withResolvers<never>();
+    const held = (call: { label: string }) => {
+      if (call.label !== "POST /complete") return undefined;
+      complete.resolve();
+      return lose.promise;
+    };
+    const setup = persistFixture({ fault: firstOf(broken.fault, held), options: { concurrency: 1 } });
+    const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
+    await act(() => result.current.hook.upload(threeParts()));
+    await setup.drained();
+    broken.failing.on = false;
+    let retried: Promise<unknown> = Promise.resolve();
+    act(() => {
+      retried = result.current.hook.retry();
+    });
+    await act(() => complete.promise);
+    act(() => result.current.hook.abort());
+    lose.reject(new TypeError("Failed to fetch"));
+    await act(() => retried);
+    await setup.drained();
+
+    expect({
+      status: result.current.hook.files[0]?.status,
+      stored: stored(setup),
+      listed: result.current.resumable.uploads,
+    }).toEqual({ status: "aborted", stored: [], listed: [] });
   });
 
   it("lists an upload again once its resume is cancelled while its checks run", async () => {
