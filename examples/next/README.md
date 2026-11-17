@@ -4,8 +4,8 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
 
 - `lib/cloudrop.ts` creates the server with one route, `files`, that only a signed-in user may use.
 - `app/api/cloudrop/[...all]/route.ts` mounts it: `export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);`.
-- `app/page.tsx` uploads with `cloudrop/client`. It imports only the server's type, so the server module and its
-  secret never reach the browser bundle.
+- `app/page.tsx` uploads with `useUpload` from `lib/upload.ts`, which creates the `cloudrop/react` hooks. They import
+  only the server's type, so the server module and its secret never reach the browser bundle.
 - `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
   answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
 

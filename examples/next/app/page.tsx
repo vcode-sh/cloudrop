@@ -1,27 +1,19 @@
 "use client";
 
-import { createCloudropClient } from "cloudrop/client";
-import { type ChangeEvent, useState } from "react";
-// A type import: the server module, and the secret it reads, stay out of the browser bundle.
-import type { cloudrop } from "../lib/cloudrop";
+import type { UploadFile } from "cloudrop/react";
+import { useUpload } from "../lib/upload";
 
-const client = createCloudropClient<typeof cloudrop>();
+/** The status line of the latest upload; the route's onComplete returns `{ key }`. */
+function statusOf(file: UploadFile<{ key: string }>): string {
+  if (file.error) return `${file.error.code}: ${file.error.message}`;
+  if (file.result) return `Uploaded ${file.name} (${file.size} bytes) as ${file.result.data.key}`;
+  return `Uploading ${file.name}…`;
+}
 
 export default function Page() {
-  const [status, setStatus] = useState("");
-
-  async function onChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    // Cleared so that choosing the same file again uploads it: Chromium fires `cancel`, not `change`, for an unchanged
-    // selection.
-    event.target.value = "";
-    if (!file) return;
-    setStatus(`Uploading ${file.name}…`);
-    const { data, error } = await client.upload("files", file);
-    setStatus(
-      error ? `${error.code}: ${error.message}` : `Uploaded ${file.name} (${file.size} bytes) as ${data.data.key}`,
-    );
-  }
+  // getInputProps() clears the input after each pick, so choosing the same file again uploads it again.
+  const { files, getInputProps } = useUpload("files");
+  const latest = files.at(-1);
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: "40rem", margin: "2rem auto", lineHeight: 1.6 }}>
@@ -32,10 +24,11 @@ export default function Page() {
       </form>
       <p>
         <label>
-          File to upload <input type="file" onChange={onChange} />
+          File to upload <input {...getInputProps()} />
         </label>
       </p>
-      <p role="status">{status}</p>
+      {latest && <progress value={latest.progress} aria-label={`${latest.name} progress`} />}
+      <p role="status">{latest ? statusOf(latest) : ""}</p>
     </main>
   );
 }
