@@ -68,8 +68,7 @@ export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<R
     if (upload) entry.run = job.runUpload(upload).finally(job.idle);
   }
   // One file's new ticket stops on that file's cancel and pause, as its re-asks do (M3-U92).
-  const refused =
-    fresh.length > 0 ? launch(job, fresh, fresh.length === 1 ? { reask: false, first: 1 } : undefined) : null;
+  const refused = fresh.length > 0 ? launch(job, fresh, fresh.length === 1 ? 1 : undefined) : null;
   const outcomes = await allSettled(entries);
   return { outcomes, refused: await refused };
 }

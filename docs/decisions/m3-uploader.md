@@ -760,8 +760,10 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`; one `Job.runUpload` brackets each run
   since `b368bc4`). Amended by `M3-U92` (in force): a file's wait before it asks `/upload` again after a retryable
   refusal counts as running, through the same bracket (`Job.watch`), so `offline` pauses it; the `/upload` itself and
-  the backoff after it when it fails as a whole are still not watched.
-- **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/lifecycle.test.ts`.
+  the backoff after it when it fails as a whole are still not watched. Amended by `M4-F9` S9 (2026-11-17): a one-file
+  `/upload` (a re-ask, a one-file `retry()`'s new ticket, a start over) is watched for its whole ask, the request and
+  its backoffs included; the job's own `/upload` and a retry's for several files still are not.
+- **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/launch.ts` (`askAlone`), `client/lifecycle.test.ts`.
 
 ## Plan B's failed-file rule as built, task 5's rulings and the budget
 
@@ -1532,7 +1534,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `/upload` had the same gap. Since fix round 2, `ABORTED` counts as a pause only when the pause aborted the backoff, as
   `runFile` decides: an answer carrying that code made the re-ask loop with no backoff and no budget (re-review
   Important 1); and offline is stated as built (re-review Minor 2). Since the chaos final review's M2, a resumed file's
-  start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal.
+  start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal. Amended by `M4-F9`
+  S9 (2026-11-17): a one-file `/upload` is watched for the whole ask, its wait after a refusal and its backoff after an
+  `/upload` that failed as a whole alike, so `offline` pauses a file waiting to ask again whatever the job's other
+  files do, and `online` asks at once.
 - **Visible in:** `client/launch.ts` (`refused`, `askAlone`, `launch`'s `Alone`), `client/job-run.ts` (`startOver`,
   `Job.watch`), `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts`
   (`withRetry`'s `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`,

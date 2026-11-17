@@ -228,20 +228,36 @@ describe("a file waiting to ask /upload again", () => {
     },
   );
 
-  it.each(scenarios)(
-    "asks nothing while paused in the backoff of $scenario, then asks at once on resume()",
-    async ({ scenario }) => {
-      const { fixture, client } = busyAfter(scenario);
+  // Offline reaches the backoff whatever the job's other files do: the whole one-file ask is watched (M4-F9 S9).
+  const holds = [
+    {
+      held: "paused by the caller",
+      freed: "resume()",
+      hold: (h: Held) => h.job.pause(),
+      free: (h: Held) => h.job.resume(),
+    },
+    {
+      held: "paused by offline",
+      freed: "online",
+      hold: (h: Held) => h.page.fire("offline"),
+      free: (h: Held) => h.page.fire("online"),
+    },
+  ];
+  it.each(scenarios.flatMap((row) => holds.map((hold) => ({ ...row, ...hold }))))(
+    "asks nothing while $held in the backoff of $scenario, then asks at once on $freed",
+    async ({ scenario, hold, free }) => {
+      const { fixture, client, page } = busyAfter(scenario);
       const job = await inBackoff[scenario](client);
-      job.pause();
+      hold({ job, page });
       const paused = statuses(job);
       await vi.advanceTimersByTimeAsync(60_000);
-      const whilePaused = [...fixture.requests];
-      job.resume();
-      const status = await settled(job);
-      expect({ paused, whilePaused, status, requests: fixture.requests }).toEqual({
+      // Checked before the file is freed: one that was never held may be stuck behind a fake timer by now.
+      expect({ paused, whilePaused: fixture.requests }).toEqual({
         paused: ["paused"],
         whilePaused: ["POST /upload", "POST /upload"],
+      });
+      free({ job, page });
+      expect({ status: await settled(job), requests: fixture.requests }).toEqual({
         status: "done",
         requests: ["POST /upload", "POST /upload", "POST /upload", "PUT object", "POST /complete"],
       });

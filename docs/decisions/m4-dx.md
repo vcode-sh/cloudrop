@@ -145,6 +145,32 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §3 F7; code audit of `main` at `907cc77`.
 - **Visible in:** `client/upload.ts` (`probed`).
 
+### M4-F9: the client's simplifications S1 to S9
+
+- **Decision:** S1: `job.retry()` is written inline; the one-caller `retryJob` is gone. S2: `launch`'s `Alone
+  { reask, first }` is `first?: number` (a re-ask is `first > 1`; a one-file `retry()` and a start over pass 1), and
+  `whole` is `(first ?? 1) === 1` with every file of the job. S3: `classifyAnswer(status, body, retryAfterHeader)` reads
+  the S3 code and `Retry-After` itself; `STORAGE_CODE` is no longer exported. S4 is `M4-F6`. S5: `Alone`, `UploadLock`,
+  `Step` and `PARTS_IN_FLIGHT` are no longer exported (no importer). S6: `createMeter()` takes no start time: `restart()`
+  always runs before the first `add()`. S7: `startJob` passes its arguments inline. S8 is `M4-F5`. S9: `refused()`'s
+  wait is `askAlone`'s first wait (`launch(job, [entry], attempt + 1, waitMs)`), inside one `job.watch` for the whole
+  one-file ask, so `offline` pauses a file waiting to ask again, after a refusal or in the backoff after an `/upload`
+  that failed as a whole, whatever the job's other files do.
+- **Why:** design §3 F9, every candidate accepted: fewer exported symbols, parameters and hops for the same behaviour,
+  and S9 one wait loop instead of two, which also closes the gap where `offline` reached a re-ask's backoff only while
+  another file ran.
+- **If wrong:** S9 watches connectivity while a one-file `/upload` is on its way: `offline` then pauses the file, whose
+  ticket, if the `/upload` answers, waits paused until `online`, as a job's own ticket does (`M3-U39`). Tests that
+  pinned the removed details changed: `bucket.test.ts`'s `classifyAnswer` rows pass an XML body and a header,
+  `progress.test.ts` calls `createMeter()`, `parts.test.ts`'s double builds `urls` (`M4-F8`), and
+  `retry-abort.test.ts`'s `M3-U39` row uses a retry `/upload` for two files, the kind still not watched.
+- **Status:** in force. S9 amends `M3-U92` and `M3-U49`.
+- **Source:** design §3 F9; code audit of `main` at `907cc77`.
+- **Visible in:** `client/job.ts`, `client/launch.ts` (`refused`, `askAlone`, `launch`), `client/retry-file.ts`,
+  `client/job-run.ts` (`startOver`), `client/bucket.ts`, `client/transport.ts`, `client/locks.ts`, `client/parts.ts`,
+  `client/progress.ts`, `client/upload-refusals-wait.test.ts` (the offline rows), `docs/guide/client.md` ("When /upload
+  refuses one file", "Offline").
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)

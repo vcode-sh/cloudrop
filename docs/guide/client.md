@@ -209,9 +209,9 @@ server started it) asks `/upload` again for itself alone, with the backoff above
 
 - The file stays `queued` while it waits.
 - Pausing it stops the wait until it resumes. Cancelling it ends it `aborted` at once, without another request.
-- Going offline pauses it while it waits after a refusal, and going back online asks at once. In the backoff after a
-  later `/upload` that failed as a whole, going offline pauses it only while another file of the job is uploading;
-  otherwise that `/upload` goes through its attempts, as the job's own does.
+- Going offline pauses it while it waits, after a refusal or after a later `/upload` that failed as a whole, whatever
+  the job's other files do; going back online asks at once. An `/upload` already sent is not stopped: a ticket it
+  brings waits paused.
 - A refusal that is not retryable, such as a file over the size limit, fails the file at once.
 
 ## Concurrency and order
@@ -233,8 +233,9 @@ back online.
 
 - A file you paused stays paused. Your `pause()` or `resume()` of a file the network paused makes it yours.
 - Files that start while the page is offline pause before any `PUT`.
-- The `/upload` that starts a job is not held: with no network it fails every file with `NETWORK_ERROR` after its
-  attempts, and `retry()` sends it again.
+- The `/upload` that starts a job, or that a `job.retry()` sends for several files, is not held: with no network it
+  fails those files with `NETWORK_ERROR` after its attempts, and `retry()` sends it again. A one-file `/upload` (a
+  file asking again after a refusal, a `file.retry()` that needs a new ticket) pauses while it waits.
 
 ## Stalled requests
 

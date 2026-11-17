@@ -110,7 +110,7 @@ async function startOver(job: Job, entry: Entry): Promise<void> {
   forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
-  await launch(job, [entry], { reask: false, first: 1 });
+  await launch(job, [entry], 1);
   await entry.run;
 }
 

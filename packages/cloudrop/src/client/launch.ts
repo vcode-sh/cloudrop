@@ -12,24 +12,13 @@ import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retr
 
 /**
  * A file /upload refused at `attempt`. A retryable refusal asks again for this file alone, within the budget and after
- * the wait of any request's retry (M3-U92); the file stays queued meanwhile. A pause, offline included, ends the wait
- * and holds the file until resume() asks at once. A file cancelled before or meanwhile ends aborted and sends nothing:
- * it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
+ * the wait of any request's retry (M3-U92); the file stays queued meanwhile. A file cancelled meanwhile ends aborted
+ * and sends nothing: it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
  */
 async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
-  if (refusal.retryable && attempt < MAX_ATTEMPTS) {
-    // In one bracket: watching again would call online(), which resumes a file offline paused (M3-U48).
-    await job.watch(async () => {
-      // pauseFile and a cancel abort the pass, which here is the wait.
-      const wait = new AbortController();
-      entry.pass = wait;
-      if (entry.status !== "paused") await pause(retryDelay(attempt, retryAfterOf(refusal)), wait.signal);
-      await held(entry);
-    });
-    await launch(job, [entry], { reask: true, first: attempt + 1 });
-    return entry.run;
-  }
-  settle(entry, "failed", withFile(refusal, entry));
+  if (!refusal.retryable || attempt === MAX_ATTEMPTS) return settle(entry, "failed", withFile(refusal, entry));
+  await launch(job, [entry], attempt + 1, retryDelay(attempt, retryAfterOf(refusal)));
+  return entry.run;
 }
 
 /** One file's share of an /upload answer, given at `attempt`. `whole`: the /upload asked for every file of the job. */
@@ -56,58 +45,63 @@ async function runEntry(
 }
 
 /**
- * Calls `ask` through the retry budget, from attempt `next()`, with `entry`'s pause and cancel ending the backoff. A
- * pause holds the file, then asks at once with the count kept (M3-U92). A cancel's ABORTED is returned as it is.
+ * Calls `ask` through the retry budget, from attempt `next()`, after waiting `waitMs` (a refusal's backoff), with
+ * `entry`'s pause and cancel ending the wait and the backoff. A pause, offline included, holds the file, then asks at
+ * once with the count kept (M3-U92). A cancel's ABORTED is returned as it is. The whole ask is watched in one bracket:
+ * watching again would call online(), which resumes a file offline paused (M3-U48).
  */
-async function askAlone<T>(
+function askAlone<T>(
   job: Job,
   entry: Entry,
   ask: (attempt: number) => Promise<Result<T>>,
   next: () => number,
+  waitMs: number,
 ): Promise<Result<T>> {
   const { signal } = entry.cancel;
-  for (;;) {
-    if (entry.status === "paused") await job.watch(() => held(entry));
-    if (signal.aborted) return fail(aborted());
-    // pauseFile and a cancel abort the pass, which here is the backoff.
-    const pass = new AbortController();
-    entry.pass = pass;
-    const answer = await withRetry(ask, pass.signal, next());
-    // A pause ended the backoff only when this pass fired, as in runFile: an answer may carry ABORTED itself.
-    if (answer.error?.code !== "ABORTED" || !pass.signal.aborted || signal.aborted) return answer;
-  }
-}
-
-/**
- * An /upload for one file, which that file's cancel and pause stop rather than the job's signal (M3-U92). `reask`:
- * after a refusal, so never the whole job, whose /upload has answered; `first`: the attempt of the budget it starts at.
- */
-export interface Alone {
-  reask: boolean;
-  first: number;
+  return job.watch(async () => {
+    for (let wait = waitMs; ; wait = 0) {
+      if (entry.status === "paused") wait = 0;
+      await held(entry);
+      if (signal.aborted) return fail(aborted());
+      // pauseFile and a cancel abort the pass, which here is the wait and the backoff.
+      const pass = new AbortController();
+      entry.pass = pass;
+      if (wait > 0) await pause(wait, pass.signal);
+      const answer = await withRetry(ask, pass.signal, next());
+      // A pause ended the wait only when this pass fired, as in runFile: an answer may carry ABORTED itself.
+      if (answer.error?.code !== "ABORTED" || !pass.signal.aborted || signal.aborted) return answer;
+    }
+  });
 }
 
 /**
  * Asks one /upload for tickets for `entries`, then runs every file at once (the pool decides who sends); each
  * `entry.run` settles with its file. Resolves with the /upload's refusal when it asked for every file of the job.
- * `alone` asks for its one file on that file's own signals: a cancel stops the request and its backoff, a pause ends
- * the backoff and holds the file, and resume() asks at once with the attempt count kept.
+ * With `first`, the attempt of the budget it starts at, it asks for its one file alone, on that file's own signals
+ * (M3-U92), after `waitMs`: a cancel stops the request and the waits, a pause ends a wait and holds the file, and
+ * resume() asks at once with the attempt count kept. `first` above 1 is a re-ask after a refusal, so never the whole
+ * job, whose /upload has answered.
  */
-export async function launch(job: Job, entries: readonly Entry[], alone?: Alone): Promise<CloudropError | null> {
+export async function launch(
+  job: Job,
+  entries: readonly Entry[],
+  first?: number,
+  waitMs = 0,
+): Promise<CloudropError | null> {
   const { context, args } = job;
   const files = entries.map((entry) => entry.file);
-  const own = alone && entries[0];
+  const own = first === undefined ? undefined : entries[0];
   // job.abort() and the caller's signal cancel every file, so a file's own signal hears them too.
   const signal = own ? own.cancel.signal : job.signal;
-  let attempt = (alone?.first ?? 1) - 1;
+  let attempt = (first ?? 1) - 1;
   const ask = (at: number) => {
     attempt = at;
     return context.endpoints.start(args.route, files, args.metadata, signal);
   };
-  const started = (own ? askAlone(job, own, ask, () => attempt + 1) : withRetry(ask, signal)).then((answer) =>
+  const started = (own ? askAlone(job, own, ask, () => attempt + 1, waitMs) : withRetry(ask, signal)).then((answer) =>
     answer.error && signal.aborted ? fail(aborted()) : answer,
   );
-  const whole = !alone?.reask && entries.length === job.entries.length;
+  const whole = (first ?? 1) === 1 && entries.length === job.entries.length;
   entries.forEach((entry, index) => {
     entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole, attempt)).finally(job.idle);
   });
