@@ -3,16 +3,16 @@
 // optional peer: only this entry imports it.
 
 import { configError } from "../errors.ts";
-import { type RouteFunction, routeFor } from "../server/route.ts";
-import type { CloudropStore } from "../server/store.ts";
+import type { CloudropStore, TransactionalStore } from "../server/store.ts";
 import { sqlStore } from "../store/sql/store.ts";
 import type { StoreTables } from "../store/sql/tables.ts";
 import { type DrizzlePostgres, type DrizzleTransaction, postgresExecutor } from "./drizzle/postgres.ts";
 import { type DrizzleAsyncSqlite, type DrizzleSqlite, sqliteExecutor } from "./drizzle/sqlite.ts";
+import { withRoute } from "./transactional.ts";
 
 export type { StoreTables } from "../store/sql/tables.ts";
 export type { DrizzlePostgres, DrizzlePostgresQueryable, DrizzleTransaction } from "./drizzle/postgres.ts";
-export type { CloudropPostgresTables } from "./drizzle/postgres-tables.ts";
+export type { CloudropPgTables } from "./drizzle/postgres-tables.ts";
 export { cloudropPgTables } from "./drizzle/postgres-tables.ts";
 export type { DrizzleAsyncSqlite, DrizzleSqlite, DrizzleSqliteQueryable } from "./drizzle/sqlite.ts";
 export type { CloudropSqliteTables } from "./drizzle/sqlite-tables.ts";
@@ -25,10 +25,6 @@ interface DrizzleStoreOptions {
   tables?: StoreTables;
   transaction?: boolean;
 }
-
-/** A store built with `transaction: true`: its `route` makes routes whose `onComplete` receives Drizzle's `tx`. */
-export type DrizzleTransactionalStore<TTx> = CloudropStore<TTx> &
-  Required<Pick<CloudropStore<TTx>, "transaction">> & { route: RouteFunction<{ tx: TTx }> };
 
 /**
  * A cloudrop store over a Drizzle database: Postgres (node-postgres over a `Pool`, postgres.js) or SQLite
@@ -58,7 +54,7 @@ export type DrizzleTransactionalStore<TTx> = CloudropStore<TTx> &
 export function drizzleStore<TDb extends DrizzlePostgres>(
   db: TDb,
   options: { dialect: "postgres"; tables?: StoreTables; transaction: true },
-): DrizzleTransactionalStore<DrizzleTransaction<TDb>>;
+): TransactionalStore<DrizzleTransaction<TDb>>;
 export function drizzleStore(
   db: DrizzlePostgres,
   options: { dialect: "postgres"; tables?: StoreTables; transaction?: false },
@@ -73,19 +69,14 @@ export function drizzleStore(
 ): CloudropStore<unknown> {
   const { dialect, tables, transaction = false } = options;
   if (dialect === "sqlite") {
-    if (transaction) {
-      throw configError(
-        "transaction: true needs Postgres. SQLite has a single writer, so a transaction held open while onComplete runs would block every other upload; leave the option out and completions use a lease.",
-      );
-    }
-    return sqlStore(sqliteExecutor(db as DrizzleSqlite | DrizzleAsyncSqlite), { tables });
+    // The core refuses transaction: true on SQLite, with the same message for every adapter.
+    return sqlStore(sqliteExecutor(db as DrizzleSqlite | DrizzleAsyncSqlite), { tables, transaction });
   }
   if (dialect !== "postgres") {
     throw configError(
       `drizzleStore's dialect ${JSON.stringify(dialect)} is not supported. Use "postgres" or "sqlite".`,
     );
   }
-  const store = sqlStore(postgresExecutor(db as DrizzlePostgres, transaction), { tables });
-  // routeFor brands routes with this very object, the one the app passes to createCloudrop.
-  return transaction ? Object.assign(store, { route: routeFor(store) }) : store;
+  const store = sqlStore(postgresExecutor(db as DrizzlePostgres), { tables, transaction });
+  return transaction ? withRoute(store) : store;
 }

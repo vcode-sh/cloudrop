@@ -13,8 +13,8 @@ import {
   type PostgresJsSql,
   pgExecutor,
   postgresJsExecutor,
-  type SqlExecutor,
   sqlStore,
+  type TransactionalSqlExecutor,
 } from "./sql.ts";
 
 const NOW = new Date("2026-11-17T10:20:30.123Z");
@@ -62,13 +62,11 @@ describe("Postgres under lock contention", () => {
   ];
 
   /** A store over fresh tables, with its transaction. */
-  async function transactionalStore(executor: () => SqlExecutor<unknown>) {
+  async function transactionalStore(executor: () => TransactionalSqlExecutor<unknown>) {
     await db.reset();
     await db.createTables();
-    const store = sqlStore(executor());
-    const transaction = store.transaction?.bind(store);
-    if (!transaction) throw new Error("A Postgres store must offer transactions.");
-    return { store, transaction };
+    const store = sqlStore(executor(), { transaction: true });
+    return { store, transaction: store.transaction.bind(store) };
   }
 
   /**
@@ -173,7 +171,7 @@ describe("Postgres under lock contention", () => {
     const pool = new pg.Pool({ connectionString: db.url, max: 1 });
     try {
       await pool.query("SET lock_timeout = '7s'");
-      const store = sqlStore(pgExecutor(pool));
+      const store = sqlStore(pgExecutor(pool), { transaction: true });
       await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
       const seen = await store.transaction(async (tx, inner) => {
         const during = await inner.claim("f-1", "claim-a", NOW, LEASE);

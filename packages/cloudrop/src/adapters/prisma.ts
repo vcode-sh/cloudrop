@@ -3,11 +3,13 @@
 // described by the members called here, so the library imports nothing from Prisma.
 
 import { configError } from "../errors.ts";
-import { type RouteFunction, routeFor } from "../server/route.ts";
-import type { CloudropStore } from "../server/store.ts";
-import type { SqlDialect, SqlExecutor, SqlRow, SqlStatement } from "../store/sql/executor.ts";
+import type { CloudropStore, TransactionalStore } from "../server/store.ts";
+import { type SqlRow, sequential, type TransactionalSqlExecutor } from "../store/sql/executor.ts";
 import { sqlStore } from "../store/sql/store.ts";
 import type { StoreTables } from "../store/sql/tables.ts";
+import { withRoute } from "./transactional.ts";
+
+export type { StoreTables } from "../store/sql/tables.ts";
 
 /** What the store calls on a Prisma client, or on the client of an interactive transaction. */
 export interface PrismaQueryable {
@@ -41,7 +43,7 @@ export type PrismaTransactionClient<TClient> = TClient extends {
 
 interface StoreOptionsBase {
   /** The provider of the Prisma schema's datasource: `"postgres"` (`postgresql`) or `"sqlite"`. */
-  dialect: SqlDialect;
+  dialect: "postgres" | "sqlite";
   /** The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`; letters, digits and `_`. */
   tables?: StoreTables;
 }
@@ -62,33 +64,19 @@ export interface PrismaTransactionalStoreOptions extends StoreOptionsBase {
   transactionOptions?: PrismaTransactionOptions;
 }
 
-/** A store with transactions, and `route` for the routes whose `onComplete` receives the transaction as `tx`. */
-export interface PrismaTransactionalStore<TTx> extends CloudropStore<TTx> {
-  transaction: NonNullable<CloudropStore<TTx>["transaction"]>;
-  /** `route()`, with `onComplete({ tx })` typed as Prisma's transaction client. Use it with this store only. */
-  route: RouteFunction<{ tx: TTx }>;
-}
-
-const rowsOf = async (client: PrismaQueryable, { sql, params }: SqlStatement): Promise<SqlRow[]> =>
-  // Prisma answers the rows of a raw query as plain objects, and an empty array for a statement without RETURNING.
-  (await client.$queryRawUnsafe(sql, ...params)) as SqlRow[];
-
-async function inOrder(client: PrismaQueryable, statements: readonly SqlStatement[]): Promise<SqlRow[][]> {
-  const results: SqlRow[][] = [];
-  for (const statement of statements) results.push(await rowsOf(client, statement));
-  return results;
-}
+/** The executor's statements on the client or a transaction's client, in order when batched. */
+const on = (client: PrismaQueryable, dialect: "postgres" | "sqlite") =>
+  sequential(
+    dialect,
+    // Prisma answers the rows of a raw query as plain objects, and an empty array for a statement without RETURNING.
+    async (sql, params) => (await client.$queryRawUnsafe(sql, ...params)) as SqlRow[],
+  );
 
 function checkOptions(options: PrismaStoreOptions | PrismaTransactionalStoreOptions): void {
   const { dialect, transaction } = options;
   if (dialect !== "postgres" && dialect !== "sqlite") {
     throw configError(
       `prismaStore() got dialect ${JSON.stringify(dialect)}. Pass { dialect: "postgres" } or { dialect: "sqlite" }, matching your Prisma datasource.`,
-    );
-  }
-  if (transaction && dialect !== "postgres") {
-    throw configError(
-      "prismaStore({ transaction: true }) needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave transaction off on SQLite.",
     );
   }
   if (!transaction && "transactionOptions" in options && options.transactionOptions) {
@@ -100,41 +88,23 @@ function checkOptions(options: PrismaStoreOptions | PrismaTransactionalStoreOpti
 
 function prismaExecutor(
   prisma: PrismaClientLike,
-  options: PrismaStoreOptions | PrismaTransactionalStoreOptions,
-): SqlExecutor<PrismaQueryable> {
-  const { dialect } = options;
-  const executor: SqlExecutor<PrismaQueryable> = {
-    dialect,
-    query: (sql, params) => rowsOf(prisma, { sql, params }),
+  { dialect, transactionOptions }: { dialect: "postgres" | "sqlite"; transactionOptions?: PrismaTransactionOptions },
+): TransactionalSqlExecutor<PrismaQueryable> {
+  return {
+    ...on(prisma, dialect),
     // The array form: Prisma runs the queries in order in one transaction, and a failure rolls back all of them.
     batch: async (statements) =>
       (await prisma.$transaction(
         statements.map(({ sql, params }) => prisma.$queryRawUnsafe(sql, ...params)),
       )) as SqlRow[][],
-  };
-  if (!options.transaction) return executor;
-  return {
-    ...executor,
-    transaction: (run) =>
-      prisma.$transaction(
-        (tx) =>
-          run(
-            {
-              dialect,
-              query: (sql, params) => rowsOf(tx, { sql, params }),
-              // Already inside the transaction: run the statements in order on tx.
-              batch: (statements) => inOrder(tx, statements),
-            },
-            tx,
-          ),
-        options.transactionOptions,
-      ),
+    // The store uses it only with transaction: true, which the core refuses on SQLite.
+    transaction: (run) => prisma.$transaction((tx) => run(on(tx, dialect), tx), transactionOptions),
   };
 }
 
 /**
- * A cloudrop store over a Prisma 7 client, in two tables you add to your Prisma schema (the models are in the store
- * guide). Without `transaction`, a `/complete` holds its file with a lease while `onComplete` runs. With
+ * A cloudrop store over a Prisma 7 client, in two tables you add to your Prisma schema (the store guide links the
+ * models). Without `transaction`, a `/complete` holds its file with a lease while `onComplete` runs. With
  * `transaction: true` (Postgres only), the claim, `onComplete` and the completion share one interactive transaction:
  * build routes with `store.route` so `onComplete` gets Prisma's transaction client as `tx`, and keep network calls out
  * of it (they belong in `afterComplete`).
@@ -164,14 +134,18 @@ function prismaExecutor(
 export function prismaStore<TClient extends PrismaClientLike>(
   prisma: TClient,
   options: PrismaTransactionalStoreOptions,
-): PrismaTransactionalStore<PrismaTransactionClient<TClient>>;
+): TransactionalStore<PrismaTransactionClient<TClient>>;
 export function prismaStore(prisma: PrismaClientLike, options: PrismaStoreOptions): CloudropStore;
 export function prismaStore(
   prisma: PrismaClientLike,
   options: PrismaStoreOptions | PrismaTransactionalStoreOptions,
 ): CloudropStore<unknown> {
   checkOptions(options);
-  const store = sqlStore(prismaExecutor(prisma, options), { tables: options.tables });
-  // routeFor brands routes with this very object, the one the app passes to createCloudrop.
-  return options.transaction ? Object.assign(store, { route: routeFor<{ tx: unknown }>(store) }) : store;
+  const { tables, transaction = false } = options;
+  const transactionOptions = options.transaction ? options.transactionOptions : undefined;
+  const store = sqlStore(prismaExecutor(prisma, { dialect: options.dialect, transactionOptions }), {
+    tables,
+    transaction,
+  });
+  return transaction ? withRoute(store) : store;
 }

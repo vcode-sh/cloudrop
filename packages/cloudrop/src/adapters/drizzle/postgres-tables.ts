@@ -51,7 +51,7 @@ type UsageColumns = {
 };
 
 /** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables. */
-export interface CloudropPostgresTables {
+export interface CloudropPgTables {
   files: ReturnType<typeof pgTable<string, FileColumns>>;
   usage: ReturnType<typeof pgTable<string, UsageColumns>>;
 }
@@ -68,7 +68,7 @@ const count = (name: string) => bigint(name, { mode: "number" }).notNull();
  * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables();
  * ```
  */
-export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropPostgresTables {
+export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropPgTables {
   const names = tableNames(options);
   const files = pgTable(
     names.files,

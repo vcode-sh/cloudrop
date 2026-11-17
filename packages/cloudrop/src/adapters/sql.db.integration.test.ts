@@ -33,11 +33,11 @@ describe("Postgres", () => {
 
   describeStoreContract(
     "sql adapter, node-postgres",
-    sqlStoreTarget(db, (tables) => sqlStore(pgExecutor(db.pool), { tables })),
+    sqlStoreTarget(db, (tables) => sqlStore(pgExecutor(db.pool), { tables, transaction: true })),
   );
   describeStoreContract(
     "sql adapter, postgres.js",
-    sqlStoreTarget(db, (tables) => sqlStore(postgresJsExecutor(sql), { tables })),
+    sqlStoreTarget(db, (tables) => sqlStore(postgresJsExecutor(sql), { tables, transaction: true })),
   );
 
   const stores = [

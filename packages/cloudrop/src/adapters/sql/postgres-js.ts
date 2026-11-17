@@ -2,7 +2,7 @@
 // described by the members used here, so the library needs neither postgres.js nor its types;
 // sql.db.integration.test.ts passes a real `postgres()` instance.
 
-import type { SqlRow, SqlStatement, TransactionalSqlExecutor } from "../../store/sql/executor.ts";
+import { type SqlRow, sequential, type TransactionalSqlExecutor } from "../../store/sql/executor.ts";
 
 /** What the executor calls on postgres.js's `sql` or a transaction's `sql`. */
 export interface PostgresJsQueryable {
@@ -19,15 +19,9 @@ export interface PostgresJsSql<TTx extends PostgresJsQueryable = PostgresJsQuery
   begin(options: string, run: (sql: TTx) => Promise<unknown>): Promise<unknown>;
 }
 
-const rowsOf = async (sql: PostgresJsQueryable, statement: SqlStatement): Promise<SqlRow[]> => [
-  ...(await sql.unsafe(statement.sql, [...statement.params])),
-];
-
-async function inOrder(sql: PostgresJsQueryable, statements: readonly SqlStatement[]): Promise<SqlRow[][]> {
-  const results: SqlRow[][] = [];
-  for (const statement of statements) results.push(await rowsOf(sql, statement));
-  return results;
-}
+/** The executor's statements on `sql` or a transaction's `sql`, in order when batched. */
+const on = (sql: PostgresJsQueryable) =>
+  sequential("postgres", async (query, params): Promise<SqlRow[]> => [...(await sql.unsafe(query, [...params]))]);
 
 /**
  * An executor over postgres.js: `sqlStore(postgresJsExecutor(postgres(url)))`. Leave the connections at Postgres's
@@ -41,20 +35,9 @@ export function postgresJsExecutor<TTx extends PostgresJsQueryable>(
     // postgres.js types its answer from the callback, which the structural shape above cannot express.
     (await sql.begin(work)) as T;
   return {
-    dialect: "postgres",
-    query: (query, params) => rowsOf(sql, { sql: query, params }),
-    batch: (statements) => inTransaction((tx) => inOrder(tx, statements)),
-    transaction: (run) =>
-      inTransaction((tx) =>
-        run(
-          {
-            dialect: "postgres",
-            query: (query, params) => rowsOf(tx, { sql: query, params }),
-            // Already inside the transaction: a failed statement aborts it, so nothing of the batch can commit alone.
-            batch: (statements) => inOrder(tx, statements),
-          },
-          tx,
-        ),
-      ),
+    ...on(sql),
+    // Outside a transaction, a batch gets one of its own.
+    batch: (statements) => inTransaction((tx) => on(tx).batch(statements)),
+    transaction: (run) => inTransaction((tx) => run(on(tx), tx)),
   };
 }

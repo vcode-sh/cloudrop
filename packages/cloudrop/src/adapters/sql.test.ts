@@ -31,12 +31,16 @@ test("an executor of another dialect is refused with INVALID_CONFIG", () => {
   );
 });
 
+const NEEDS_POSTGRES =
+  "transaction: true needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave the option out and completions use a lease.";
+
 describe("store.route", () => {
   // Executors over drivers that are never called: building a store and its routes runs no statement.
   const pool = { query: async () => ({ rows: [] }), connect: async () => ({ ...pool, release() {} }) };
-  const pgStore = sqlStore(pgExecutor(pool));
-  const postgresJsStore = sqlStore(postgresJsExecutor(postgres("postgres://127.0.0.1:1/never", { max: 1 })));
-  const sqliteStore = sqlStore(sqliteExecutor({ exec() {}, prepare: () => ({ all: () => [] }) }));
+  const pgStore = sqlStore(pgExecutor(pool), { transaction: true });
+  const postgresJs = postgresJsExecutor(postgres("postgres://127.0.0.1:1/never", { max: 1 }));
+  const postgresJsStore = sqlStore(postgresJs, { transaction: true });
+  const sqlite = sqliteExecutor({ exec() {}, prepare: () => ({ all: () => [] }) });
   const policy = { accept: "image/*", maxSize: 5_000_000, authorize: () => ({ userId: "u-1" }) };
 
   test("routes of a transactional store are branded with that store and type tx as the executor's handle", () => {
@@ -56,9 +60,28 @@ describe("store.route", () => {
     expect(storeOfRoute(pgRoute.definition)).toBe(pgStore);
   });
 
-  test("a store without transactions has no route", () => {
-    expect("route" in sqliteStore).toBe(false);
-    expectTypeOf(sqliteStore).not.toHaveProperty("route");
-    expectTypeOf(sqliteStore).toEqualTypeOf<CloudropStore<never>>();
+  test("without transaction: true even a Postgres store has no transaction and no route, so completions use a lease", () => {
+    const stores = [sqlStore(pgExecutor(pool)), sqlStore(postgresJs, { transaction: false }), sqlStore(sqlite)];
+    expect(stores.map((store) => [store.transaction, "route" in store])).toEqual([
+      [undefined, false],
+      [undefined, false],
+      [undefined, false],
+    ]);
+    expectTypeOf(sqlStore(pgExecutor(pool))).toEqualTypeOf<CloudropStore>();
+  });
+
+  test.each([
+    { name: "on SQLite", target: sqlite, message: NEEDS_POSTGRES },
+    {
+      name: "over a Postgres executor without transaction()",
+      target: executor("postgres"),
+      message:
+        "transaction: true needs an executor with transaction(), such as pgExecutor or postgresJsExecutor. Add one to your executor, or leave the option out and completions use a lease.",
+    },
+  ])("refuses transaction: true $name with INVALID_CONFIG", ({ target, message }) => {
+    // @ts-expect-error: only an executor that can hold a transaction takes transaction: true.
+    expect(() => sqlStore(target, { transaction: true })).toThrow(
+      expect.objectContaining({ code: "INVALID_CONFIG", message }),
+    );
   });
 });

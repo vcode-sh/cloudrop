@@ -35,7 +35,7 @@ declare class PrismaClient {
 const client = {} as PrismaClientLike;
 
 describe("prismaStore types", () => {
-  test("compile", () => {
+  test("transaction: true types tx as Prisma's transaction client; without it, or on SQLite, there is no route", () => {
     const prisma = {} as PrismaClient;
     const store = prismaStore(prisma, {
       dialect: "postgres",
@@ -77,7 +77,8 @@ test.each([
   {
     name: "transaction: true on SQLite",
     options: { dialect: "sqlite", transaction: true },
-    message: expect.stringContaining("prismaStore({ transaction: true }) needs Postgres."),
+    message:
+      "transaction: true needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave the option out and completions use a lease.",
   },
   {
     name: "transactionOptions without transaction: true",

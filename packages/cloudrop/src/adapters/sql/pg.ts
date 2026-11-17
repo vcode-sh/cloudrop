@@ -2,7 +2,7 @@
 // by the members used here, so the library needs neither pg nor its types; sql.db.integration.test.ts passes a real
 // pg.Pool.
 
-import type { SqlRow, SqlStatement, TransactionalSqlExecutor } from "../../store/sql/executor.ts";
+import { type SqlRow, sequential, type TransactionalSqlExecutor } from "../../store/sql/executor.ts";
 
 /** What the executor calls on a node-postgres pool or client; `onComplete` gets the transaction's client as `tx`. */
 export interface PgQueryable {
@@ -19,14 +19,9 @@ export interface PgPool extends PgQueryable {
   connect(): Promise<PgPoolClient>;
 }
 
-const rowsOf = async (client: PgQueryable, { sql, params }: SqlStatement) =>
-  (await client.query(sql, [...params])).rows;
-
-async function inOrder(client: PgQueryable, statements: readonly SqlStatement[]): Promise<SqlRow[][]> {
-  const results: SqlRow[][] = [];
-  for (const statement of statements) results.push(await rowsOf(client, statement));
-  return results;
-}
+/** The executor's statements on one pool or client, in order when batched. */
+const on = (client: PgQueryable) =>
+  sequential("postgres", async (sql, params) => (await client.query(sql, [...params])).rows);
 
 /**
  * An executor over a node-postgres pool: `sqlStore(pgExecutor(new Pool({ connectionString })))`. Leave the
@@ -55,20 +50,9 @@ export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> 
   }
 
   return {
-    dialect: "postgres",
-    query: (sql, params) => rowsOf(pool, { sql, params }),
-    batch: (statements) => inTransaction((client) => inOrder(client, statements)),
-    transaction: (run) =>
-      inTransaction((client) =>
-        run(
-          {
-            dialect: "postgres",
-            query: (sql, params) => rowsOf(client, { sql, params }),
-            // Already inside the transaction: a failed statement aborts it, so nothing of the batch can commit alone.
-            batch: (statements) => inOrder(client, statements),
-          },
-          client,
-        ),
-      ),
+    ...on(pool),
+    // Outside a transaction, a batch gets one of its own on one client.
+    batch: (statements) => inTransaction((client) => on(client).batch(statements)),
+    transaction: (run) => inTransaction((client) => run(on(client), client)),
   };
 }

@@ -33,6 +33,22 @@ export interface SqlExecutor<TTx = never> {
 /** An executor that can hold a transaction (node-postgres, postgres.js): its store gets `transaction` and `route`. */
 export type TransactionalSqlExecutor<TTx> = SqlExecutor<TTx> & Required<Pick<SqlExecutor<TTx>, "transaction">>;
 
+/**
+ * An executor whose `batch` runs its statements one after another through `query`: for a connection already inside
+ * a transaction, where a failed statement aborts the transaction, so nothing of the batch can commit alone.
+ */
+export function sequential(dialect: SqlDialect, query: SqlExecutor["query"]): Omit<SqlExecutor<never>, "transaction"> {
+  return {
+    dialect,
+    query,
+    async batch(statements) {
+      const results: SqlRow[][] = [];
+      for (const { sql, params } of statements) results.push(await query(sql, params));
+      return results;
+    },
+  };
+}
+
 /** Runs one built statement. */
 export function runStatement(
   executor: Pick<SqlExecutor<unknown>, "query">,

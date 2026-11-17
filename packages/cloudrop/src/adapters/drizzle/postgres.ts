@@ -4,7 +4,7 @@
 
 import type { SQL } from "drizzle-orm";
 import { configError } from "../../errors.ts";
-import type { SqlExecutor, SqlRow, SqlStatement } from "../../store/sql/executor.ts";
+import { type SqlRow, type SqlStatement, sequential, type TransactionalSqlExecutor } from "../../store/sql/executor.ts";
 import { drizzleSql } from "./statement.ts";
 
 /** What the store calls on a Drizzle Postgres database or transaction. */
@@ -35,18 +35,9 @@ async function rowsOf(target: DrizzlePostgresQueryable, statement: SqlStatement)
   );
 }
 
-async function inOrder(target: DrizzlePostgresQueryable, statements: readonly SqlStatement[]): Promise<SqlRow[][]> {
-  const results: SqlRow[][] = [];
-  for (const statement of statements) results.push(await rowsOf(target, statement));
-  return results;
-}
-
-/** Inside a transaction: a failed statement aborts it, so nothing of a batch can commit alone. */
-const within = (tx: DrizzlePostgresQueryable): Omit<SqlExecutor, "transaction"> => ({
-  dialect: "postgres",
-  query: (sql, params) => rowsOf(tx, { sql, params }),
-  batch: (statements) => inOrder(tx, statements),
-});
+/** The executor's statements on the database or a transaction, in order when batched. */
+const on = (target: DrizzlePostgresQueryable) =>
+  sequential("postgres", (sql, params) => rowsOf(target, { sql, params }));
 
 /**
  * True for a node-postgres client that is not a pool: Drizzle's node-postgres driver checks out a connection for a
@@ -60,17 +51,16 @@ function isSingleConnection(db: DrizzlePostgres): boolean {
   return typeof query === "function" && typeof connect === "function" && !client.constructor.name.includes("Pool");
 }
 
-/** The executor; with `transactions`, it also runs `onComplete` in a Drizzle transaction whose `tx` the route gets. */
-export function postgresExecutor(db: DrizzlePostgres, transactions: boolean): SqlExecutor<DrizzlePostgresQueryable> {
+/** The executor; its `transaction` runs `onComplete` in a Drizzle transaction whose `tx` the route gets. */
+export function postgresExecutor(db: DrizzlePostgres): TransactionalSqlExecutor<DrizzlePostgresQueryable> {
   if (isSingleConnection(db)) {
     throw configError(
       "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle(new Pool({ connectionString })), or use postgres.js.",
     );
   }
-  const executor: SqlExecutor<DrizzlePostgresQueryable> = {
-    ...within(db),
-    batch: (statements) => db.transaction((tx) => inOrder(tx, statements)),
+  return {
+    ...on(db),
+    batch: (statements) => db.transaction((tx) => on(tx).batch(statements)),
+    transaction: (run) => db.transaction((tx) => run(on(tx), tx)),
   };
-  if (transactions) executor.transaction = (run) => db.transaction((tx) => run(within(tx), tx));
-  return executor;
 }

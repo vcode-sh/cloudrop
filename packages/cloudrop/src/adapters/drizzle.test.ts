@@ -35,7 +35,7 @@ describe("drizzleStore", () => {
     // @ts-expect-error: the SQLite options have no transaction.
     expect(() => drizzleStore(sqliteDb, { dialect: "sqlite", transaction: true })).toThrow(
       invalidConfig(
-        "transaction: true needs Postgres. SQLite has a single writer, so a transaction held open while onComplete runs would block every other upload; leave the option out and completions use a lease.",
+        "transaction: true needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave the option out and completions use a lease.",
       ),
     );
   });

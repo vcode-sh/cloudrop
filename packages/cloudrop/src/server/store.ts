@@ -2,6 +2,8 @@
 // own. The shipped adapters (`cloudrop/adapters/*`) and the testing memory store implement it; the contract suite in
 // `src/testing/store-contract.ts` proves an implementation keeps every promise written here.
 
+import type { RouteFunction } from "./route.ts";
+
 /** Where a file's row stands. `pending` until a `/complete` claims it; the five ended statuses never change again. */
 export type FileStatus =
   | "pending"
@@ -171,3 +173,10 @@ export interface CloudropStore<TTx = never> {
    */
   transaction?<T>(run: (tx: TTx, store: Omit<CloudropStore<TTx>, "transaction">) => Promise<T>): Promise<T>;
 }
+
+/**
+ * A store built with `transaction: true`: completions run in its transaction, and `route` makes the routes whose
+ * `onComplete` receives that transaction as `tx`. Its routes work only with this very store passed to `createCloudrop`.
+ */
+export type TransactionalStore<TTx> = CloudropStore<TTx> &
+  Required<Pick<CloudropStore<TTx>, "transaction">> & { route: RouteFunction<{ tx: TTx }> };

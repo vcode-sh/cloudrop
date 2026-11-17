@@ -47,6 +47,7 @@ export type {
   FileStatus,
   NewFile,
   OwnerUsage,
+  TransactionalStore,
   Transition,
 } from "./server/store.ts";
 export type { StoreFileApi } from "./server/store-api.ts";

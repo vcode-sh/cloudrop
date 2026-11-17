@@ -12,7 +12,19 @@ import { checkSchema, quoteTables, type StoreTables } from "./tables.ts";
 export interface SqlStoreOptions {
   /** The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`; letters, digits and `_`. */
   tables?: StoreTables;
+  /**
+   * Postgres only, with an executor that has `transaction()`. On: each completion's claim, `onComplete` and record
+   * share one transaction, and the store gets `route` for routes whose `onComplete` receives it as `tx`; a completion
+   * holds a connection and the row lock while `onComplete` runs. Off (the default): a completion holds its file with
+   * a lease and no connection.
+   */
+  transaction?: boolean;
 }
+
+const NEEDS_POSTGRES =
+  "transaction: true needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave the option out and completions use a lease.";
+const NEEDS_TRANSACTION =
+  "transaction: true needs an executor with transaction(), such as pgExecutor or postgresJsExecutor. Add one to your executor, or leave the option out and completions use a lease.";
 
 /** Postgres waits at most this long for a row lock inside a transaction; a claim that waits longer is `busy`. */
 const LOCK_TIMEOUT = "2s";
@@ -37,8 +49,8 @@ function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMet
 
 /**
  * A store over SQL tables. Each method is one atomic unit (one statement on Postgres, one batch on SQLite). The schema
- * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. When the
- * executor can hold a transaction, the store has `transaction` too: inside it a claim waits at most 2 seconds for
+ * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. With
+ * `transaction: true` the store has `transaction` too, from the executor's: inside it a claim waits at most 2 seconds for
  * Postgres's row lock, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish; the
  * app's own statements through `tx` keep the lock timeout their session had. Postgres must run at its default
  * isolation, READ COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
@@ -61,8 +73,10 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
     return schema;
   };
   const store: CloudropStore<TTx> = afterCheck(methodsOver({ executor, dialect, tables }), ready);
-  const transaction = executor.transaction?.bind(executor);
-  if (!transaction) return store;
+  if (!options.transaction) return store;
+  if (dialect !== "postgres") throw configError(NEEDS_POSTGRES);
+  if (!executor.transaction) throw configError(NEEDS_TRANSACTION);
+  const transaction = executor.transaction.bind(executor);
   return {
     ...store,
     async transaction<T>(run: (tx: TTx, store: StoreMethods) => Promise<T>): Promise<T> {

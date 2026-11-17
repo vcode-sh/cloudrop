@@ -689,6 +689,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task C fix round 1, 2026-11-17.
 - **Visible in:** `src/adapters/sql.ts`, `src/adapters/sql/pg.ts`, `src/adapters/sql/postgres-js.ts`,
   `src/store/sql/executor.ts`, `src/adapters/sql.test.ts`.
+- **Superseded 2026-11-17 (final fix round):** `sqlStore` is transactional only with `transaction: true`
+  (M5-T92), and returns `TransactionalStore<TTx>` from `cloudrop` (M5-T93); `TransactionalSqlStore` is gone.
 
 ### M5-T78: READ COMMITTED is required; node:sqlite files shared by writers need a busy timeout
 
@@ -725,6 +727,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task D, 2026-11-17.
 - **Visible in:** `src/adapters/drizzle.ts`, `src/adapters/drizzle/postgres.ts`, `src/adapters/drizzle.test.ts`.
+- **Amended 2026-11-17 (final fix round):** the transactional overload returns `TransactionalStore<…>` from
+  `cloudrop` (M5-T93); `DrizzleTransactionalStore` is gone.
 - **Amended 2026-11-17 (fix round 1):** the option interfaces no overload could take (`DrizzleStoreOptions`, with a
   `dialect` union) are no longer exported; callers use the overloads' literal options. The SQLite overload also takes
   `DrizzleAsyncSqlite` (M5-T46).
@@ -934,6 +938,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   back. On Postgres the raw SQL finds its tables through the connection's search path, while PrismaPg's `schema` option
   reaches model queries only (measured): tables outside `public` need both, as the factory's TSDoc says, preferably
   `ALTER ROLE <user> SET search_path = …`, which survives connection poolers (M5-T59).
+- **Amended 2026-11-17 (final fix round):** the transactional overload returns `TransactionalStore<…>` from
+  `cloudrop` (M5-T93); `PrismaTransactionalStore` is gone. `transaction: true` on SQLite is refused by the core, with
+  the message every adapter shares (M5-T94).
 - **Status:** decided.
 - **Source:** task E, 2026-11-17.
 - **Visible in:** `src/adapters/prisma.ts`, `src/adapters/prisma.test.ts`.
@@ -1199,3 +1206,61 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `src/server/complete-verify.ts` (`cleanUpRefused`'s `rowEnded`), `src/server/store-complete.ts`,
   `src/server/store-complete.test.ts`, `docs/guide/store.md`.
+
+### M5-T92: `sqlStore` is transactional only with `transaction: true`, like Drizzle and Prisma
+
+- **Decision:** `sqlStore(executor, { transaction: true })` runs completions in the executor's transaction and returns
+  a `TransactionalStore<TTx>` with `route`. Without the option, every executor's store is a plain `CloudropStore`
+  with no `transaction`, so completions use the lease. The option lives in the core's `SqlStoreOptions`, so all three
+  adapters pass it the same way; the core refuses it with `INVALID_CONFIG` on SQLite (M5-T94) and over an executor
+  without `transaction()` ("transaction: true needs an executor with transaction(), such as pgExecutor or
+  postgresJsExecutor…"). Drizzle's and Prisma's executors now always carry `transaction`; the core uses it only when
+  asked.
+- **Why:** final review M3. A transactional completion holds a pool connection and the row lock while `onComplete`
+  runs, and M5-T66 runs plain routes inside it too, so an app on `sqlStore(pgExecutor(pool))` with a slow `onComplete`
+  could exhaust its pool without having chosen transaction mode. The same routes on Drizzle or Prisma ran under a
+  lease. Opt-in makes the three adapters agree. Observed RED: the three new rows in `sql.test.ts` (no transaction
+  without the option; both refusals).
+- **If wrong:** an app that relied on the implicit mode loses exactly-once until it adds the option; the package is
+  `0.0.0`, so nobody has.
+- **Status:** decided; supersedes M5-T77's implicit mode.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/store/sql/store.ts`, `src/adapters/sql.ts`, `src/adapters/sql.test.ts`, the db-lane targets,
+  `docs/guide/store.md`.
+
+### M5-T93: one `TransactionalStore<TTx>` from `cloudrop`, one `withRoute`, one `sequential`
+
+- **Decision:** `cloudrop` exports `TransactionalStore<TTx>`: a `CloudropStore<TTx>` with a required `transaction` and
+  `route: RouteFunction<{ tx: TTx }>`. It replaces `TransactionalSqlStore` (sql), `DrizzleTransactionalStore` (drizzle)
+  and `PrismaTransactionalStore` (prisma). The adapters attach `route` through one internal helper,
+  `withRoute(store)` in `src/adapters/transactional.ts`. The four hand-written "statements in order on one connection"
+  executors (node-postgres, postgres.js, Drizzle on Postgres, Prisma) are now `sequential(dialect, query)` from
+  `src/store/sql/executor.ts`, whose `batch` runs its statements in order through `query`.
+- **Why:** final review M4, S1 and S2: one shape had three names, and one loop four copies. The build now puts the SQL
+  core and `withRoute` in one shared chunk, named after the helper (`transactional-*.js`); chunk names are internal.
+- **If wrong:** types only; a re-export under an old name can be added.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/server/store.ts`, `src/index.ts`, `src/adapters/transactional.ts`, `src/adapters/sql.ts`,
+  `src/adapters/drizzle.ts`, `src/adapters/prisma.ts`, `src/adapters/sql/pg.ts`, `src/adapters/sql/postgres-js.ts`,
+  `src/adapters/drizzle/postgres.ts`, `src/store/sql/executor.ts`.
+
+### M5-T94: adapter names and messages made consistent
+
+- **Decision:**
+  - `cloudropPgTables()` returns `CloudropPgTables` (was `CloudropPostgresTables`), beside `cloudropSqliteTables()` and
+    `CloudropSqliteTables`.
+  - `cloudrop/adapters/prisma` exports `StoreTables`, which its options name, as sql and drizzle do. Its options'
+    `dialect` is the literal union `"postgres" | "sqlite"`, so its public signature names no unexported type.
+  - The rule for option types: an adapter exports every type its public signatures name. sql exports
+    `SqlStoreOptions`; prisma exports `PrismaStoreOptions` and `PrismaTransactionalStoreOptions`; drizzle's overloads
+    write their options inline and name none, so it exports none.
+  - One message refuses `transaction: true` on SQLite for every adapter, from the core: "transaction: true needs
+    Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every
+    other upload; leave the option out and completions use a lease."
+- **Why:** final review M5 and M6. The package is `0.0.0`, so renames are free now and breaking after publish.
+- **If wrong:** wording and type names only.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle.ts`, `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/prisma.ts`,
+  `src/store/sql/store.ts`, `src/adapters/drizzle.test.ts`, `src/adapters/prisma.test.ts`.
