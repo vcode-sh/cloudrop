@@ -44,6 +44,21 @@ describe("api.checkBucket", () => {
     });
   });
 
+  it("counts a one-day abort rule as one day", async () => {
+    const fixture = serverFixture(
+      { files },
+      {
+        bucketConfig: {
+          lifecycle: `<LifecycleConfiguration>${abortRule.replace(">7<", ">1<")}</LifecycleConfiguration>`,
+        },
+      },
+    );
+    expect((await fixture.cloudrop.api.checkBucket()).data?.lifecycle).toEqual({
+      status: "ok",
+      message: "Incomplete multipart uploads are aborted after 1 day.",
+    });
+  });
+
   it("finds a rule that does not expose ETag, a missing abort rule and a private route on a public bucket", async () => {
     const privateFiles = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone, visibility: "private" });
     const fixture = serverFixture(

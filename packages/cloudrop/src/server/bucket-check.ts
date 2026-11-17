@@ -61,9 +61,10 @@ function lifecycleCheck(rules: readonly BucketLifecycleRule[]): BucketCheck {
       candidate.enabled && candidate.prefix === "" && candidate.abortIncompleteMultipartUploadDays !== undefined,
   );
   if (rule) {
+    const days = rule.abortIncompleteMultipartUploadDays;
     return {
       status: "ok",
-      message: `Incomplete multipart uploads are aborted after ${rule.abortIncompleteMultipartUploadDays} days.`,
+      message: `Incomplete multipart uploads are aborted after ${days} day${days === 1 ? "" : "s"}.`,
     };
   }
   return {
