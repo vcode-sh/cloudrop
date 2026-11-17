@@ -1612,3 +1612,30 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Visible in:** `src/store/sql/tables.db.integration.test.ts`, `src/testing/db/sql-target.ts`,
   `src/testing/db/postgres.ts`, `src/testing/db/schema.ts`, `src/testing/db/raw-reader.ts`,
   `src/testing/db/raw-tables.ts`, `scripts/size-limit.config.ts`.
+
+## M4b: timestamps at millisecond precision
+
+### M5-T130: every Postgres time column cloudrop declares is `timestamptz(3)`
+
+- **Decision:** `cloudropPgTables` declares its time columns `timestamp(name, { withTimezone: true, precision: 3,
+  mode: "date" })`; the lane's Postgres DDL (`src/testing/db/schema.ts`), the guide's copy of it
+  (`docs/guide/store.md`), the M5 spec's table and the shipped Prisma Postgres models (`@db.Timestamptz(3)`) say the
+  same. The tables' equivalence test now compares types with their precision (`format_type` on the catalogue side), so
+  a Drizzle table and the DDL that disagree on precision fail it. SQLite and D1 are unchanged (integer milliseconds).
+  The bind (`$n::timestamptz`) and the raw reader keep naming the unconstrained type: a cast to `timestamptz` then an
+  assignment to a `timestamptz(3)` column rounds to the column's precision, and the reader decodes both the same.
+- **Why:** the owner's app (app-a) declares every timestamp `{ withTimezone: true, precision: 3 }`, and a JavaScript
+  `Date` carries milliseconds, so the store never wrote a non-zero microsecond. Checked before the change: every
+  comparison in the Postgres SQL (`src/store/sql/postgres.ts`, the sweep's stale reads, the keyset cursor of
+  M5-T39) sets a column from a bound `Date` and compares it with another bound `Date`, both whole milliseconds, so
+  rounding to 3 digits changes no stored value and no comparison. The one server-side clock, `updated_at = now()` in
+  `reconcile`, is written and never compared (its only comparison is with `'-infinity'`, which is exact at any
+  precision); at precision 3 Postgres rounds it to the nearest millisecond, at most half a millisecond ahead.
+- **If wrong:** tables created from the old DDL (`timestamptz`, microseconds) keep working, since the store writes
+  milliseconds either way; a drizzle-kit diff against them proposes an `ALTER COLUMN … TYPE timestamp(3) with time
+  zone`, which is safe to apply or to skip.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/testing/db/schema.ts`,
+  `src/testing/db/prisma/postgres/cloudrop.prisma`, `src/adapters/drizzle-tables.db.integration.test.ts`,
+  `docs/guide/store.md`.

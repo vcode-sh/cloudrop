@@ -234,6 +234,9 @@ Use the tool you query with:
   SQLite statements into the new file, then `wrangler d1 migrations apply DB` (it applies to the local database; add
   `--remote` for the deployed one).
 
+Postgres times are `timestamptz(3)`: the store writes milliseconds, the precision of a JavaScript `Date`, so a
+microsecond column would only hold zeros. Tables created earlier with plain `timestamptz` keep working unchanged.
+
 <!-- ddl:postgres -->
 ```sql
 CREATE TABLE "cloudrop_files" (
@@ -249,13 +252,13 @@ CREATE TABLE "cloudrop_files" (
   metadata text,
   result text,
   claim text,
-  claimed_at timestamptz,
-  expires_at timestamptz NOT NULL,
-  created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL,
-  completed_at timestamptz,
-  ended_at timestamptz,
-  cleaned_at timestamptz,
+  claimed_at timestamptz(3),
+  expires_at timestamptz(3) NOT NULL,
+  created_at timestamptz(3) NOT NULL,
+  updated_at timestamptz(3) NOT NULL,
+  completed_at timestamptz(3),
+  ended_at timestamptz(3),
+  cleaned_at timestamptz(3),
   request_key text
 );
 
@@ -276,7 +279,7 @@ CREATE TABLE "cloudrop_usage" (
   reserved_bytes bigint NOT NULL CHECK (reserved_bytes >= 0),
   active_bytes bigint NOT NULL CHECK (active_bytes >= 0),
   files integer NOT NULL CHECK (files >= 0),
-  updated_at timestamptz NOT NULL
+  updated_at timestamptz(3) NOT NULL
 );
 ```
 

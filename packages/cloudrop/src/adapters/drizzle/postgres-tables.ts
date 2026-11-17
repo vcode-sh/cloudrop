@@ -71,7 +71,7 @@ export interface CloudropTablesOptions {
 // 0.45 takes the name alone.
 const Schema: new (name: string, casing: undefined) => { table: PgTableFn<string> } = PgSchema;
 
-const time = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+const time = (name: string) => timestamp(name, { withTimezone: true, precision: 3, mode: "date" });
 const count = (name: string) => bigint(name, { mode: "number" }).notNull();
 
 /**
