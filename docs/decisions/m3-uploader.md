@@ -547,7 +547,7 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **If wrong:** one refusal of that `/upload` fails every file that needed a ticket; `file.retry()` retries one at a
   time.
 - **Status:** in force (`4f1887a`). What a refused `/upload` answers each file: `M3-U52`.
-- **Visible in:** `client/retry-file.ts` (`retryFiles`), `client/job-run.ts` (`launch`), `client/job.ts` (`retryJob`),
+- **Visible in:** `client/retry-file.ts` (`retryFiles`), `client/launch.ts` (`launch`), `client/job.ts` (`retryJob`),
   `client/retry-file.test.ts`.
 
 ### M3-U35: `done` reports each file's first outcome
@@ -801,7 +801,7 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Why:** `UploadResult`'s contract (`M3-U3`, `M3-U10`): a file's error names its file unless the whole job failed.
 - **If wrong:** the same refusal reads with or without `error.file` depending on how many files the retry asked for.
 - **Status:** in force (`4f1887a`).
-- **Visible in:** `client/job-run.ts` (`launch`, `runEntry`), `client/retry-file.test.ts`.
+- **Visible in:** `client/launch.ts` (`launch`, `runEntry`), `client/retry-file.test.ts`.
 
 ### M3-U53: a failed file is held for `pagehide` before its status turns `failed`
 
@@ -974,7 +974,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   (`NO_SUCH_UPLOAD`, so it starts over with a new ticket, `M3-U74`) or sends only the missing parts when it did not.
 - **Status:** in force (`7f2a7b1`, `2fe56b7`, `8770518`, `2075eac`; the README's section `d63579c`). Spec §7 says
   so.
-- **Visible in:** spec §7, `client/records.ts`, `client/job-run.ts` (the save), `client/file-run.ts`,
+- **Visible in:** spec §7, `client/records.ts`, `client/persist.ts` (`uploadOf`, the save), `client/file-run.ts`,
   `client/lifecycle.ts`.
 
 ### M3-U63: resume is explicit: `resumable()`, `resume(upload, file)` and `forget()`
@@ -1528,7 +1528,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `runFile` decides: an answer carrying that code made the re-ask loop with no backoff and no budget (re-review
   Important 1); and offline is stated as built (re-review Minor 2). Since the chaos final review's M2, a resumed file's
   start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal.
-- **Visible in:** `client/job-run.ts` (`refused`, `askAlone`, `launch`'s `Alone`, `startOver`, `Job.watch`),
-  `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts` (`withRetry`'s
-  `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`, `client/upload-refusals-wait.test.ts`,
-  `client/resume.test.ts` (the start over's backoff rows), README ("Client").
+- **Visible in:** `client/launch.ts` (`refused`, `askAlone`, `launch`'s `Alone`), `client/job-run.ts` (`startOver`,
+  `Job.watch`), `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts`
+  (`withRetry`'s `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`,
+  `client/upload-refusals-wait.test.ts`, `client/resume.test.ts` (the start over's backoff rows), README ("Client").

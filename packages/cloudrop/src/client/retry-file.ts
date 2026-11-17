@@ -4,7 +4,8 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
-import { allSettled, forgetTicket, type Job, launch } from "./job-run.ts";
+import { allSettled, forgetTicket, type Job } from "./job-run.ts";
+import { launch } from "./launch.ts";
 import type { FileOutcome } from "./types.ts";
 
 /** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
