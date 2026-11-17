@@ -100,8 +100,9 @@ Runs the `*.db.integration.test.ts` files (Vitest project `db`) against two data
 - **SQLite** through `node:sqlite`, a fresh database per test: in memory, or a file under `.superpowers/test-db/` when
   a second client must open it.
 
-Before the tests the lane generates the Prisma 7 test clients from `src/testing/db/prisma/*.prisma` into
-`packages/cloudrop/.prisma-client/` (git-ignored). Generation needs no network. The fixtures are in
+Before the tests the lane generates the Prisma 7 test clients from the schema folders `src/testing/db/prisma/postgres/`
+and `sqlite/` into `packages/cloudrop/.prisma-client/` (git-ignored); each folder's `cloudrop.prisma` holds the models
+the store guide ships. Generation needs no network. The fixtures are in
 `src/testing/db/`: the DDL (`schema.ts`), the two databases (`postgres.ts`, `sqlite.ts`), the raw reader the store
 contract checks results with (`raw-reader.ts`) and the Prisma clients (`prisma.ts`). The lane fails when Docker is not
 running.

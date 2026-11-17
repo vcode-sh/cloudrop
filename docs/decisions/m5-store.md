@@ -796,6 +796,132 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ## Prisma adapter (task E)
 
+### M5-T54: `prismaStore` over raw queries, with `transaction: true` as a typed overload
+
+- **Decision:** `prismaStore(prisma, { dialect, tables?, transaction?, transactionOptions? })` builds a `SqlExecutor`
+  over `$queryRawUnsafe` and hands it to `sqlStore`. A batch is `$transaction([...])`, the array form, which Prisma runs
+  in order in one transaction. `transaction: true` is an overload whose options require `dialect: "postgres"`; it adds
+  the executor's `transaction` over `prisma.$transaction(async (tx) => …, transactionOptions)`, with batches run in order
+  on `tx`, already inside the transaction, and returns `PrismaTransactionalStore<TTx>`: `transaction`
+  required and `store.route = routeFor<{ tx: TTx }>(store)` on the very store object. `TTx` is
+  `PrismaTransactionClient<TClient>`, the callback parameter of the client's last `$transaction` overload, which is the
+  callback form in Prisma 7's generated client, so `onComplete({ tx })` is `Omit<PrismaClient, ITXClientDenyList>`. The
+  client is typed by hand (`PrismaClientLike`); `src/` imports nothing from Prisma. `transactionOptions` takes only
+  `maxWait` and `timeout`. `INVALID_CONFIG` at construction for an unknown dialect, `transaction: true` on SQLite, and
+  `transactionOptions` without `transaction: true`. The 2 s `lock_timeout` stays the core's (around the claim only, M5-T76).
+- **Why:** spec §5.5 and §7. No `isolationLevel`: the claim's busy answer relies on Read Committed re-reading a row it
+  waited for (`outcomes.ts`), so Serializable would turn overlaps into serialization failures. Prisma's 5 s default
+  timeout counts `onComplete`; a completion that outlasts it is rolled back and answered as a retryable store failure
+  (measured, `prisma-handler.db.integration.test.ts`).
+- **If wrong:** a caller that needs another isolation level gets a new option later; an exported one cannot be taken
+  back. On Postgres the raw SQL finds its tables through the connection's search path, while PrismaPg's `schema` option
+  reaches model queries only (measured): tables outside `public` need both, as the factory's TSDoc says, preferably
+  `ALTER ROLE <user> SET search_path = …`, which survives connection poolers (M5-T59).
+- **Status:** decided.
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `src/adapters/prisma.ts`, `src/adapters/prisma.test.ts`.
+
+### M5-T55: Prisma's raw results need no new decoding; its SQLSTATE is found under `meta`, as `originalCode`
+
+- **Decision:** measured through `$queryRawUnsafe` (Prisma 7.10.1).
+  - Postgres (`@prisma/adapter-pg`): `bigint` and `count(*)` come back as `BigInt`, `sum(...)` (numeric) as `Decimal`,
+    `boolean` as boolean, `timestamptz` as `Date`, and a bound JS number cast `$1::bigint` as `BigInt`.
+  - SQLite (`@prisma/adapter-better-sqlite3`): a column declared `INTEGER` comes back as a number (2^53 − 1 exactly), and
+    an expression without a declared type (`sum`, `count`, `1`, `1 = 2`) as `BigInt`.
+  - A statement without `RETURNING` answers `[]` on both. The core's `toSafeInteger` and `toDate` already accept all of
+    these, so the decoder is unchanged.
+  - Prisma reports a raw query's failure as `P2010` with the driver adapter's error under `meta.driverAdapterError`.
+    That error's `cause` holds the SQLSTATE as `originalCode`, on every error the adapter maps, and as `code` only on the
+    ones it does not name. 55P03 arrives as `{ originalCode: "55P03", kind: "postgres", code: "55P03" }`, and 23505 as
+    `{ originalCode: "23505", kind: "UniqueConstraintViolation", constraint, table }`, with no `code`.
+  - The core's SQLSTATE walk (behind `isLockTimeout` and `isUniqueViolation`) follows `cause`, or
+    `meta.driverAdapterError` when there is no `cause`, and matches `code` or `originalCode`.
+- **Why:** the brief's one allowed edit to the core.
+  - Without the `meta` hop, a claim that times out on the row lock fails the completion instead of answering `busy`.
+  - Without `originalCode`, the loser of two racing first reserves of a new owner with a quota throws 23505 instead of
+    running again (M5-T74). The review measured that (fix round 1), and the contract row "concurrent first reserves of
+    new owners" failed through `prismaStore` in 4 of 4 runs before the fix and passed in 5 of 5 after.
+  - The first version of this entry claimed the reserve rerun already worked; it did not, because its unit row
+    invented a `code` Prisma never sets for 23505.
+- **If wrong:** another Prisma major may move the field. The contract row (every store that takes concurrent calls),
+  the Prisma lock-timeout row and the measured-shape rows in `src/store/sql/executor.test.ts` fail first.
+- **Status:** decided; corrected in task E fix round 1.
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `src/store/sql/executor.ts`, `src/store/sql/executor.test.ts`, `src/testing/store-contract/usage.ts`.
+
+### M5-T56: the shipped Prisma models are the test client's schema files
+
+- **Decision:** the test schemas became Prisma multi-file schema folders, `src/testing/db/prisma/postgres/` and
+  `sqlite/`. Each holds `cloudrop.prisma`, the two models the docs ship with a header for users, and `schema.prisma`,
+  the lane's generator and datasource. `scripts/test-db.sh` generates from the folders, so the snippet is the file the
+  lane generates, migrates and round-trips. The store guide (task F) links to `cloudrop.prisma`. Measured:
+  - On Postgres `prisma migrate diff` from C0's DDL to the models finds no difference, and a db row keeps it so.
+  - On SQLite it reports both tables as redefined, only because Prisma declares `BigInt` columns `BIGINT` where the DDL
+    says `INTEGER`; with `BIGINT` in the DDL the diff is empty.
+  - The DDL stays `INTEGER`: both names have INTEGER affinity, so storage and behaviour are the same, and Drizzle's
+    `sqlite-core` (task D) declares `integer`.
+  - Prisma's models read every column the store wrote and the store reads a row the models wrote, on both dialects.
+  - CHECK constraints are outside Prisma's schema language and outside `migrate diff`, so "no difference" covers
+    columns, types, nullability, keys and indexes. Tables created by `prisma migrate` from the models lack §3's
+    `CHECK (… >= 0)` on the usage counters; the guide gives the one `ALTER TABLE` line to add them (task E notes for F).
+  - `cloudrop.prisma` carries only user-facing comments; the test-only sentence is in `schema.prisma`. The guide links
+    to the shipped file, or checks a pasted copy against it (fix round 1).
+- **Why:** the brief's "one source" for the snippet; C0's schema header claimed the migration check for task E.
+- **If wrong:** if the docs' DDL should satisfy a Prisma migration on SQLite too, declare the 64-bit columns `BIGINT`
+  in `schema.ts` and have task D's comparison read affinities rather than declared names.
+- **Status:** decided.
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `src/testing/db/prisma/`, `scripts/test-db.sh`, `src/testing/db/schema.ts`,
+  `src/adapters/prisma.db.integration.test.ts`.
+
+### M5-T57: failure injection on Prisma's SQLite connection, no gap
+
+- **Decision:** the Prisma fixture's `openPrismaClient(db, { onSqliteConnection })` wraps the better-sqlite3 adapter
+  factory's `connect` and hands over the connection the adapter keeps as `client`. Prisma's SQLite contract target
+  registers the same one-shot `cloudrop_fail_once` function there, after `sqlStoreTarget` creates the triggers. The
+  trigger then fails the first usage write on Prisma's own connection. Prisma on SQLite declares only `transaction` as
+  a gap, like node:sqlite.
+- **Why:** M5-T43's function lives on the fixture's node:sqlite connection, which Prisma never writes through. A
+  probe that never arms the function fails the four atomicity rows.
+- **If wrong:** the adapter's `client` property is not public API. If a Prisma release renames it, the fixture fails
+  loudly ("Prisma has not opened its SQLite connection yet"), and the fallback is to declare the gap.
+- **Status:** decided.
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `src/testing/db/prisma.ts`, `src/adapters/prisma.db.integration.test.ts`.
+
+### M5-T58: `cloudrop/adapters/prisma` is budgeted 16 kB summed
+
+- **Decision:** measured after the build on `ce8c637`:
+  - `cloudrop/adapters/prisma` is 12.18 kB summed, which breaks down as:
+    - its own file, 0.88 kB;
+    - the SQL core chunk, 8.59 kB;
+    - `route()` for `store.route` with `errors` and `input`, 2.78 kB.
+  - Its budget rises from task C's 13 kB to 16 kB.
+  - Importing `routeFor` (allowed by M5-T77) moved `route()` into a chunk that `cloudrop` also loads. Summed `cloudrop`
+    grew 0.8 kB when Prisma first imported it (44.5 to 45.3 kB on `d9a4ec1`) and is 45.87 kB now. The bundled and
+    minified build barely moved (27.14 kB).
+- **Why:** M4-F24 sets ceilings with wide headroom. The 13 kB scaffold predates `routeFor`. It would leave 0.8 kB,
+  about 7%, which would force a raise at the first change to the core.
+- **If wrong:** if the summed `cloudrop` budget gets tight, move `routeFor` and the brand into a module of their own,
+  imported only by `route()` and the adapters.
+- **Status:** decided.
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts`.
+
+### M5-T59: no Prisma-only `schema` option; a core-wide `tables.schema` is a later option
+
+- **Decision:** `prismaStore` gets no option naming a Postgres schema. Tables outside `public` are reached through the
+  connection's search path, set preferably with `ALTER ROLE <user> SET search_path = …` (or `ALTER DATABASE`), which
+  works behind connection poolers. A per-connection `options=-c search_path=…` is the alternative, which some poolers
+  drop (unverified here). The factory's TSDoc says both.
+- **Why:** the table names are quoted once in the core (`quoteTables`), and Drizzle `pgSchema` and plain-SQL users have
+  the same need. An adapter-only option would split one concept across adapters.
+- **If wrong:** if the owner wants it, rule it once for every adapter: `tables: { schema?: string }`, validated like
+  the names and emitted as `"app"."cloudrop_files"` everywhere, including the schema check. That would be a new entry.
+- **Status:** decided (review M2, fix round 1).
+- **Source:** task E, 2026-11-17.
+- **Visible in:** `src/adapters/prisma.ts`.
+
 <!-- Task E appends its entries above this line. -->
 
 ## Lanes, example and docs (task F)

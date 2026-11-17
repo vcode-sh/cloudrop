@@ -1,15 +1,7 @@
-// The test models of the store's tables on SQLite (spec §3), mapped to the shipped column names. Times are BigInt
-// milliseconds since the epoch, as the DDL stores them: Prisma's DateTime encoding on SQLite differs, and Int is 32-bit.
-// scripts/test-db.sh generates the client into packages/cloudrop/.prisma-client/sqlite (git-ignored).
-
-generator client {
-  provider = "prisma-client"
-  output   = "../../../../.prisma-client/sqlite"
-}
-
-datasource db {
-  provider = "sqlite"
-}
+// cloudrop's tables for prismaStore() on SQLite (spec M5 §3). Copy both models into your schema and create them with a
+// migration: the model and field names are yours to change, the table and column names are fixed. Times are BigInt
+// milliseconds since the epoch, as the store writes them: Prisma stores DateTime differently on SQLite, and Int is
+// 32-bit.
 
 model CloudropFile {
   id          String  @id
