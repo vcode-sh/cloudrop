@@ -1,5 +1,5 @@
+import type { RequestRecord } from "./journal";
 import styles from "./lab.module.css";
-import type { RequestRecord } from "./lab-fetch";
 import { type LogRow, requestFailed } from "./run-report";
 
 const percent = (value: number): string => `${(value * 100).toFixed(2)}%`;

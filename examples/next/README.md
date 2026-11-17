@@ -135,27 +135,40 @@ rule it already has):
   `INVALID_TOKEN`, `VERIFICATION_FAILED`) or once the ticket expired, it asks `/upload` for a new ticket and a new key,
   and the file's bytes start again from 0. The retry's requests join the same table and the summary shows the files'
   latest outcomes, with the time counted from Upload.
+- **Unfinished uploads:** the multipart uploads this browser saved and has not finished, from
+  `client.resumable("files")`, read when the page loads and after each run and retry: name, size and when the ticket
+  expires, never its token, key or metadata. Each has a file input, **Resume** with the file's name, that takes the same
+  file from disk and calls `client.resume(upload, file, { signal })` as a run of its own, into the Files and Requests
+  tables and the summary: its first request is `/complete`, which says which parts the bucket lacks, then one `/sign`
+  for their URLs, those parts alone and `/complete` again. A resume refused before any request shows the client's
+  message in the status line: another file than the one the upload started with, an upload that finished or expired, or
+  one still being sent by this page or another tab of the browser. **Forget unfinished uploads** calls
+  `client.forget()`, what an app calls at sign-out; it deletes the records, not the uploads. The lab's clients use the
+  default namespace: the demo has one user, and its sign-in cookie is `HttpOnly`, so the page cannot read who it is.
 - **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it again),
-  answer the next `/upload` or `/sign` with 503 (the client backs off and retries), delay every bucket PUT (so a 100 MiB
-  file shows four parts in flight, and Pause has PUTs to stop), and drop the answer of the next `/complete` (the client
-  retries it, and from then on a cancel or failure keeps the file). The network error, the 503 and the dropped answer
-  untick themselves after one hit. Two more hold until unticked, to fail a file for Retry: every PUT of part 2 gets a
-  network error (the client renews its URL once and makes 6 attempts, up to about 15 s of waits, then the file fails
-  with `NETWORK_ERROR` and keeps its ticket), and the lab answers every bucket PUT with 400 in the bucket's place,
-  sending nothing (the file fails at once with `UPLOAD_REJECTED`, which needs a new ticket). A third holds every
-  `/complete` answer: the lab forwards the request and the server finishes the file, but the page hears nothing and
-  shows the `/complete` in flight until the box is unticked; a reload before then drops the answer unheard and leaves
-  the file stored. Each line on the page names the decision behind the behaviour.
+  drop the answer of the next bucket PUT (the bucket stores the bytes, the client sends the PUT again, and a single PUT
+  then gets `412`, which the client counts as stored), answer the next `/upload` or `/sign` with 503 (the client backs
+  off and retries), delay every bucket PUT (so a 100 MiB file shows four parts in flight, and Pause has PUTs to stop),
+  and drop the answer of the next `/complete` (the client retries it, and from then on a cancel or failure keeps the
+  file). The network error, the dropped answers and the 503 untick themselves after one hit. Two more hold until
+  unticked, to fail a file for Retry: every PUT of part 2 gets a network error (the client renews its URL once and makes
+  6 attempts, up to about 15 s of waits, then the file fails with `NETWORK_ERROR` and keeps its ticket), and the lab
+  answers every bucket PUT with 400 in the bucket's place, sending nothing (the file fails at once with
+  `UPLOAD_REJECTED`, which needs a new ticket). A third holds every `/complete` answer: the lab forwards the request and
+  the server finishes the file, but the page hears nothing and shows the `/complete` in flight until the box is
+  unticked; a reload before then drops the answer unheard and leaves the file stored, for a resume to find. Each line on
+  the page names the decision behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
-  `/upload` for a new ticket and injected faults, and a bar on a shared timeline. The log keeps only the request's kind,
+  `/upload` for a new ticket, a `412` PUT whose object was already stored, a resume's first `/complete` and the `/sign`
+  for its missing parts, and injected faults, and a bar on a shared timeline. The log keeps only the request's kind,
   the bucket host, the part number, status, times and body size: never a URL, header or token, so no presigned URL
   reaches the page. Requests are recorded only while a run or a retry is going: an `/abort` the client has to send again
   after that is not in the table.
 - **Summary:** total time, the files' size, the bytes of the PUTs the bucket answered, end-to-end throughput in MiB/s
-  (not shown under 1 MiB, where round trips dominate, or after a retry), PUT requests started and answered, retries,
-  renewals, peak PUTs in flight, the job's `{ data, error }` with an outcome per file, and one sentence that tells the
-  run.
+  (not shown under 1 MiB, where round trips dominate, after a retry, or for a resume, which sends only the missing
+  parts), PUT requests started and answered, retries, renewals, peak PUTs in flight, the job's `{ data, error }` with an
+  outcome per file, and one sentence that tells the run.
 
 Against RustFS, start the container and run `bun run setup:rustfs` and `bun run dev` as in "Run with RustFS" above, then
 open `/lab`. Against R2, set the variables from "Run with R2"; the bucket's CORS rule must allow
@@ -168,23 +181,28 @@ The numbers come from one browser on one network: they show how the client behav
 
 `app/upload.browser.test.ts` uploads a 14-byte file in one `PUT`, a 20 MiB file in three parts, and the same file chosen
 twice, from Chromium's headless shell. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
-parts, a dropped bucket PUT as renewed and retried, a cancel during a delay as nothing sent, a paused file resumed with
-each part stored once, and three files in one job, and that no signed URL reaches the page. Three rows throttle uploads
-to 4 MiB/s through Chromium's DevTools protocol. Two sample a bar every 100 ms: through XMLHttpRequest it rises in small
-steps to the file's size; with PUTs sent through fetch it moves a part at a time. The third sets the emulated network
-offline during a 20 MiB upload: the page's `offline` event pauses the file with no PUT in flight, and back online each
-part is sent again and the file completes. Two more rows upload a 20 MiB file and then a 1 KiB file with one connection
-and every PUT delayed by a second: with `smallest-first` the 1 KiB file completes first, with `added` the 20 MiB file
-does. Two rows retry a failed file: a 20 MiB file whose part 2 fails until the budget runs out is retried with its
-ticket, so the table shows no new `/upload` and only part 2 and `/complete` sent again; a 1 KiB file refused with 400 is
-retried with a new ticket, through a second `/upload`. `app/lab-reload.browser.test.ts` covers what the
-resume-after-reload rows stand on, with a 20 MiB file of fixed bytes written once to Playwright's output directory
-(`test-results/`) and chosen through the file input, so a reload picks the same file with the same `lastModified`: with
-one connection and every PUT delayed by a second, part 1 is stored while part 2 still waits, and after a reload the
-same file uploads again; with `/complete` answers held, the page shows `/complete` in flight while the object is
-already in the bucket (read back through the example's storage), and unticking the box completes the file and lets the
-next upload through. The helpers the lab's tests share are in `app/lab-page.ts`. Run them from the repository root; install the shell once from
-this directory with `bunx playwright install --only-shell chromium`.
+parts, a dropped bucket PUT as renewed and retried, a PUT whose answer was dropped as sent again and answered `412` with
+the note "already stored", a cancel during a delay as nothing sent, a paused file resumed with each part stored once,
+and three files in one job, and that no signed URL reaches the page. Three rows throttle uploads to 4 MiB/s through
+Chromium's DevTools protocol. Two sample a bar every 100 ms: through XMLHttpRequest it rises in small steps to the
+file's size; with PUTs sent through fetch it moves a part at a time. The third sets the emulated network offline during
+a 20 MiB upload: the page's `offline` event pauses the file with no PUT in flight, and back online each part is sent
+again and the file completes. Two more rows upload a 20 MiB file and then a 1 KiB file with one connection and every PUT
+delayed by a second: with `smallest-first` the 1 KiB file completes first, with `added` the 20 MiB file does. Two rows
+retry a failed file: a 20 MiB file whose part 2 fails until the budget runs out is retried with its ticket, so the table
+shows no new `/upload` and only part 2 and `/complete` sent again; a 1 KiB file refused with 400 is retried with a new
+ticket, through a second `/upload`. `app/lab-reload.browser.test.ts` resumes after a reload, with a 20 MiB file of fixed
+bytes written once to Playwright's output directory (`test-results/`) and chosen through the file input, so a reload
+picks the same file with the same `lastModified`. With one connection and every PUT delayed by a second, the page
+reloads once part 1 is stored; the upload is listed, and picking the same file sends `/complete` (answered `409`, parts
+2 and 3 missing), one `/sign` for those two, their PUTs and `/complete`, and the object read back equals the file. With
+`/complete` answers held, the page reloads while the object is already in the bucket, and the resume sends `/complete`
+alone and gets the same key. Picking a different file shows the client's "This is not the file the upload started with"
+and sends nothing, and the upload still resumes with the right file. A second page of the same browser that resumes an
+upload the first page is still sending shows "This upload is being sent in this browser". **Forget unfinished
+uploads** empties the list of a file the bucket refused. The helpers
+the lab's tests share are in `app/lab-page.ts`. Run them from the repository root; install the shell once from this
+directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves

@@ -1,5 +1,6 @@
 import styles from "./lab.module.css";
-import { describeRun, type LogRow, type Run, resultJson, seconds, summarize, throughputText } from "./run-report";
+import { describeRun } from "./run-description";
+import { type LogRow, type Run, resultJson, seconds, summarize, throughputText } from "./run-report";
 
 const MIB = 1024 * 1024;
 

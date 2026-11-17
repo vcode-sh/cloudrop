@@ -1,33 +1,12 @@
-// The run's request log, and the fetch that records the client's requests and injects the faults ticked on the page.
+// The fetch that records the client's requests and injects the faults ticked on the page.
 // By default the lab installs it as window.fetch for the upload server's endpoints only (bucket PUTs go through
 // lab-xhr.ts); with "Send PUTs with fetch" it is the client's fetch option and sees the bucket PUTs too.
 import type { ClientOptions } from "cloudrop/client";
-import { displayHost } from "./host";
+import type { Journal, RequestRecord } from "./journal";
 
 type ClientFetch = NonNullable<ClientOptions["fetch"]>;
 
-/** What the log keeps of one request: never its URL, headers or body, which hold a signature or a token. */
-export interface RequestRecord {
-  /** "/upload", "/sign", "/complete", "/abort", "PUT single" or "PUT part n". */
-  kind: string;
-  isBucketPut: boolean;
-  /** The bucket's host for a PUT, the page's own host for an endpoint call. */
-  host: string;
-  /** The upload the request belongs to, as a number the run gives it: one file's requests apart from another's. */
-  subject: string;
-  /** For a /sign, the URL it asks for: "the PUT" or "part n"; null for every other request. */
-  signedFor: string | null;
-  /** An HTTP status; null while the request is in flight. */
-  status: number | "network error" | "cancelled" | null;
-  startMs: number;
-  endMs: number | null;
-  /** The size of the request body; 0 when the lab answered in the bucket's place, which sends nothing. */
-  bytes: number;
-  /** The faults the lab injected into this request, in words. */
-  injected: string[];
-}
-
-export type OneShotFault = "bucketNetworkError" | "endpoint503" | "dropComplete";
+export type OneShotFault = "bucketNetworkError" | "dropBucketAnswer" | "endpoint503" | "dropComplete";
 /** Faults that hit every matching request while ticked. */
 export type HeldFault = "part2NetworkError" | "bucket400" | "holdComplete";
 
@@ -44,96 +23,24 @@ export interface FaultSwitch {
 export const REFUSAL = { status: 400, body: "<Error><Code>InvalidArgument</Code></Error>" } as const;
 
 /**
- * The bucket fault ticked for this PUT, noted in its record: a network error, the lab's 400 in the bucket's place, or
- * none. A held fault that applies leaves the one-shot network error ticked for the next PUT.
+ * The bucket fault ticked for this PUT: a network error, the bucket's answer dropped once it is sent, the lab's 400 in
+ * the bucket's place, or none. Noted in its record, apart from a dropped answer, which the sender notes with the
+ * bucket's status. A held fault that applies leaves the one-shot faults ticked for the next PUT.
  */
-export function bucketFault(record: RequestRecord, faults: FaultSwitch): "network error" | "refused" | null {
+export function bucketFault(
+  record: RequestRecord,
+  faults: FaultSwitch,
+): "network error" | "answer dropped" | "refused" | null {
   const partTwo = record.kind === "PUT part 2" && faults.on("part2NetworkError");
   if (partTwo || faults.take("bucketNetworkError")) {
     record.injected.push("injected network error");
     return "network error";
   }
+  if (faults.take("dropBucketAnswer")) return "answer dropped";
   if (!faults.on("bucket400")) return null;
   record.injected.push("injected 400");
   record.bytes = 0;
   return "refused";
-}
-
-export interface Journal {
-  /** Appends a record for a request about to be sent. The URL and body are read here and kept nowhere. */
-  start(url: string, method: string, body: unknown): RequestRecord;
-  end(record: RequestRecord, status: NonNullable<RequestRecord["status"]>): void;
-  /** Adds what the lab did to a request still in flight, and shows it at once. */
-  note(record: RequestRecord, words: string): void;
-}
-
-function sizeOf(body: unknown): number {
-  if (body instanceof Blob) return body.size;
-  return typeof body === "string" ? new TextEncoder().encode(body).length : 0;
-}
-
-type Target = Pick<RequestRecord, "kind" | "isBucketPut" | "host" | "signedFor"> & {
-  /** What tells this request's upload from another's: a PUT's URL path or an endpoint's token. Held only as a key in
-   * memory for the run's numbering; never shown, logged or stored. */
-  secret: string;
-};
-
-/** The URL and body are read here and nowhere else: only the endpoint's name, the part number and the host leave. */
-function readTarget(url: string, method: string, body: unknown): Target {
-  const parsed = new URL(url, window.location.href);
-  if (method === "PUT") {
-    const part = parsed.searchParams.get("partNumber");
-    const kind = part ? `PUT part ${part}` : "PUT single";
-    return { kind, isBucketPut: true, host: displayHost(parsed.host), signedFor: null, secret: parsed.pathname };
-  }
-  // /sign, /complete and /abort send { token }; a /sign adds the parts it asks for, and /upload has no token.
-  const { token = "", parts } = (typeof body === "string" ? JSON.parse(body) : {}) as {
-    token?: string;
-    parts?: number[];
-  };
-  const kind = `/${parsed.pathname.split("/").at(-1)}`;
-  const signedFor = kind === "/sign" ? (parts ? `part ${parts.join(", ")}` : "the PUT") : null;
-  return { kind, isBucketPut: false, host: parsed.host, signedFor, secret: token };
-}
-
-/** A log that calls `changed` whenever a record starts or ends. */
-export function createJournal(log: RequestRecord[], changed: () => void): Journal {
-  // Each upload gets a number on first sight, so the notes tell one file's requests from another's; the numbers die
-  // with the run.
-  const numbers = new Map<string, string>();
-  function numberOf(secret: string): string {
-    const known = numbers.get(secret);
-    if (known) return known;
-    const next = String(numbers.size + 1);
-    numbers.set(secret, next);
-    return next;
-  }
-  return {
-    start(url, method, body) {
-      const { secret, ...target } = readTarget(url, method, body);
-      const record: RequestRecord = {
-        ...target,
-        subject: numberOf(secret),
-        status: null,
-        startMs: performance.now(),
-        endMs: null,
-        bytes: sizeOf(body),
-        injected: [],
-      };
-      log.push(record);
-      changed();
-      return record;
-    },
-    end(record, status) {
-      record.status = status;
-      record.endMs = performance.now();
-      changed();
-    },
-    note(record, words) {
-      record.injected.push(words);
-      changed();
-    },
-  };
 }
 
 /** How often a held /complete looks at its box: the lab hears of an untick only by asking. */
@@ -172,6 +79,12 @@ async function sendWithFaults(
   }
   const fault = record.isBucketPut ? bucketFault(record, faults) : null;
   if (fault === "network error") throw networkError();
+  if (fault === "answer dropped") {
+    const response = await send(url, init);
+    await response.body?.cancel();
+    record.injected.push(`answer dropped (the bucket sent ${response.status})`);
+    throw networkError();
+  }
   if (fault === "refused") {
     return new Response(REFUSAL.body, { status: REFUSAL.status, headers: { "content-type": "application/xml" } });
   }

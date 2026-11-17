@@ -5,6 +5,7 @@ export type Faults = Record<OneShotFault | HeldFault, boolean> & { delayMs: numb
 
 export const NO_FAULTS: Faults = {
   bucketNetworkError: false,
+  dropBucketAnswer: false,
   endpoint503: false,
   dropComplete: false,
   part2NetworkError: false,
@@ -19,6 +20,12 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     label: "Fail the next bucket PUT with a network error",
     effect:
       "What a browser shows for an answer it may not read, such as an expired R2 URL. The client waits a random time of up to 0.5 s after a first attempt, renews that URL once through /sign and sends it again (decisions M3-S10, M3-S11).",
+  },
+  {
+    fault: "dropBucketAnswer",
+    label: "Drop the answer of the next bucket PUT",
+    effect:
+      "The bucket stores the bytes; the page gets a network error. The client renews the URL and sends the PUT again: a single PUT carries If-None-Match: *, so the bucket answers 412, which the client counts as stored (M3-S10).",
   },
   {
     fault: "endpoint503",
@@ -62,7 +69,7 @@ export function FaultPanel({ faults, onChange }: Props) {
     <section className={styles.section}>
       <h2>Faults</h2>
       <p className={styles.muted}>
-        The first three boxes hit the next matching request once, then untick themselves; the next three hit every
+        The first four boxes hit the next matching request once, then untick themselves; the next three hit every
         matching request until you untick them. Faults can change while an upload runs.
       </p>
       {FAULT_BOXES.map(({ fault, label, effect }) => (

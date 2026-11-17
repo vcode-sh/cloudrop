@@ -90,6 +90,23 @@ test("a dropped bucket PUT is renewed and retried", async ({ page }) => {
   await expectNoSignedUrl(page);
 });
 
+test("a PUT whose answer was dropped is sent again, and its 412 counts as stored", async ({ page }) => {
+  await signIn(page);
+  await page.getByLabel("Drop the answer of the next bucket PUT").check();
+
+  await uploadGenerated(page, "1 KiB");
+
+  // The bucket stored the first PUT; the second carries If-None-Match: * like every single PUT, so it gets 412.
+  expect(await requestRows(page)).toEqual([
+    ["/upload", "200", ""],
+    ["PUT single", "network error", "answer dropped (the bucket sent 200)"],
+    ["/sign", "200", "renewal"],
+    ["PUT single", "412", "retry; already stored"],
+    ["/complete", "200", ""],
+  ]);
+  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"error": null');
+});
+
 test("a cancel while parts wait sends nothing to the bucket", async ({ page }) => {
   await signIn(page);
   // Long enough that all three parts are still waiting inside the lab's fetch when Cancel is pressed.

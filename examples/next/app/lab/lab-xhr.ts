@@ -1,7 +1,8 @@
 // The XMLHttpRequest the lab installs while a run or a retry goes: it records each bucket PUT the client sends and
 // injects the bucket faults ticked on the page. cloudrop/client reads window.XMLHttpRequest on every PUT, so no library
 // option is needed (spec §6).
-import { bucketFault, type FaultSwitch, type Journal, REFUSAL, type RequestRecord } from "./lab-fetch";
+import type { Journal, RequestRecord } from "./journal";
+import { bucketFault, type FaultSwitch, REFUSAL } from "./lab-fetch";
 
 /** Makes window.XMLHttpRequest record and fault bucket PUTs, until the returned function puts the browser's back. */
 export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void {
@@ -11,10 +12,15 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
   class LabXhr extends RealXhr {
     #method = "";
     #url = "";
-    /** The injected delay, network error or refusal still to come; null once the request is really sent. */
-    #pending: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * Cancels what the lab does in the request's place: the injected delay, network error or refusal still to come, or
+     * the PUT whose answer it drops. Null while nothing is pending, as once the request is really sent.
+     */
+    #pending: (() => void) | null = null;
     /** True once the lab answered with its refusal in the bucket's place: the getters below then return it. */
     #refused = false;
+    /** The headers the client set, for a PUT the lab sends itself to drop its answer. */
+    #headers = new Headers();
 
     override get readyState() {
       return this.#refused ? RealXhr.DONE : super.readyState;
@@ -38,6 +44,11 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
       super.open(method, url, async, username, password);
     }
 
+    override setRequestHeader(name: string, value: string) {
+      this.#headers.append(name, value);
+      super.setRequestHeader(name, value);
+    }
+
     override send(body?: Document | XMLHttpRequestBodyInit | null) {
       if (this.#method !== "PUT") return super.send(body);
       const record = journal.start(this.#url, "PUT", body);
@@ -52,26 +63,58 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
       const delayMs = faults.delayMs();
       if (delayMs === 0) return this.#sendOrFail(record, body);
       record.injected.push(`delayed ${delayMs} ms`);
-      this.#pending = setTimeout(() => this.#sendOrFail(record, body), delayMs);
+      this.#later(() => this.#sendOrFail(record, body), delayMs);
+    }
+
+    /** Runs `next` after `ms`, unless abort() comes first. */
+    #later(next: () => void, ms?: number) {
+      const timer = setTimeout(() => {
+        this.#pending = null;
+        next();
+      }, ms);
+      this.#pending = () => clearTimeout(timer);
     }
 
     #sendOrFail(record: RequestRecord, body?: Document | XMLHttpRequestBodyInit | null) {
-      this.#pending = null;
       const fault = bucketFault(record, faults);
       if (fault === null) return super.send(body);
+      if (fault === "answer dropped") return this.#sendUnheard(record, body);
       // A real answer or network error arrives after send() returns, never inside it.
-      this.#pending = setTimeout(() => {
-        this.#pending = null;
+      this.#later(() => {
         if (fault === "network error") return this.dispatchEvent(new ProgressEvent("error"));
         this.#refused = true;
         for (const type of ["readystatechange", "load", "loadend"]) this.dispatchEvent(new ProgressEvent(type));
       });
     }
 
+    /**
+     * Sends the PUT through fetch with the client's headers, then tells the client it got no answer, as a connection
+     * lost after the bucket stored the bytes. This XMLHttpRequest itself sends nothing.
+     */
+    #sendUnheard(record: RequestRecord, body?: Document | XMLHttpRequestBodyInit | null) {
+      const unheard = new AbortController();
+      this.#pending = () => unheard.abort();
+      // The client sends a Blob, which fetch takes as it is.
+      const init = { method: "PUT", headers: this.#headers, body: body as BodyInit, signal: unheard.signal };
+      fetch(this.#url, init)
+        .then(async (response) => {
+          await response.body?.cancel();
+          record.injected.push(`answer dropped (the bucket sent ${response.status})`);
+        })
+        // A real network error ends as a dropped answer does.
+        .catch(() => undefined)
+        .finally(() => {
+          if (unheard.signal.aborted) return;
+          this.#pending = null;
+          this.dispatchEvent(new ProgressEvent("error"));
+        });
+    }
+
     override abort() {
       if (this.#pending === null) return super.abort();
-      // Nothing was sent, so a real abort() would fire nothing: fire the event it fires for a request in flight.
-      clearTimeout(this.#pending);
+      // This XMLHttpRequest sent nothing, so a real abort() would fire nothing: fire the event it fires for a request
+      // in flight.
+      this.#pending();
       this.#pending = null;
       this.dispatchEvent(new ProgressEvent("abort"));
     }

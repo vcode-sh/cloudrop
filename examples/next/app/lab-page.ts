@@ -68,6 +68,21 @@ export async function chooseOnDisk(page: Page, path: string): Promise<void> {
   await page.getByLabel("Files to upload").setInputFiles(path);
 }
 
+/** Each unfinished upload the page lists as [name, bytes]; none while the table is absent. */
+export function unfinishedRows(page: Page): Promise<[name: string, bytes: string][]> {
+  return page
+    .getByRole("table", { name: "Unfinished uploads" })
+    .locator("tbody tr")
+    .evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "")))
+    .then((rows) => rows.map((cells): [string, string] => [cells[0] ?? "", cells[1] ?? ""]));
+}
+
+/** Picks `path` through the Resume input of the unfinished upload named `name`. */
+export async function resumeWith(page: Page, name: string, path: string): Promise<void> {
+  const table = page.getByRole("table", { name: "Unfinished uploads" });
+  await table.getByLabel(`Resume ${name}`, { exact: true }).setInputFiles(path);
+}
+
 /** Waits until the request table shows a "PUT part 1" the bucket answered 200: that part is stored. */
 export async function partOneStored(page: Page): Promise<void> {
   await expect
