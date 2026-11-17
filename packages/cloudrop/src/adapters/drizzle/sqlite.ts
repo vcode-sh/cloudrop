@@ -14,9 +14,13 @@ export interface DrizzleSqliteQueryable {
   run(query: SQL): unknown;
 }
 
-/** A Drizzle SQLite database over a synchronous driver: `drizzle(new Database(path))` from `drizzle-orm/better-sqlite3`. */
+/**
+ * A Drizzle SQLite database over a synchronous driver: `drizzle(new Database(path))` from `drizzle-orm/better-sqlite3`.
+ * `transaction` is not generic here: drizzle-orm 0.45 types its answer as the callback's, 1.0 through a conditional type
+ * that refuses async callbacks, and both fit this shape.
+ */
 export interface DrizzleSqlite extends DrizzleSqliteQueryable {
-  transaction<T>(run: (tx: DrizzleSqliteQueryable) => T, config?: { behavior?: "immediate" }): T;
+  transaction(run: (tx: DrizzleSqliteQueryable) => SqlRow[][], config?: { behavior?: "immediate" }): unknown;
 }
 
 /**
@@ -47,8 +51,11 @@ function synchronousExecutor(db: DrizzleSqlite): SqlExecutor {
   return {
     dialect: "sqlite",
     query: async (sql, params) => rowsOf(db, { sql, params }),
+    // The transaction answers what its callback returned.
     batch: async (statements) =>
-      db.transaction((tx) => statements.map((statement) => rowsOf(tx, statement)), { behavior: "immediate" }),
+      db.transaction((tx) => statements.map((statement) => rowsOf(tx, statement)), {
+        behavior: "immediate",
+      }) as SqlRow[][],
   };
 }
 

@@ -1,80 +1,63 @@
-// The store's tables as Drizzle `pg-core` tables (spec M5 §3). The column types are spelled out because the package
-// emits declarations without inference (isolatedDeclarations); the compiler checks the builders below against them,
-// and drizzle.test.ts pins the row types they give.
-import {
-  type $Type,
-  type BuildColumns,
-  type ColumnBuilderBase,
-  type IsPrimaryKey,
-  type NotNull,
-  sql,
-} from "drizzle-orm";
-import {
-  bigint,
-  check,
-  index,
-  integer,
-  type PgBigInt53BuilderInitial,
-  type PgIntegerBuilderInitial,
-  type PgTableWithColumns,
-  type PgTextBuilderInitial,
-  type PgTimestampBuilderInitial,
-  pgTable,
-  text,
-  timestamp,
-} from "drizzle-orm/pg-core";
+// The store's tables as Drizzle `pg-core` tables (spec M5 §3). The package emits declarations without inference
+// (isolatedDeclarations), so the table types are spelled out, but only through what drizzle-orm 0.45 and 1.0 both
+// export: the builder functions' return types, their `this`-typed methods and `pgTable`'s own signature. The names of
+// the builder types differ between the two lines and are never written here. The compiler checks the builders below
+// against these types, and drizzle.test.ts pins the row types they give on both lines.
+
+import { sql } from "drizzle-orm";
+import { bigint, check, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { FileStatus } from "../../server/store.ts";
 import { type CloudropTablesOptions, tableNames } from "./tables.ts";
 
-type Text<TName extends string> = PgTextBuilderInitial<TName, [string, ...string[]]>;
-type Count<TName extends string> = NotNull<PgBigInt53BuilderInitial<TName>>;
-type Time<TName extends string> = PgTimestampBuilderInitial<TName>;
+// Each builder function's last overload names the column; `timestamp`'s mode defaults to Dates, and `bigint`'s answer
+// is a union by mode, of which the number one is taken.
+type Text = ReturnType<typeof text>;
+type Time = ReturnType<typeof timestamp>;
+type NotNull<TColumn extends { notNull(): unknown }> = ReturnType<TColumn["notNull"]>;
+type PrimaryKey<TColumn extends { primaryKey(): unknown }> = ReturnType<TColumn["primaryKey"]>;
+type Count = NotNull<Extract<ReturnType<typeof bigint>, { _: { data: number } }>>;
+// A type-only stand-in for a text column, so `$type`, a generic method, can be instantiated with the status type.
+declare const textStandIn: Text;
+type Status = NotNull<ReturnType<typeof textStandIn.$type<FileStatus>>>;
 
 type FileColumns = {
-  id: IsPrimaryKey<NotNull<Text<"id">>>;
-  route: NotNull<Text<"route">>;
-  key: NotNull<Text<"key">>;
-  owner: Text<"owner">;
-  status: NotNull<$Type<Text<"status">, FileStatus>>;
-  name: NotNull<Text<"name">>;
-  type: NotNull<Text<"type">>;
-  size: Count<"size">;
-  uploadId: Text<"upload_id">;
-  metadata: Text<"metadata">;
-  result: Text<"result">;
-  claim: Text<"claim">;
-  claimedAt: Time<"claimed_at">;
-  expiresAt: NotNull<Time<"expires_at">>;
-  createdAt: NotNull<Time<"created_at">>;
-  updatedAt: NotNull<Time<"updated_at">>;
-  completedAt: Time<"completed_at">;
-  endedAt: Time<"ended_at">;
-  cleanedAt: Time<"cleaned_at">;
+  id: PrimaryKey<Text>;
+  route: NotNull<Text>;
+  key: NotNull<Text>;
+  owner: Text;
+  status: Status;
+  name: NotNull<Text>;
+  type: NotNull<Text>;
+  size: Count;
+  uploadId: Text;
+  metadata: Text;
+  result: Text;
+  claim: Text;
+  claimedAt: Time;
+  expiresAt: NotNull<Time>;
+  createdAt: NotNull<Time>;
+  updatedAt: NotNull<Time>;
+  completedAt: Time;
+  endedAt: Time;
+  cleanedAt: Time;
 };
 
 type UsageColumns = {
-  owner: IsPrimaryKey<NotNull<Text<"owner">>>;
-  reservedBytes: Count<"reserved_bytes">;
-  activeBytes: Count<"active_bytes">;
-  files: NotNull<PgIntegerBuilderInitial<"files">>;
-  updatedAt: NotNull<Time<"updated_at">>;
+  owner: PrimaryKey<Text>;
+  reservedBytes: Count;
+  activeBytes: Count;
+  files: NotNull<ReturnType<typeof integer>>;
+  updatedAt: NotNull<Time>;
 };
-
-type Table<TColumns extends Record<string, ColumnBuilderBase>> = PgTableWithColumns<{
-  name: string;
-  schema: undefined;
-  columns: BuildColumns<string, TColumns, "pg">;
-  dialect: "pg";
-}>;
 
 /** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables. */
 export interface CloudropPostgresTables {
-  files: Table<FileColumns>;
-  usage: Table<UsageColumns>;
+  files: ReturnType<typeof pgTable<string, FileColumns>>;
+  usage: ReturnType<typeof pgTable<string, UsageColumns>>;
 }
 
-const time = <TName extends string>(name: TName) => timestamp(name, { withTimezone: true, mode: "date" });
-const count = <TName extends string>(name: TName) => bigint(name, { mode: "number" }).notNull();
+const time = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+const count = (name: string) => bigint(name, { mode: "number" }).notNull();
 
 /**
  * The store's tables as Drizzle `pg-core` tables, for an app's schema and migrations (drizzle-kit picks them up from

@@ -1,16 +1,15 @@
 // drizzleStore's construction-time checks, the statement translation, and the public types (`bun run typecheck`
-// compiles this file: every expectTypeOf and expect-error directive is an assertion). What the store does on a real
-// database is proven by the store contract in drizzle.db.integration.test.ts.
+// compiles this file: every expectTypeOf and expect-error directive is an assertion). It names only what drizzle-orm
+// 0.45 and 1.0 both export, so scripts/check-drizzle-versions.sh compiles it against 1.0 too. What the store does on a
+// real database is proven by the store contract in drizzle.db.integration.test.ts.
 
 import Database from "better-sqlite3";
-import type { ExtractTablesWithRelations } from "drizzle-orm";
 import { drizzle as betterSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as libsql } from "drizzle-orm/libsql";
-import { type NodePgQueryResultHKT, drizzle as nodePostgres } from "drizzle-orm/node-postgres";
-import { PgDialect, type PgTransaction, pgTable, text } from "drizzle-orm/pg-core";
+import { drizzle as nodePostgres } from "drizzle-orm/node-postgres";
+import { PgDialect, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle as pgProxy } from "drizzle-orm/pg-proxy";
-import { type PostgresJsQueryResultHKT, drizzle as postgresJs } from "drizzle-orm/postgres-js";
-import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import pg from "pg";
 import { afterAll, describe, expect, expectTypeOf, onTestFinished, test } from "vitest";
 import type { FileStatus } from "../server/store.ts";
@@ -19,11 +18,10 @@ import { drizzleSql } from "./drizzle/statement.ts";
 import { cloudropPgTables, cloudropSqliteTables, drizzleStore } from "./drizzle.ts";
 
 const appUploads = pgTable("app_uploads", { fileId: text("file_id").primaryKey(), owner: text("owner").notNull() });
-const schema = { appUploads };
 // Neither client connects until a query runs, and none does here.
 const pool = new pg.Pool();
 afterAll(() => pool.end());
-const postgresDb = nodePostgres({ client: pool, schema });
+const postgresDb = nodePostgres({ client: pool });
 const sqliteConnection = new Database(":memory:");
 afterAll(() => sqliteConnection.close());
 const sqliteDb = betterSqlite({ client: sqliteConnection });
@@ -116,11 +114,8 @@ describe("drizzleSql", () => {
   });
 
   test("on SQLite, gives each ? the next value, null included", () => {
-    const query = drizzleSql("sqlite", { sql: "INSERT INTO t VALUES (?, ?, ?)", params: ["f-1", null, 9] });
-    expect(new SQLiteSyncDialect().sqlToQuery(query)).toMatchObject({
-      sql: "INSERT INTO t VALUES (?, ?, ?)",
-      params: ["f-1", null, 9],
-    });
+    const query = drizzleSql("sqlite", { sql: "SELECT ? AS a, ? AS b, ? AS c", params: ["f-1", null, 9] });
+    expect(sqliteDb.all(query)).toEqual([{ a: "f-1", b: null, c: 9 }]);
   });
 });
 
@@ -135,23 +130,23 @@ describe("cloudropPgTables and cloudropSqliteTables", () => {
 
 // Types only from here: the routes below are built, never called.
 
-type NodePgTx = PgTransaction<NodePgQueryResultHKT, typeof schema, ExtractTablesWithRelations<typeof schema>>;
+/** What Drizzle's own `transaction` hands its callback: the `tx` `onComplete` must receive. */
+type DrizzleTx<TDb extends { transaction: (run: never) => unknown }> = Parameters<Parameters<TDb["transaction"]>[0]>[0];
+
 drizzleStore(postgresDb, { dialect: "postgres", transaction: true }).route(policy, {
   onComplete: async ({ tx, userId, file }) => {
-    expectTypeOf(tx).toEqualTypeOf<NodePgTx>();
+    expectTypeOf(tx).toEqualTypeOf<DrizzleTx<typeof postgresDb>>();
+    expectTypeOf(tx).not.toBeAny();
     await tx.insert(appUploads).values({ fileId: file.id, owner: userId });
     return null;
   },
 });
 
-type PostgresJsTx = PgTransaction<
-  PostgresJsQueryResultHKT,
-  Record<string, never>,
-  ExtractTablesWithRelations<Record<string, never>>
->;
-drizzleStore(postgresJs.mock(), { dialect: "postgres", transaction: true }).route(policy, {
-  onComplete: ({ tx }) => {
-    expectTypeOf(tx).toEqualTypeOf<PostgresJsTx>();
+const postgresJsDb = postgresJs.mock();
+drizzleStore(postgresJsDb, { dialect: "postgres", transaction: true }).route(policy, {
+  onComplete: async ({ tx, userId, file }) => {
+    expectTypeOf(tx).toEqualTypeOf<DrizzleTx<typeof postgresJsDb>>();
+    await tx.insert(appUploads).values({ fileId: file.id, owner: userId });
     return null;
   },
 });

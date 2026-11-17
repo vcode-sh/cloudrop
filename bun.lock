@@ -61,7 +61,7 @@
         "wrangler": "^4.162.0",
       },
       "peerDependencies": {
-        "drizzle-orm": ">=0.45.0 <1",
+        "drizzle-orm": ">=0.45.0 <2",
         "react": ">=18",
       },
       "optionalPeers": [
