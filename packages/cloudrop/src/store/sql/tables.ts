@@ -4,6 +4,7 @@
 
 import { CloudropError, configError } from "../../errors.ts";
 import type { SqlExecutor } from "./executor.ts";
+import { FILE_COLUMNS } from "./records.ts";
 
 /** The table names a store is built with (spec §3); columns are fixed. */
 export interface StoreTables {
@@ -21,27 +22,6 @@ type Reader = Pick<SqlExecutor<unknown>, "query">;
 
 const TABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-const FILE_COLUMNS = [
-  "id",
-  "route",
-  "key",
-  "owner",
-  "status",
-  "name",
-  "type",
-  "size",
-  "upload_id",
-  "metadata",
-  "result",
-  "claim",
-  "claimed_at",
-  "expires_at",
-  "created_at",
-  "updated_at",
-  "completed_at",
-  "ended_at",
-  "cleaned_at",
-];
 const USAGE_COLUMNS = ["owner", "reserved_bytes", "active_bytes", "files", "updated_at"];
 
 /** Validates the names (the only text the core puts into SQL unbound) and quotes them. */
@@ -71,7 +51,7 @@ async function runs(executor: Reader, sql: string): Promise<boolean> {
  * The first problem with one table: the table itself, or its first missing column in the order of spec §3. Only called
  * after the whole-table read failed, so the probes run on the error path alone.
  */
-async function findMissing(executor: Reader, table: string, columns: string[]): Promise<string | null> {
+async function findMissing(executor: Reader, table: string, columns: readonly string[]): Promise<string | null> {
   if (!(await runs(executor, `SELECT 1 FROM "${table}" WHERE 1 = 0`))) return `The table "${table}" does not exist.`;
   for (const column of columns) {
     if (!(await runs(executor, `SELECT ${column} FROM "${table}" WHERE 1 = 0`))) {
@@ -87,7 +67,7 @@ async function findMissing(executor: Reader, table: string, columns: string[]): 
  * (the database is down) is rethrown as it is.
  */
 export async function checkSchema(executor: Reader, names: Required<StoreTables>): Promise<void> {
-  const tables: [string, string[]][] = [
+  const tables: [string, readonly string[]][] = [
     [names.files, FILE_COLUMNS],
     [names.usage, USAGE_COLUMNS],
   ];

@@ -38,8 +38,10 @@ function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMet
 /**
  * A store over SQL tables. Each method is one atomic unit (one statement on Postgres, one batch on SQLite). The schema
  * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. When the
- * executor can hold a transaction, the store has `transaction` too: Postgres's row lock wait is capped at 2 seconds in
- * it, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish.
+ * executor can hold a transaction, the store has `transaction` too: inside it a claim waits at most 2 seconds for
+ * Postgres's row lock, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish; the
+ * app's own statements through `tx` keep the database's lock timeout. Postgres must run at its default isolation, READ
+ * COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
  */
 export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlStoreOptions = {}): CloudropStore<TTx> {
   const { dialect } = executor;
