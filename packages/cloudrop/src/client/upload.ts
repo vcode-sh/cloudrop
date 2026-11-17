@@ -40,10 +40,20 @@ export interface UploadContext {
   /** Keeps one signed-in user's records apart from another's (ruling M3-U79). */
   namespace: string;
   /**
-   * The ids of the uploads whose ticket this client holds, from the ticket's arrival to letGo, or is resuming, from
-   * resume() to its refusal or its ticket's letGo: resumable() leaves them out (M4-F22).
+   * One claim per holder of an upload: a ticket, from its arrival to its unlock, and a resume, from resume() to its
+   * refusal or its upload's unlock. resumable() leaves out every upload with a claim (M4-F22).
    */
-  held: Set<string>;
+  held: Set<{ id: string }>;
+}
+
+/**
+ * Claims upload `id` until the returned function is called; again, it does nothing. Each holder releases only its own
+ * claim, so two holders of one upload, such as two resumes in flight, never release each other's (M4-F22).
+ */
+export function hold({ held }: UploadContext, id: string): () => void {
+  const claim = { id };
+  held.add(claim);
+  return () => held.delete(claim);
 }
 
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {

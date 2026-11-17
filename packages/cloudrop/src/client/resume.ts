@@ -15,16 +15,17 @@ import { lockUpload } from "./locks.ts";
 import type { UploadRecord } from "./records.ts";
 import { type Retried, retryFiles } from "./retry-file.ts";
 import type { FileOutcome, ResumableUpload, UploadJob } from "./types.ts";
-import { newUpload, type UploadContext } from "./upload.ts";
+import { hold, newUpload, type UploadContext } from "./upload.ts";
 
 /** The namespace's unfinished uploads, newest first, for `route` or every route, without a token, key or metadata. */
 export async function resumable(context: UploadContext, route?: string): Promise<Result<ResumableUpload[]>> {
   const listed = await context.records.list(context.namespace);
   if (listed.error) return listed;
+  // An upload this client holds is continued through its own job, and resume() would refuse it (M4-F22).
+  const held = new Set(Array.from(context.held, (claim) => claim.id));
   return ok(
     listed.data
-      // An upload this client holds is continued through its own job, and resume() would refuse it (M4-F22).
-      .filter((record) => (route === undefined || record.route === route) && !context.held.has(record.id))
+      .filter((record) => (route === undefined || record.route === route) && !held.has(record.id))
       // Exactly these fields (M3-U77).
       .map(({ id, route, name, size, type, lastModified, expiresAt }) => ({
         id,
@@ -59,14 +60,9 @@ async function check(
   id: string,
   file: File,
 ): Promise<CloudropError | { record: UploadRecord; unlock: () => void }> {
-  // Held from the call, before the first await, so resumable() no longer lists it; not by this check when another job
-  // of the client holds it, whose lock then refuses this one. A refusal lets it go, as the upload's unlock does (M4-F22).
-  const { held } = context;
-  const claimed = !held.has(id);
-  if (claimed) held.add(id);
-  const release = () => {
-    if (claimed) held.delete(id);
-  };
+  // Claimed from the call, before the first await, so resumable() no longer lists it. A refusal releases this claim
+  // only, as the upload's unlock does; another holder's claim, such as a running file's, stays (M4-F22).
+  const release = hold(context, id);
   const refuse = (refusal: CloudropError) => {
     release();
     return refusal;

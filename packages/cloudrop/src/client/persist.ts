@@ -17,19 +17,19 @@ import type { Entry } from "./entry.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import type { Job } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";
-import { newUpload, type Upload, type UploadContext } from "./upload.ts";
+import { hold, newUpload, type Upload, type UploadContext } from "./upload.ts";
 
 /** `entry`'s upload under the ticket that just arrived; a persisted one is locked at once, and saved once locked. */
 export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): Upload {
-  const { records, namespace, held } = context;
+  const { records, namespace } = context;
   // A single PUT cannot resume, and with persistence off nothing could resume it: neither is saved nor locked. The
   // upload does not wait for the lock: no other holder can know an id /upload just made (ruling M3-U81).
   let unlock = () => {};
   if (ticket.kind === "multipart" && records.enabled) {
     const lock = lockUpload(ticket.id);
-    held.add(ticket.id);
+    const release = hold(context, ticket.id);
     unlock = () => {
-      held.delete(ticket.id);
+      release();
       lock.release();
     };
     const { file } = entry;

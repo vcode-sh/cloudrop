@@ -1,8 +1,9 @@
 // Contract: resume spec §2, §3.6 and §3.7 with rulings M3-U77 and M3-U78 and the plan audit's M10, through the real
 // client. resumable() lists the namespace's unexpired records newest first, as exactly M3-U77's fields, by route when
-// asked, and deletes the expired ones; it leaves out every upload this client holds: a running or failed file's, and one
-// being resumed, until the page lets it go (M4-F22). forget() deletes the namespace's records or, with { all: true }, every one,
-// refuses any other argument, and leaves a running upload running. A failed store is STORAGE_ERROR; with persistence
+// asked, and deletes the expired ones; it leaves out every upload this client holds: a running or failed file's, and
+// one being resumed, until the page lets it go, each claim released on its own (M4-F22). forget() deletes the
+// namespace's records or, with { all: true }, every one, refuses any other argument, and leaves a running upload
+// running. A failed store is STORAGE_ERROR; with persistence
 // off, no indexedDB or no Web Locks (M3-U88) nothing is kept and nothing can be resumed.
 // Oracle: what the fake IndexedDB holds, the requests the fixture saw, literal records and literal messages.
 
@@ -136,6 +137,35 @@ describe("resumable() and the uploads this client holds (M4-F22)", () => {
     await setup.drained();
 
     expect(ids((await setup.client.resumable()).data)).toEqual([setup.issued[0]?.id]);
+  });
+
+  it("hides an upload resumed right after a resume of it that is refused", async () => {
+    const probe = gate(nth("POST /complete", 1));
+    const setup = await reloaded(gate(partThree), probe.fault);
+    const refused = setup.client.resume(setup.upload, smallFile("other.txt"));
+    setup.client.resume(setup.upload, fourParts());
+    const code = (await refused.done).error?.code;
+    await probe.reached;
+
+    expect({ code, whileRunning: ids((await setup.client.resumable()).data) }).toEqual({
+      code: "INVALID_INPUT",
+      whileRunning: [],
+    });
+  });
+
+  it("hides an upload resumed again at once after a cancelled resume of it", async () => {
+    const probe = gate(nth("POST /complete", 1));
+    const setup = await reloaded(gate(partThree), probe.fault);
+    const cancelled = setup.client.resume(setup.upload, fourParts());
+    cancelled.abort();
+    setup.client.resume(setup.upload, fourParts());
+    const code = (await cancelled.done).error?.code;
+    await probe.reached;
+
+    expect({ code, whileRunning: ids((await setup.client.resumable()).data) }).toEqual({
+      code: "ABORTED",
+      whileRunning: [],
+    });
   });
 
   it("hides an upload while its resume runs, and lists it again after a refused or cancelled resume", async () => {
