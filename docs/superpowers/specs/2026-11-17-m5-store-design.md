@@ -1,6 +1,6 @@
 # M5: the database store
 
-Date: 2026-11-17. Status: approved by the owner on 2026-11-17 ("build the store interface before the M5 plugins"),
+Date: 2026-11-17. Status: done (merged to `main` 2026-11-17); approved by the owner on 2026-11-17 ("build the store interface before the M5 plugins"),
 under the standing instruction to follow the best recommendations without check-ins. Decisions: series `M5-T` in
 `docs/decisions/m5-store.md`. This milestone takes the number M5; the plugins move to M6 and docs/beta/1.0 to M7
 (spec §14 is amended in the same change).
