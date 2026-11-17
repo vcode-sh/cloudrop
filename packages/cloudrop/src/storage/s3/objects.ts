@@ -15,7 +15,7 @@ import {
   rangeProblem,
   sizeProblem,
 } from "../validate.ts";
-import { stripQuotes, xmlBlocks, xmlText } from "../xml.ts";
+import { stripQuotes, xmlBlocks, xmlText, xmlValue } from "../xml.ts";
 import { objectUrl, type S3Context } from "./context.ts";
 import { META_PREFIX, orEmpty, writeHeaders } from "./options.ts";
 import { allOk, etagIn, incompleteResponse, validDate, wholeNumber } from "./responses.ts";
@@ -59,9 +59,9 @@ function toPayload(body: Uint8Array<ArrayBuffer> | ArrayBuffer | string | Blob):
 function readListedObject(block: string): Result<ListedObject> {
   const key = xmlText(block, "Key");
   if (!key) return fail(incompleteResponse("object key"));
-  const size = wholeNumber(xmlText(block, "Size"));
+  const size = wholeNumber(xmlValue(block, "Size"));
   if (size === undefined) return fail(incompleteResponse("valid object size"));
-  const uploadedAt = validDate(xmlText(block, "LastModified"));
+  const uploadedAt = validDate(xmlValue(block, "LastModified"));
   if (uploadedAt === undefined) return fail(incompleteResponse("valid last-modified date"));
   return ok({ key, size, etag: etagIn(block), uploadedAt });
 }
@@ -162,7 +162,7 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
       const listed = allOk(xmlBlocks(result.data, "Contents").map(readListedObject));
       if (listed.error) return listed;
       const items = listed.data;
-      if (xmlText(result.data, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
+      if (xmlValue(result.data, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
       // Ending the listing here would silently skip the rest of the prefix.
       const nextCursor = xmlText(result.data, "NextContinuationToken");
       return nextCursor ? ok({ items, nextCursor }) : fail(incompleteResponse("continuation token"));

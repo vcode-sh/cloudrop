@@ -1,5 +1,5 @@
 import { CloudropError, type CloudropErrorCode } from "../errors.ts";
-import { xmlText } from "./xml.ts";
+import { xmlValue } from "./xml.ts";
 
 const INVALID_PART_CODES = new Set(["InvalidPart", "InvalidPartOrder", "EntityTooSmall"]);
 
@@ -79,7 +79,7 @@ const RULES: readonly Rule[] = [
  * answered a same-key write burst with HTTP 429 and S3 code "ServiceUnavailable" (docs/research/r2-spike-findings.md, Q9).
  */
 export function storageError(status: number, body: string): CloudropError {
-  const rawCode = xmlText(body, "Code");
+  const rawCode = xmlValue(body, "Code");
   // The code comes from the response body and goes to logs, so accept only what an S3 code looks like.
   const storageCode = rawCode && /^[A-Za-z0-9]{1,64}$/.test(rawCode) ? rawCode : undefined;
   const rule = RULES.find((candidate) => candidate.matches(status, storageCode));

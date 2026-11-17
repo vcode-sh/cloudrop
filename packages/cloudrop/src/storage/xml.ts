@@ -23,15 +23,23 @@ export function xmlBlocks(xml: string, tag: string): string[] {
   return Array.from(xml.matchAll(pattern), (match) => match[1] ?? "");
 }
 
-/** Decoded text of the first `<tag>` element, or undefined when absent. */
+/**
+ * Decoded text of the first `<tag>` element exactly as sent, or undefined when absent. For keys, upload IDs, ETags,
+ * tokens and prefixes: whitespace at their edges is part of the value ("users/42/a " is its own key).
+ */
 export function xmlText(xml: string, tag: string): string | undefined {
   const block = xmlBlocks(xml, tag)[0];
-  return block === undefined ? undefined : decodeXml(block.trim());
+  return block === undefined ? undefined : decodeXml(block);
 }
 
-/** Decoded text of every `<tag>` element, in document order. */
-export function xmlTexts(xml: string, tag: string): string[] {
-  return xmlBlocks(xml, tag).map((block) => decodeXml(block.trim()));
+/** Like xmlText, trimmed: for numbers, dates, booleans and codes, whose edge whitespace means nothing. */
+export function xmlValue(xml: string, tag: string): string | undefined {
+  return xmlText(xml, tag)?.trim();
+}
+
+/** Trimmed text of every `<tag>` element, in document order: for lists of origins, methods and header names. */
+export function xmlValues(xml: string, tag: string): string[] {
+  return xmlBlocks(xml, tag).map((block) => decodeXml(block).trim());
 }
 
 export function stripQuotes(value: string): string {

@@ -24,4 +24,18 @@ export function listCases(suite: ContractSuite): void {
     expect(removed.data?.deleted.toSorted()).toEqual(everything.toSorted());
     expect((await driver.list(key("list/"))).data?.items).toEqual([]);
   });
+
+  // A route's key() can produce such keys and keyProblem accepts them; a listing that trimmed them would make every
+  // later delete miss, so deletePrefix and the suite's own teardown could never empty the prefix.
+  it("lists and deletes keys with edge whitespace exactly as stored", async () => {
+    const { driver } = suite;
+    const keys = ["edge/ lead", "edge/trail ", "edge/nbsp\u00a0"].map(key);
+    const stored = await Promise.all(keys.map((k) => driver.put(k, "x")));
+    expect(stored.map((result) => result.error)).toEqual([null, null, null]);
+    const listed = await driver.list(key("edge/"));
+    expect(listed.data?.items.map((item) => item.key).toSorted()).toEqual(keys.toSorted());
+    const removed = await driver.deleteMany(keys);
+    expect(removed.data?.failed).toEqual([]);
+    expect((await driver.list(key("edge/"))).data?.items).toEqual([]);
+  });
 }
