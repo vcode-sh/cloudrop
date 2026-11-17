@@ -12,8 +12,11 @@ export interface RequestRecord {
   subject: string;
   /** For a /sign, the URL it asks for: "the PUT" or "part n"; null for every other request. */
   signedFor: string | null;
-  /** An HTTP status; null while the request is in flight. */
-  status: number | "network error" | "cancelled" | null;
+  /**
+   * An HTTP status; "cancelled" when the client stopped the request because the person paused or cancelled, or the page
+   * went offline; "stalled" when it gave up on its own, after 30 s without progress (M3-U27, M3-U47); null in flight.
+   */
+  status: number | "network error" | "cancelled" | "stalled" | null;
   startMs: number;
   endMs: number | null;
   /** The size of the request body; 0 when the lab answered in the bucket's place, which sends nothing. */

@@ -52,11 +52,11 @@ function repeatLabel(record: RequestRecord, before: RequestRecord | undefined): 
 const isResume = (records: readonly RequestRecord[]): boolean => records[0]?.kind === "/complete";
 
 /**
- * A request its file already sent is a retry, or, when the earlier one was cancelled by a pause, resumed. A /sign
- * renews a URL, unless the file's last /sign for the same URL failed: then it is that renewal's retry. This example's
- * /upload ticket signs every part (the route's 100 MB limit, binary as in cloudrop, is 13 parts of 8 MiB; a ticket
- * signs up to 20), so the client asks /sign only to replace a URL, or, in a resumed upload, which has no URL, for the
- * parts its first /complete named missing. That /complete is a question, not an attempt the next one retries.
+ * A request its file already sent is a retry (after a stall too), or, when the earlier one was cancelled by a pause,
+ * resumed. A /sign renews a URL, unless the file's last /sign for the same URL failed: then it is that renewal's
+ * retry. This example's /upload ticket signs every part (the route's 100 MB limit, binary as in cloudrop, is 13
+ * parts of 8 MiB; a ticket signs up to 20), so the client asks /sign only to replace a URL, or, in a resumed upload,
+ * which has no URL, for the parts its first /complete named missing. That /complete is a question, not an attempt the next one retries.
  */
 export function annotate(records: readonly RequestRecord[]): LogRow[] {
   const probe = isResume(records) ? records[0] : undefined;

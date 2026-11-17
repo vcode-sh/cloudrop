@@ -161,7 +161,10 @@ rule it already has):
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
   `/upload` for a new ticket, a `412` PUT whose object was already stored, a resume's first `/complete` and the `/sign`
-  for its missing parts, and injected faults, and a bar on a shared timeline. The log keeps only the request's kind,
+  for its missing parts, and injected faults, and a bar on a shared timeline. A request the client stopped shows
+  `cancelled` when you paused or cancelled, or the browser went offline, and `stalled` when the client gave up on it
+  by itself after 30 s without progress; the client's own retry of a stalled PUT is a `retry`, of a cancelled one
+  `resumed`. The log keeps only the request's kind,
   the bucket host, the part number, status, times and body size: never a URL, header or token, so no presigned URL
   reaches the page. Requests are recorded only while a run or a retry is going: an `/abort` the client has to send again
   after that is not in the table.

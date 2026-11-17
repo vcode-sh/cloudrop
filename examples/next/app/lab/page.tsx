@@ -38,6 +38,9 @@ export default function LabPage() {
   // The wrappers read the faults while an upload runs, between renders: the ref always holds the latest.
   const faultsNow = useRef<Faults>(NO_FAULTS);
   const cancel = useRef<AbortController | null>(null);
+  // True from a person's Pause or Cancel until the next Resume, run or retry: the client's aborts meanwhile are theirs.
+  // A file's own buttons count too, so one file paused while another stalls shows that stall as cancelled.
+  const stopAsked = useRef(false);
   // The job's log and client, kept for its retries; `wrap` is false when the client sends through the lab's fetch
   // option.
   const recorder = useRef<{ journal: Journal; wrap: boolean; client: LabClient } | null>(null);
@@ -59,6 +62,14 @@ export default function LabPage() {
       return true;
     },
     on: (fault) => faultsNow.current[fault],
+    // Offline, the client pauses its files on its own (M3-U28).
+    stopAsked: () => stopAsked.current || !navigator.onLine,
+  };
+
+  /** Marks what the person asked for before the client acts on it, so the log names the aborts that follow. */
+  const asked = (stop: boolean, act: () => void) => () => {
+    stopAsked.current = stop;
+    act();
   };
 
   /** Shows `run` as going, records the requests of `work` in the job's log, then shows the result it settles with. */
@@ -69,6 +80,7 @@ export default function LabPage() {
     // PUTs through XMLHttpRequest, which reports bytes as they leave. With a fetch option the client sends everything
     // through it, and a PUT's bytes count only once the bucket answers (spec §4.1).
     const uninstall = wrap ? [installLabFetch(journal, faultSwitch), installLabXhr(journal, faultSwitch)] : [];
+    stopAsked.current = false;
     setRun(run);
     try {
       const result = await work();
@@ -149,13 +161,13 @@ export default function LabPage() {
           <button type="button" disabled={files.length === 0 || running} onClick={() => upload(files)}>
             Upload
           </button>
-          <button type="button" disabled={!running} onClick={() => job?.pause()}>
+          <button type="button" disabled={!running} onClick={asked(true, () => job?.pause())}>
             Pause
           </button>
-          <button type="button" disabled={!running} onClick={() => job?.resume()}>
+          <button type="button" disabled={!running} onClick={asked(false, () => job?.resume())}>
             Resume
           </button>
-          <button type="button" disabled={!running} onClick={() => cancel.current?.abort()}>
+          <button type="button" disabled={!running} onClick={asked(true, () => cancel.current?.abort())}>
             Cancel
           </button>
         </div>
@@ -165,7 +177,7 @@ export default function LabPage() {
               <dt>PUTs in flight</dt>
               <dd>{putsInFlight}</dd>
             </dl>
-            <FileRows job={job} retry={retry} />
+            <FileRows job={job} retry={retry} asked={asked} />
           </>
         )}
         <RequestTable rows={rows} />

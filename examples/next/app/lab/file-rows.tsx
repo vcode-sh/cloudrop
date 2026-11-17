@@ -26,7 +26,17 @@ export interface Retry<R> {
   file(handle: FileHandle<R>): void;
 }
 
-function FileRow<R>({ file, handle, retry }: { file: FileSnapshot<R>; handle: FileHandle<R>; retry: Retry<R> | null }) {
+/** Wraps a button's action with what it asks the client: to stop (true) or to go on (false). */
+export type Asked = (stop: boolean, act: () => void) => () => void;
+
+interface RowProps<R> {
+  file: FileSnapshot<R>;
+  handle: FileHandle<R>;
+  retry: Retry<R> | null;
+  asked: Asked;
+}
+
+function FileRow<R>({ file, handle, retry, asked }: RowProps<R>) {
   const { name, status } = file;
   const settled = status === "done" || status === "failed" || status === "aborted";
   return (
@@ -47,14 +57,19 @@ function FileRow<R>({ file, handle, retry }: { file: FileSnapshot<R>; handle: Fi
           type="button"
           aria-label={`Pause ${name}`}
           disabled={status !== "queued" && status !== "uploading"}
-          onClick={handle.pause}
+          onClick={asked(true, handle.pause)}
         >
           Pause
         </button>
-        <button type="button" aria-label={`Resume ${name}`} disabled={status !== "paused"} onClick={handle.resume}>
+        <button
+          type="button"
+          aria-label={`Resume ${name}`}
+          disabled={status !== "paused"}
+          onClick={asked(false, handle.resume)}
+        >
           Resume
         </button>
-        <button type="button" aria-label={`Cancel ${name}`} disabled={settled} onClick={handle.abort}>
+        <button type="button" aria-label={`Cancel ${name}`} disabled={settled} onClick={asked(true, handle.abort)}>
           Cancel
         </button>
         <button
@@ -71,7 +86,7 @@ function FileRow<R>({ file, handle, retry }: { file: FileSnapshot<R>; handle: Fi
 }
 
 /** The job's snapshot: a row per file in the order they were passed, and the totals with the job's Retry. */
-export function FileRows<R>({ job, retry }: { job: UploadJob<R>; retry: Retry<R> | null }) {
+export function FileRows<R>({ job, retry, asked }: { job: UploadJob<R>; retry: Retry<R> | null; asked: Asked }) {
   const { files, totals } = useSyncExternalStore(job.subscribe, job.getSnapshot);
   return (
     <>
@@ -91,7 +106,7 @@ export function FileRows<R>({ job, retry }: { job: UploadJob<R>; retry: Retry<R>
         <tbody>
           {files.map((file, index) => (
             // job.files and snapshot.files are both in the order the files were passed (ruling M3-U1).
-            <FileRow key={file.id} file={file} handle={job.files[index] as FileHandle<R>} retry={retry} />
+            <FileRow key={file.id} file={file} handle={job.files[index] as FileHandle<R>} retry={retry} asked={asked} />
           ))}
         </tbody>
         <tfoot>

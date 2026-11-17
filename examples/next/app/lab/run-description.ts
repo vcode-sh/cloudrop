@@ -1,6 +1,8 @@
 // The sentence under the lab's summary that tells a run, built from the request log.
 import { type LogRow, type Run, requestFailed, type Summary, seconds, summarize, throughputText } from "./run-report";
 
+const REASONS: Record<string, string> = { "network error": "a network error", stalled: "a stall" };
+
 const times = (count: number): string => (count === 1 ? "once" : count === 2 ? "twice" : `${count} times`);
 
 function answeredText(started: number, answered: number): string {
@@ -31,7 +33,7 @@ function retryClauses(rows: readonly LogRow[]): string[] {
       attempts
         .map(({ record }) => record)
         .filter((record) => requestFailed(record) && record.status !== "cancelled")
-        .map(({ status }) => (status === "network error" ? "a network error" : `HTTP ${status}`)),
+        .map(({ status }) => REASONS[String(status)] ?? `HTTP ${status}`),
     );
     const { kind } = first.record;
     const subject = kind === "PUT single" ? "the PUT" : kind.replace("PUT ", "");

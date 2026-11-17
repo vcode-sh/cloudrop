@@ -17,7 +17,16 @@ export interface FaultSwitch {
   take(fault: OneShotFault): boolean;
   /** True while `fault` is ticked. */
   on(fault: HeldFault): boolean;
+  /** True from a person's Pause or Cancel until the next Resume or run, and while the page is offline. */
+  stopAsked(): boolean;
 }
+
+/**
+ * What a request the client aborted is called. The client aborts for a pause, a cancel or going offline, and on its own
+ * for a stall; it does not say which, so the lab tells them apart by whether anyone asked it to stop.
+ */
+export const abortedAs = (faults: FaultSwitch): "cancelled" | "stalled" =>
+  faults.stopAsked() ? "cancelled" : "stalled";
 
 /** What a bucket sends for a request it will never accept: an S3 error body, readable through its CORS rule. */
 export const REFUSAL = { status: 400, body: "<Error><Code>InvalidArgument</Code></Error>" } as const;
@@ -134,7 +143,7 @@ export function createLabFetch(journal: Journal, faults: FaultSwitch, send: Clie
       journal.end(record, response.status);
       return response;
     } catch (error) {
-      journal.end(record, init.signal?.aborted ? "cancelled" : "network error");
+      journal.end(record, init.signal?.aborted ? abortedAs(faults) : "network error");
       throw error;
     }
   };

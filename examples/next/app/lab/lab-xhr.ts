@@ -2,7 +2,7 @@
 // injects the bucket faults ticked on the page. cloudrop/client reads window.XMLHttpRequest on every PUT, so no library
 // option is needed (spec §6).
 import type { Journal, RequestRecord } from "./journal";
-import { bucketFault, type FaultSwitch, REFUSAL } from "./lab-fetch";
+import { abortedAs, bucketFault, type FaultSwitch, REFUSAL } from "./lab-fetch";
 
 /** Makes window.XMLHttpRequest record and fault bucket PUTs, until the returned function puts the browser's back. */
 export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void {
@@ -59,7 +59,7 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
         if (this.readyState === RealXhr.DONE && this.status !== 0) journal.end(record, this.status);
       });
       this.addEventListener("error", () => journal.end(record, "network error"));
-      this.addEventListener("abort", () => journal.end(record, "cancelled"));
+      this.addEventListener("abort", () => journal.end(record, abortedAs(faults)));
       const delayMs = faults.delayMs();
       if (delayMs === 0) return this.#sendOrFail(record, body);
       record.injected.push(`delayed ${delayMs} ms`);

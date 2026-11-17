@@ -95,16 +95,19 @@ test("a black-holed part stalls after 30 s without progress, is renewed and sent
     { outcome: "aborted", bytesIn: 8 * MIB },
     { outcome: 200, bytesIn: 8 * MIB },
   ]);
+  // Nobody paused or cancelled, so the lab shows the client's own abort as a stall and the next attempt as its retry.
   expect(await requestRows(page)).toEqual([
     ["/upload", "200", ""],
-    // The lab hears the watchdog's abort() as it hears a pause's: "cancelled", and the next attempt "resumed".
-    ["PUT part 1", "cancelled", ""],
+    ["PUT part 1", "stalled", ""],
     ["PUT part 2", "200", ""],
     ["PUT part 3", "200", ""],
     ["/sign", "200", "renewal of part 1"],
-    ["PUT part 1", "200", "resumed"],
+    ["PUT part 1", "200", "retry"],
     ["/complete", "200", ""],
   ]);
+  await expect(page.getByRole("status")).toHaveText(
+    /^Started 4 PUTs \(at most 3 at a time\), 3 got an answer; part 1 was retried once after a stall; renewed one URL through \/sign; completed in [\d.]+ m?s at [\d.]+ MiB\/s\.$/,
+  );
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
   await expectStoredAsResult(page, file.path);
 });
