@@ -166,12 +166,14 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
 
   /**
    * Whether `value`, stored under `id`, is a record this client can use. One that expired, has another shape, or a
-   * part count its size and part size do not give (as answers.ts checks a live ticket, audit M2), is deleted. NaN, from
-   * an expiresAt that is not a date, compares false: such a record counts as expired.
+   * part count its size and part size do not give (as answers.ts checks a live ticket, audit M2) or above the 10,000
+   * parts S3 and R2 allow (Infinity from a part size of 0 included: final review M1), is deleted. NaN, from an
+   * expiresAt that is not a date, compares false: such a record counts as expired.
    */
   const usable = (store: IDBObjectStore, id: IDBValidKey, value: unknown): value is UploadRecord => {
     if (
       isRecord(value) &&
+      value.partCount <= 10_000 &&
       value.partCount === countParts(value.size, value.partSize) &&
       Date.parse(value.expiresAt) - now() >= EXPIRY_MARGIN_MS
     ) {

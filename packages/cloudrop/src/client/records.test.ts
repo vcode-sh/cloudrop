@@ -214,11 +214,24 @@ describe("records of another shape (audit M2: another library version or script 
     { name: "no token", value: { ...SAVED, id: "u-2", token: undefined } },
     // 50 MiB in 10 MiB parts is 5 parts, as answers.ts checks a live ticket.
     { name: "a part count its size and part size do not give", value: { ...SAVED, id: "u-2", partCount: 4 } },
+    // Math.ceil(size / 0) is Infinity, so the count matches, and resume() would never end its loop (final review M1).
+    { name: "a part size of 0 and Infinity parts", value: { ...SAVED, id: "u-2", partSize: 0, partCount: Infinity } },
+    // 10,000 parts of 5 MiB and 1 byte more: one part over the limit of S3 and R2.
+    {
+      name: "10,001 parts",
+      value: { ...SAVED, id: "u-2", size: 52_428_800_001, partSize: 5_242_880, partCount: 10_001 },
+    },
   ])("are never listed and are deleted when seen: $name", async ({ value }) => {
     await putRaw(SAVED);
     await putRaw(value);
     expect(await storeAt().list("user-1")).toEqual({ data: [SAVED], error: null });
     expect(Object.keys(fake.stored())).toEqual(["u-1"]);
+  });
+
+  it("keeps a record of exactly 10,000 parts", async () => {
+    const largest = { ...SAVED, size: 52_428_800_000, partSize: 5_242_880, partCount: 10_000 };
+    await putRaw(largest);
+    expect(await storeAt().list("user-1")).toEqual({ data: [largest], error: null });
   });
 });
 

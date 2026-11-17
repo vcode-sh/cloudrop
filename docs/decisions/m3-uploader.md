@@ -1283,7 +1283,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   would make `resume()` throw.
 - **If wrong:** a record of a newer shape written into version 1 of the database is deleted; a newer version uses a
   new database version.
-- **Status:** in force (`2fe56b7`; the part-count check `2075eac`).
+- **Status:** in force (`2fe56b7`; the part-count check `2075eac`). The final review's M1 found that the part-count
+  check let `{ partSize: 0, partCount: Infinity }` through (`Math.ceil(n / 0)` is `Infinity`, which structured clone
+  keeps), and `resume()` of it never ended its loop; a record of more than 10,000 parts, the limit of S3 and R2, is now
+  refused and deleted too.
 - **Visible in:** `client/persist.ts` (`uploadOf`), `client/records.ts` (`save`, `isRecord`, `usable`).
 
 ### M3-U81: a ticket's lock is asked for without waiting for the answer
