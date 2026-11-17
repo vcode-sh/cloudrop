@@ -1,7 +1,8 @@
 // The store's tables as plain DDL for the database lane (M5 spec §3), and the shape every test database shares.
-// Index and key names follow Prisma's defaults (`<table>_<columns>_idx`, `<table>_pkey`), so a Prisma user's
-// migration of the same models should find nothing to change (verified in task E). The CHECK constraints are
-// Postgres-only, as §3 specifies.
+// Index and key names follow Prisma's defaults (`<table>_<columns>_idx`, `<table>_pkey`). On Postgres a Prisma
+// migration of the shipped models finds nothing to change (prisma.db.integration.test.ts runs `prisma migrate diff`);
+// on SQLite it would rebuild both tables only because Prisma declares its BigInt columns `BIGINT` where this DDL says
+// `INTEGER`, the same storage (M5-T56). The CHECK constraints are Postgres-only, as §3 specifies.
 
 export type Dialect = "postgres" | "sqlite";
 

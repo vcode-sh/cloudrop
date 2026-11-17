@@ -1,14 +1,6 @@
-// The test models of the store's tables on Postgres (spec §3), mapped to the shipped column names. scripts/test-db.sh
-// generates the client into packages/cloudrop/.prisma-client/postgres (git-ignored); cloudrop's store uses only raw SQL.
-
-generator client {
-  provider = "prisma-client"
-  output   = "../../../../.prisma-client/postgres"
-}
-
-datasource db {
-  provider = "postgresql"
-}
+// cloudrop's tables for prismaStore() on Postgres (spec M5 §3). Copy both models into your schema and create them with
+// a migration: the model and field names are yours to change, the table and column names are fixed. The database tests
+// generate their Prisma client from this file, so it is checked against the store on every run.
 
 model CloudropFile {
   id          String    @id

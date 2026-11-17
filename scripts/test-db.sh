@@ -21,7 +21,7 @@ NAME="cloudrop-test-postgres-$$"
 
 cd packages/cloudrop
 for schema in postgres sqlite; do
-  bunx prisma generate --schema "src/testing/db/prisma/${schema}.prisma" >/dev/null
+  bunx prisma generate --schema "src/testing/db/prisma/${schema}" >/dev/null
 done
 echo "Prisma test clients generated in packages/cloudrop/.prisma-client"
 
