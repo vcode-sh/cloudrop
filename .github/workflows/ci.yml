@@ -157,7 +157,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:chaos:soak --silent=false
 
-  # The Next.js example uploads from headless Chromium to RustFS. Only the headless shell is installed (--only-shell).
+  # Headless Chromium uploads to RustFS: the Next.js example stateless and with its store, then the Vite example with
+  # the Hono API on its own Postgres. Only the headless shell is installed (--only-shell).
   browser:
     needs: check
     runs-on: ubuntu-latest

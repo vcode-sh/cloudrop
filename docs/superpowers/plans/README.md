@@ -34,21 +34,24 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M5 (no plan file: tasks A–F, C0 in the design's §9), design [`2026-11-17-m5-store-design.md`](../specs/2026-11-17-m5-store-design.md) | Done, merged to `main` 2026-11-17 | `createCloudrop({ store, quota, completionLeaseMs })`: a row before signing, `onComplete` once (exactly once for writes through `tx` on Postgres), hard quota, `QUOTA_EXCEEDED`, revocation, `/abort` that never deletes a completed file, `api.file/usage/revokeUploads/deleteFile/reconcile/sweep`; `cloudrop/adapters/sql` (node-postgres, postgres.js, `node:sqlite`, D1), `/drizzle` (drizzle-orm `>=0.45.0 <1 \|\| >=1.0.0-rc.5 <2`), `/prisma` (Prisma 7); `test:db`, D1 in `test:wrangler`, store rows in `test:chaos` and the browser lanes, the example's opt-in SQLite store, the [store guide](../../guide/store.md); decisions `M5-T16`..`M5-T98` |
 | M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
 | Post-M5 follow-ups (no plan file: tasks I and S, then M4-F25) | Done, merged to `main` 2026-11-17 | `POST /upload` takes an optional `idempotencyKey`. The client sends one per ask, and with a store a retry supersedes the lost attempt's pending rows of the same owner (owner-less rows are never superseded, `M5-T105`): `reserve` gains `requestKey`, and `cloudrop_files` gains `request_key` and an index on `(route, request_key)`. `tables.schema` puts both tables in a Postgres schema for every adapter (Drizzle tables in the schema, Prisma `@@schema`) and is refused on SQLite. The build drops JSDoc from the shipped `.js` and keeps it in the `.d.ts`. Decisions `M5-T100`..`M5-T105`, `M5-T120`..`M5-T124`, `M4-F25` |
-| M4b (no plan file: tasks A, B and C, then an integration round) | Done, `feat/m4b` | The Next example's home page as an upload UI on the headless hooks with shadcn on Base UI and Tabler icons, and the React guide's "Build your upload UI"; `examples/hono` (Bun, Hono, better-auth, a Drizzle store on Postgres, oRPC, a sweep worker) and `examples/vite-react` (the web app on another origin), with the [Hono guide](../../guide/hono.md) and a third browser pass; `client.discard(upload)` and `useResumable().discard/forget`, `/abort { token, keep: true }`; Postgres time columns at `timestamptz(3)`; the workspace on drizzle-orm 1.0.0-rc.5; a release workflow that publishes to npm through trusted publishing ([`docs/releasing.md`](../../releasing.md)) and the package's `CHANGELOG.md`. Decisions `M4-E1`..`M4-E14`, `M4-E20`..`M4-E28`, `M3-U93`, `M3-U94`, `M4-B16`, `M5-T130` |
+| M4b (no plan file: tasks A, B, C and D, an integration round and a final fix round) | Done, merged to `main` 2026-11-18 | The Next example's home page as an upload UI on the headless hooks with shadcn on Base UI and Tabler icons, and the React guide's "Build your upload UI"; `examples/hono` (Bun, Hono, better-auth, a Drizzle store on Postgres, oRPC, a sweep worker) and `examples/vite-react` (the web app on another origin), with the [Hono guide](../../guide/hono.md) and a third browser pass; `client.discard(upload)` and `useResumable().discard/forget`, `/abort { token, keep: true }`; Postgres time columns at `timestamptz(3)`; the workspace on drizzle-orm 1.0.0-rc.5; a release workflow that publishes to npm through trusted publishing ([`docs/releasing.md`](../../releasing.md)) and the package's `CHANGELOG.md`. Decisions `M4-E1`..`M4-E14`, `M4-E20`..`M4-E30`, `M3-U93`..`M3-U95`, `M4-B16`, `M4-B17`, `M5-T130` |
 
-## State after M4b (2026-11-17)
+## State of `main` after M4b (2026-11-18)
 
-- **Gates:** measured on the merged tree: `bun run verify` 1655 passed / 3 skipped; `test:browser` 40, 3 (store pass) and
-  8 (the Vite and Hono pass); `test:db` 594 / 12 skipped; `test:chaos` 23/23; `scripts/check-drizzle-versions.sh`
-  type-checks the adapter against drizzle-orm 0.45.4 (the CI job `drizzle-0-45`) while the workspace runs
-  1.0.0-rc.5. From the tasks' last runs on their branches: `test:wrangler` 104 / 23 skipped, `test:rustfs` 24 / 3
-  skipped, `test:live` 32/32, `test:browser:live` 27 + 3. The skips are declared gaps.
+- **Gates:** measured on the branch after its final fix round: `bun run verify` 1655 passed / 3 skipped; `test:browser`
+  40, 3 (store pass) and 9 (the Vite and Hono pass); `test:chaos` 23/23; `test:live` 32/32. Measured on the merged
+  tree before that round (`408455b`), which changed no storage or store code: `test:db` 594 / 12 skipped,
+  `test:wrangler` 104 / 23 skipped, `test:rustfs` 24 / 3 skipped, `test:browser:live` 27 + 3.
+  `scripts/check-drizzle-versions.sh` type-checks the adapter against drizzle-orm 0.45.4 (the CI job `drizzle-0-45`)
+  while the workspace runs 1.0.0-rc.5. The skips are declared gaps.
 - **Summed gzip:** `cloudrop` 37.09 of 50 kB, `cloudrop/next` 0.78, `cloudrop/node` 2.26, `cloudrop/adapters/sql`
   10.84, `/drizzle` 12.65, `/prisma` 10.41 kB.
 - **Bundled:** `cloudrop` 27.37 of 30 kB, `cloudrop/client` 11.32, `cloudrop/react` 2.02 kB.
 - **Since the post-M5 follow-ups:** an unfinished upload can be discarded one at a time (`client.discard(upload)`,
   `useResumable().discard`), and `/abort` takes `keep`; three examples, of which two are a monorepo-shaped Hono API and
-  a Vite web app on another origin; Postgres time columns at millisecond precision; a release workflow, not yet run.
+  a Vite web app on another origin, which keeps each user's unfinished uploads in that user's namespace; Postgres time
+  columns at millisecond precision; a release workflow, not yet run. Security reports go by email (`SECURITY.md`);
+  there is no Dependabot.
 
 ## State of `main` after the post-M5 follow-ups (2026-11-17)
 
