@@ -6,6 +6,7 @@ import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import type { CloudropStore, FileRecord, OwnerUsage } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
+import { MAX_OWNER_LENGTH } from "./store-upload.ts";
 import { removeLeftovers, type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 
 export interface StoreFileApi {
@@ -25,10 +26,13 @@ export interface StoreFileApi {
 
 const OWNERS_PAGE = 100;
 
-const isId = (value: unknown): value is string => typeof value === "string" && value !== "" && value.length <= 255;
+/** An owner or a file id: 1 to 255 characters. */
+const isOwnerOrId = (value: unknown): value is string =>
+  typeof value === "string" && value !== "" && value.length <= MAX_OWNER_LENGTH;
 
 const badId = () => fail(invalidInput("Pass the file id, as returned with the uploaded file."));
-const badOwner = () => fail(invalidInput("Pass the owner, a string of 1 to 255 characters, as owner() returned it."));
+const badOwner = () =>
+  fail(invalidInput(`Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters, as owner() returned it.`));
 
 const notCompleted = (): CloudropError =>
   new CloudropError(
@@ -64,7 +68,7 @@ async function reconcile(
   if (!isPlainObject(options)) return fail(invalidInput("reconcile takes { owner } or nothing."));
   const repair = (owner: string) => storeCall(config.logger, `reconcile owner ${owner}`, () => store.reconcile(owner));
   if (options.owner !== undefined) {
-    if (!isId(options.owner)) return badOwner();
+    if (!isOwnerOrId(options.owner)) return badOwner();
     const repaired = await repair(options.owner);
     return repaired.error ? repaired : ok({ checked: 1, repaired: Number(repaired.data) });
   }
@@ -103,22 +107,23 @@ export function storeApi(
   return {
     file: (id) =>
       withStore("file", async (store) =>
-        isId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
+        isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
       ),
     usage: (owner) =>
       withStore("usage", async (store) =>
-        isId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
+        isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
       ),
     revokeUploads: (options) =>
       withStore("revokeUploads", async (store) => {
         const owner = isPlainObject(options) ? options.owner : undefined;
-        if (!isId(owner)) return badOwner();
+        if (!isOwnerOrId(owner)) return badOwner();
         const revoked = await storeCall(logger, `revoke the uploads of ${owner}`, () =>
           store.revoke(owner, new Date()),
         );
         return revoked.error ? revoked : ok({ revoked: revoked.data });
       }),
-    deleteFile: (id) => withStore("deleteFile", async (store) => (isId(id) ? deleteFile(config, store, id) : badId())),
+    deleteFile: (id) =>
+      withStore("deleteFile", async (store) => (isOwnerOrId(id) ? deleteFile(config, store, id) : badId())),
     reconcile: (options) => withStore("reconcile", (store) => reconcile(config, store, options)),
     sweep: (options) => withStore("sweep", (store) => sweep(config, store, options)),
   };

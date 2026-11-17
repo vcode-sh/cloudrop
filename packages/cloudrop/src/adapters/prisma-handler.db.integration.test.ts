@@ -5,7 +5,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
-import { usePostgresDatabase } from "../testing/db/postgres.ts";
+import { untilOneWaits, usePostgresDatabase } from "../testing/db/postgres.ts";
 import { openPrismaClient, type PrismaTestClient } from "../testing/db/prisma.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
@@ -25,17 +25,14 @@ beforeEach(async () => {
 });
 
 /** Resolves once some transaction waits on a files row that another holds locked. */
-async function rowLockWaiter(): Promise<void> {
+const rowLockWaiter = () =>
   // A transaction waiting for a row lock first takes the row's tuple lock; regclass resolves in this file's schema.
-  for (let polls = 0; polls < 500; polls++) {
-    const [row] = await db.query(
-      "SELECT count(*)::int AS waiting FROM pg_locks WHERE locktype = 'tuple' AND relation = 'cloudrop_files'::regclass",
-    );
-    if (row?.waiting === 1) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("No /complete ever waited for the files row lock.");
-}
+  untilOneWaits(
+    db,
+    "SELECT count(*)::int AS waiting FROM pg_locks WHERE locktype = 'tuple' AND relation = 'cloudrop_files'::regclass",
+    [],
+    "No /complete ever waited for the files row lock.",
+  );
 
 const FAILED = {
   code: "SERVER_ERROR",

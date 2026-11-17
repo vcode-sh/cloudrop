@@ -11,7 +11,7 @@ import pg from "pg";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
-import { usePostgresDatabase } from "../testing/db/postgres.ts";
+import { untilOneWaits, usePostgresDatabase } from "../testing/db/postgres.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { gate, hello, TEXT } from "../testing/store-fixture.ts";
@@ -46,17 +46,13 @@ const drivers = [
 ];
 
 /** Resolves once one of this file's connections waits for a lock, as a second claim of a held row does. */
-async function lockWaiter(): Promise<void> {
-  for (let polls = 0; polls < 400; polls++) {
-    const [row] = await db.query(
-      "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND application_name = $1",
-      [application],
-    );
-    if (row?.waiting === 1) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("No completion ever waited for the row lock.");
-}
+const lockWaiter = () =>
+  untilOneWaits(
+    db,
+    "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND application_name = $1",
+    [application],
+    "No completion ever waited for the row lock.",
+  );
 
 describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), transaction: true", (driver) => {
   beforeEach(async () => {

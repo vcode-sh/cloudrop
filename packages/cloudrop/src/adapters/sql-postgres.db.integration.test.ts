@@ -5,7 +5,7 @@
 import pg from "pg";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { usePostgresDatabase } from "../testing/db/postgres.ts";
+import { untilOneWaits, usePostgresDatabase } from "../testing/db/postgres.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
 import {
   type PgQueryable,
@@ -69,21 +69,14 @@ describe("Postgres under lock contention", () => {
     return { store, transaction: store.transaction.bind(store) };
   }
 
-  /**
-   * Waits until a statement is blocked by the backend `holder`, so the test knows its race is set up. Only that
-   * backend's waiters count: other test files run against the same server at the same time.
-   */
-  async function untilBlockedBy(holder: unknown) {
-    for (let polls = 0; polls < 500; polls++) {
-      const [row] = await db.query(
-        "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE $1::int = ANY (pg_blocking_pids(pid))",
-        [holder],
-      );
-      if (row?.waiting === 1) return;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    throw new Error(`Nothing ever waited for backend ${holder}.`);
-  }
+  /** Waits until a statement is blocked by the backend `holder`, so the test knows its race is set up. */
+  const untilBlockedBy = (holder: unknown) =>
+    untilOneWaits(
+      db,
+      "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE $1::int = ANY (pg_blocking_pids(pid))",
+      [holder],
+      `Nothing ever waited for backend ${holder}.`,
+    );
 
   test.for(executors)(
     "$name: a claim waiting on another transaction's row lock is busy after the 2 s lock timeout",

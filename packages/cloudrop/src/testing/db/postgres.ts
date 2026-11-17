@@ -101,3 +101,21 @@ export function usePostgresDatabase(): PostgresTestDatabase {
   afterAll(lifecycle.close);
   return lifecycle.database;
 }
+
+/**
+ * Resolves once `sql`, which counts waiting sessions as `waiting`, answers exactly 1: a test's race is set up. Each
+ * caller filters to its own sessions, because other test files run against the same server at the same time.
+ */
+export async function untilOneWaits(
+  db: Pick<TestDatabase, "query">,
+  sql: string,
+  params: readonly unknown[],
+  failure: string,
+): Promise<void> {
+  for (let polls = 0; polls < 500; polls++) {
+    const [row] = await db.query(sql, params);
+    if (row?.waiting === 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(failure);
+}

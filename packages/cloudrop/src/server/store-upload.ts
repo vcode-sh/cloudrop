@@ -9,7 +9,8 @@ import type { CloudropStore } from "./store.ts";
 import { cancelled, storeCall } from "./store-calls.ts";
 import type { UploadTokenPayload } from "./token.ts";
 
-const MAX_OWNER_LENGTH = 255;
+/** The longest owner, in characters; the file API holds the ids it is given to the same bound. */
+export const MAX_OWNER_LENGTH = 255;
 
 /** The route's owner for this upload: who its files count against. A bad value is the route's bug. */
 export async function readOwner(route: RouteConfig, context: OwnerContext<object, unknown>): Promise<string | null> {
