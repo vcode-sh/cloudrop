@@ -52,6 +52,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
 });
@@ -81,6 +82,20 @@ describe("useUpload", () => {
       code: "INVALID_INPUT",
       requests: [],
     });
+  });
+
+  it("throws a wrong client option in a task when a pick has no caller to resolve to", () => {
+    // No leading slash: createCloudropClient refuses this basePath (readOptions in client.ts).
+    const { useUpload } = createUploadHooks({ basePath: "api/cloudrop" });
+    const view = render(createElement(Picker, { useUpload }));
+    const input = view.getByLabelText("Files") as HTMLInputElement;
+    const picked = new DataTransfer();
+    picked.items.add(note("alpha", "a.txt"));
+    input.files = picked.files;
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    fireEvent.change(input);
+
+    expect(() => vi.runOnlyPendingTimers()).toThrow(expect.objectContaining({ code: "INVALID_CONFIG" }));
   });
 
   it("resolves INVALID_CONFIG from upload(), resume() and refresh() when the client's options are wrong", async () => {

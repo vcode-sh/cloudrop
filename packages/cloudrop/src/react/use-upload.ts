@@ -53,17 +53,25 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
     if (record.length === 2) return start((client) => client.resume(...record));
     for (const job of store.jobs()) job.resume();
   }
+  /** Files from a pick or a drop: no caller sees the result, so a wrong client option is thrown in a task (M3-U8). */
+  const take = (files: File[]) => {
+    const { error } = source.client();
+    if (!error) return void upload(files);
+    setTimeout(() => {
+      throw error;
+    });
+  };
   const onChange: InputProps["onChange"] = (event) => {
     const input = event.currentTarget;
     const picked = Array.from(input.files ?? []);
     // Cleared so that picking the same file again uploads it: Chromium fires `cancel`, not `change`, for an unchanged
     // selection.
     input.value = "";
-    void upload(picked);
+    take(picked);
   };
-  const dropProps = createDropHandlers(setDragOver, (files) => {
-    void upload(controller.latest.options.multiple ? files : files.slice(0, 1));
-  });
+  const dropProps = createDropHandlers(setDragOver, (files) =>
+    take(controller.latest.options.multiple ? files : files.slice(0, 1)),
+  );
   const actions: Pick<Hook, "upload" | "pause" | "resume" | "abort" | "retry" | "clear"> = {
     upload,
     pause: () => {
