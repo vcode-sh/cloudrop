@@ -44,13 +44,19 @@ export function runStatement(
 /**
  * True when the error carries this Postgres SQLSTATE: node-postgres and postgres.js set it as `code`, and a wrapper
  * (Drizzle's query error) keeps the driver's error as `cause`, so the chain is followed a few levels.
+ * Prisma 7 answers `P2010` and keeps its driver adapter's error, whose `cause` has the Postgres code, under
+ * `meta.driverAdapterError` (measured, 7.10.1).
  */
 function hasCode(error: unknown, sqlState: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
-    const { code, cause } = current as { code?: unknown; cause?: unknown };
+    const { code, cause, meta } = current as {
+      code?: unknown;
+      cause?: unknown;
+      meta?: { driverAdapterError?: unknown };
+    };
     if (code === sqlState) return true;
-    current = cause;
+    current = cause ?? meta?.driverAdapterError;
   }
   return false;
 }
