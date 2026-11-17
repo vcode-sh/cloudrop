@@ -87,6 +87,8 @@ export async function expectStoredFile(storage: StorageDriver, key: string, file
   const head = await storage.head(key);
   expect(head.error).toBeNull();
   expect(head.data?.size, `the size stored under ${key}`).toBe(file.size);
+  // An empty object has no byte range to read; its size is all it holds.
+  if (file.size === 0) return;
   const read = await storage.getRange(key, 0, file.size - 1);
   expect(read.error).toBeNull();
   const stored = read.data ?? new Uint8Array();
