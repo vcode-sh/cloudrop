@@ -3,17 +3,17 @@
 // and a delay put the reload between part 1 and part 2, and the held /complete answer leaves a file stored while the
 // page never hears of it. The oracle is the request sequence the resume promises (resume spec §3.4), the client's
 // messages for a refused resume (§2.1) and the object read back through the example's own storage.
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { storage } from "../lib/cloudrop";
 import {
   chooseOnDisk,
   expectNoSignedUrl,
+  expectStoredAsResult,
   fileRows,
   onDiskFile,
   partOneStored,
   requestRows,
+  resultKey,
   resumeWith,
   signIn,
   unfinishedRows,
@@ -27,22 +27,12 @@ if (!prefix)
 
 const TWENTY_MIB = 20_971_520;
 
-const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
-
 /** Every object stored under the demo user's prefix, as [key, size]. */
 async function storedObjects(): Promise<Map<string, number>> {
   const { data, error } = await storage.list(`${prefix}/demo/`);
   if (error) throw new Error(`Listing the demo user's uploads failed: ${error.message}`);
   if (data.nextCursor !== null) throw new Error("The demo user has more uploads than one list page holds.");
   return new Map(data.items.map(({ key, size }) => [key, size]));
-}
-
-/** The key the Result figure shows for the run's one file. */
-async function resultKey(page: Page): Promise<string> {
-  const text = (await page.getByRole("figure", { name: "Result" }).textContent()) ?? "";
-  const key = /"key": "([^"]+)"/.exec(text)?.[1];
-  if (!key) throw new Error("The Result figure shows no key.");
-  return key;
 }
 
 /** Uploads `path` with one connection and every PUT delayed a second, and waits until part 1 is stored. */
@@ -77,9 +67,7 @@ test("after a reload, the same file resumes with /complete and sends only the mi
   ]);
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
   await expect(page.getByText("No unfinished uploads.")).toBeVisible();
-  const { data: stored, error } = await storage.getRange(await resultKey(page), 0, TWENTY_MIB - 1);
-  expect(error).toBeNull();
-  expect(sha256(stored ?? new Uint8Array())).toBe(sha256(await readFile(file.path)));
+  await expectStoredAsResult(page, file.path);
   await expectNoSignedUrl(page);
 });
 

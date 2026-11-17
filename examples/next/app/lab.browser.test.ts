@@ -2,8 +2,8 @@
 // scripts/test-browser-live.ts (R2). The oracle is the request sequence the client's contract promises for each case
 // (decisions S10 to S12, S14): the page must show exactly those requests, and never a signed URL. The progress rows
 // read the job's snapshot through the page's bars (spec §6).
-import { type CDPSession, expect, type Page, test } from "@playwright/test";
-import { expectNoSignedUrl, fileRows, requestRows, signIn, summaryValue } from "./lab-page";
+import { expect, type Page, test } from "@playwright/test";
+import { expectNoSignedUrl, fileRows, requestRows, signIn, summaryValue, throttleUploads, uploadsAt } from "./lab-page";
 
 const MIB = 1024 * 1024;
 const TWENTY_MIB = 20_971_520;
@@ -17,15 +17,7 @@ async function uploadGenerated(page: Page, size: string): Promise<void> {
 }
 
 /** Chromium's network at 4 MiB/s up, so a 20 MiB file takes about five seconds and its bar has time to move. */
-const THROTTLED = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 4 * MIB };
-
-/** Throttles uploads; the session it returns changes the network conditions later. */
-async function throttleUploads(page: Page): Promise<CDPSession> {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Network.enable");
-  await cdp.send("Network.emulateNetworkConditions", THROTTLED);
-  return cdp;
-}
+const THROTTLED = 4 * MIB;
 
 /** The value of the file's bar every 100 ms until the run's status line says how it ended, and once more after. */
 async function sampleUntilEnded(page: Page, name: string): Promise<number[]> {
@@ -133,7 +125,7 @@ test("a cancel while parts wait sends nothing to the bucket", async ({ page }) =
 
 test("progress rises while a file uploads and ends at its size", async ({ page }) => {
   await signIn(page);
-  await throttleUploads(page);
+  await throttleUploads(page, THROTTLED);
   await page.getByRole("button", { name: "20 MiB", exact: true }).click();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
 
@@ -147,7 +139,7 @@ test("progress rises while a file uploads and ends at its size", async ({ page }
 
 test("with PUTs sent through fetch, the bar moves a part at a time", async ({ page }) => {
   await signIn(page);
-  await throttleUploads(page);
+  await throttleUploads(page, THROTTLED);
   await page.getByLabel("Send PUTs with fetch (no progress while sending)").check();
   await page.getByRole("button", { name: "20 MiB", exact: true }).click();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -233,18 +225,18 @@ test("three files in one job", async ({ page }) => {
 
 test("going offline pauses an upload and coming back online completes it", async ({ page }) => {
   await signIn(page);
-  const cdp = await throttleUploads(page);
+  const cdp = await throttleUploads(page, THROTTLED);
   await page.getByRole("button", { name: "20 MiB", exact: true }).click();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   const bar = page.getByRole("progressbar", { name: "Progress of random-20-MiB.bin" });
   await expect.poll(() => bar.evaluate((element: HTMLProgressElement) => element.value)).toBeGreaterThan(0);
 
   // Chromium's emulated offline sets navigator.onLine and fires the page's `offline` event, which the client hears.
-  await cdp.send("Network.emulateNetworkConditions", { ...THROTTLED, offline: true });
+  await cdp.send("Network.emulateNetworkConditions", uploadsAt(THROTTLED, true));
 
   await expect.poll(() => fileRows(page)).toEqual([["random-20-MiB.bin", "paused"]]);
   await expect(summaryValue(page, "PUTs in flight")).toHaveText("0");
-  await cdp.send("Network.emulateNetworkConditions", { ...THROTTLED, uploadThroughput: -1 });
+  await cdp.send("Network.emulateNetworkConditions", uploadsAt(-1));
   await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
   expect(await fileRows(page)).toEqual([["random-20-MiB.bin", "done"]]);
   // The client's pause cancelled the PUTs in flight; online sent each part again, and each was stored once.

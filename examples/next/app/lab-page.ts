@@ -1,7 +1,10 @@
-// What the lab's browser tests read from the page and stage on disk, shared by every `lab*.browser.test.ts`.
+// What the lab's browser tests read from the page, stage on disk and read back from the bucket, shared by every
+// `lab*.browser.test.ts` and the `*.chaos.browser.test.ts` rows.
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { expect, type Page, type TestInfo } from "@playwright/test";
+import { readFile, writeFile } from "node:fs/promises";
+import { type CDPSession, expect, type Page, type TestInfo, test } from "@playwright/test";
+import { storage } from "../lib/cloudrop";
 
 const MIB = 1024 * 1024;
 
@@ -91,4 +94,58 @@ export async function partOneStored(page: Page): Promise<void> {
       timeout: 20_000,
     })
     .toBe(true);
+}
+
+/** The key the Result figure shows for the run's one file. */
+export async function resultKey(page: Page): Promise<string> {
+  const text = (await page.getByRole("figure", { name: "Result" }).textContent()) ?? "";
+  const key = /"key": "([^"]+)"/.exec(text)?.[1];
+  if (!key) throw new Error("The Result figure shows no key.");
+  return key;
+}
+
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+
+/** The object under the Result figure's key, read back through the example's own storage, holds the file at `path`. */
+export async function expectStoredAsResult(page: Page, path: string): Promise<void> {
+  const bytes = await readFile(path);
+  const { data: stored, error } = await storage.getRange(await resultKey(page), 0, bytes.length - 1);
+  expect(error).toBeNull();
+  expect(sha256(stored ?? new Uint8Array())).toBe(sha256(bytes));
+}
+
+/** Chromium's emulated network: uploads at `bytesPerSecond` (-1 for no limit), or offline. */
+export const uploadsAt = (bytesPerSecond: number, offline = false) => ({
+  offline,
+  latency: 0,
+  downloadThroughput: -1,
+  uploadThroughput: bytesPerSecond,
+});
+
+/** Throttles uploads inside Chromium; the session it returns changes the network conditions later. */
+export async function throttleUploads(page: Page, bytesPerSecond: number): Promise<CDPSession> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", uploadsAt(bytesPerSecond));
+  return cdp;
+}
+
+/** Reads the value of the file's bar every 100 ms until the returned function is called, which gives the values. */
+export function sampleProgress(page: Page, name: string): () => Promise<number[]> {
+  const bar = page.getByRole("progressbar", { name: `Progress of ${name}` });
+  const samples: number[] = [];
+  let sampling = true;
+  const loop = (async () => {
+    while (sampling) {
+      samples.push(await bar.evaluate((element: HTMLProgressElement) => element.value));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  })();
+  return async () => {
+    sampling = false;
+    await loop;
+    // Kept with the test's result, as evidence of how the bar moved.
+    test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
+    return samples;
+  };
 }

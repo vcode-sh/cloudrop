@@ -1,10 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Run through scripts/test-browser.sh (RustFS) or scripts/test-browser-live.ts (R2): they export the settings that
-// `next build` and the test's own `storage` need.
+// `next build` and the test's own `storage` need. The live run sets an empty S3 endpoint, which means R2.
+const onR2 = !process.env.CLOUDROP_S3_ENDPOINT;
+
 export default defineConfig({
   testDir: "app",
   testMatch: "**/*.browser.test.ts",
+  // The chaos rows fault requests through the proxy test-browser.sh puts in front of RustFS. R2 routes by its own
+  // hostname, so nothing can sit in front of it (decision M3-K1): the live run leaves those files out.
+  testIgnore: onR2 ? "**/*.chaos.browser.test.ts" : [],
+  // One at a time: the chaos proxy's rules are global to the run.
   workers: 1,
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   use: {
