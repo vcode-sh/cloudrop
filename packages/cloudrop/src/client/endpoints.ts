@@ -21,7 +21,10 @@ export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;
 export type Ticket = SingleTicket | MultipartTicket;
 
 export interface Endpoints {
-  /** POST /upload for every file at once: one entry per file, in order; a rejected file is its error. */
+  /**
+   * POST /upload for every file at once: one entry per file, in order; a rejected file is its error, which carries the
+   * answer's Retry-After (M3-U92).
+   */
   start(
     route: string,
     files: readonly File[],
@@ -65,7 +68,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     endpoint: Endpoint,
     body: unknown,
     { signal, keepalive }: { signal?: AbortSignal; keepalive?: boolean },
-    read: (json: unknown) => T | null,
+    read: (json: unknown, retryAfterMs: number) => T | null,
   ): Promise<Result<T>> {
     let response: Response;
     let text: string;
@@ -85,26 +88,32 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
       return fail(signal?.aborted ? aborted() : serverUnreachable());
     }
     const json = parseJson(text);
+    const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
     if (!response.ok) {
       const body = readErrorBody(json);
-      const error = body ? toError(body) : refusal(response.status);
-      return fail(waitAtLeast(error, parseRetryAfter(response.headers.get("retry-after"))));
+      return fail(waitAtLeast(body ? toError(body) : refusal(response.status), retryAfterMs));
     }
-    const data = read(json);
+    const data = read(json, retryAfterMs);
     return data === null ? fail(unreadableAnswer(response.status)) : ok(data);
   }
 
   return {
-    async start(route, files, metadata, signal) {
+    start(route, files, metadata, signal) {
       // JSON.stringify leaves out a metadata of undefined, as UploadRequest's optional field allows.
       const request: UploadRequest = {
         route,
         files: files.map(({ name, size, type }) => ({ name, size, type })),
         metadata,
       };
-      const answer = await post("upload", request, { signal }, (json) => readTickets(json, files));
-      if (answer.error) return answer;
-      return ok(answer.data.map((ticket) => ("kind" in ticket ? ticket : toError(ticket))));
+      return post(
+        "upload",
+        request,
+        { signal },
+        (json, retryAfterMs) =>
+          readTickets(json, files)?.map((ticket) =>
+            "kind" in ticket ? ticket : waitAtLeast(toError(ticket), retryAfterMs),
+          ) ?? null,
+      );
     },
     signSingle: (token, signal) => post("sign", { token }, { signal }, readSignedRequest),
     signParts: (token, parts, signal) =>

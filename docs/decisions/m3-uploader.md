@@ -25,7 +25,8 @@ Numbering:
 - `M3-U60` to `M3-U69` are the resume design's decisions: the owner's of 2026-11-16 (`M3-U60` to `M3-U63`), then the
   research's defaults the design adopted (`M3-U64` to `M3-U69`). `M3-U70` to `M3-U79` are the resume plan's rulings
   R1 to R10: `R<n>` is `M3-U<n + 69>`. The resume plan's execution rulings and owner decisions follow from `M3-U80`,
-  each naming its source (`audit C1`, the ledger, a controller ruling).
+  each naming its source (`audit C1`, the ledger, a controller ruling). `M3-U92` is a controller ruling on a gap the
+  M3 chaos soak found (`docs/decisions/m3-chaos.md`, `M3-K4`).
 
 The part-size outcome spec §7 asks for is `M3-U40`. The failed-file rule that amends `M3-S15` (spec §4.7: a failed file
 of a `start()` job keeps its parts for `retry()` instead of the background `/abort`) is ruled in `M3-U29` to `M3-U38`;
@@ -498,14 +499,16 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 ### M3-U31: the errors that need a new ticket
 
 - **Decision:** plan B Q9. `UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UPLOAD_REJECTED`, `VERIFICATION_FAILED`, and any failure
-  of a file that never had a ticket (refused at `/upload`, or the job's own error), make `retry()` ask `/upload` for a
-  new ticket. Every other error is retried with the same ticket.
+  of a file that never had a ticket (refused at `/upload` for good, or with a retryable error after its attempts ran
+  out (`M3-U92`), or the job's own error), make `retry()` ask `/upload` for a new ticket. Every other error is retried
+  with the same ticket.
 - **Why:** each of these says the ticket, its URLs or what was stored cannot finish this upload: a part the bucket
   refused (400, a signature mismatch) would be refused again under the same ticket.
 - **If wrong:** an error missing from the list spends one `retry()` on the old ticket; one wrongly on it re-sends a file
   that could have finished.
 - **Status:** in force (`4f1887a`). Amended by `M3-U74`: `NO_SUCH_UPLOAD` joins the list (in force, resume plan
-  task 4), also after a `/complete` that left doubt (`M3-U83`).
+  task 4), also after a `/complete` that left doubt (`M3-U83`). Amended by `M3-U92` (in force): a retryable refusal at
+  `/upload` reaches `retry()` only once `start()` or `upload()` has used the file's attempts on it.
 - **Visible in:** `client/retry-file.ts` (`NEEDS_NEW_TICKET`, `needsTicket`), `client/retry-file.test.ts`.
 
 ### M3-U32: `abort()` on a failed file
@@ -752,7 +755,9 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   waiting for `online`. An `online` that comes while nothing is watched is caught up when the next run starts
   (`M3-U48`).
 - **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`; one `Job.runUpload` brackets each run
-  since `b368bc4`).
+  since `b368bc4`). Amended by `M3-U92` (in force): a file's wait before it asks `/upload` again after a retryable
+  refusal counts as running, through the same bracket (`Job.watch`), so `offline` pauses it; the `/upload` itself is
+  still not watched.
 - **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/lifecycle.test.ts`.
 
 ## Plan B's failed-file rule as built, task 5's rulings and the budget
@@ -783,7 +788,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   job's error) turns it `aborted` and sends nothing.
 - **Why:** spec §4.5: `abort()` ends a file aborted, and only a done file ignores it. There is nothing to free.
 - **If wrong:** the snapshot says `aborted` where `done` said `failed`, as for every aborted failed file (`M3-U35`).
-- **Status:** in force (`4f1887a`).
+- **Status:** in force (`4f1887a`). `M3-U92` applies it to a file waiting to ask `/upload` again: a cancel ends it
+  `aborted` and sends nothing.
 - **Visible in:** `client/file-run.ts` (`abortFile`).
 
 ### M3-U52: the errors of a retry's refused `/upload`
@@ -1467,3 +1473,35 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   reaches its ceiling; M4 decides whether that target moves.
 - **Status:** in force (`260489c`). Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.
+
+## Chaos soak rulings
+
+### M3-U92: a retryable refusal at `/upload` is retried within the attempt budget
+
+- **Decision:** controller ruling on a gap the M3 chaos soak found (`M3-K4`). When `/upload` answers a file with a
+  rejected ticket whose error is retryable (`STORAGE_ERROR` or `RATE_LIMITED` when starting the file in storage failed
+  with a retryable error, `M2-D13`), `start()`, `upload()` and `retry()` ask `/upload` again for that file alone, while
+  the job's other files go on at once. Each `/upload` that asks for the file is one attempt of the 6 every request has
+  (`M3-S9`), counted from the job's own `/upload`: a whole-call failure of a later `/upload` spends the same budget, and
+  the wait before each attempt is the same full-jitter backoff (ceilings 0.5, 1, 2, 4, 8 s), never shorter than the
+  answer's `Retry-After`. The `Retry-After` of an answer that rejected a file applies to that file's error, also on a
+  `200`. Once the attempts run out the file ends `failed` with its last error, which names the file; a later `retry()`
+  asks for a new ticket (`M3-U31`). A refusal that is not retryable (the policy's, a storage refusal, the `SERVER_ERROR`
+  of a driver that threw) ends the file at once after one `/upload`, as before. While it waits the file stays `queued`
+  with no bytes, as a part waiting to retry leaves its file's status and bytes alone. `pause()` and `offline` end the
+  wait and hold the file `paused` (`M3-U28`, `M3-U39`); `resume()` or `online` asks at once, and the attempt count goes
+  on from where it was. The file's `abort()`, `job.abort()` and the caller's signal end it `aborted` without a request
+  (`M3-U51`).
+- **Why:** before, a retryable refusal ended the file at once, while a failure of the whole `/upload` (`M3-U49`) and
+  every bucket `PUT` went through the retry budget: a 503 from `CreateMultipartUpload` failed the file although asking
+  again a moment later would have started it. Asking for the refused file alone keeps the other files from being asked
+  twice, which would issue them a second ticket and key. A per-file ask lets a pause or a cancel act on that file
+  without holding the others.
+- **If wrong:** a burst of storage refusals across a job of many files sends one `/upload` per refused file on each
+  round instead of one for all, so `authorize` and the route's checks run once per file. The server sends no
+  `Retry-After` of its own on a `200`, so only a proxy or app that adds one is honoured. Unlike a part, whose new pass
+  after `resume()` starts a fresh budget, a file that waited for `/upload` keeps its count across a pause.
+- **Status:** in force (this change).
+- **Visible in:** `client/job-run.ts` (`refused`, `launch`, `Job.watch`), `client/endpoints.ts` (`start`, `post`),
+  `client/retry.ts` (`withRetry`'s `first`), `client/file-run.ts` (`woken`), `client/upload-refusals.test.ts`, README
+  ("Client").

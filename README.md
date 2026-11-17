@@ -178,6 +178,10 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
   (16 MiB from 256 MiB, larger only when a file would need over 10,000 parts), at most four of a file at a time, read
   with `Blob.slice`. A request is tried up to 6 times with backoff, honouring `Retry-After`; an expired upload URL is
   renewed once; parts that `/complete` reports missing are sent again, at most twice.
+- A file that `/upload` refuses with a retryable error (the storage service failed while the server started it) asks
+  `/upload` again for itself alone, within the same 6 attempts and backoff, while the job's other files go on. It
+  stays `queued` while it waits; pausing it, going offline or cancelling it stops the wait, and a cancel sends nothing.
+  A refusal that is not retryable, such as a file over the size limit, fails the file at once.
 - In a browser, a bucket `PUT` that makes no progress for 30 s, or whose answer takes that long after the last byte,
   counts as a network error and is tried again. Through `fetch`, which reports no progress, a `PUT` gets 30 s plus its
   size at 100 KiB/s.

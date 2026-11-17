@@ -6,11 +6,11 @@ import { CloudropError, fail, type Result } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
 import type { Ticket } from "./endpoints.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
-import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
+import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle, woken } from "./file-run.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { letGo, uploadOf } from "./persist.ts";
 import { createProgress } from "./progress.ts";
-import { withRetry } from "./retry.ts";
+import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retry.ts";
 import type { FileOutcome, UploadResult } from "./types.ts";
 import type { Upload, UploadContext } from "./upload.ts";
 
@@ -28,6 +28,8 @@ export interface Job {
    * out gone starts over within the run (M3-U74).
    */
   runUpload(upload: Upload): Promise<void>;
+  /** Runs `run` with the page's connectivity watched meanwhile (M3-U49). */
+  watch<T>(run: () => Promise<T>): Promise<T>;
   /** Hears the caller's signal from now on (a run starts), or stops once no file runs or holds its ticket (M3-U38). */
   listen(): void;
   idle(): void;
@@ -69,15 +71,15 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
     entries,
     signal,
     abort,
-    runUpload(upload) {
+    runUpload: (upload) =>
+      job.watch(() => runFile(context, upload).then((gone) => gone && startOver(job, upload.entry))),
+    watch(run) {
       running += 1;
       if (running === 1) unwatch = watchConnectivity(offline, online);
-      return runFile(context, upload)
-        .then((gone) => gone && startOver(job, upload.entry))
-        .finally(() => {
-          running -= 1;
-          if (running === 0) unwatch();
-        });
+      return run().finally(() => {
+        running -= 1;
+        if (running === 0) unwatch();
+      });
     },
     listen() {
       args.signal.addEventListener("abort", abort);
@@ -113,16 +115,43 @@ async function startOver(job: Job, entry: Entry): Promise<void> {
   await entry.run;
 }
 
-/** One file's share of an /upload answer. `whole`: the /upload asked for every file of the job. */
+/**
+ * A file /upload refused at `attempt`. A retryable refusal asks again for this file alone, within the budget and after
+ * the wait of any request's retry (M3-U92); the file stays queued meanwhile. A pause, offline included, ends the wait
+ * and holds the file until resume() asks at once. A file cancelled before or meanwhile ends aborted and sends nothing:
+ * it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
+ */
+async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
+  const { signal } = entry.cancel;
+  if (refusal.retryable && attempt < MAX_ATTEMPTS && !signal.aborted) {
+    await job.watch(async () => {
+      // pauseFile and a cancel abort the pass, which here is the wait.
+      const wait = new AbortController();
+      entry.pass = wait;
+      if (entry.status !== "paused") await pause(retryDelay(attempt, retryAfterOf(refusal)), wait.signal);
+      while (entry.status === "paused" && !signal.aborted) await woken(entry);
+    });
+    if (!signal.aborted) {
+      await launch(job, [entry], attempt + 1);
+      return entry.run;
+    }
+  }
+  settle(entry, signal.aborted ? "aborted" : "failed", withFile(signal.aborted ? aborted() : refusal, entry));
+}
+
+/**
+ * One file's share of an /upload answer, given at `attempt`. `whole`: the /upload asked for every file of the job.
+ */
 async function runEntry(
   job: Job,
   entry: Entry,
   answer: Result<(Ticket | CloudropError)[]>,
   index: number,
   whole: boolean,
+  attempt: number,
 ): Promise<void> {
-  const cancelled = entry.cancel.signal.aborted;
   if (answer.error) {
+    const cancelled = entry.cancel.signal.aborted;
     // A file cancelled on its own meanwhile ends as cancelled, with its own error (ruling M3-U10). Otherwise the error
     // is the job's when /upload asked for every file, and the file's own when a retry asked for some (ruling M3-U3).
     const own = cancelled && !job.signal.aborted;
@@ -131,27 +160,31 @@ async function runEntry(
   }
   // readTickets answers one ticket per file; a missing one would otherwise leave the file queued for good.
   const ticket = answer.data[index] ?? unreadableAnswer(200);
-  if (ticket instanceof CloudropError) {
-    // A file cancelled meanwhile ends as cancelled: it holds no ticket the server must be told about.
-    return settle(entry, cancelled ? "aborted" : "failed", withFile(cancelled ? aborted() : ticket, entry));
-  }
+  if (ticket instanceof CloudropError) return refused(job, entry, ticket, attempt);
   entry.upload = uploadOf(job, entry, ticket);
   await job.runUpload(entry.upload);
 }
 
 /**
- * Asks one /upload for tickets for `entries`, then runs every file at once (the pool decides who sends); each
- * `entry.run` settles with its file. Resolves with the /upload's refusal when it asked for every file of the job.
+ * Asks one /upload for tickets for `entries`, from attempt `first` of the budget, then runs every file at once (the
+ * pool decides who sends); each `entry.run` settles with its file. Resolves with the /upload's refusal when it asked
+ * for every file of the job.
  */
-export async function launch(job: Job, entries: readonly Entry[]): Promise<CloudropError | null> {
+export async function launch(job: Job, entries: readonly Entry[], first = 1): Promise<CloudropError | null> {
   const { context, args, signal } = job;
   const files = entries.map((entry) => entry.file);
-  const started = withRetry(() => context.endpoints.start(args.route, files, args.metadata, signal), signal).then(
-    (answer) => (answer.error && signal.aborted ? fail(aborted()) : answer),
+  let attempt = first;
+  const ask = (at: number) => {
+    attempt = at;
+    return context.endpoints.start(args.route, files, args.metadata, signal);
+  };
+  const started = withRetry(ask, signal, first).then((answer) =>
+    answer.error && signal.aborted ? fail(aborted()) : answer,
   );
-  const whole = entries.length === job.entries.length;
+  // A file asking again (M3-U92) is never the whole job: the job's /upload already answered.
+  const whole = first === 1 && entries.length === job.entries.length;
   entries.forEach((entry, index) => {
-    entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole)).finally(job.idle);
+    entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole, attempt)).finally(job.idle);
   });
   const { error } = await started;
   return whole ? error : null;
