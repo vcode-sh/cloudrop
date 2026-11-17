@@ -8,6 +8,8 @@ A Next.js app router application that mounts cloudrop's server and uploads from 
   only the server's type, so the server module and its secret never reach the browser bundle.
 - `app/api/demo-sign-in/route.ts` signs the visitor in as the demo user: the page's sign-in form posts there, and it
   answers with an `HttpOnly` cookie, `demo-user=demo`, that `authorize` reads.
+- `lib/store.ts` is the opt-in database store, off unless `CLOUDROP_EXAMPLE_STORE` is set ("Run with a database
+  store").
 
 Files up to 8 MiB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB file is three parts.
 
@@ -102,12 +104,38 @@ rule it already has):
 ]
 ```
 
+## Run with a database store
+
+By default the example is stateless: the upload token carries everything, and nothing is written anywhere. Set
+`CLOUDROP_EXAMPLE_STORE` to keep a row per upload in SQLite through `node:sqlite` (no native build), with any of the
+storage setups above:
+
+```sh
+CLOUDROP_EXAMPLE_STORE=sqlite bun run dev           # .data/cloudrop.db, git-ignored
+CLOUDROP_EXAMPLE_STORE=/path/to/uploads.db bun run dev
+```
+
+`lib/store.ts` opens the file, creates cloudrop's tables from `lib/cloudrop-tables.sql` and the app's own
+`example_uploads` table, and passes `sqlStore(sqliteExecutor(database))` to `createCloudrop`. With it:
+
+- each user's uploads count toward a quota, 500 MB unless `CLOUDROP_EXAMPLE_QUOTA_MB` says otherwise; a file that does
+  not fit is refused with `QUOTA_EXCEEDED` before a byte is sent;
+- the route's `owner` is the demo user, and `onComplete` records the upload in `example_uploads` once, however often
+  the client repeats `/complete`;
+- `afterComplete` logs one line per completed upload, after its record is written;
+- the lab page shows the user's storage and finished uploads from `app/api/usage/route.ts`, which calls
+  `cloudrop.api.usage`.
+
+The [store guide](../../docs/guide/store.md) explains each of these and what changes in production.
+
 ## Lab page
 
 <http://localhost:5173/lab> shows how an upload works, request by request and byte by byte. It uses the same
 `cloudrop/client` as the quickstart page; the library itself is unchanged.
 
 - **Setup:** the demo sign-in, and which storage the server uploads to and its host, from `app/api/lab-info/route.ts`.
+- **Your storage:** with a database store, the bytes used and reserved against the quota and the finished uploads with
+  how many times `onComplete` ran for each (always 1); without one, a line saying how to turn it on.
   That route is demo-only, like the sign-in: it names no credential or bucket, but a real app has no reason to tell
   visitors where it stores files.
 - **Files:** choose several with the file input, or add 1 KiB, 5 MiB, 20 MiB or 100 MiB of random bytes made in the
@@ -206,11 +234,17 @@ and sends nothing, and the upload still resumes with the right file. A second pa
 upload the first page is still sending shows "This upload is being sent in this browser". After a reload leaves an
 upload listed, **Forget unfinished uploads** empties the list, which stays empty after another reload; the test then
 aborts that multipart upload through the example's storage, so the bucket keeps nothing. The helpers
-the lab's tests share are in `app/lab-page.ts`. Run them from the repository root; install the shell once from this
+the lab's tests share are in `app/lab-page.ts`.
+
+`app/lab.store.browser.test.ts` runs in a second pass, with the database store on and a quota of 50 MB. A 20 MiB file
+whose `/complete` answer was held is resumed after a reload: the resume's `/complete` is answered from the row, the
+user's usage grows by the file's size once, and `onComplete` recorded it once. A 51 MiB file is refused with
+`QUOTA_EXCEEDED` after `/upload` alone, and the usage does not change. The first pass runs every other file on the
+stateless example. Run them from the repository root; install the shell once from this
 directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
-  serves this example on port 5173, and removes the container afterwards. It needs Docker, no credentials, and leaves
+  serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards. It needs Docker, no credentials, and leaves
   any `.env.local` alone.
 - `bun run test:browser:live` runs the same tests on a real R2 bucket, with the credentials `bun run test:live` reads
   (`CLOUDROP_R2_ENV_FILE`). The bucket's CORS rule must allow `http://localhost:5173`, as above. Everything it uploads

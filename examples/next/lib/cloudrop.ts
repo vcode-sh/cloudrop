@@ -1,4 +1,5 @@
 import { createCloudrop, r2, route, s3, unauthorized } from "cloudrop";
+import { quotaBytes, recordUpload, store } from "./store";
 
 // The presets read their settings from CLOUDROP_S3_* or CLOUDROP_R2_* (README.md). An empty CLOUDROP_S3_ENDPOINT
 // counts as unset, so the live run can switch a RustFS .env.local back to R2.
@@ -9,7 +10,7 @@ export const storage = process.env.CLOUDROP_S3_ENDPOINT ? s3() : r2();
  * Demo only, never ship this: any visitor can set this cookie to any name and upload under that user's prefix.
  * app/api/demo-sign-in/route.ts sets it. A real app reads its own signed session here.
  */
-const demoUser = (request: Request): string | undefined =>
+export const demoUser = (request: Request): string | undefined =>
   /(?:^|;\s*)demo-user=([a-z0-9-]{1,32})(?:;|$)/.exec(request.headers.get("cookie") ?? "")?.[1];
 
 // Created when the module loads, as the quickstart shows. `next build` loads it too, and needs no settings: cloudrop
@@ -18,6 +19,8 @@ export const cloudrop = createCloudrop({
   storage,
   // Small enough that the page's 20 MiB test file goes in three parts; the default is 64 MiB.
   multipartThreshold: "8MB",
+  // With CLOUDROP_EXAMPLE_STORE set (lib/store.ts): a row per upload, one onComplete per file, and a quota per user.
+  ...(store && { store, quota: () => quotaBytes }),
   routes: {
     files: route(
       {
@@ -33,7 +36,16 @@ export const cloudrop = createCloudrop({
       },
       {
         prefix: ({ userId }) => `${process.env.CLOUDROP_EXAMPLE_PREFIX ?? "example"}/${userId}`,
-        onComplete: ({ file }) => ({ key: file.key }),
+        onComplete: ({ file, userId }) => {
+          recordUpload(userId, file);
+          return { key: file.key };
+        },
+        // Store only: createCloudrop refuses them without one. The user's uploads count toward their quota.
+        owner: store ? ({ userId }) => userId : undefined,
+        // After the completion is recorded, at most once: a place for emails and webhooks, never for the record.
+        afterComplete: store
+          ? ({ file, userId }) => console.info(`cloudrop example: ${userId} completed ${file.key}`)
+          : undefined,
       },
     ),
   },

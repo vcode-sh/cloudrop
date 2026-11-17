@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Browser lane: the Next.js example, built and started by Playwright, uploads from headless Chromium to a
 # disposable RustFS container, through the chaos proxy (scripts/chaos-proxy.ts) that the `*.chaos.browser.test.ts`
-# rows fault through its control endpoint. The trap stops the proxy and removes this run's container on success,
-# failure and interrupt; Playwright stops the server.
+# rows fault through its control endpoint. Playwright runs twice: the stateless example with every row but the store
+# rows, then the example with a database store (CLOUDROP_EXAMPLE_STORE) with the store rows alone. The trap stops the
+# proxy, removes this run's container and its store database on success, failure and interrupt; Playwright stops the
+# server.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -27,12 +29,15 @@ export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-browser-rustfs-$$"
 export CLOUDROP_CHAOS_PROXY_PORT="$PROXY_PORT"
 PROXY_PID=""
+# The store pass's database: this run's own, in the example's git-ignored .data/.
+STORE_DB="$ROOT/examples/next/.data/browser-$$.db"
 # One EXIT trap for both resources, since a second `trap … EXIT` would replace the first. Registered before `up` so a
 # container that starts but never becomes ready is still removed; `down` only touches this run's name.
 cleanup() {
   if [[ -n "$PROXY_PID" ]] && kill "$PROXY_PID" 2>/dev/null; then
     echo "Chaos proxy stopped"
   fi
+  rm -f "$STORE_DB" "$STORE_DB-journal"
   "$ROOT/scripts/rustfs.sh" down
 }
 trap cleanup EXIT
@@ -71,5 +76,7 @@ export CLOUDROP_EXAMPLE_PREFIX=browser
 export CLOUDROP_SETUP_ENV_FILE=0
 cd examples/next
 bun run setup:rustfs
-# Arguments go to Playwright, for example one file: bun run test:browser lab.browser.test.ts
-bunx playwright test "$@"
+# Arguments go to both passes, for example one file: bun run test:browser lab.browser.test.ts
+bunx playwright test --pass-with-no-tests "$@"
+# A quota of 50 MB: the store rows' refusal sends a 51 MiB file.
+CLOUDROP_EXAMPLE_STORE="$STORE_DB" CLOUDROP_EXAMPLE_QUOTA_MB=50 bunx playwright test --pass-with-no-tests "$@"

@@ -23,6 +23,7 @@ import { DEFAULT_SETTINGS, RunSettings, type Settings } from "./run-settings";
 import { RunSummary } from "./run-summary";
 import { SetupStrip } from "./setup-strip";
 import { UnfinishedUploads, useUnfinished } from "./unfinished-uploads";
+import { Usage } from "./usage";
 
 type FileResult = RouteResult<typeof cloudrop, "files">;
 type LabClient = CloudropClient<typeof cloudrop>;
@@ -146,6 +147,7 @@ export default function LabPage() {
         from one browser on one network: they are not a benchmark. <a href="/">Back to the quickstart page</a>.
       </p>
       <SetupStrip />
+      <Usage version={run?.endMs ?? null} />
       <FileSource
         files={files}
         disabled={running}

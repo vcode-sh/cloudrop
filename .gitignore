@@ -21,3 +21,6 @@ next-env.d.ts
 *.tsbuildinfo
 test-results/
 playwright-report/
+
+# The example store's SQLite database (CLOUDROP_EXAMPLE_STORE=sqlite)
+examples/next/.data/

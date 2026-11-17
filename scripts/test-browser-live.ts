@@ -1,9 +1,10 @@
 // The browser lane on a real R2 bucket: `bun run test:browser:live`. Playwright builds and starts the Next.js example
-// on R2 and uploads from headless Chromium; afterwards this script deletes the run's prefix and prints how many objects
-// it held. Settings are loaded as scripts/test-live-r2.ts loads them and go only into the child's environment;
-// everything the child prints passes through the redactor.
+// on R2 and uploads from headless Chromium, twice: the stateless example with every row but the store rows, then the
+// example with a database store with the store rows alone. Afterwards this script deletes the run's prefix and the
+// store's database and prints how many objects the prefix held. Settings are loaded as scripts/test-live-r2.ts loads
+// them and go only into the children's environment; everything a child prints passes through the redactor.
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { constants } from "node:os";
 import { createInterface } from "node:readline";
@@ -41,34 +42,24 @@ const prefix = `live-test/cloudrop-${Buffer.from(crypto.getRandomValues(new Uint
 const secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
 const redactor = createRedactor([...Object.values(settings), secret]);
 
-const child = spawn("bunx", ["playwright", "test", ...process.argv.slice(2)], {
-  cwd: `${root}examples/next`,
-  env: {
-    ...process.env,
-    ...settings,
-    CLOUDROP_SECRET: secret,
-    CLOUDROP_EXAMPLE_PREFIX: prefix,
-    // Exported and empty: it wins over a RustFS .env.local, so lib/cloudrop.ts uses r2().
-    CLOUDROP_S3_ENDPOINT: "",
-    // No colour: an ANSI code in the middle of a value would stop the redactor from matching it. FORCE_COLOR alone,
-    // because Node warns when NO_COLOR is set beside it.
-    FORCE_COLOR: "0",
-  },
-  // Its own process group, so one signal reaches bunx and Playwright. Playwright starts the web server and Chromium in
-  // groups of their own and stops them itself when it is signalled, but not when it is killed.
-  detached: true,
-  stdio: ["ignore", "pipe", "pipe"],
-});
+// The store pass's database: this run's own, in the example's git-ignored .data/, deleted below.
+const storeDb = `${root}examples/next/.data/browser-live-${process.pid}.db`;
+const passes: Record<string, string>[] = [
+  {},
+  // A quota of 50 MB: the store rows' refusal sends a 51 MiB file.
+  { CLOUDROP_EXAMPLE_STORE: storeDb, CLOUDROP_EXAMPLE_QUOTA_MB: "50" },
+];
 
-// A signal is forwarded to the child's group; a second one, or the end of the grace period, kills the group. Either
-// way this script waits for the child to end and then deletes the prefix.
+// A signal is forwarded to the running child's group; a second one, or the end of the grace period, kills the group.
+// Either way this script waits for the child to end, starts no further pass and then deletes the prefix.
 const GRACE_MS = 30_000;
 let stopSignal: "SIGHUP" | "SIGINT" | "SIGTERM" | undefined;
 let killed = false;
+let child: ReturnType<typeof spawn> | undefined;
 let closed = false;
 function signalChild(signal: NodeJS.Signals) {
   // Once Playwright has closed, its process group is gone and its id may be reused: send nothing.
-  if (closed || !child.pid) return;
+  if (closed || !child?.pid) return;
   try {
     process.kill(-child.pid, signal);
     // Only a kill that reached the group can have left the example server behind.
@@ -85,28 +76,61 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     setTimeout(() => signalChild("SIGKILL"), GRACE_MS).unref();
   });
 }
-const relayed = (
-  [
-    [child.stdout, process.stdout],
-    [child.stderr, process.stderr],
-  ] as const
-).map(async ([from, to]) => {
-  for await (const line of createInterface({ input: from, crlfDelay: Number.POSITIVE_INFINITY })) {
-    to.write(`${redactor.redact(line)}\n`);
-  }
-});
-child.on("error", (error: NodeJS.ErrnoException) => {
-  // Nothing was written yet, so there is nothing to delete.
-  console.error(`Could not start Playwright (${error.code ?? "unknown error"}). Is bunx on your PATH?`);
-  process.exit(1);
-});
-const code = await new Promise<number>((resolve) =>
-  child.on("close", (exitCode, signal) => {
-    closed = true;
-    resolve(exitCode ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 1));
-  }),
-);
-await Promise.all(relayed);
+
+/** Runs Playwright once with `extra` in its environment and answers its exit code. */
+async function runPlaywright(extra: Record<string, string>): Promise<number> {
+  closed = false;
+  const running = spawn("bunx", ["playwright", "test", "--pass-with-no-tests", ...process.argv.slice(2)], {
+    cwd: `${root}examples/next`,
+    env: {
+      ...process.env,
+      ...settings,
+      ...extra,
+      CLOUDROP_SECRET: secret,
+      CLOUDROP_EXAMPLE_PREFIX: prefix,
+      // Exported and empty: it wins over a RustFS .env.local, so lib/cloudrop.ts uses r2().
+      CLOUDROP_S3_ENDPOINT: "",
+      // No colour: an ANSI code in the middle of a value would stop the redactor from matching it. FORCE_COLOR alone,
+      // because Node warns when NO_COLOR is set beside it.
+      FORCE_COLOR: "0",
+    },
+    // Its own process group, so one signal reaches bunx and Playwright. Playwright starts the web server and Chromium
+    // in groups of their own and stops them itself when it is signalled, but not when it is killed.
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child = running;
+  const relayed = (
+    [
+      [running.stdout, process.stdout],
+      [running.stderr, process.stderr],
+    ] as const
+  ).map(async ([from, to]) => {
+    for await (const line of createInterface({ input: from, crlfDelay: Number.POSITIVE_INFINITY })) {
+      to.write(`${redactor.redact(line)}\n`);
+    }
+  });
+  running.on("error", (error: NodeJS.ErrnoException) => {
+    // Nothing of this pass was written yet; an earlier pass's objects are deleted below either way.
+    console.error(`Could not start Playwright (${error.code ?? "unknown error"}). Is bunx on your PATH?`);
+  });
+  const exitCode = await new Promise<number>((resolve) =>
+    running.on("close", (code, signal) => {
+      closed = true;
+      resolve(code ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 1));
+    }),
+  );
+  await Promise.all(relayed);
+  return exitCode;
+}
+
+let code = 0;
+for (const extra of passes) {
+  code = await runPlaywright(extra);
+  if (code !== 0 || stopSignal) break;
+}
+rmSync(storeDb, { force: true });
+rmSync(`${storeDb}-journal`, { force: true });
 
 const cloudrop = createCloudrop({
   storage: r2({
