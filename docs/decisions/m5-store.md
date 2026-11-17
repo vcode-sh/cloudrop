@@ -652,10 +652,14 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ### M5-T76: the 2 s lock timeout covers the claim alone
 
-- **Decision:** in transaction mode the store runs `SET LOCAL lock_timeout = '2s'` before each claim and `SET LOCAL
-  lock_timeout = DEFAULT` after it, rather than once when the transaction opens. `DEFAULT` returns to the session's own
-  value (the server's, or one set at connection start). After a claim that timed out, the transaction is aborted and
-  nothing more runs.
+- **Decision:** in transaction mode the store caps only the claim. Before each claim one statement reads the session's
+  `current_setting('lock_timeout')` and sets `set_config('lock_timeout', '2s', true)`. After the claim,
+  `set_config('lock_timeout', <saved>, true)` puts the saved value back. The app's statements through `tx` therefore
+  run at exactly the lock timeout their session had, whether it came from the server, the role, a startup option or a
+  `SET` on the connection. After a claim that timed out, the transaction is aborted and nothing more runs.
+- **Amended 2026-11-17 (fix round 2):** the first version reset to `DEFAULT`, which drops a session-level `SET` (the
+  re-review's N1: an app's `SET lock_timeout = '7s'` came back as `0`). The saved value is now restored instead, at the
+  same round-trip count. Measured: `onComplete` sees `7s`.
 - **Why:** review M1. `onComplete`'s statements through `tx` inherited the cap, so an app statement waiting more than
   2 s for a lock it would get failed the completion. Measured: such a statement now waits 2.5 s and commits.
 - **If wrong:** it costs one round trip per transactional claim.
