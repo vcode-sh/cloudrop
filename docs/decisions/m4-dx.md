@@ -441,7 +441,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 task D review amended `M4-B1` to `M4-B4`, `M4-B10` and `M4-B12` in place, before the branch merged, and added `M4-B13`
 to `M4-B15`; fix round 2 amended `M4-B1`, `M4-B3`, `M4-B10`, `M4-B12` and `M4-B15`, with `M4-F22` and `M4-F23` in the
 client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again); the final
-review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22` and `M4-F23` in place.
+review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22` and `M4-F23` in place.
 
 ### M4-B1: `createUploadHooks<typeof cloudrop>(options?)`, with a lazy client
 
