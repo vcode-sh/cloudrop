@@ -142,10 +142,14 @@ describe("Postgres", () => {
     const store = prismaStore(prisma, { dialect: "postgres", transaction: true });
     await store.reserve({ owner: "u-1", limit: null, expiresAt: LATER, files: [file("f-1", 1)] }, NOW);
     const held = gate();
+    const claimed = gate();
     const holder = store.transaction(async (_tx, inner) => {
       expect(await inner.claim("f-1", "claim-a", NOW, 60_000)).toEqual({ kind: "claimed" });
+      claimed.open();
       await held.opened;
     });
+    // Only once the holder has the row: started together, the second claim can win the race and commit first.
+    await claimed.opened;
     const started = Date.now();
     // The holder is let go however the wait ends, so a failure here leaves no lock behind for the next row.
     const waiting = await store
