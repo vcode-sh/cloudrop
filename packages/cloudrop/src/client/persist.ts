@@ -3,12 +3,14 @@
 // holder sends it meanwhile. Both are taken when the ticket arrives, from start(), upload() or a retry's new ticket, and
 // both go when the page gives the ticket up (audit C2, I5), through letGo:
 // - the file ends done (runFile);
-// - its /abort is sent (drop): a cancel, a failure of upload(), abort() or the job's signal on a failed file, pagehide;
-//   the lock is let go only once the /abort is answered, so no other tab completes what it then deletes;
+// - its /abort is sent (drop): a cancel, abort() or the job's signal on a failed file, and the failure of a single PUT
+//   in upload() or at pagehide; the lock is let go only once the /abort is answered, so no other tab completes what
+//   it then deletes;
 // - a cancel, or abort() of a failed file, when a /complete may have finished it and no /abort is sent (end, abortFile);
 // - a retry's new ticket replaces it (requeue).
-// A failed file of start() keeps both, for retry(). One of upload() that a /complete may have finished keeps its record,
-// for a later resume, and lets the lock go: this page has no handle to send it again (ruling M3-U82).
+// A failed file of start() keeps both, for retry(). A failed multipart file of upload(), and one of start() at pagehide,
+// keeps its record for a resume after a reload and lets the lock go, sending no /abort (giveUp, M4-F1); so does one of
+// upload() that a /complete may have finished: this page has no handle to send it again (ruling M3-U82).
 
 import type { Ticket } from "./endpoints.ts";
 import type { Entry } from "./file-run.ts";

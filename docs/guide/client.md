@@ -252,13 +252,17 @@ size at 100 KiB/s.
 ## What gets cleaned up
 
 - **Cancelling** returns `ABORTED` and tells the server to clean up with `/abort`.
-- **A file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so `upload()`
-  answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
+- **A single-`PUT` file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so
+  `upload()` answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
+- **A multipart file of `upload()` that fails** keeps its parts and its resume record, so a reload can
+  [resume](resume.md) it and send only the parts the bucket lacks; no `/abort` is sent. With persistence off or
+  unavailable it is cleaned up as a single `PUT` is.
 - **A failed file of `start()`** keeps its ticket and the parts already stored in the bucket, so `retry()` can reuse
-  them, until
-  `abort()` of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours). `abort()` and
-  `pagehide` tell the server with `/abort`; after expiry, the bucket's lifecycle rule removes unfinished parts. A failed
-  single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not retry.
+  them, until `abort()` of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours).
+  `abort()` tells the server with `/abort`. `pagehide` does too for a single `PUT`; a multipart file keeps its parts
+  and its resume record for a reload, as in `upload()`. The bucket's lifecycle rule removes unfinished parts nobody
+  resumes. A failed single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not
+  retry.
 - **A file after a `/complete` that may have succeeded** is always kept, never deleted.
 
 ## Errors that only the client produces

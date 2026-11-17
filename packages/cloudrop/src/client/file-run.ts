@@ -1,7 +1,8 @@
 // One file of a job after /upload, from its ticket to its outcome: passes that send its bytes and /complete
 // (upload.ts), paused and resumed in between (spec §4.5), then an ending without success (a cancel or a failure). A
 // cancel tells the server unless a /complete may have finished the file (decisions S14, S15, ruling S-18); a failure
-// of start() keeps the ticket and the parts for retry() (spec §4.7), and one of upload() tells the server (M3-U29).
+// of start() keeps the ticket and the parts for retry() (spec §4.7), and one of upload() gives the ticket up (M3-U29,
+// M4-F1).
 
 import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
@@ -142,6 +143,17 @@ export function drop(context: UploadContext, upload: Upload): Promise<void> {
 }
 
 /**
+ * Gives a failed file's ticket up (M4-F1). A multipart ticket a reload can resume keeps its record and sends no
+ * /abort, now or later: another tab may resume and complete the upload, and the bucket's lifecycle rule removes parts
+ * never resumed. Any other ticket is dropped.
+ */
+export function giveUp(context: UploadContext, upload: Upload): void {
+  if (upload.ticket.kind === "single" || !context.records.enabled) return void drop(context, upload);
+  upload.dropped = true;
+  upload.unlock();
+}
+
+/**
  * Cancels a file (ruling M3-U38). A running one ends aborted through its run, which tells the server. A failed one
  * ends aborted at once and frees what it kept (M3-U32), unless a /complete may have finished it (keep-or-abort,
  * M3-S14, M3-H16).
@@ -174,17 +186,17 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
   settle(entry, failed ? "failed" : "aborted", withFile(failed ? error : aborted(), entry));
   // A /complete that may have succeeded keeps the file rather than delete a recorded one (M3-H15, M3-H16). Otherwise
   // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
-  if (mayBeComplete) {
-    // A cancel ends the upload. A failure of upload() keeps the record for a resume, which only /complete can settle,
-    // and lets the lock go: this page cannot send the file again (M3-U82).
-    if (failed) upload.unlock();
-    else letGo(context, upload);
+  if (failed) {
+    // A failure of upload() keeps the record of a /complete in doubt for a resume, which only /complete can settle, and
+    // lets the lock go: this page cannot send the file again (M3-U82). Any other's /abort finishes in the background:
+    // abort() never rejects, so nothing is left unhandled.
+    if (mayBeComplete) upload.unlock();
+    else giveUp(context, upload);
     return;
   }
-  const cleanup = drop(context, upload);
-  // A failure's /abort finishes in the background: abort() never rejects, so nothing is left unhandled. A cancel waits
-  // for it, and `done` with it, so the caller knows the server was told.
-  if (!failed) await cleanup;
+  // A cancel ends the upload. Its /abort is waited for, and `done` with it, so the caller knows the server was told.
+  if (mayBeComplete) letGo(context, upload);
+  else await drop(context, upload);
 }
 
 /** What a resumed upload's probe answers when the upload is gone and was not completed (M3-U74). */

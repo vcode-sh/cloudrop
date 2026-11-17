@@ -222,18 +222,25 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     });
   });
 
-  it("pagehide sends a failed file's /abort and lets both go", async () => {
+  it("pagehide gives a failed file's ticket up without an /abort: the record stays for a reload (M4-F1)", async () => {
     const page = pageEvents();
-    const { id, kept, from, drained, db, locks } = await failedFile();
+    const { job, id, kept, from, drained, db, locks, reload } = await failedFile();
     const sent = from();
     page.fire("pagehide");
     await drained();
+    const afterHide = { sent: sent(), stored: Object.keys(db.stored()), locks: locks.held() };
+    // A page restored from the back-forward cache: another tab may have resumed and completed the upload since, so
+    // this page's abort() must not delete it (M3-U88).
+    job.files[0]?.abort();
+    await drained();
+    const listed = (await reload().resumable()).data?.map((upload) => upload.id);
 
-    expect({ kept, sent: sent(), stored: db.stored(), locks: locks.held() }).toEqual({
+    expect({ kept, afterHide, sent: sent(), status: job.getSnapshot().files[0]?.status, listed }).toEqual({
       kept: { code: "UPLOAD_REJECTED", stored: [id], locks: [lockOf(id)] },
-      sent: ["POST /abort"],
-      stored: {},
-      locks: [],
+      afterHide: { sent: [], stored: [id], locks: [] },
+      sent: [],
+      status: "aborted",
+      listed: [id],
     });
   });
 

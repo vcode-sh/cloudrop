@@ -56,8 +56,8 @@ export interface Upload {
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
   /**
-   * Its /abort was sent (after a failure of upload(), on pagehide or on abort()): a retry needs a new ticket
-   * (M3-U33).
+   * The page gave its ticket up: its /abort was sent, or a reload may resume it (giveUp, M4-F1). A retry needs a new
+   * ticket, and no /abort follows (M3-U33).
    */
   dropped: boolean;
   /** Lets go of the upload's Web Lock, held while the page keeps the ticket (M3-U73); a no-op when none was taken. */
