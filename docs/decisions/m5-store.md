@@ -154,6 +154,182 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ## SQL core and the sql adapter (task C)
 
+### M5-T34: the executor seam, and shipped executors typed by hand
+
+- **Decision:** `SqlExecutor<TTx = never>` is `{ dialect, query(sql, params), batch(statements), transaction?(run) }`,
+  as spec §7 has it, made generic in the handle `onComplete` receives as `tx`. `sqlStore(executor, { tables? })`
+  returns `CloudropStore<TTx>`, with `transaction` exactly when the executor has one. `cloudrop/adapters/sql` ships
+  `pgExecutor(pool)` (`tx` is the checked-out client), `postgresJsExecutor(sql)` (`tx` is the transaction's `sql`),
+  `sqliteExecutor(db)` and `d1Executor(d1)`, the last two without `transaction`. Each driver is described by hand by
+  the members the executor calls (`PgPool`, `PostgresJsSql`, `SqliteDatabase`, `D1Database` and their parts, exported
+  as types), so the library imports no driver and no driver types; `tsconfig.test.json` proves a real `pg.Pool`,
+  `postgres()` and `DatabaseSync` fit. Inside a transaction an executor's `batch` runs its statements in order on the
+  transaction's connection: Postgres aborts the transaction on the first failure, so nothing of the batch commits alone.
+- **Why:** spec review I12 (ship code, not snippets). Hand-written shapes follow `src/node.ts` and keep
+  `types: []`. A generic `tx` lets Drizzle and Prisma pass their own transaction types through the same core.
+- **If wrong:** a driver whose real type does not fit the shape needs a one-line cast in the app, or a wider shape.
+  `D1Database` is unchecked against `@cloudflare/workers-types` here (not installed); the Wrangler lane checks it.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/executor.ts`, `src/store/sql/store.ts`, `src/adapters/sql.ts`, `src/adapters/sql/*`.
+
+### M5-T35: Postgres `reserve` is one statement that locks the usage row first
+
+- **Decision:** with an owner, `reserve` is one statement. The files arrive as one JSON parameter
+  (`json_to_recordset`). A CTE locks the owner's usage row (`FOR UPDATE`), a recursive CTE walks the files in order
+  adding each that fits (`reserved + active + size <= limit`), and data-modifying CTEs insert the reserved rows and add
+  their bytes to the usage row, or create it. Without an owner it is one plain insert. An existing id fails the
+  statement, so nothing of the call is written. For an owner with no usage row yet, two first reserves racing each
+  other behave differently. Without a limit, the later one adds to the row the other created (`ON CONFLICT … DO
+  UPDATE`). With a limit, the later one fails on the unique owner, and the server answers it with a retryable
+  `SERVER_ERROR`, because its quota decisions assumed no row.
+- **Why:** spec §4 asks for one statement on Postgres, atomic per call. Data-modifying CTEs share one snapshot and
+  cannot see each other's writes, so the per-file decisions must be computed, not read back. The lock is taken before
+  any decision, so concurrent reserves of one owner queue and none overshoots. Measured: 8 racing reserves against
+  room for 5 reserve exactly 5 on both Postgres executors. The quota applies from an owner's first file, and a call
+  refused entirely leaves no usage row (M5-T18).
+- **If wrong:** the new-owner race with a limit costs one client retry. Creating the usage row first, in a separate
+  statement, would remove it but break the single-statement rule and leave zero rows behind (M5-T18).
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`.
+
+### M5-T36: SQLite batches put the usage write first, guarded on the files row as it was
+
+- **Decision:** on SQLite, `complete`, `end` and `revoke` are batches whose usage `UPDATE` runs first. It is guarded on
+  the files row's state before the change (`status = from`, and for `complete` the claim token too), and the files
+  `UPDATE` with the same guard follows. Both statements test the same condition on a row nothing has changed yet, so
+  they apply together or not at all. `reserve` runs, per file in order, a guarded `INSERT … SELECT … WHERE <quota fits>
+  RETURNING id` and then a usage upsert guarded by the same quota condition: the usage row is unchanged between the
+  two, so they agree. No statement reads another's row count. `end` from an ended status, and an owner-less row, write
+  no usage at all. Times are integer milliseconds bound as numbers. Booleans are never bound: optional clauses
+  (`cleaned_at`) are built into the SQL text.
+- **Why:** spec review C1. Guarding the usage write on the state *after* the files change (`status = 'completed' AND
+  claim = ?`) would count a replay of the same claim twice. Measured: the replay row of the contract catches it.
+- **If wrong:** the contract's usage-write fault can only fail the first statement of `complete`, `end` and `revoke`
+  on SQLite, so on SQLite it proves their rollback trivially. `reserve`'s injected fault, and every method's injected
+  fault on Postgres, do roll back a files change already made.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/sqlite.ts`.
+
+### M5-T37: `reconcile` locks, recounts, and creates a missing row only when the count is not zero
+
+- **Decision:** on Postgres, `reconcile` is a two-statement batch: `SELECT … FOR UPDATE` on the usage row, then one
+  `INSERT … SELECT <recount> … ON CONFLICT DO UPDATE … WHERE IS DISTINCT FROM … RETURNING`. The second statement takes
+  a new snapshot after the lock (READ COMMITTED), so a reserve committed while reconcile waited is counted. On SQLite
+  it is the same upsert alone, since one writer runs at a time. The insert happens only when the owner has
+  pending/completing/completed rows or already has a usage row, so an owner with nothing gets no row. `updated_at` is
+  the database clock: `now()` on Postgres, `julianday('now')` in milliseconds on SQLite (valid on every SQLite version,
+  unlike `unixepoch('subsec')`).
+- **Why:** spec review I10. Measured: a row holds a reserve open in a transaction until reconcile blocks
+  (`pg_stat_activity` shows the lock wait), then commits it. Without the lock statement, the reserve's 5 bytes are
+  lost (fault probe P8).
+- **If wrong:** one race remains: an owner whose usage row was deleted by hand, a first reserve and a reconcile all at
+  once. The lock then finds no row to hold, so the recount can overwrite the reserve. A `reconcile` afterwards repairs
+  it.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/sqlite.ts`, `src/store/sql/outcomes.ts`.
+
+### M5-T38: every Postgres placeholder is cast; times as ISO text; JSON bound as text
+
+- **Decision:** statements are built with a binder that adds each value as it writes its placeholder. On Postgres the
+  placeholder is `$n::type` (`text`, `bigint`, `integer`, `timestamptz`). Times are bound as ISO strings, sizes as
+  numbers. The reserve's JSON is bound as `$n::text::json`. On SQLite the placeholder is `?`, so the template's
+  evaluation order is the binding order, and times are integer milliseconds. Results decode through one
+  `toSafeInteger` (number, decimal text, bigint, a decimal-like object; it throws on fractions and beyond 2^53) and one
+  `toDate` (Date, ISO text, milliseconds).
+- **Why:** spec review I9. Drivers that send typed parameters (Prisma sends strings as text) fail without casts.
+  Measured: postgres.js JSON-encodes a string bound to a `json` parameter a second time ("cannot call
+  json_to_recordset on a scalar"), and binding it as text first fixes it. A size of 2^53 − 1 round-trips through all
+  three executors.
+- **If wrong:** a driver that rejects ISO text for `timestamptz` would need Dates; none of the three does.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/bind.ts`, `src/store/sql/records.ts`.
+
+### M5-T39: keyset paging compares bytes; the cursor is `<ms>:<id>`
+
+- **Decision:** `stale` asks for `limit + 1` rows ordered by `(time, id)` and continues with a row-value comparison
+  `(time, id) > (cursor time, cursor id)`. `owners` does the same over `owner`. On Postgres, `id` and `owner` compare
+  with `COLLATE "C"` in both the comparison and the `ORDER BY`. SQLite's default collation already compares bytes. A
+  `stale` cursor is the last row's time in milliseconds and its id; an owners cursor is the last owner. A cursor the
+  store did not make throws.
+- **Why:** task A's note (M5-T20): with the database's default collation (often `en_US`), the order of mixed-case ids
+  would differ between Postgres, SQLite and the memory store. Byte order is the same everywhere. Times are written
+  with millisecond precision, so a millisecond cursor is exact.
+- **If wrong:** the `COLLATE "C"` comparison cannot use a plain index on `id` built with another collation. The sweep
+  pages by `(status, time)` first, so the cost is small.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/reads.ts`, `src/store/sql/records.ts`.
+
+### M5-T40: the schema check runs once, lazily, and blames the schema only when the database answers
+
+- **Decision:** on a store's first call it reads every column of both tables with `WHERE 1 = 0`. When that fails and a
+  bare `SELECT 1` succeeds, it probes the table and then each column in spec §3's order, and throws `INVALID_CONFIG`.
+  The message names the table, and the missing column when the table exists, then says to create the tables as the
+  docs show or pass `{ tables }`. When `SELECT 1` fails too (the database is down), the original error is rethrown.
+  A failed check is not cached, so the next call checks again. Concurrent first calls share one check. A transaction
+  runs the check before it opens.
+- **Why:** spec §3. Probes run only on the error path, so the normal path costs two reads per store instance.
+- **If wrong:** a database user without `SELECT` rights on a column is reported as a missing column. The message still
+  names the place to look.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/tables.ts`, `src/store/sql/store.ts`.
+
+### M5-T41: transaction mode caps the row lock wait at 2 s and answers `busy`, on both Postgres drivers
+
+- **Decision:** `store.transaction(run)` runs `SET LOCAL lock_timeout = '2s'` on Postgres, then hands `run` methods
+  whose `claim` turns Postgres's lock timeout (`55P03`, also found through a wrapper's `cause`) into `{ kind: "busy" }`.
+  When that happened and `run` finished, a transaction that then fails with the same lock timeout returns `run`'s
+  answer. Outside a transaction no lock timeout is set, so a claim never waits long: its single `UPDATE` waits only for
+  another single statement.
+- **Why:** spec §5.5 step 5. Measured: node-postgres commits an aborted transaction as a silent `ROLLBACK`, while
+  postgres.js rethrows the first failed statement of a transaction even after the code caught it. Both now answer
+  `busy` after 2 s (two 2-second rows in the db lane). Nothing was written either way.
+- **If wrong:** another driver that reports the lock timeout differently needs its code added to `isLockTimeout`
+  (Prisma is checked in its own task).
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/store/sql/store.ts`, `src/store/sql/executor.ts`.
+
+### M5-T42: packaging of the three adapter subpaths
+
+- **Decision:** `package.json` exports `./adapters/sql`, `./adapters/drizzle` and `./adapters/prisma`, built by tsdown
+  to `dist/adapters/<name>.js` (named entries). `drizzle-orm >=0.45.0` is an optional peer. Prisma needs none:
+  `prismaStore` will take a structurally typed client. `drizzle.ts` and `prisma.ts` export nothing until their tasks
+  land, which keeps publint and attw green with no stub that throws. The size budgets are summed with their chunks:
+  sql 14 kB (measured 9.62 kB; 5.89 kB bundled and minified, mostly SQL text); drizzle and prisma 13 kB each (the core
+  plus 3 kB). The size config now follows `../` imports from `dist/adapters/`. Two Biome fences: `src/store/**`
+  imports no adapter, entry, server (except `server/store`), client, storage, protocol or testing code; `src/adapters/**`
+  imports the same set minus adapters, so it reaches only the core, the store types and errors. The core gets its own
+  chunk once a second adapter imports it; today it is inlined into `adapters/sql.js`.
+- **Why:** spec §7 and review I13: tasks D and E touch only their own files.
+- **If wrong:** the budgets are guards (M4-F24); tasks D and E re-measure theirs.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `packages/cloudrop/package.json`, `tsdown.config.ts`, `scripts/size-limit.config.ts`, `biome.json`.
+
+### M5-T43: one contract target for every SQL store, with failure injection that survives rollback
+
+- **Decision:** `src/testing/db/sql-target.ts` exports `sqlStoreTarget(db, storeOver, gaps?)`, the contract setup for
+  any SQL store, and `src/testing/db/raw-tables.ts` exports `rawTables(db, tables?)`, the final `RawTables` over C0's
+  reader. Per case, Postgres starts from an empty schema, and SQLite gets a new database from its fixture. Setup
+  creates the default, `renamed_*` and `broken_*` tables (the broken files table without `result`). `injectFailure`
+  arms a one-shot trigger on the usage table. On Postgres it is a `RAISE EXCEPTION` gated on `nextval` of a fresh
+  sequence, which a rollback does not undo. On node:sqlite it is a `RAISE(ABORT)` whose `WHEN` calls a registered JS
+  function holding the armed flag. Gaps: node:sqlite declares only `transaction`, and Postgres none. Tasks D and E
+  call `sqlStoreTarget` with their own store factory.
+- **Why:** a trigger that drops itself or clears a flag row rolls back with the failed statement and fires every time
+  (the controller's measurement). One target keeps the contract's setup identical across adapters.
+- **If wrong:** D1 has no user functions, so its lane declares `failureInjection` and `transaction` as gaps.
+- **Status:** decided.
+- **Source:** task C, 2026-11-17.
+- **Visible in:** `src/testing/db/sql-target.ts`, `src/testing/db/raw-tables.ts`, `src/adapters/sql.db.integration.test.ts`.
+
 <!-- Task C appends its entries above this line. -->
 
 ## Drizzle adapter (task D)
