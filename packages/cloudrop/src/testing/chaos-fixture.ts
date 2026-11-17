@@ -68,6 +68,10 @@ export interface ChaosFixture {
    * so a renewal or a new ticket shows here and not in `bucketRequests` (spec §4 rows 1, 3, 4, 7, 8).
    */
   appRequests(): string[];
+  /** The bodies of the app's error answers, in order, as the client got them: rows read a message word for word. */
+  appErrors(): unknown[];
+  /** Waits up to `timeoutMs` until `appRequests()` holds `call`, such as "POST /abort 200" (a background /abort). */
+  waitForApp(call: string, timeoutMs?: number): Promise<void>;
   /** The first log entry `matches` accepts, waiting up to `timeoutMs` for it (a background /abort lands late, M1). */
   waitForEntry(matches: (entry: ChaosEntry) => boolean, timeoutMs?: number): Promise<ChaosEntry>;
   /** The object under `key` is exactly `file`: size and SHA-256, read from RustFS directly. */
@@ -81,7 +85,7 @@ export interface ChaosFixture {
    * lifecycle rule, such as a retry's first ticket (audit C3).
    */
   expectNoUploadsLeft(options?: { allow?: readonly string[] }): Promise<void>;
-  /** Clears the rules, random mode, held requests, the prefix's uploads and objects, both logs and the logger. */
+  /** Clears the rules, random mode, held requests, the prefix's uploads and objects, the logs and the logger. */
   reset(): Promise<void>;
   /** Clears the prefix and stops the proxy. */
   stop(): Promise<void>;
@@ -116,12 +120,15 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
   const cloudrop = chaosCloudrop(chaosStorage(proxy.url), prefix, logger);
 
   const appRequests: string[] = [];
+  const appErrors: unknown[] = [];
   const fetch: ClientFetch = async (url, init) => {
     if (!url.startsWith(BASE_PATH)) return globalThis.fetch(url, init);
     init.signal?.throwIfAborted();
     const headers = { ...Object.fromEntries(new Headers(init.headers)), origin: APP_ORIGIN };
     const response = await cloudrop.handler(new Request(url, { method: init.method, body: init.body, headers }));
     appRequests.push(`${init.method ?? "GET"} ${url.slice(BASE_PATH.length)} ${response.status}`);
+    // A clone, so the client still reads the body; the handler answers every error with cloudrop's JSON body.
+    if (!response.ok) appErrors.push(await response.clone().json());
     return response;
   };
   const uploadsLeft = () => openUploads(endpoint, prefix);
@@ -135,6 +142,14 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
       createCloudropClient<ChaosCloudrop>({ persist: false, ...options, fetch, basePath: BASE_PATH }),
     bucketRequests: () => proxy.log().map((entry) => `${entry.label} ${entry.outcome}`),
     appRequests: () => [...appRequests],
+    appErrors: () => [...appErrors],
+    waitForApp: (call, timeoutMs = 5000) =>
+      vi.waitFor(
+        () => {
+          if (!appRequests.includes(call)) throw new Error(`The client has not got "${call}". Seen: ${appRequests}.`);
+        },
+        { timeout: timeoutMs, interval: 10 },
+      ),
     waitForEntry: (matches, timeoutMs = 5000) =>
       vi.waitFor(
         () => {
@@ -162,6 +177,7 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
       await clearPrefix(direct, endpoint, prefix);
       proxy.clearLog();
       appRequests.length = 0;
+      appErrors.length = 0;
       logger.errors.length = 0;
       logger.warnings.length = 0;
     },
@@ -181,8 +197,8 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
  * test: started once before all (teardown registered with it), `Math.random` stubbed to 0 for every test (M3-K3),
  * and reset after each, so every test starts with no rules, empty logs and an empty prefix. A request still in flight
  * at the reset lands in the next test's logs, so a row that triggers a background /abort waits for it before it ends
- * (audit M1): for `POST /abort 200` in `appRequests()`, which lands after the /abort's last storage call, not for that
- * call's proxy entry, which the proxy logs while the handler is still answering.
+ * (audit M1) with `waitForApp("POST /abort 200")`: that call is recorded after the /abort's last storage call, while
+ * the call's proxy entry (`waitForEntry`) is logged as the handler is still answering.
  */
 export function useChaosFixture(): ChaosFixture {
   const fixture = {} as ChaosFixture;
