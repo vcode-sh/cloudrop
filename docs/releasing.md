@@ -7,47 +7,103 @@ one-time publish credential. No npm token exists, in GitHub secrets or anywhere 
 
 The workflow has two jobs:
 
-1. **build** (read-only, no OIDC): checks that the tag matches `packages/cloudrop/package.json`, runs
-   `bun run verify`, packs the package and keeps the tarball as an artifact.
-2. **publish** (environment `npm`, OIDC): waits for a reviewer's approval (public repository only, see below), then
-   publishes that exact tarball with `npm publish --access public`. It checks out no code and installs no
-   dependencies, so nothing from the repository or its dependencies runs while the publish permission exists. A
-   prerelease version (`1.0.0-beta.1`, `0.2.0-rc.1`) is published under the dist-tag `next`; every other version under
-   `latest`.
+1. **build** (read-only, no OIDC): checks that the tag matches the version in `packages/cloudrop/package.json` and
+   points at a commit on `main`, runs `bun run verify`, packs the package and keeps the tarball as an artifact for 7
+   days.
+2. **publish** (environment `npm`, OIDC only): waits for a reviewer's approval, then publishes that exact tarball with
+   `npm publish --access public`. It checks out no code and installs no dependencies, so nothing from the repository
+   or its dependencies runs while the publish permission exists. A prerelease version (`1.0.0-beta.1`, `0.2.0-rc.1`)
+   is published under the dist-tag `next`; every other version under `latest`.
+
+## First release, in order
+
+The recommended path makes the repository public first: GitHub's approval step, npm's provenance and the README's
+links all need a public repository. Do the steps in this order. The trusted publisher (step 5) must publish
+successfully within **2 days** of being created, or it expires and must be deleted and created again.
+
+1. **Make the repository public:** in `vcode-sh/cloudrop`, **Settings → General → Danger Zone → Change
+   visibility**.
+2. **Create the environment `npm` with required reviewers:** [The GitHub environment](#the-github-environment-npm).
+3. **Turn on two-factor authentication** for the npm account: [npm account](#npm-account).
+4. **Prepare the release commit** and push it to `main` without a tag: steps 1 and 2 of
+   [Release a version](#release-a-version). Wait until CI is green.
+5. **Add the trusted publisher** on npmjs.com: [The trusted publisher](#the-trusted-publisher).
+6. **Tag and approve:** steps 3 and 4 of [Release a version](#release-a-version). The version is on npm when
+   **publish** ends.
+7. **Disallow tokens** for the package: [Disallow tokens](#disallow-tokens).
+8. **Revoke every npm token:** [Revoke tokens](#revoke-tokens).
+
+### If the repository stays private
+
+Trusted publishing works from a private repository, with these differences:
+
+- **The environment depends on the plan.** On GitHub Free, a private repository has no environments. Leave the trusted
+  publisher's **Environment name** empty (the field is optional) and delete the line `environment: npm` from the
+  `publish` job in `release.yml`; the two must agree, or npm refuses the publish. On GitHub Pro or Team, create the
+  environment with its tag rule (step 2) and keep both as they are, but its required reviewers do nothing.
+- **No approval step.** Either way, **publish** starts as soon as **build** passes: pushing a `v*` tag on `main` is the
+  release. For a human check that does not depend on GitHub's plan, use npm's
+  [staged publishing](https://docs.npmjs.com/staged-publishing): in the last line of `release.yml`, change
+  `npm publish` to `npm stage publish`, and in the trusted publisher allow only **npm stage publish**. Each version
+  then waits until a maintainer approves it on npmjs.com (the package's **Staged Packages** tab) with two-factor
+  authentication.
+- **No provenance.** npm adds a provenance statement (a signed link from the published version to this repository,
+  commit and workflow run) on its own only when the repository is public, so a version published from a private
+  repository has none. npm does not support provenance from a private repository, which is why the workflow never
+  passes `--provenance` and `package.json` has no `publishConfig.provenance`. Once the repository is public, the next
+  release gets provenance with no change to the workflow.
+- **Links that 404.** The package README links its guides at `https://github.com/vcode-sh/cloudrop/blob/main/...`,
+  and `repository`, `homepage` and `bugs` in `package.json` point at the repository. For anyone without access, every
+  one of those links is a GitHub 404, on npmjs.com and in editors that show the README. The quickstart and the bucket
+  rules in the README are complete without them.
 
 ## Release a version
 
 1. On `main`, with CI green, set `version` in `packages/cloudrop/package.json` (for example `0.1.0`) and turn the
-   `## Unreleased` heading of `packages/cloudrop/CHANGELOG.md` into `## [0.1.0] - YYYY-MM-DD`, with a new empty
-   `## Unreleased` above it. Commit both in one commit:
+   `## Unreleased` heading of `packages/cloudrop/CHANGELOG.md` into `## 0.1.0 - YYYY-MM-DD`, with a new empty
+   `## Unreleased` above it. Commit both in one commit and push it:
 
    ```bash
    git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md
    git commit -m "chore(release): 0.1.0"
+   git push origin main
    ```
 
 2. Optionally, see what will be published: `bun run build && cd packages/cloudrop && npm pack --dry-run`.
-3. Tag that commit and push the commit and the tag:
+3. Tag that commit and push the tag:
 
    ```bash
    git tag v0.1.0
-   git push origin main v0.1.0
+   git push origin v0.1.0
    ```
 
 4. Open the run under **Actions → release**. When **build** passes, **publish** waits for the `npm` environment:
-   choose **Review deployments**, tick `npm` and approve (while the repository is private there is no approval step
-   and **publish** starts on its own). The version is on npm when the job ends.
+   choose **Review deployments**, tick `npm` and choose **Approve and deploy**. (While the repository is private there
+   is no approval step and **publish** starts on its own.)
 
-If **build** fails on the tag check, the tag and the version disagree: delete the tag (`git push origin :v0.1.0` and
-`git tag -d v0.1.0`), fix the version or tag the right commit, and push the tag again. A version npm already has can
-never be published again, not even after it is unpublished: fix forward with the next patch version.
+## If a release fails
+
+**build fails** on the tag check: the tag and the version disagree, or the tag points at a commit that is not on
+`main`. Delete the tag (`git push origin :v0.1.0` and `git tag -d v0.1.0`), fix the version or tag the right commit on
+`main`, and push the tag again. A failed `bun run verify` is fixed the same way, with a new commit on `main`.
+
+**publish fails:** first check whether the version reached npm: `npm view cloudrop versions`.
+
+- **The version is not on npm.** Fix the cause, then open the run and choose **Re-run failed jobs**: **publish** runs
+  again with the same tarball, without rebuilding. The artifact is kept for 7 days; after that, delete the tag and
+  push it again. The usual causes on a first release, all reported as an authentication error or a 404:
+  - the trusted publisher does not allow **npm publish** (a new configuration allows only `npm stage publish`);
+  - the trusted publisher expired (no successful publish within 2 days) or has a typo: delete it and add it again;
+  - the environment name differs between the trusted publisher and the `publish` job;
+  - `repository.url` in `package.json` does not match the repository (see [Package metadata](#package-metadata)).
+- **The version is on npm.** Do not re-run: npm refuses a version it already has (`You cannot publish over the
+  previously published versions`), even after an unpublish. Fix forward with the next patch version.
+- **The download of the artifact fails for lack of a scope.** The `publish` job grants only `id-token: write`; add
+  `contents: read` back to its `permissions` and re-run.
 
 ## One-time setup
 
-Do these once, in this order. The trusted publisher must publish successfully within **2 days** of being created, or it
-expires and must be deleted and created again, so do step 3 right before the first release.
-
-### 1. Create the GitHub environment `npm`
+### The GitHub environment `npm`
 
 In the repository `vcode-sh/cloudrop`: **Settings → Environments → New environment**.
 
@@ -57,16 +113,15 @@ In the repository `vcode-sh/cloudrop`: **Settings → Environments → New envir
   type **Tag** and pattern `v*`. Nothing but a release tag can then run in this environment.
 - Add no secrets and no variables to it.
 
-While the repository is private, GitHub limits these rules by plan: required reviewers need a public repository (or
-GitHub Enterprise), and the tag rule needs GitHub Pro or Team. See
-[While the repository is private](#while-the-repository-is-private).
+In a private repository, GitHub limits these rules by plan: see
+[If the repository stays private](#if-the-repository-stays-private).
 
-### 2. Make sure the npm account uses two-factor authentication
+### npm account
 
 On npmjs.com, **Account → Two-Factor Authentication** must be on (an authenticator app or a security key). It is
-required for the package setting in step 4.
+required to disallow tokens and to approve a staged version.
 
-### 3. Add the trusted publisher on npmjs.com
+### The trusted publisher
 
 On [npmjs.com/package/cloudrop](https://www.npmjs.com/package/cloudrop) (signed in as `vcode.sh`): **Settings →
 Trusted publishing**, choose **GitHub Actions** and fill in, exactly:
@@ -76,58 +131,33 @@ Trusted publishing**, choose **GitHub Actions** and fill in, exactly:
 | Organization or user | `vcode-sh` |
 | Repository | `cloudrop` |
 | Workflow filename | `release.yml` (the file name only, not the path) |
-| Environment name | `npm` |
+| Environment name | `npm` (empty on GitHub Free with a private repository) |
 | Allowed actions | tick **npm publish** (a new configuration allows only `npm stage publish` until you do) |
 
 Leave **npm dist-tag** unticked: the workflow sets the dist-tag while publishing and never runs `npm dist-tag`. A
 configuration cannot be edited once saved; to change a field, delete it and add it again.
 
-### 4. Disallow tokens for the package
+### Disallow tokens
 
 After the first release succeeds through the workflow: on the package page, **Settings → Publishing access**, choose
 **Require two-factor authentication and disallow tokens** and save with **Update Package Settings**. From then on no
 npm token can publish `cloudrop`, whatever its scope; trusted publishing still can.
 
-### 5. Revoke every npm token
+### Revoke tokens
 
 On npmjs.com, **Account → Access Tokens**: revoke every token, the leaked one first. Nothing in this repository uses a
-token, and step 4 already stops tokens from publishing `cloudrop`; revoking them also stops them from publishing or
-changing any other package of the account. If a machine still needs to read private packages, create a new read-only
-granular token for it instead of keeping an old one.
+token, and disallowing tokens already stops them from publishing `cloudrop`; revoking them also stops them from
+publishing or changing any other package of the account. If a machine still needs to read private packages, create a
+new read-only granular token for it instead of keeping an old one.
 
 ## Package metadata
 
 Trusted publishing compares `repository.url` in the published `package.json` with the repository the workflow runs in,
 so `packages/cloudrop/package.json` keeps `repository.url` at `git+https://github.com/vcode-sh/cloudrop.git` and
-`repository.directory` at `packages/cloudrop`; `bun run package:check` fails when either changes. If the repository is
-renamed or moves to another owner, change both fields and the trusted publisher together. `publishConfig.access` is
-`public` and `files` ships `dist` and `CHANGELOG.md`; npm adds `README.md`, `LICENSE` and `package.json` itself.
-
-## While the repository is private
-
-Trusted publishing works from a private repository, but three things change until the repository is public:
-
-- **No approval step.** On GitHub Free, Pro and Team, an environment's required reviewers work only in public
-  repositories, so the **publish** job starts as soon as **build** passes: pushing a `v*` tag is the release. Only
-  people with write access can push a tag, and on Pro or Team the environment's tag rule still keeps everything but a
-  `v*` tag out of `npm`. For a human check that does not depend on GitHub's plan, npm's
-  [staged publishing](https://docs.npmjs.com/staged-publishing) holds a version until a maintainer approves it on
-  npmjs.com with two-factor authentication: change the publish step's `npm publish` to `npm stage publish` and allow
-  only **npm stage publish** in the trusted publisher. The workflow does not do this today.
-
-- **No provenance.** npm adds a provenance statement (a signed link from the published version to this repository,
-  commit and workflow run) on its own only when the repository is public. From a private repository the version is
-  published without one, so npm shows no provenance badge. That is why the workflow does not pass `--provenance` and
-  `package.json` has no `publishConfig.provenance`: forcing provenance from a private repository makes npm refuse the
-  whole publish. Once the repository is public, the next release gets provenance with no change to the workflow.
-- **Links that 404.** The package README links its guides at `https://github.com/vcode-sh/cloudrop/blob/main/...`,
-  and `repository`, `homepage` and `bugs` in `package.json` point at the repository. For anyone without access, every
-  one of those links is a GitHub 404, on npmjs.com and in editors that show the README.
-
-What to do: make the repository public before the first release, or at the latest right after it, so the page and
-the links work and every later version carries provenance. If it has to stay private for longer, publish with the
-README as it is (the quickstart and the bucket rules in it are complete on their own) and expect the broken links
-until then.
+`repository.directory` at `packages/cloudrop`; `bun run package:check` (`scripts/check-package.sh`) fails when either
+changes. If the repository is renamed or moves to another owner, change both fields, that script and the
+[trusted publisher](#the-trusted-publisher) together. `publishConfig.access` is `public` and `files` ships `dist` and
+`CHANGELOG.md`; npm adds `README.md`, `LICENSE` and `package.json` itself.
 
 ## References
 
@@ -135,4 +165,5 @@ until then.
   [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements),
   [Staged publishing](https://docs.npmjs.com/staged-publishing).
 - GitHub: [OpenID Connect](https://docs.github.com/en/actions/concepts/security/openid-connect),
-  [Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+  [Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments),
+  [Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
