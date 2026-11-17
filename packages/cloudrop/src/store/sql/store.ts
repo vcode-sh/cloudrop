@@ -1,5 +1,5 @@
-// The SQL core's entry: a CloudropStore over any SqlExecutor, for Postgres or SQLite. Every adapter (`cloudrop/adapters/
-// sql`, Drizzle, Prisma) builds an executor and calls this; none writes SQL of its own.
+// The SQL core's entry: a CloudropStore over any SqlExecutor, for Postgres or SQLite. Every adapter
+// (`cloudrop/adapters/sql`, Drizzle, Prisma) builds an executor and calls this; none writes SQL of its own.
 
 import { configError } from "../../errors.ts";
 import type { CloudropStore } from "../../server/store.ts";
@@ -40,8 +40,8 @@ function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMet
  * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. When the
  * executor can hold a transaction, the store has `transaction` too: inside it a claim waits at most 2 seconds for
  * Postgres's row lock, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish; the
- * app's own statements through `tx` keep the database's lock timeout. Postgres must run at its default isolation, READ
- * COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
+ * app's own statements through `tx` keep the lock timeout their session had. Postgres must run at its default
+ * isolation, READ COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
  */
 export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlStoreOptions = {}): CloudropStore<TTx> {
   const { dialect } = executor;
@@ -72,13 +72,21 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
       try {
         return await transaction<T>(async (inner, tx) => {
           const methods = methodsOver({ executor: inner, dialect, tables });
-          const lockTimeout = async (value: string) => {
-            if (dialect === "postgres") await inner.query(`SET LOCAL lock_timeout = ${value}`, []);
+          // The cap covers the claim alone: onComplete's own statements through tx then run at whatever lock timeout
+          // the session had, restored exactly (a session-level SET included, which DEFAULT would drop). Another
+          // /complete holding the row lock past the cap makes the row busy, not broken. The CTE is materialized so the
+          // saved value is read before set_config changes it.
+          const capLockWait = async (): Promise<string | undefined> => {
+            if (dialect !== "postgres") return undefined;
+            const [row] = await inner.query(
+              `WITH before AS MATERIALIZED (SELECT current_setting('lock_timeout') AS saved)
+               SELECT saved, set_config('lock_timeout', '${LOCK_TIMEOUT}', true) FROM before`,
+              [],
+            );
+            return String(row?.saved);
           };
-          // The cap covers the claim alone: onComplete's own statements through tx wait as long as the database lets
-          // them. Another /complete holding the row lock past the cap makes the row busy, not broken.
           const claim: StoreMethods["claim"] = async (...args) => {
-            await lockTimeout(`'${LOCK_TIMEOUT}'`);
+            const saved = await capLockWait();
             let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
             try {
               outcome = await methods.claim(...args);
@@ -87,7 +95,7 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
               timedOut = true;
               return { kind: "busy" };
             }
-            await lockTimeout("DEFAULT");
+            if (saved !== undefined) await inner.query("SELECT set_config('lock_timeout', $1::text, true)", [saved]);
             return outcome;
           };
           const value = await run(tx, { ...methods, claim });

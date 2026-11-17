@@ -1,5 +1,5 @@
-// sqlStore's construction-time checks (what it refuses before any statement runs) and the types of its route(). Everything a store does is proven
-// by the store contract on real databases (sql.db.integration.test.ts).
+// sqlStore's construction-time checks (what it refuses before any statement runs) and the types of its route().
+// Everything a store does is proven by the store contract on real databases (sql.db.integration.test.ts).
 
 import postgres from "postgres";
 import { describe, expect, expectTypeOf, test } from "vitest";
