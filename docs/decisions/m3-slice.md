@@ -184,7 +184,9 @@ otherwise.
   lifecycle rule. A single `PUT` cancelled after its bytes reached the bucket may land after `/abort`'s HEAD; that
   object is an orphan the lifecycle rule does not remove (the 1.1 database adapters close this gap).
 - **Status:** in force (`bc06db2`, `cec31c9`). Spec §5.5 says the client never sends `/abort` after a `/complete` that
-  may have succeeded.
+  may have succeeded. Amended by `M4-F3` (2026-11-17): a `/complete` gets 120 s for its answer, then counts as one that
+  got none (`NETWORK_ERROR`, which may have finished), so a server that never answers no longer holds a cancelled
+  `upload()` open.
 - **Visible in:** `client/upload.ts` (`complete`, `uploadFile`), `client/endpoints.ts` (`complete`, `abort`),
   `client/upload-failures.test.ts` (the four `/complete` cancel rows).
 

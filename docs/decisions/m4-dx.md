@@ -57,6 +57,40 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   (`resumeRun`), `client/job.test.ts` ("cancels one file while /upload is in flight"), `client/persist.test.ts` ("takes
   no lock and saves nothing").
 
+### M4-F3: endpoint calls time out
+
+- **Decision:** every call to the server has a deadline for its whole answer, body included: 30 s for `/upload` and
+  `/sign`, 120 s for `/complete`, 10 s for `/abort` (as before). A call that misses it ends as no answer does: a
+  retryable `NETWORK_ERROR`, which the retry budget (`M3-S9`) tries again. Only the caller's own cancel answers
+  `ABORTED`. A `/complete` that timed out counts as one that may have finished (`M3-S14`), so a cancel or a failure
+  then keeps the file. One `AbortController` per call takes both the timer and the caller's signal, without
+  `AbortSignal.any` (`M3-U16`).
+- **Why:** design §3 F3. Without a deadline a server that accepted the connection and never answered left a file
+  `queued` (at `/upload`) or `completing` for good, and a cancelled `upload()` waited for the browser to drop the
+  connection. `/complete` gets four times as long because the server verifies up to 10,000 parts with `ListParts`
+  pages before it answers.
+- **If wrong:** a server slower than 30 s at `/upload` (an `authorize` that calls a slow service) or 120 s at
+  `/complete` is asked again, up to six times; a second `/complete` of a finished upload runs `onComplete` again, which
+  must be idempotent by `file.id` (`M3-U84`), and a second `/upload` leaves the first ticket's multipart upload to the
+  lifecycle rule.
+- **Status:** in force. Amends `M3-S14` (its known cost of a `/complete` that never answers).
+- **Source:** design §3 F3; code audit of `main` at `907cc77`.
+- **Visible in:** `client/endpoints.ts` (`post`, `ASK_TIMEOUT_MS`, `COMPLETE_TIMEOUT_MS`), `client/endpoints.test.ts`
+  ("a server that never answers").
+
+### M4-F6: `/abort` relies on the browser floor's timers, without a guard
+
+- **Decision:** `abort()` no longer wraps its request in a `try/catch`. Its deadline is the same timer as every other
+  call's (`M4-F3`) instead of `AbortSignal.timeout`, and `post` never rejects, so nothing is left to catch.
+- **Why:** design §3 F6. The `try/catch` could only catch a missing `AbortSignal.timeout`, and then it silently skipped
+  every `/abort`. The browser floor (ES2023: Chrome 103, Safari 16, Firefox 100) has that API, and with one timer for
+  all calls it is no longer used at all.
+- **If wrong:** nothing known: `post` maps every failure, a synchronous throw of `fetch` included, to a result.
+- **Status:** in force.
+- **Source:** design §3 F6; code audit of `main` at `907cc77`.
+- **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts` (the `abort` rows; the row for a missing
+  `AbortSignal.timeout` is gone).
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)
