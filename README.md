@@ -74,25 +74,27 @@ own app's session lookup and error display.
 import { createCloudrop, r2, route, unauthorized } from "cloudrop";
 
 export const cloudrop = createCloudrop({
-  // Reads CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY from the environment.
+  // Reads CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY on the first request.
   storage: r2({ bucket: "media" }),
   // The upload token secret comes from CLOUDROP_SECRET. Generate one with: openssl rand -base64 32
   routes: {
-    avatar: route({
-      accept: "image/*",
-      maxSize: "5MB",
-      authorize: async ({ request }) => {
-        const user = await getUser(request); // your app's session lookup
-        return user ? { userId: user.id } : unauthorized();
+    avatar: route(
+      {
+        accept: "image/*",
+        maxSize: "5MB",
+        authorize: async ({ request }) => {
+          const user = await getUser(request); // your app's session lookup
+          return user ? { userId: user.id } : unauthorized();
+        },
       },
-      prefix: ({ userId }) => `users/${userId}/avatars`,
-    }),
+      { prefix: ({ userId }) => `users/${userId}/avatars` },
+    ),
   },
 });
 ```
 
-Write `authorize` before `prefix`, `key` and `onComplete`: TypeScript types their context from its result, in the order
-the options are written. What `authorize` returns is signed into the upload token, which the browser can read, so
+`route()` takes the policy first and, optionally, `prefix`, `key` and `onComplete` second: TypeScript types their
+context from what `authorize` returns. That result is signed into the upload token, which the browser can read, so
 return ids, never secrets.
 
 **2. Mount the handler.** In Next.js, `app/api/cloudrop/[...all]/route.ts`:
