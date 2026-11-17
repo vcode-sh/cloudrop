@@ -42,4 +42,4 @@ if [ -z "${READY:-}" ]; then
 fi
 CLOUDROP_WRANGLER_ENDPOINT="http://127.0.0.1:${PORT}/cdn-cgi/local/r2/s3" \
   bunx vitest run --project integration src/storage/s3-driver.wrangler.integration.test.ts \
-  src/adapters/sql-d1.wrangler.integration.test.ts
+  src/adapters/sql-d1.wrangler.integration.test.ts src/adapters/drizzle-d1.wrangler.integration.test.ts

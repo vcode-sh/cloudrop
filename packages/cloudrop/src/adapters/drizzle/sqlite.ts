@@ -1,11 +1,14 @@
 // Drizzle on SQLite, through `all` and `run`. A synchronous driver (better-sqlite3) runs a batch in
 // `db.transaction(…, { behavior: "immediate" })`, which ends before any other call can start. An asynchronous one with
-// an atomic batch (libsql/Turso, D1) runs it through `db.batch`, ordered and all-or-nothing. Neither has transaction
+// an atomic batch (libsql/Turso) runs it through `db.batch`, ordered and all-or-nothing. D1 runs through the binding
+// Drizzle keeps as `db.$client`, as `d1Executor` does: drizzle-orm 0.45's D1 `batch` cannot take a raw statement with
+// parameters (it reads a `stmt` that `db.run(sql)` never prepares; measured in the Wrangler lane). None has transaction
 // mode: an interactive transaction would hold the only writer across `onComplete`'s awaits.
 
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { SqlExecutor, SqlRow, SqlStatement } from "../../store/sql/executor.ts";
+import { type D1Database, d1Executor } from "../sql/d1.ts";
 import { drizzleSql } from "./statement.ts";
 
 /** What the store calls on a synchronous Drizzle SQLite database or transaction. */
@@ -78,7 +81,22 @@ function batchingExecutor(db: DrizzleAsyncSqlite): SqlExecutor {
   };
 }
 
+/** The D1 binding of a `drizzle-orm/d1` database, which Drizzle keeps as `$client`; null for any other driver. */
+function d1Binding(db: object): D1Database | null {
+  const client: unknown = "$client" in db ? db.$client : null;
+  const isD1 =
+    typeof client === "object" &&
+    client !== null &&
+    "prepare" in client &&
+    typeof client.prepare === "function" &&
+    "batch" in client &&
+    typeof client.batch === "function";
+  return isD1 ? (client as D1Database) : null;
+}
+
 export function sqliteExecutor(db: DrizzleSqlite | DrizzleAsyncSqlite): SqlExecutor {
+  const d1 = d1Binding(db);
+  if (d1) return d1Executor(d1);
   return "batch" in db && typeof db.batch === "function"
     ? batchingExecutor(db as DrizzleAsyncSqlite)
     : synchronousExecutor(db as DrizzleSqlite);
