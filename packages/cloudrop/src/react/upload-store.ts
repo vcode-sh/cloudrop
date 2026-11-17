@@ -42,7 +42,7 @@ function isSameFile(previous: FileSnapshot<unknown>, next: FileSnapshot<unknown>
 export interface UploadStore<R> {
   add(job: UploadJob<R>): void;
   jobs(): readonly UploadJob<R>[];
-  /** Drops the jobs whose every file has ended. */
+  /** Drops the jobs whose every file ended done or aborted. */
   clear(): void;
   subscribe(listener: () => void): () => void;
   getSnapshot(): UploadView<R>;
@@ -52,10 +52,10 @@ export function createUploadStore<R>(): UploadStore<R> {
   let jobs: readonly UploadJob<R>[] = [];
   const listeners = new Set<() => void>();
   const stops = new Map<UploadJob<R>, () => void>();
-  // Bumped on every change; the view is rebuilt only when it moved, so React gets the same object until then.
-  let version = 0;
+  // Rebuilt on every change, so getSnapshot returns the same object until the next one.
+  let view: UploadView<R> = EMPTY_VIEW;
   const notify = () => {
-    version += 1;
+    view = build();
     for (const listener of listeners) listener();
   };
   const watch = (job: UploadJob<R>) => stops.set(job, job.subscribe(notify));
@@ -80,8 +80,6 @@ export function createUploadStore<R>(): UploadStore<R> {
     return file;
   }
 
-  let view: UploadView<R> = EMPTY_VIEW;
-  let viewVersion = 0;
   function build(): UploadView<R> {
     if (jobs.length === 0) return EMPTY_VIEW;
     const snapshots = jobs.map((job) => job.getSnapshot());
@@ -100,19 +98,20 @@ export function createUploadStore<R>(): UploadStore<R> {
     },
     jobs: () => jobs,
     clear() {
-      const running = jobs.filter((job) => {
-        const { done, failed, aborted, count } = job.getSnapshot().totals;
-        return done + failed + aborted < count;
+      // A failed file stays: retry() can still send it, and the client keeps its ticket and parts for that.
+      const kept = jobs.filter((job) => {
+        const { done, aborted, count } = job.getSnapshot().totals;
+        return done + aborted < count;
       });
-      for (const job of jobs) if (!running.includes(job)) unwatch(job);
-      jobs = running;
+      for (const job of jobs) if (!kept.includes(job)) unwatch(job);
+      jobs = kept;
       notify();
     },
     subscribe(listener) {
       if (listeners.size === 0) {
         for (const job of jobs) watch(job);
-        // Nobody heard what the jobs did meanwhile.
-        version += 1;
+        // Nobody heard what the jobs did meanwhile, such as under a hidden <Activity>.
+        view = build();
       }
       listeners.add(listener);
       return () => {
@@ -120,12 +119,6 @@ export function createUploadStore<R>(): UploadStore<R> {
         if (listeners.size === 0) for (const job of jobs) unwatch(job);
       };
     },
-    getSnapshot() {
-      if (viewVersion !== version) {
-        viewVersion = version;
-        view = build();
-      }
-      return view;
-    },
+    getSnapshot: () => view,
   };
 }

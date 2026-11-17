@@ -2,19 +2,20 @@
 // starts in an effect or during render, so StrictMode's second render and second effect start nothing.
 
 import { useInsertionEffect, useState, useSyncExternalStore } from "react";
-import type { CloudropClient, ResumableUpload, UploadJob, UploadResult } from "../client.ts";
+import { isList } from "../client/arguments.ts";
+import type { CloudropClient, Result, ResumableUpload, UploadJob, UploadResult } from "../client.ts";
 import { createDropHandlers } from "./drop.ts";
+import type { JobTracker } from "./job-tracker.ts";
 import type { InputProps, UseUploadOptions, UseUploadResult } from "./types.ts";
 import { createUploadStore, EMPTY_VIEW } from "./upload-store.ts";
 
-/** What createUploadHooks shares with its hooks. */
-export interface HookSource {
-  /** The client, created on the first call: in a handler or an effect, so never during a server render. */
-  client(): CloudropClient;
-  /** Tells useResumable when the job settles, since a settled job may have added or removed a record. */
-  started(job: UploadJob<unknown>): void;
-  /** Calls `listener` whenever a job started through the hooks settles; returns the unsubscribe. */
-  onSettled(listener: () => void): () => void;
+/** What createUploadHooks shares with its hooks: the client and the jobs they started. */
+export interface HookSource extends JobTracker {
+  /**
+   * The client, created on the first call: in a handler or an effect, so never during a server render. A wrong option
+   * gives its INVALID_CONFIG error, which upload(), resume() and refresh() resolve with.
+   */
+  client(): Result<CloudropClient>;
 }
 
 interface Latest {
@@ -30,22 +31,30 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   // Event handlers read the committed render's route and options, so the functions below never change.
   const controller = { latest: initial, store };
 
-  function start(job: UploadJob<unknown>): Promise<UploadResult<unknown>> {
+  function start(
+    route: string,
+    files: readonly unknown[],
+    begin: (client: CloudropClient) => UploadJob<unknown>,
+  ): Promise<UploadResult<unknown>> {
+    const client = source.client();
+    if (client.error) return Promise.resolve({ data: null, error: client.error });
+    const job = begin(client.data);
     store.add(job);
-    source.started(job);
+    source.track(job, route, files);
     return job.done;
   }
   const upload: Hook["upload"] = (files, call = {}) => {
-    const list = files instanceof File ? [files] : Array.from(files ?? []);
+    // As the client reads its argument (readFiles in client/arguments.ts): a list, or one value it checks is a File.
+    const list = files === null ? [] : isList(files) ? Array.from(files) : [files];
     if (list.length === 0) return Promise.resolve(null);
     const { route, options } = controller.latest;
     const metadata = "metadata" in call ? call.metadata : options.metadata;
-    return start(source.client().start(route, list, { metadata }));
+    return start(route, list, (client) => client.start(route, list, { metadata }));
   };
   function resume(): void;
   function resume(upload: ResumableUpload, file: File): Promise<UploadResult<unknown>>;
   function resume(...record: [] | [ResumableUpload, File]): Promise<UploadResult<unknown>> | undefined {
-    if (record.length === 2) return start(source.client().resume(...record));
+    if (record.length === 2) return start(record[0].route, [record[1]], (client) => client.resume(...record));
     for (const job of store.jobs()) job.resume();
   }
   const onChange: InputProps["onChange"] = (event) => {

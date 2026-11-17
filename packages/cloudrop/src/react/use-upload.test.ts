@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
-// Contract: spec §6.1 (M4-B2, M4-B4) through createUploadHooks on the real client and the fake server. `files` lists
-// every file of the jobs the hook started, in start order, each with controls bound to it, and keeps a file's object
-// until that file changes; `totals` and `isUploading` span those jobs; upload(null) starts nothing; upload() reads the
-// latest options; the input clears after a pick; StrictMode duplicates nothing; unmounting leaves the jobs running.
+// Contract: spec §6.1 (M4-B1, M4-B2, M4-B4) through createUploadHooks on the real client and the fake server: each file's
+// controls act on that file and the hook's on every job; upload(null) starts nothing, and upload() passes what it gets
+// to the client, which checks it is a File; a wrong client option resolves INVALID_CONFIG; upload() reads the latest
+// options; the input clears after a pick; StrictMode duplicates nothing. What the hook renders: upload-store.test.ts.
 // Oracle: the requests the fixture saw, the server's verdicts for the routes below and the statuses the client reports.
 
+import { File as NodeFile } from "node:buffer";
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react";
 import { createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,9 +13,9 @@ import type { InferableCloudrop } from "../client.ts";
 import { createUploadHooks, type UploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import type { StandardSchema } from "../server/schema.ts";
-import { clientFixture, type Fault } from "../testing/client-fixture.ts";
-import { errorResponse } from "../testing/fake-r2/responses.ts";
+import type { Fault } from "../testing/client-fixture.ts";
 import { firstOf, gate } from "../testing/persist-fixture.ts";
+import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 import type { UploadFile } from "./types.ts";
 
 const tagged: StandardSchema<{ tag: string }> = {
@@ -31,27 +32,7 @@ const routes = {
   }),
 };
 
-/** Hooks whose client is created from options on first use, as an app's are, on a fixture answered by `fault`. */
-function setup(fault: Fault = () => undefined) {
-  const fixture = clientFixture(routes, { fault });
-  return { fixture, ...createUploadHooks({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false }) };
-}
-
-/** waitFor polls every 50 ms by default; these renders follow microtasks and 0 ms backoffs. */
-const fast = { interval: 1 };
-const note = (text: string, name: string) => new File([text], name, { type: "text/plain" });
-/** Holds the single PUT of the file of `size` bytes: sizes 5, 6 and 7 tell the files apart. */
-const holdPut = (size: number) => gate((call) => call.label === "PUT object" && (call.init.body as Blob).size === size);
-/** Every PUT of a file of `size` bytes fails while `failing.on`, through all its attempts: STORAGE_ERROR. */
-function failPut(size: number) {
-  const failing = { on: true };
-  const fault: Fault = (call) =>
-    failing.on && call.label === "PUT object" && (call.init.body as Blob).size === size
-      ? errorResponse(500, "InternalError", "We encountered an internal error. Please try again.")
-      : undefined;
-  return { failing, fault };
-}
-const statuses = (files: readonly UploadFile<unknown>[]) => files.map((file) => `${file.name} ${file.status}`);
+const setup = (fault?: Fault) => hooksFixture(routes, fault);
 const count = (requests: string[], label: string) => requests.filter((request) => request === label).length;
 
 /** A file input that takes several text files, and an output listing the hook's files. */
@@ -76,69 +57,6 @@ afterEach(() => {
 });
 
 describe("useUpload", () => {
-  it("lists every file of the hook's uploads in start order, with totals that leave failed files out", async () => {
-    const { useUpload } = setup();
-    const { result } = renderHook(() => useUpload("notes", { multiple: true }));
-    await act(() => result.current.upload(note("alpha", "a.txt")));
-    // 20 bytes is over the route's 16: /upload refuses that file only.
-    await act(() => result.current.upload([note("bravo!", "b.txt"), note("x".repeat(20), "big.txt")]));
-
-    const { files, totals, isUploading } = result.current;
-    expect({ files: statuses(files), code: files[2]?.error?.code, totals, isUploading }).toEqual({
-      files: ["a.txt done", "b.txt done", "big.txt failed"],
-      code: "FILE_TOO_LARGE",
-      totals: { bytes: 11, size: 11, progress: 1, speed: 0, eta: null, done: 2, failed: 1, aborted: 0, count: 3 },
-      isUploading: false,
-    });
-  });
-
-  it("counts the hook as finished when its only counted file is an empty one that is done", async () => {
-    const { useUpload } = setup();
-    const { result } = renderHook(() => useUpload("notes"));
-    await act(() => result.current.upload(note("", "empty.txt")));
-    await act(() => result.current.upload(note("x".repeat(20), "big.txt")));
-
-    expect(result.current.totals).toEqual({
-      bytes: 0,
-      size: 0,
-      progress: 1,
-      speed: 0,
-      eta: null,
-      done: 1,
-      failed: 1,
-      aborted: 0,
-      count: 2,
-    });
-  });
-
-  it("is uploading while a file waits or sends, and not once it is paused or settled", async () => {
-    const held = holdPut(5);
-    const { useUpload } = setup(held.fault);
-    const { result } = renderHook(() => useUpload("notes"));
-    let done: Promise<unknown> = Promise.resolve();
-    act(() => {
-      done = result.current.upload(note("alpha", "a.txt"));
-    });
-    const waiting = result.current.isUploading;
-    await act(() => held.reached);
-    const sending = result.current.isUploading;
-    act(() => result.current.pause());
-    await waitFor(() => expect(statuses(result.current.files)).toEqual(["a.txt paused"]), fast);
-    const paused = result.current.isUploading;
-    act(() => {
-      result.current.resume();
-      held.open();
-    });
-    await act(() => done);
-
-    expect({ waiting, sending, paused, settled: result.current.isUploading }).toEqual({
-      waiting: true,
-      sending: true,
-      paused: false,
-      settled: false,
-    });
-  });
-
   it("resolves null for no file or an empty list, and sends nothing", async () => {
     const { fixture, useUpload } = setup();
     const { result } = renderHook(() => useUpload("notes"));
@@ -151,25 +69,53 @@ describe("useUpload", () => {
     });
   });
 
-  it("keeps a file's object while only another file changes, and replaces it when that file changes", async () => {
-    const held = holdPut(6);
-    const { useUpload } = setup(held.fault);
-    const { result } = renderHook(() => useUpload("notes", { multiple: true }));
-    let done: Promise<unknown> = Promise.resolve();
-    act(() => {
-      done = result.current.upload([note("alpha", "a.txt"), note("bravo!", "b.txt")]);
-    });
-    await act(() => held.reached);
-    await waitFor(() => expect(statuses(result.current.files)).toEqual(["a.txt done", "b.txt uploading"]), fast);
-    const [first, second] = result.current.files;
-    act(() => held.open());
-    await act(() => done);
+  it("passes a File of another realm to the client, which refuses it as INVALID_INPUT", async () => {
+    const { fixture, useUpload } = setup();
+    const { result } = renderHook(() => useUpload("notes"));
+    // Node's File is not this window's File, as one from an iframe is not: `instanceof File` is false for both.
+    const foreign = new NodeFile(["alpha"], "a.txt", { type: "text/plain" }) as unknown as File;
+    const answer = await act(() => result.current.upload(foreign));
 
-    const [firstAfter, secondAfter] = result.current.files;
-    expect({ first: firstAfter === first, second: secondAfter === second, status: secondAfter?.status }).toEqual({
-      first: true,
-      second: false,
-      status: "done",
+    expect({ answer: answer?.data, code: answer?.error?.code, requests: fixture.requests }).toEqual({
+      answer: null,
+      code: "INVALID_INPUT",
+      requests: [],
+    });
+  });
+
+  it("resolves INVALID_CONFIG from upload(), resume() and refresh() when the client's options are wrong", async () => {
+    // No leading slash: createCloudropClient refuses this basePath (readOptions in client.ts).
+    const { useUpload, useResumable } = createUploadHooks({ basePath: "api/cloudrop" });
+    const { result } = renderHook(() => ({ hook: useUpload("notes"), resumable: useResumable() }));
+    const record = {
+      id: "01M7M9TNBPHGF4ET6BM935W02V",
+      route: "notes" as const,
+      name: "a.txt",
+      size: 5,
+      type: "text/plain",
+      lastModified: 0,
+      expiresAt: "2026-11-18T00:00:00.000Z",
+    };
+    const answers = await act(() =>
+      Promise.all([
+        result.current.hook.upload(note("alpha", "a.txt")),
+        result.current.hook.resume(record, note("alpha", "a.txt")),
+        result.current.resumable.refresh(),
+      ]),
+    );
+
+    expect({
+      answers: answers.map((answer) => [answer?.data, answer?.error?.code]),
+      files: result.current.hook.files,
+      uploads: result.current.resumable.uploads,
+    }).toEqual({
+      answers: [
+        [null, "INVALID_CONFIG"],
+        [null, "INVALID_CONFIG"],
+        [null, "INVALID_CONFIG"],
+      ],
+      files: [],
+      uploads: [],
     });
   });
 
@@ -249,28 +195,6 @@ describe("useUpload", () => {
     expect(statuses(result.current.files)).toEqual(["a.txt done", "b.txt done"]);
   });
 
-  it("clear() drops the settled jobs and keeps the running one", async () => {
-    const held = holdPut(7);
-    const { useUpload } = setup(held.fault);
-    const { result } = renderHook(() => useUpload("notes"));
-    await act(() => result.current.upload(note("alpha", "a.txt")));
-    await act(() => result.current.upload(note("x".repeat(20), "big.txt")));
-    let running: Promise<unknown> = Promise.resolve();
-    act(() => {
-      running = result.current.upload(note("charlie", "c.txt"));
-    });
-    await act(() => held.reached);
-    act(() => result.current.clear());
-    const cleared = statuses(result.current.files);
-    act(() => held.open());
-    await act(() => running);
-
-    expect({ cleared, after: statuses(result.current.files) }).toEqual({
-      cleared: ["c.txt uploading"],
-      after: ["c.txt done"],
-    });
-  });
-
   it("sends the latest render's metadata, unless the call passes its own", async () => {
     const { useUpload } = setup();
     const { result, rerender } = renderHook(({ tag }) => useUpload("tagged", { metadata: { tag } }), {
@@ -321,25 +245,6 @@ describe("useUpload", () => {
     expect({ requests: fixture.requests, files: statuses(result.current.files) }).toEqual({
       requests: ["POST /upload", "PUT object", "POST /complete"],
       files: ["a.txt done"],
-    });
-  });
-
-  it("leaves the upload running when the component unmounts, and sends no /abort", async () => {
-    const held = holdPut(5);
-    const { fixture, useUpload } = setup(held.fault);
-    const { result, unmount } = renderHook(() => useUpload("notes"));
-    let done: ReturnType<typeof result.current.upload> = Promise.resolve(null);
-    act(() => {
-      done = result.current.upload(note("alpha", "a.txt"));
-    });
-    await held.reached;
-    unmount();
-    held.open();
-    const answer = await done;
-
-    expect({ status: answer?.data?.files[0]?.status, requests: fixture.requests }).toEqual({
-      status: "done",
-      requests: ["POST /upload", "PUT object", "POST /complete"],
     });
   });
 });
