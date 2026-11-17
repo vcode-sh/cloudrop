@@ -666,6 +666,41 @@ Runs 1 and 2 aborted 2 uploads and deleted 11 keys each; run 3 deleted 1. No buc
 written; the `OPTIONS` control writes nothing. The page server on port 5173 and every browser were stopped at the end
 of each run.
 
+## Overlapping completions, 2026-11-17
+
+Measured 2026-11-17, 08:27:50–08:29:50 UTC, on the same test bucket, for `M4-F12`: can a `/complete` retried while the
+first `CompleteMultipartUpload` still runs get `NoSuchUpload` from ListParts or Complete before HEAD shows the object?
+The server would then answer `NO_SUCH_UPLOAD` for a finished upload (`M3-U83`, "If wrong"). Bun 1.4.4 drove cloudrop's
+own S3 driver (`createS3Driver`, R2 rules). Each trial created a multipart upload with `x-amz-meta-cloudrop-id`,
+uploaded its 5 MiB parts through `presignPart`, then sent Complete A (with `If-None-Match: *`, as `/complete` does),
+Complete B with the same part list a fixed delay after A, and ListParts plus HEAD from three pollers staggered by
+35 ms until four rounds after A answered (433 HEADs and as many ListParts in all). The probe was scratch code outside
+the repository; its output went through `createRedactor` and held no URL, credential or upload ID. Times are from the
+start of Complete A.
+
+| Parts (MiB) | Trials | Complete A took | Complete B 200 (B started after A) | Complete B `404 NoSuchUpload` (B started after A) |
+|---|---|---|---|---|
+| 4 (20) | 1 | 230 ms | 1 (0 ms) | 0 |
+| 10 (50) | 16 | 215–380 ms | 6 (0–160 ms) | 10 (150–300 ms; 7 while A was still running) |
+| 40 (200) | 4 | 242–304 ms | 1 (0 ms) | 3 (200, 400, 600 ms; 1 while A was still running) |
+| 200 (1,000) | 2 | 589 and 357 ms | 1 (150 ms) | 1 (300 ms, while A was still running) |
+
+- **No window in 23 trials.** HEAD saw the object before or as the first `NoSuchUpload` arrived: every HEAD that
+  started after any `NoSuchUpload` answer (from ListParts or Complete B) returned the object with its `cloudrop-id`
+  and size. The last HEAD that found nothing started 104–427 ms into A, at least 88 ms before A answered.
+- **ListParts started during a completion answers `500 InternalError`**, in every trial (1–5 times each, 67 in all);
+  once the object is visible it answers `NoSuchUpload`. `storageError` maps it to a retryable `STORAGE_ERROR`, so `/complete` answers
+  retryable and the client's retry then finds the object through `completedBefore`.
+- **Two overlapping completions both succeed when the second starts early** (up to 160 ms after the first here): 200
+  for both, with `If-None-Match: *` on each, never `412`, so both `/complete` calls run `afterVerify` and
+  `onComplete`, which `docs/guide/server.md` already asks to be idempotent by `file.id` (`M3-U84`). A later one, even while the
+  first still runs, gets `NoSuchUpload`, and by then HEAD already shows the object.
+
+Ruling (`M4-F12`): the window the audit feared was not observed, so `completedBefore` keeps answering `NO_SUCH_UPLOAD`
+on the first HEAD that finds nothing. Unmeasured: completions far longer than 0.6 s (thousands of parts) and other
+regions or load. Each run deleted its objects (1, 6, 10, 4 and 2) and aborted its uploads, then listed its
+`live-test/cloudrop-<32 hex>/` prefix empty; no bucket setting was read or written.
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in
@@ -692,7 +727,8 @@ of each run.
 - Jurisdiction endpoints, virtual-host addressing with the own presigner (the SDK runs used path style), Infrequent
   Access storage class.
 - A Complete whose request is lost and retried. Inferred from Q11: the retry gets `NoSuchUpload`, which the client
-  must reconcile with HEAD.
+  must reconcile with HEAD. A retry that overlaps the first Complete was measured in
+  [Overlapping completions](#overlapping-completions-2026-11-17).
 - RustFS/SeaweedFS uneven-part behaviour (open item 7). This spike touched only R2.
 - The `r2/reference/limits` page from the brief: the R2 limits live at `r2/platform/limits` ([limits]).
 

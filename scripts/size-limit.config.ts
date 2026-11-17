@@ -26,6 +26,17 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
+  // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
+  // of the unminified files the summed budget counts. 21.33 kB when set (M4-F14).
+  {
+    name: "cloudrop (bundled)",
+    path: join(dist, "index.js"),
+    gzip: true,
+    limit: "23.5 kB",
+    // index.js has a bare `import "./types-….js"` that sideEffects: false lets esbuild drop, as it should; without
+    // this every run prints that as a warning.
+    modifyEsbuildConfig: (config: object) => ({ ...config, logOverride: { "ignored-bare-import": "silent" } }),
+  },
   // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decisions 2026-11-16: resume
   // after reload is on by default with a raised ceiling, and ceilings get headroom instead of step-by-step raises; the
   // resume plan measured 9.57 kB before its last feature task, so the ceiling was 10.5 kB. The final review's fixes

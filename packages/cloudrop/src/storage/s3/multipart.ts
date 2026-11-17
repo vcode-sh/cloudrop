@@ -2,7 +2,7 @@ import { fail, ok, type Result } from "../../errors.ts";
 import { invalidInput } from "../../input.ts";
 import type { ObjectOptions, PartInfo, StorageDriver } from "../driver.ts";
 import { keyProblem, MAX_LIST_PAGE, objectOptionsProblem, partsProblem, uploadIdProblem } from "../validate.ts";
-import { escapeXml, stripQuotes, xmlBlocks, xmlText } from "../xml.ts";
+import { escapeXml, stripQuotes, xmlBlocks, xmlText, xmlValue } from "../xml.ts";
 import { objectUrl, type S3Context } from "./context.ts";
 import { objectHeaders, orEmpty } from "./options.ts";
 import { allOk, etagIn, incompleteResponse, wholeNumber } from "./responses.ts";
@@ -11,15 +11,15 @@ import { SLOW_REQUEST_TIMEOUT_MS, send, sendForXml } from "./transport.ts";
 const encoder = new TextEncoder();
 
 function readPart(block: string, maxParts: number): Result<PartInfo> {
-  const partNumber = wholeNumber(xmlText(block, "PartNumber"));
+  const partNumber = wholeNumber(xmlValue(block, "PartNumber"));
   if (partNumber === undefined || partNumber < 1 || partNumber > maxParts) {
     return fail(incompleteResponse("valid part number"));
   }
-  const size = wholeNumber(xmlText(block, "Size"));
+  const size = wholeNumber(xmlValue(block, "Size"));
   if (size === undefined) return fail(incompleteResponse("valid part size"));
   const etag = etagIn(block);
   if (etag === "") return fail(incompleteResponse("part ETag"));
-  return ok({ partNumber, size, etag, checksumCrc32c: xmlText(block, "ChecksumCRC32C") });
+  return ok({ partNumber, size, etag, checksumCrc32c: xmlValue(block, "ChecksumCRC32C") });
 }
 
 /** One page of ListParts: its parts, and the marker of the next page, or null after the last one. */
@@ -37,8 +37,8 @@ async function partsPage(
   if (result.error) return result;
   const parts = allOk(xmlBlocks(result.data, "Part").map((block) => readPart(block, ctx.rules.maxParts)));
   if (parts.error) return parts;
-  if (xmlText(result.data, "IsTruncated") !== "true") return ok({ parts: parts.data, next: null });
-  const next = xmlText(result.data, "NextPartNumberMarker") ?? "";
+  if (xmlValue(result.data, "IsTruncated") !== "true") return ok({ parts: parts.data, next: null });
+  const next = xmlValue(result.data, "NextPartNumberMarker") ?? "";
   // A missing or non-advancing marker would loop forever, and so would one past the last possible part number.
   if (!(Number(next) > Number(marker)) || Number(next) > ctx.rules.maxParts) {
     return fail(incompleteResponse("valid next part marker"));

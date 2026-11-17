@@ -201,7 +201,10 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   doc comment and the README say so. `error.file` is a new public field (a minor semver change).
 - **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`, `5cc63e5`). Supersedes `M3-S1`; spec §1 says so. A cancelled
   file that `/upload` refused ends `aborted` since `d399b90` (plan B early review M3): before, it ended `failed`, and
-  its `retry()` asked for a ticket only to `/abort` it at once.
+  its `retry()` asked for a ticket only to `/abort` it at once. Amended by `M4-F2` (2026-11-17): every cancel of a file
+  waiting for its ticket (its own, `job.abort()`, the caller's signal) ends it `aborted` at once with its own `ABORTED`
+  naming the file, before `/upload` answers; when the job's own `/upload` was cancelled, `done`'s error is still the
+  job's `ABORTED`.
 - **Visible in:** `client/job.ts`, `client/types.ts`, `errors.ts` (`CloudropError.file`), `client/failures.ts`
   (`withFile`), `client/job.test.ts`.
 
@@ -231,7 +234,9 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   change "at once" above to "in the same task". Revisit if `maxFiles` may ever exceed about 300, or the client splits
   a job over several `/upload`s: the cost crosses one frame at about 400 to 550 files.
 - **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`). Plan B made one exception (`M3-U36`, `4f1887a`): a retry under
-  a new ticket starts the file's bytes again from 0.
+  a new ticket starts the file's bytes again from 0. Amended by `M4-F2` (2026-11-17): a file cancelled while it waited
+  for its ticket shows `aborted` at once too; a ticket that arrives for it later gets its `/abort` in the background,
+  and `done` does not wait for that answer.
 - **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job-snapshot.ts` (`fileSnapshot`, `snapshotOf`),
   `client/types.ts` (`FileSnapshot`, `JobSnapshot`), `client/job-snapshot.test.ts`.
 
@@ -476,7 +481,9 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Why:** parts nobody can retry would wait for the lifecycle rule, and a single-PUT object would stay in the bucket
   for good: the cost `M3-S15` was made to remove.
 - **If wrong:** a page that wants to retry a failure of `upload()` calls `start()` instead.
-- **Status:** in force (`4f1887a`: `upload()` passes `keepFailed: false`). Spec §4.7's first bullet says so.
+- **Status:** in force (`4f1887a`: `upload()` passes `keepFailed: false`). Spec §4.7's first bullet says so. Amended
+  by `M4-F1` (2026-11-17): a failed multipart file of a client that keeps records, whose failure the same ticket could
+  fix (retryable, outside `M3-U31`'s set), sends no `/abort`; it keeps its record, so a reload can resume it.
 - **Visible in:** `client.ts` (`upload`), `client/file-run.ts` (`end`), `client/upload-abort.test.ts`.
 
 ### M3-U30: `retry()` chooses its branch when it is called
@@ -534,7 +541,9 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **If wrong:** a page that closes without `pagehide` firing (a crash) leaves a failed single-PUT object in the bucket;
   a restored page re-sends the whole file under a new key.
 - **Status:** in force (`4f1887a`). An expired ticket is let go without an `/abort` (audit M7), and the failed file is
-  held before its status changes (`M3-U53`).
+  held before its status changes (`M3-U53`). Amended by `M4-F1` (2026-11-17): a multipart ticket of a client that keeps
+  records, whose failure the same ticket could fix, is given up without `/abort` and keeps its record for a reload;
+  only other tickets get the `/abort`.
 - **Visible in:** `client/lifecycle.ts` (`createLeftovers`), `client/file-run.ts` (`end`), `client.ts` (`leftovers`),
   `client/retry-abort.test.ts` (the `pagehide` rows).
 
@@ -757,8 +766,10 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
 - **Status:** in force (`58d24f7`, moved to `client/job-run.ts` by `613bbcf`; one `Job.runUpload` brackets each run
   since `b368bc4`). Amended by `M3-U92` (in force): a file's wait before it asks `/upload` again after a retryable
   refusal counts as running, through the same bracket (`Job.watch`), so `offline` pauses it; the `/upload` itself and
-  the backoff after it when it fails as a whole are still not watched.
-- **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/lifecycle.test.ts`.
+  the backoff after it when it fails as a whole are still not watched. Amended by `M4-F9` S9 (2026-11-17): a one-file
+  `/upload` (a re-ask, a one-file `retry()`'s new ticket, a start over) is watched for its whole ask, the request and
+  its backoffs included; the job's own `/upload` and a retry's for several files still are not.
+- **Visible in:** `client/job-run.ts` (`Job.runUpload`), `client/launch.ts` (`askAlone`), `client/lifecycle.test.ts`.
 
 ## Plan B's failed-file rule as built, task 5's rulings and the budget
 
@@ -1342,7 +1353,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   (`server/complete.ts`, `completedBefore`), so no earlier `/complete` finished the file. Kept sticky, every retry would
   reuse the dead ticket and fail again.
 - **If wrong:** a server that answered `NO_SUCH_UPLOAD` for a finished upload would make a retry store the file a
-  second time under a new key.
+  second time under a new key. Live R2 showed no such moment for a `/complete` that overlaps the first (`M4-F12`).
 - **Status:** in force (`2fe56b7`).
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/persist-failures.test.ts`.
 
@@ -1529,7 +1540,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `/upload` had the same gap. Since fix round 2, `ABORTED` counts as a pause only when the pause aborted the backoff, as
   `runFile` decides: an answer carrying that code made the re-ask loop with no backoff and no budget (re-review
   Important 1); and offline is stated as built (re-review Minor 2). Since the chaos final review's M2, a resumed file's
-  start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal.
+  start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal. Amended by `M4-F9`
+  S9 (2026-11-17): a one-file `/upload` is watched for the whole ask, its wait after a refusal and its backoff after an
+  `/upload` that failed as a whole alike, so `offline` pauses a file waiting to ask again whatever the job's other
+  files do, and `online` asks at once.
 - **Visible in:** `client/launch.ts` (`refused`, `askAlone`, `launch`'s `Alone`), `client/job-run.ts` (`startOver`,
   `Job.watch`), `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts`
   (`withRetry`'s `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`,

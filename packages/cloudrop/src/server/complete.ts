@@ -4,13 +4,12 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { countParts, sizeOfPart } from "../plan.ts";
 import type { CompleteResponse, UploadedFile } from "../protocol/types.ts";
-import type { ObjectInfo } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
 import type { EndpointInput, ServerConfig } from "./config.ts";
 import { storageFailure } from "./http.ts";
 import { runAfterVerify, runOnAbort } from "./plugins.ts";
 import { isMultipart, type MultipartToken, type UploadTokenPayload } from "./token.ts";
-import { abortContext, readTokenRequest } from "./token-request.ts";
+import { readTokenRequest, tokenAbortContexts } from "./token-request.ts";
 
 const DISCARDED = "The uploaded file does not match what was declared, so it was discarded. Upload it again.";
 
@@ -31,7 +30,7 @@ const partChanged = (): CloudropError =>
 
 /** This upload is over: plugins release what they reserved for it. */
 const release = (config: ServerConfig, token: UploadTokenPayload): Promise<void> =>
-  runOnAbort(config.plugins, [abortContext(token, "rejected")], config.logger);
+  runOnAbort(config.plugins, tokenAbortContexts(token, "rejected"), config.logger);
 
 /**
  * Deletes a rejected object, then releases its reservation. When the delete fails, the object is kept with its
@@ -45,11 +44,10 @@ async function discard(config: ServerConfig, token: UploadTokenPayload, error: C
 }
 
 /** Single PUT: the object must exist with this upload's id, size and type (spec §7.6). */
-async function verifyObject(
-  config: ServerConfig,
-  token: UploadTokenPayload,
-  object: ObjectInfo | null,
-): Promise<Result<void>> {
+async function verifyObject(config: ServerConfig, token: UploadTokenPayload): Promise<Result<void>> {
+  const head = await config.storage.head(token.key);
+  if (head.error) return fail(storageFailure(head.error, config.logger));
+  const object = head.data;
   if (object === null) {
     return fail(
       new CloudropError("NOT_UPLOADED", "The file has not been uploaded yet. Upload it, then complete the upload."),
@@ -101,7 +99,8 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     );
   }
   const parts = numbers.map((partNumber) => ({ partNumber, etag: byNumber.get(partNumber)?.etag ?? "" }));
-  // Keys are unique, so a 412 here is this upload completed by a concurrent call, or another writer's object.
+  // Keys are unique, so a 412 here is another writer's object at this key. R2 answers an overlapping completion of
+  // this upload with 200 or NoSuchUpload, never 412 (M4-F12).
   const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
   if (!completed.error) return ok(undefined);
   if (completed.error.code === "NO_SUCH_UPLOAD") return completedBefore(config, token);
@@ -137,13 +136,7 @@ export async function handleComplete({ request, body, config }: EndpointInput): 
   if (verified.error) return verified;
   const { token, route } = verified.data;
   const { storage, logger } = config;
-  let stored: Result<void>;
-  if (isMultipart(token)) {
-    stored = await completeParts(config, token);
-  } else {
-    const head = await storage.head(token.key);
-    stored = head.error ? fail(storageFailure(head.error, logger)) : await verifyObject(config, token, head.data);
-  }
+  const stored = isMultipart(token) ? await completeParts(config, token) : await verifyObject(config, token);
   if (stored.error) return stored;
   const file: UploadedFile = {
     id: token.id,

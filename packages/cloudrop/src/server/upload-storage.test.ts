@@ -72,30 +72,44 @@ describe("POST /upload: storage failures and plugins", () => {
     });
   });
 
-  // StorageDriver is a public interface: a custom driver's throw is that file's failure, not the whole request's.
-  it("rejects only the file whose driver threw while starting it, and releases it", async () => {
-    const bucket = serverFixture({ files }).storage;
-    const storage: StorageDriver = {
-      ...bucket,
-      createMultipart: () => {
-        throw new Error("driver bug");
-      },
-    };
-    const events: string[] = [];
-    const fixture = serverFixture({ files }, { storage, multipartThreshold: MiB, plugins: [releases(events)] });
-    const { body } = await upload(fixture, { route: "files", files: [png(2 * MiB, "big.png"), png(10, "small.png")] });
-    expect({ tickets: rejections(body), logged: fixture.logger.errors.map(({ message }) => message), events }).toEqual({
-      tickets: [
-        {
-          code: "SERVER_ERROR",
-          message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
-          retryable: false,
+  // StorageDriver is a public interface: a custom driver's throw is that file's failure, not the whole request's, and
+  // a multipart upload created before the throw is aborted, not left open in the bucket.
+  it.for<{ method: "createMultipart" | "presignPart" }>([{ method: "createMultipart" }, { method: "presignPart" }])(
+    "rejects only the file whose driver threw in $method, releases it and leaves no upload open",
+    async ({ method }) => {
+      const { storage: bucket, fake } = serverFixture({ files });
+      const storage: StorageDriver = {
+        ...bucket,
+        [method]: () => {
+          throw new Error("driver bug");
         },
-        "single",
-      ],
-      // The file id is the key's random ULID.
-      logged: [expect.stringMatching(/^cloudrop: could not start the upload of file [0-9A-Z]{26} on route "files"\.$/)],
-      events: ["release failed big.png"],
-    });
-  });
+      };
+      const events: string[] = [];
+      const fixture = serverFixture({ files }, { storage, multipartThreshold: MiB, plugins: [releases(events)] });
+      const { body } = await upload(fixture, {
+        route: "files",
+        files: [png(2 * MiB, "big.png"), png(10, "small.png")],
+      });
+      expect({
+        tickets: rejections(body),
+        logged: fixture.logger.errors.map(({ message }) => message),
+        events,
+      }).toEqual({
+        tickets: [
+          {
+            code: "SERVER_ERROR",
+            message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
+            retryable: false,
+          },
+          "single",
+        ],
+        // The file id is the key's random ULID.
+        logged: [
+          expect.stringMatching(/^cloudrop: could not start the upload of file [0-9A-Z]{26} on route "files"\.$/),
+        ],
+        events: ["release failed big.png"],
+      });
+      expect(fake.pendingUploads()).toBe(0);
+    },
+  );
 });

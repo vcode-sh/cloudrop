@@ -38,13 +38,16 @@ export interface Endpoints {
   /** POST /complete { token }, without the caller's signal: a cancel must not cut off a /complete the server may finish. */
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
   /**
-   * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects, gives up after
-   * ABORT_TIMEOUT_MS (10 s); the answer ({ id }) is ignored.
+   * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects; the answer ({ id })
+   * is ignored.
    */
   abort(token: string): Promise<void>;
 }
 
-/** So a server that never answers cannot hold a cancelled upload() open. */
+// How long each call may wait for its whole answer, so a server that never answers cannot hold a file queued,
+// completing or cancelling for good (M4-F3). /complete may list 10,000 parts, which the server verifies first.
+const ASK_TIMEOUT_MS = 30_000;
+const COMPLETE_TIMEOUT_MS = 120_000;
 const ABORT_TIMEOUT_MS = 10_000;
 
 /** The parsed body, or undefined (which JSON never is) when it is not JSON: every reader refuses it. */
@@ -63,13 +66,26 @@ const refusal = (status: number): CloudropError => (status === 429 ? serverBusy(
 const toError = (body: ErrorBody): CloudropError => new CloudropError(body.code, body.message, body);
 
 export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints {
-  /** POSTs `body` as JSON and reads a 2xx answer with `read`. Never rejects. */
+  /**
+   * POSTs `body` as JSON and reads a 2xx answer with `read`. Never rejects. No whole answer within `timeoutMs` is
+   * NETWORK_ERROR, as no answer is; ABORTED only when `signal` fired.
+   */
   async function post<T>(
     endpoint: Endpoint,
     body: unknown,
-    { signal, keepalive }: { signal?: AbortSignal; keepalive?: boolean },
+    {
+      signal,
+      keepalive,
+      timeoutMs = ASK_TIMEOUT_MS,
+    }: { signal?: AbortSignal; keepalive?: boolean; timeoutMs?: number },
     read: (json: unknown, retryAfterMs: number) => T | null,
   ): Promise<Result<T>> {
+    // Without AbortSignal.any (ruling M3-U19): one controller that the timeout and the caller's signal both abort.
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    const timeout = setTimeout(stop, timeoutMs);
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
     let response: Response;
     let text: string;
     try {
@@ -79,13 +95,16 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
         credentials: "include",
-        signal,
+        signal: controller.signal,
         keepalive,
       });
       // A body cut off on the way counts as no answer: for /complete, the server may have finished.
       text = await response.text();
     } catch {
       return fail(signal?.aborted ? aborted() : serverUnreachable());
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", stop);
     }
     const json = parseJson(text);
     const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
@@ -118,14 +137,11 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     signSingle: (token, signal) => post("sign", { token }, { signal }, readSignedRequest),
     signParts: (token, parts, signal) =>
       post("sign", { token, parts }, { signal }, (json) => readSignedParts(json, parts)),
-    complete: (token) => post("complete", { token }, {}, readCompleted),
+    complete: (token) => post("complete", { token }, { timeoutMs: COMPLETE_TIMEOUT_MS }, readCompleted),
+    // The body is a token, far under the 64 KiB a browser allows keepalive requests. A failed /abort changes nothing
+    // for a cancelled upload; the lifecycle rule cleans up.
     async abort(token) {
-      try {
-        // The body is a token, far under the 64 KiB a browser allows keepalive requests.
-        await post("abort", { token }, { signal: AbortSignal.timeout(ABORT_TIMEOUT_MS), keepalive: true }, () => true);
-      } catch {
-        // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up.
-      }
+      await post("abort", { token }, { keepalive: true, timeoutMs: ABORT_TIMEOUT_MS }, () => true);
     },
   };
 }

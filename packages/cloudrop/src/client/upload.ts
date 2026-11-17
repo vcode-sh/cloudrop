@@ -7,8 +7,8 @@ import { sizeOfPart } from "../part-size.ts";
 import type { CompleteResponse, MultipartTicket, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
+import type { Entry } from "./entry.ts";
 import { aborted } from "./failures.ts";
-import type { Entry } from "./file-run.ts";
 import type { Leftovers } from "./lifecycle.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
@@ -56,8 +56,8 @@ export interface Upload {
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
   /**
-   * Its /abort was sent (after a failure of upload(), on pagehide or on abort()): a retry needs a new ticket
-   * (M3-U33).
+   * The page gave its ticket up: its /abort was sent, or a reload may resume it (giveUp, M4-F1). A retry needs a new
+   * ticket, and no /abort follows (M3-U33).
    */
   dropped: boolean;
   /** Lets go of the upload's Web Lock, held while the page keeps the ticket (M3-U73); a no-op when none was taken. */
@@ -67,6 +67,16 @@ export interface Upload {
    * or PARTS_MISSING (resume spec §3.4). Until then every part counts as landed and no byte as sent.
    */
   probe: boolean;
+  /** Every URL signed for it so far (PartSender.urls). */
+  readonly urls: Map<number, SignedRequest>;
+}
+
+/** `entry`'s upload under `ticket`, from its first pass; `probe` when resume() rebuilt it from a record. */
+export function newUpload(ticket: Ticket, entry: Entry, unlock: () => void, probe = false): Upload {
+  // A single PUT is part 1 of 1, so one routine sends both kinds.
+  const signed = ticket.kind === "single" ? [{ partNumber: 1, ...ticket.put }] : ticket.parts;
+  const urls = new Map(signed.map((part) => [part.partNumber, part]));
+  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe, urls };
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -77,7 +87,7 @@ function moveTo(entry: Entry, status: "uploading" | "completing"): void {
 }
 
 /** Sends through `signal`, the pass's: a pause or a cancel aborts the PUTs and /sign calls in flight. */
-function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: AbortSignal): PartSender {
+function senderFor(context: UploadContext, { ticket, entry, urls }: Upload, signal: AbortSignal): PartSender {
   const { file, rank } = entry;
   const { pool } = context;
   // A slot is held for the PUT alone: it is free again before a retry's wait (spec §4.4). A part still waiting for one
@@ -110,19 +120,13 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
     }
   };
   if (ticket.kind === "multipart") {
-    return {
-      signal,
-      first: ticket.parts,
-      put,
-      sign: (parts) => context.endpoints.signParts(ticket.token, parts, signal),
-    };
+    return { signal, urls, put, sign: (parts) => context.endpoints.signParts(ticket.token, parts, signal) };
   }
-  // A single PUT is part 1 of 1, so one routine sends both kinds.
   const sign = async (): Promise<Result<SignedPart[]>> => {
     const renewed = await context.endpoints.signSingle(ticket.token, signal);
     return renewed.error ? renewed : ok([{ partNumber: 1, ...renewed.data }]);
   };
-  return { signal, first: [{ partNumber: 1, ...ticket.put }], put, sign };
+  return { signal, urls, put, sign };
 }
 
 /**
@@ -137,9 +141,11 @@ function probed(upload: Upload, done: Result<unknown>, missing: readonly number[
   upload.probe = false;
   // Only a multipart ticket is probed: each size comes from the plan, without slicing the file (final review M2).
   const { partSize } = ticket as MultipartTicket;
+  // A Set: 0.6 ms instead of 20 ms for an array at 10,000 parts with 9,000 missing (M4-F7).
+  const lacking = new Set(missing);
   for (const part of entry.landed) {
     const size = sizeOfPart(entry.file.size, partSize, part);
-    if (!missing?.includes(part)) entry.progress.sent(part, size, size);
+    if (!lacking.has(part)) entry.progress.sent(part, size, size);
   }
   // The caller counts a repair round for this answer next: given back here.
   if (missing) upload.repairs--;
@@ -176,7 +182,8 @@ export async function sendAndComplete(
     const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
     if (upload.probe) probed(upload, done, missing);
-    if (!missing?.length || upload.repairs === REPAIR_ROUNDS) return done;
+    // A cancel during /complete ends the file with this answer rather than start a repair (M4-F4).
+    if (!missing?.length || upload.repairs === REPAIR_ROUNDS || entry.cancel.signal.aborted) return done;
     upload.repairs++;
     for (const partNumber of missing) entry.landed.delete(partNumber);
     // Uploading again at once, so a pause applies to the repair (ruling M3-U4).

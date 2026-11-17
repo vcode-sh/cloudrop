@@ -3,20 +3,11 @@
 // by every file of one job.retry() that needs one.
 
 import type { CloudropError } from "../errors.ts";
-import type { Entry } from "./file-run.ts";
+import type { Entry } from "./entry.ts";
+import { NEEDS_NEW_TICKET } from "./failures.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
 import type { FileOutcome } from "./types.ts";
-
-/** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
-const NEEDS_NEW_TICKET = new Set<string | undefined>([
-  "UPLOAD_EXPIRED",
-  "INVALID_TOKEN",
-  "UPLOAD_REJECTED",
-  "VERIFICATION_FAILED",
-  // The upload is gone and nothing of it was stored (M3-U74): its ticket can never finish it.
-  "NO_SUCH_UPLOAD",
-]);
 
 /**
  * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): never when
@@ -68,8 +59,7 @@ export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<R
     if (upload) entry.run = job.runUpload(upload).finally(job.idle);
   }
   // One file's new ticket stops on that file's cancel and pause, as its re-asks do (M3-U92).
-  const refused =
-    fresh.length > 0 ? launch(job, fresh, fresh.length === 1 ? { reask: false, first: 1 } : undefined) : null;
+  const refused = fresh.length > 0 ? launch(job, fresh, fresh.length === 1 ? 1 : undefined) : null;
   const outcomes = await allSettled(entries);
   return { outcomes, refused: await refused };
 }

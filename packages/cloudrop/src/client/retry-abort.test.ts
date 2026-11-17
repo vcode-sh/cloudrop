@@ -217,16 +217,16 @@ describe("connectivity during a retry", () => {
     const put = heldPut(1000);
     const upload = gate();
     const { client } = setup(async ({ label, nth, init }) => {
-      // The retry's /upload, for b.bin.
+      // The retry's one /upload for b.bin and c.bin, on the job's signal: no run watches it, unlike a one-file /upload.
       if (label === "POST /upload" && nth === 2) await upload.pass();
       if (label !== "PUT object") return undefined;
       const body = init.body as Blob;
-      // a.bin fails with a 500 and keeps its ticket; b.bin fails with a mismatch and needs a new one (M3-U31).
+      // a.bin fails with a 500 and keeps its ticket; b.bin and c.bin fail with a mismatch and need new ones (M3-U31).
       if (failing) return body.size === 1000 ? storageDown() : errorResponse(403, "SignatureDoesNotMatch", "Mismatch.");
       await put.hold(body);
       return undefined;
     });
-    const job = client.start("files", [fileOf(1000, "a.bin"), fileOf(2000, "b.bin")]);
+    const job = client.start("files", [fileOf(1000, "a.bin"), fileOf(2000, "b.bin"), fileOf(3000, "c.bin")]);
     await job.done;
     failing = false;
     const [a] = job.files;
@@ -241,12 +241,12 @@ describe("connectivity during a retry", () => {
     await vi.waitFor(() => expect(page.listening()).toEqual([]));
     page.fire("online");
     upload.release();
-    // A b.bin left paused would hold the retry for good: fail on the statuses instead of the test's timeout.
-    await vi.waitFor(() => expect(statuses(job)).toEqual(["aborted", "done"]));
+    // A file left paused would hold the retry for good: fail on the statuses instead of the test's timeout.
+    await vi.waitFor(() => expect(statuses(job)).toEqual(["aborted", "done", "done"]));
     const { data } = await retried;
     expect({ offline, retried: data?.files.map((file) => file.status) }).toEqual({
-      offline: ["paused", "paused"],
-      retried: ["aborted", "done"],
+      offline: ["paused", "paused", "paused"],
+      retried: ["aborted", "done", "done"],
     });
   });
 });

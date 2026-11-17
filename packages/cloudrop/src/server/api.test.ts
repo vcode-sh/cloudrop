@@ -136,6 +136,15 @@ describe("api.deletePrefix", () => {
     expect((await storage.list("users/")).data?.items.map((item) => item.key)).toEqual(["users/420/keep.txt"]);
   });
 
+  it("deletes keys that end in a space or a no-break space", async () => {
+    const { cloudrop, storage } = serverFixture({ files });
+    await Promise.all(["users/42/a ", "users/42/b\u00a0"].map((key) => storage.put(key, "x")));
+    expect(await cloudrop.api.deletePrefix("users/42/")).toEqual({
+      data: { deleted: 2, verifiedAt: new Date("2026-11-15T12:34:56Z") },
+      error: null,
+    });
+  });
+
   it.for<{ name: string; prefix: unknown }>([
     { name: "an empty prefix, which is the whole bucket", prefix: "" },
     // Without the slash it would also match "users/420/".

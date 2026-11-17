@@ -9,7 +9,7 @@ import { storageFailure } from "./http.ts";
 import { runOnAbort } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import { isMultipart } from "./token.ts";
-import { abortContext, readToken } from "./token-request.ts";
+import { readToken, tokenAbortContexts } from "./token-request.ts";
 
 export async function handleAbort({ body, config }: EndpointInput): Promise<Result<AbortResponse>> {
   // No route lookup: cleaning up must still work after a deploy removed or renamed the token's route.
@@ -30,6 +30,6 @@ export async function handleAbort({ body, config }: EndpointInput): Promise<Resu
     const removed = await storage.delete(token.key);
     if (removed.error) return fail(storageFailure(removed.error, logger));
   }
-  await runOnAbort(config.plugins, [abortContext(token, "aborted")], logger);
+  await runOnAbort(config.plugins, tokenAbortContexts(token, "aborted"), logger);
   return ok({ id: token.id });
 }

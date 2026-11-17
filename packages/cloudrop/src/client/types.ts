@@ -78,9 +78,9 @@ export interface FileHandle<R = unknown> {
   /** Sends a paused file's parts that have not landed; a single PUT starts again. Other files ignore it. */
   resume(): void;
   /**
-   * Cancels this file only, paused or not: its requests stop, the server is told, and it ends aborted. A failed file
-   * ends aborted too, and the server is told to drop what it kept for retry(), unless a /complete may have finished the
-   * file. A done file ignores it.
+   * Cancels this file only, paused or not: its requests stop, it ends aborted at once, and the server is told of the
+   * ticket it holds. A failed file ends aborted too, and the server is told to drop what it kept for retry(), unless a
+   * /complete may have finished the file or the page already gave its ticket up (pagehide). A done file ignores it.
    */
   abort(): void;
   /**

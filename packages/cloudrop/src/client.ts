@@ -2,7 +2,7 @@
 
 import { isList } from "./client/arguments.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
-import { drop } from "./client/file-run.ts";
+import { giveUp } from "./client/file-run.ts";
 import { startJob } from "./client/job.ts";
 import { createLeftovers } from "./client/lifecycle.ts";
 import { createPool } from "./client/pool.ts";
@@ -189,7 +189,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     order,
     nextRank: () => ++rank,
     // Called only when the page hides, after `context` below exists.
-    leftovers: createLeftovers((held) => drop(context, held)),
+    leftovers: createLeftovers((held) => giveUp(context, held)),
     keepFailed: true,
     records: createRecords(persist),
     namespace,
