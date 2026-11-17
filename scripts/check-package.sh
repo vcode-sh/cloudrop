@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
-# README, LICENSE and CHANGELOG and the repository trusted publishing checks, publint and attw read it, and
-# size-limit reads the built entries. The tarball goes to a scratch
-# directory that the trap removes on success, failure and interrupt.
+# README, LICENSE and CHANGELOG and the repository that trusted publishing checks, publint and attw read it, and
+# size-limit reads the built entries. The tarball goes to a scratch directory that the trap removes on success, failure
+# and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/packages/cloudrop"
@@ -31,10 +31,16 @@ if ! cmp -s "$ROOT/LICENSE" LICENSE; then
   exit 1
 fi
 # npm's trusted publishing refuses a package whose repository.url is not the repository the workflow runs in, and the
-# directory points npm's page and provenance at the package inside it (docs/releasing.md, "Package metadata").
-REPOSITORY="$(tar -xzOf "${TARBALL[0]}" package/package.json | node -p 'const { repository: r } = JSON.parse(require("fs").readFileSync(0, "utf8")); r?.url + " " + r?.directory')"
-if [ "$REPOSITORY" != "git+https://github.com/vcode-sh/cloudrop.git packages/cloudrop" ]; then
-  echo "packages/cloudrop/package.json has repository \"$REPOSITORY\". Set repository.url to git+https://github.com/vcode-sh/cloudrop.git and repository.directory to packages/cloudrop." >&2
+# directory points npm's page and provenance at the package inside it. A rename of the repository changes this value,
+# package.json and the trusted publisher together (docs/releasing.md, "Package metadata" and "The trusted publisher").
+EXPECTED_REPOSITORY="git+https://github.com/vcode-sh/cloudrop.git packages/cloudrop"
+READ_REPOSITORY='const { repository: r } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+r ? r.url + " " + r.directory : "none"'
+REPOSITORY="$(tar -xzOf "${TARBALL[0]}" package/package.json | node -p "$READ_REPOSITORY")"
+if [ "$REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
+  echo "packages/cloudrop/package.json has repository \"$REPOSITORY\"." \
+    "Set repository.url to git+https://github.com/vcode-sh/cloudrop.git" \
+    "and repository.directory to packages/cloudrop." >&2
   exit 1
 fi
 ./node_modules/.bin/publint run "${TARBALL[0]}" --strict
