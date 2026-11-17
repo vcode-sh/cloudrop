@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `main` after the chaos plan, which closes M3. This file is the one place
+Updated 2026-11-17 on `main` after M4a (audit fixes, developer experience, `cloudrop/react`). This file is the one place
 that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
 done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
 in [`docs/decisions/`](../../decisions/README.md).
@@ -13,7 +13,7 @@ in [`docs/decisions/`](../../decisions/README.md).
 | M1 | `storage`: SigV4 signer, `r2` and `s3` drivers, fake R2, contract suite, Wrangler and RustFS lanes | **Done** 2026-11-15 (closed at `ca28497`; plan below) |
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*`, Next and Node adapters | **Done** 2026-11-16 (closed at `2483890`, then the hardening phase, `ca91b33`) |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
-| M4 | `cloudrop/react`, shadcn registry, examples | Not started |
+| M4 | `cloudrop/react`, shadcn registry, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (shadcn registry, Hono and Vite examples) not started |
 | M5 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
 | M6 | Docs, 0.x beta, 1.0 | Not started |
 | 1.1 | Drizzle adapter | Not started |
@@ -31,17 +31,20 @@ in [`docs/decisions/`](../../decisions/README.md).
 | [M3 progress plan B](2026-11-16-m3-progress-plan-b.md) ([audit](2026-11-16-m3-progress-plan-b.audit.md)) | Done, `fbc5c15..220332c` | `concurrency: "auto"`, `order: "smallest-first"`, stalled PUTs, offline and online, `retry()` with the failed-file rule and `pagehide`, 16 MiB parts from 256 MiB, the lab's controls; decisions `M3-U23`..`M3-U59` |
 | [M3 resume](2026-11-16-m3-resume.md) ([audit](2026-11-16-m3-resume.audit.md)), design [`2026-11-16-resume-design.md`](../specs/2026-11-16-resume-design.md) | Done, `57144e0..11eb34d` | Records in IndexedDB, edge-hash fingerprint, a Web Lock per upload, `resumable()`, `resume(upload, file)`, `forget()`, the `/complete` probe, `persist` and `namespace`; R2's browser refusals measured; the lab's resume rows; decisions `M3-U60`..`M3-U91` |
 | [M3 chaos](2026-11-17-m3-chaos.md) ([audit](2026-11-17-m3-chaos.audit.md)), design [`2026-11-17-chaos-design.md`](../specs/2026-11-17-chaos-design.md) | Done, from `11eb34d`, merged to `main` 2026-11-17 | A fault-injecting proxy in front of RustFS; `test:chaos` on every pull request (Node rows 1–8, 12–14, 17), the browser rows through the proxy in `test:browser` (stall under Playwright's clock), a nightly `test:chaos:soak` (seeded random faults, a mid-run abort, the real-time stall and throttle rows); the lab shows a stall as a stall; one client fix the soak found (`M3-U92`: a retryable refusal at `/upload` is asked again within the attempt budget); decisions `M3-K1`..`M3-K11`, `M3-U92` |
+| M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
 
-## State of `main` after the chaos plan (2026-11-17)
+## State of `main` after M4a (2026-11-17)
 
-- **Gates:** `bun run verify` passes: 1325 unit tests, 1 skipped (a pre-existing skip). `test:chaos` 16/16 (Node,
-  RustFS behind the proxy), `test:chaos:soak` 4/4 (seeded soak and the real-time rows), `test:browser` 35/35 on RustFS
-  (the lab's rows and the browser chaos rows) and `test:browser:live` 22/22 on R2 (chaos rows left out: R2 routes by its
-  own host). `test:live`, `test:rustfs` and `test:wrangler` were not run again: the plan changed client, example and
-  test-only code, no server or storage code.
-- **Bundle (gzip):** `cloudrop` 33.84 kB of 36 kB, `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of
-  3.2 kB, `cloudrop/client` 10.85 kB of the 11 kB ceiling (`M3-U91`; 10.58 kB before the chaos plan's `M3-U92`): about
-  0.15 kB of room for M4 under the ceiling.
+- **Gates:** `bun run verify` passes: 1418 unit tests, 1 skipped (a pre-existing skip). `test:rustfs` 24 passed and
+  `test:wrangler` 18 passed (their skips are the backends' declared gaps), `test:live` 32/32 on R2, `test:chaos` 16/16,
+  `test:chaos:soak` 4/4, `test:browser` 35/35 on RustFS and `test:browser:live` 22/22 on R2.
+- **Bundle (gzip):** `cloudrop` 36.7 kB of 40 kB as published (22.36 kB of 23.5 kB bundled and minified, `M4-F14`),
+  `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of 3.2 kB, `cloudrop/client` 11.03 kB of 11.5 kB
+  (`M4-F23`), `cloudrop/react` 1.96 kB of 2.05 kB (`M4-B10`).
+- **Since M3:** `route(policy, callbacks)` (options in any order), the environment read on the first request (`next
+  build` needs no secrets), `r2()`/`s3()` read their settings from the environment, `forbidden()`, `cloudrop/react`, a
+  resume record kept after a network failure, endpoint deadlines, `resumable()` leaving out uploads the page holds, keys
+  with edge whitespace listed exactly, the npm README and LICENSE, and the guides (React, deployment, Hono and Bun).
 - **What works end to end:** server (`createCloudrop`, `route`, the four endpoints, verification, `api.*`), Next and
   Node adapters, `cloudrop/client` (single PUT and multipart, four parts of a file in flight, URL renewal,
   `PARTS_MISSING` repair, bounded retry, cancel with keep-or-abort; since plan A: bytes, speed and time left through
@@ -60,11 +63,19 @@ in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### M4: `cloudrop/react`, the shadcn registry, examples (spec §14)
+### M4b: the shadcn registry and examples (spec §14)
 
-M3 is done. M4 starts from a client at 10.85 kB of its 11 kB ceiling, which decides how much of the React bindings fit
-(see "client plus React" below). A copy of files into the origin-private file system, so a resume needs no new pick,
-stays deferred to a later opt-in (`M3-U65`).
+M4a is done (design §7 lists what it left out). M4b: a shadcn registry (`UploadButton`, `Dropzone`, `FileList` over
+`cloudrop/react`) and `examples/hono` and `examples/vite-react` (the two cold-developer apps of 2026-11-17 are a
+starting point). A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to
+a later opt-in (`M3-U65`).
+
+### Recommended before the M5 plugins (owner decision)
+
+A database `store` interface usable from Prisma and Drizzle: a pending row before signing, exactly-once `onComplete`,
+an orphan sweep and quota. The product-fit review of 2026-11-17 found it the need shared by app-b, app-c and app-a,
+worth more than any single plugin (design §7). Also recorded there: a bucket-setup command for R2 and S3-compatible
+services, a React Native client with background transfer, per-route `Cache-Control`, batches over 100 files.
 
 ### Owner steps
 
@@ -80,8 +91,9 @@ stays deferred to a later opt-in (`M3-U65`).
     from other links;
   - `/complete` makes three storage calls (ListParts, CompleteMultipart, HEAD); whether one can go without weakening
     verification (spec §7) needs analysis.
-- **The "client plus React" target:** spec §1 keeps about 12 kB while the client's ceiling is now 11 kB, which
-  leaves M4's bindings about 1 kB at the ceiling (`M3-U91`); M4 decides whether the target moves.
+- **The "client plus React" target:** spec §1 keeps about 12 kB; after M4a the client is 11.03 kB (ceiling 11.5 kB,
+  `M4-F23`) and `cloudrop/react` 1.96 kB (budget 2.05 kB, `M4-B10`), 12.99 kB together. Confirm the new ceilings, or
+  ask for a size pass.
 - **Unreadable R2 refusals:** a bad-signature `403` reaches the page as a network error, so the client retries for
   about 15 s and answers a retryable `NETWORK_ERROR`. Option: stop at the second unreadable answer on a fresh URL when
   `/sign` succeeded, with a non-retryable code (findings in `r2-spike-findings.md`, "Browser refusals and checksums,

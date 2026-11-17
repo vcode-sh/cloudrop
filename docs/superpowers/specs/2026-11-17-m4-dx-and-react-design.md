@@ -1,6 +1,6 @@
 # M4a: audit fixes, developer experience and React hooks
 
-Date: 2026-11-17. Status: approved by the owner's standing instruction ("follow the best recommendations, no quick
+Date: 2026-11-17. Status: done (merged to `main` 2026-11-17); approved by the owner's standing instruction ("follow the best recommendations, no quick
 workarounds"), who asked on 2026-11-17 to fix the `route()` ordering trap, ship the hooks, and act on a cold-developer
 test and a code audit. Decisions are recorded as `M4-F` (fixes and developer experience) and `M4-B` (bindings) in
 `docs/decisions/m4-dx.md`.
