@@ -12,13 +12,12 @@ describe("bucket names", () => {
     ["trailing hyphen", "media-"],
     ["slash", "a/b"],
     ["legacy upper case with underscore", "My_Legacy_Bucket"],
-    ["empty", ""],
   ] as const;
 
   it.each(rejected)("r2() rejects a bucket name that is %s", (_why, bucket) => {
     const error = thrownBy(() => r2({ ...goodR2, bucket }));
     expect(error.code).toBe("INVALID_CONFIG");
-    expect(error.message).toContain(bucket === "" ? "Missing R2 settings: bucket" : "bucket name");
+    expect(error.message).toContain("bucket name");
   });
 
   it.each(rejected)("s3() rejects a bucket name that is %s", (_why, bucket) => {

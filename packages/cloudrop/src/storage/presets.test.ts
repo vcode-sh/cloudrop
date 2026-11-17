@@ -1,14 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeR2 } from "../testing/fake-r2.ts";
-import { ACCOUNT, goodR2, goodS3, thrownBy } from "../testing/presets-fixture.ts";
+import { ACCOUNT, firstUseError, goodR2, goodS3, thrownBy } from "../testing/presets-fixture.ts";
 import type { FetchLike } from "./driver.ts";
-import { r2, type S3Options, s3 } from "./presets.ts";
+import { r2, s3 } from "./presets.ts";
 
-const ENV_NAMES = ["CLOUDROP_R2_ACCOUNT_ID", "CLOUDROP_R2_ACCESS_KEY_ID", "CLOUDROP_R2_SECRET_ACCESS_KEY"] as const;
+const ENV_NAMES = [
+  "CLOUDROP_R2_BUCKET",
+  "CLOUDROP_R2_ACCOUNT_ID",
+  "CLOUDROP_R2_ACCESS_KEY_ID",
+  "CLOUDROP_R2_SECRET_ACCESS_KEY",
+] as const;
 
 function setEnv(values: Partial<Record<(typeof ENV_NAMES)[number], string>>): void {
   for (const name of ENV_NAMES) vi.stubEnv(name, values[name]);
 }
+
+const S3_ENV_NAMES = [
+  "CLOUDROP_S3_ENDPOINT",
+  "CLOUDROP_S3_REGION",
+  "CLOUDROP_S3_BUCKET",
+  "CLOUDROP_S3_ACCESS_KEY_ID",
+  "CLOUDROP_S3_SECRET_ACCESS_KEY",
+] as const;
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -26,27 +39,28 @@ function capture(): { fetch: FetchLike; requests: Request[] } {
 const authorizationOf = (requests: Request[]): string => requests[0]?.headers.get("authorization") ?? "";
 
 describe("r2()", () => {
-  it("reports every missing setting in one message, naming the option and the environment variable", () => {
+  it("reports every missing setting in one message on first use, naming the option and the environment variable", async () => {
     setEnv({});
-    expect(thrownBy(() => r2({ bucket: "media" }))).toMatchObject({
+    expect(await firstUseError(r2({ bucket: "media" }))).toMatchObject({
       name: "CloudropError",
       code: "INVALID_CONFIG",
       message:
-        "Missing R2 settings: accountId (CLOUDROP_R2_ACCOUNT_ID), accessKeyId (CLOUDROP_R2_ACCESS_KEY_ID), secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY). Pass them to r2(); a setting with a variable name in parentheses can also come from the environment.",
+        "Missing R2 settings: accountId (CLOUDROP_R2_ACCOUNT_ID), accessKeyId (CLOUDROP_R2_ACCESS_KEY_ID), secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY). Pass them to r2() or set the environment variables in parentheses.",
     });
   });
 
-  it("names only what is missing", () => {
+  it("names only what is missing", async () => {
     setEnv({ CLOUDROP_R2_ACCOUNT_ID: ACCOUNT });
-    expect(thrownBy(() => r2({ bucket: "media", accessKeyId: "k" })).message).toContain(
+    expect((await firstUseError(r2({ bucket: "media", accessKeyId: "k" })))?.message).toContain(
       "Missing R2 settings: secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY).",
     );
   });
 
-  it("treats a call without options like an empty options object", () => {
+  it("reads every setting from the environment when called without options", async () => {
     setEnv({});
-    const error = thrownBy(() => (r2 as () => unknown)());
-    expect(error.message).toContain("Missing R2 settings: bucket, accountId (CLOUDROP_R2_ACCOUNT_ID)");
+    expect((await firstUseError(r2()))?.message).toContain(
+      "Missing R2 settings: bucket (CLOUDROP_R2_BUCKET), accountId (CLOUDROP_R2_ACCOUNT_ID)",
+    );
   });
 
   it("rejects an account ID of the wrong shape, saying its length but never its value", () => {
@@ -107,9 +121,9 @@ describe("r2()", () => {
     expect(authorizationOf(requests)).toContain("Credential=option-key/");
   });
 
-  it("treats an empty environment variable as missing", () => {
+  it("treats an empty environment variable as missing", async () => {
     setEnv({ CLOUDROP_R2_ACCOUNT_ID: "" });
-    expect(thrownBy(() => r2({ bucket: "media" })).message).toContain("CLOUDROP_R2_ACCOUNT_ID");
+    expect((await firstUseError(r2({ bucket: "media" })))?.message).toContain("CLOUDROP_R2_ACCOUNT_ID");
   });
 
   it.each(["eu", "fedramp"] as const)("uses the %s jurisdiction endpoint", async (jurisdiction) => {
@@ -125,13 +139,14 @@ describe("r2()", () => {
     });
   });
 
-  it("keeps working where there is no process, and then names the missing setting", () => {
+  it("keeps working where there is no process, and then names the missing setting", async () => {
     const original = globalThis.process;
     // @ts-expect-error simulating a Worker or a browser, where `process` is not defined
     delete globalThis.process;
     try {
-      expect(() => r2({ ...goodR2 })).not.toThrow();
-      expect(thrownBy(() => r2({ bucket: "media" })).message).toContain("CLOUDROP_R2_ACCOUNT_ID");
+      const fake = createFakeR2({ bucket: "media", credentials: { accessKeyId: "k", secretAccessKey: "s" } });
+      expect(await r2({ ...goodR2, fetch: fake.fetch }).head("a")).toEqual({ data: null, error: null });
+      expect((await firstUseError(r2({ bucket: "media" })))?.message).toContain("CLOUDROP_R2_ACCOUNT_ID");
     } finally {
       globalThis.process = original;
     }
@@ -178,14 +193,14 @@ describe("s3()", () => {
     });
   });
 
-  it("reports every missing setting in one message", () => {
-    expect(thrownBy(() => s3({} as S3Options)).message).toBe(
-      "Missing S3 settings: endpoint, region, bucket, accessKeyId, secretAccessKey. Pass them to s3().",
+  it("reports every missing setting in one message on first use, naming the option and the environment variable", async () => {
+    for (const name of S3_ENV_NAMES) vi.stubEnv(name, "");
+    expect((await firstUseError(s3()))?.message).toBe(
+      "Missing S3 settings: endpoint (CLOUDROP_S3_ENDPOINT), region (CLOUDROP_S3_REGION), bucket (CLOUDROP_S3_BUCKET), accessKeyId (CLOUDROP_S3_ACCESS_KEY_ID), secretAccessKey (CLOUDROP_S3_SECRET_ACCESS_KEY). Pass them to s3() or set the environment variables in parentheses.",
     );
-    expect(thrownBy(() => s3({ ...goodS3, region: "", accessKeyId: "" })).message).toBe(
-      "Missing S3 settings: region, accessKeyId. Pass them to s3().",
+    expect((await firstUseError(s3({ ...goodS3, region: "", accessKeyId: "" })))?.message).toBe(
+      "Missing S3 settings: region (CLOUDROP_S3_REGION), accessKeyId (CLOUDROP_S3_ACCESS_KEY_ID). Pass them to s3() or set the environment variables in parentheses.",
     );
-    expect(thrownBy(() => (s3 as () => unknown)()).message).toContain("Missing S3 settings: endpoint");
   });
 
   it("rejects credentials embedded in the endpoint without echoing them", () => {
