@@ -6,6 +6,13 @@ cloudrop lets a browser upload files straight to your bucket, so the bytes never
 decides who may upload what, signs short-lived upload links, and checks the stored file before it accepts it. The
 browser client sends the bytes, retries what fails, shows progress, and picks up where it left off after a reload.
 
+```bash
+npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
+```
+
+Until 0.1 is published, the version on npm (`0.0.0`) only reserves the name: to try cloudrop now, clone this repository
+and run [`examples/next`](examples/next/README.md).
+
 ## How it works
 
 ```text
@@ -39,6 +46,8 @@ browser client sends the bytes, retries what fails, shows progress, and picks up
   as the network allows.
 - **Progress you can render.** Bytes, progress, speed and time left per file and for the whole job, as a snapshot that
   works with React's `useSyncExternalStore`.
+- **React hooks.** `cloudrop/react` gives you `useUpload` for inputs, drop zones and progress lists, and `useResumable`
+  for uploads to continue after a reload, typed from your server's routes.
 - **Control per file.** Pause, resume, cancel and retry one file or every file of a job.
 - **Offline handling.** When the page goes offline, uploads pause, and they resume when it is back online.
 - **Resume after a reload.** A large upload survives a reload or a closed tab: the user picks the file again, and only
@@ -46,27 +55,28 @@ browser client sends the bytes, retries what fails, shows progress, and picks up
 - **Server-side checks.** Authorization is required on every route. Size and type are checked before signing and
   verified again on the stored object.
 - **Zero runtime dependencies.** Only web-platform APIs, so the server runs on Node.js 24+, Bun, Deno and Cloudflare
-  Workers.
+  Workers. React is an optional peer dependency, used only by `cloudrop/react`.
 
 ## Status
 
-cloudrop is pre-release. Nothing usable is published yet: `cloudrop@0.0.0` on npm only reserves the name. To try it,
-clone this repository and run [`examples/next`](examples/next/README.md).
+Pre-release: the API may change before 0.1.
 
 - **Done:** M0 (a spike against real R2), M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite), M2 (the
-  server: routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js and Node adapters) and M3
-  (the upload engine and the browser client).
+  server: routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js and Node adapters), M3
+  (the upload engine and the browser client) and M4a (fixes from a code audit, `route(policy, callbacks)`, settings
+  read from the environment on the first request, `forbidden()`, and the `cloudrop/react` hooks).
 - **Tested on:** the upload protocol runs against an in-process fake R2, real R2, and RustFS behind a fault-injecting
   proxy, and from Chromium through the example on RustFS and on real R2. Wrangler's local R2 runs the storage contract
   and single uploads only: it does not implement `ListParts`, so a multipart upload cannot complete there.
-- **Next:** React hooks (`useUpload`) arrive in M4.
+- **Next:** M4b (shadcn registry components, Hono and Vite React examples), then M5 (plugins: content checks, limits,
+  images, checksums).
 
 Where the project stands and what comes next: [docs/superpowers/plans/README.md](docs/superpowers/plans/README.md).
 
 ## Quickstart
 
-Three files: the server, the route that mounts it, and the page that uploads. `getUser` and `showError` stand for your
-own app's session lookup and error display.
+Four files: the server, the route that mounts it, the hooks, and the component that uploads. `getUser` stands for your
+own app's session lookup.
 
 **1. Create the server** in `lib/cloudrop.ts`:
 
@@ -106,45 +116,68 @@ import { cloudrop } from "../../../../lib/cloudrop";
 export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 ```
 
-Node, Express and other runtimes: [Mounting the handler](docs/guide/server.md#mounting-the-handler).
+Node, Express, Hono, Bun and other runtimes: [Mounting the handler](docs/guide/server.md#mounting-the-handler).
 
-**3. Upload from the browser:**
+**3. Create the hooks** in `lib/upload.ts`:
 
 ```ts
-"use client";
-import { createCloudropClient } from "cloudrop/client";
+import { createUploadHooks } from "cloudrop/react";
 // A type import: a value import would pull the server, its storage driver and its secret into the browser bundle.
-import type { cloudrop } from "../lib/cloudrop"; // from app/page.tsx
+import type { cloudrop } from "./cloudrop";
 
-const { upload } = createCloudropClient<typeof cloudrop>();
+export const { useUpload, useResumable } = createUploadHooks<typeof cloudrop>();
+```
 
-async function onPick(file: File) {
-  const { data, error } = await upload("avatar", file);
-  if (error) {
-    showError(error.message); // your app's error display
-    return;
-  }
-  console.log(data.file.key, data.data); // data.data is what onComplete returned, null without one
+**4. Upload from a component:**
+
+```tsx
+"use client";
+import { useUpload } from "../lib/upload";
+
+export function AvatarPicker() {
+  const { files, getInputProps } = useUpload("avatar", { accept: "image/*" });
+  const avatar = files.at(-1);
+  return (
+    <label>
+      Avatar <input {...getInputProps()} />
+      {avatar?.status === "uploading" && <progress value={avatar.progress} />}
+      {avatar?.error && <p role="alert">{avatar.error.message}</p>}
+      {avatar?.result && <p>Saved as {avatar.result.file.key}</p>}
+    </label>
+  );
 }
 ```
 
-`upload()` never rejects for an expected failure. It resolves to `{ data, error }`: branch on `error.code` (such as
-`UNAUTHORIZED`, `FILE_TOO_LARGE`, `NETWORK_ERROR`, or `ABORTED` after a cancel) and show `error.message`, which tells
-the user what to do next. Every code is listed in [Errors](docs/guide/errors.md).
+Each entry of `files` is one file's live state: `status`, `progress`, `error` and, once done, `result`. Nothing throws
+for an expected failure: a file's `error` carries a `code` for your code to branch on (such as `UNAUTHORIZED`,
+`FORBIDDEN`, `FILE_TOO_LARGE` or `NETWORK_ERROR`) and a `message` that tells the user what to do next. Every code is
+listed in [Errors](docs/guide/errors.md); everything the hooks do is in [React](docs/guide/react.md).
 
-A working version of these three files, with a demo sign-in, runs against a local RustFS container without any
+Without React, the client does the same in one call:
+
+```ts
+import { createCloudropClient } from "cloudrop/client";
+import type { cloudrop } from "../lib/cloudrop";
+
+const { upload } = createCloudropClient<typeof cloudrop>();
+const { data, error } = await upload("avatar", file); // never rejects for an expected failure
+```
+
+A working version of these files, with a demo sign-in, runs against a local RustFS container without any
 credentials: [`examples/next`](examples/next/README.md).
 
 ## Set up your bucket
 
 Browsers upload to the bucket directly, so the bucket must allow it:
 
-- **A CORS rule** that allows `PUT` from your page's origin with the headers cloudrop signs (`content-type`,
-  `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`) and exposes `ETag` and `Retry-After`.
+- **A CORS rule** that allows `PUT` from your page's origin (the page's, not your API's) with the headers cloudrop signs
+  (`content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`) and exposes `ETag` and
+  `Retry-After`.
 - **A lifecycle rule** that aborts incomplete multipart uploads, so parts of an upload that never finished do not stay
   in the bucket.
 
-The exact rules for R2 and S3, the Wrangler commands and the token permissions: [Bucket setup](docs/guide/bucket-setup.md).
+The exact rules for R2 and S3, the Wrangler and AWS CLI commands and the token permissions:
+[Bucket setup](docs/guide/bucket-setup.md).
 In development, the server checks the bucket on its first request and logs what is missing; that check does not
 cover `Retry-After`.
 
@@ -155,6 +188,7 @@ cover `Retry-After`.
 | [Server](docs/guide/server.md) | `createCloudrop`, storage drivers, routes, the upload token, mounting, origins, `cloudrop.api` |
 | [Client](docs/guide/client.md) | `createCloudropClient`, `upload()` and `start()`, progress, pause, retry, concurrency, offline |
 | [React](docs/guide/react.md) | `cloudrop/react`: `useUpload` and `useResumable` for inputs, drop zones, progress lists and resume |
+| [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies across sites, proxies, building without secrets |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |
 | [Bucket setup](docs/guide/bucket-setup.md) | CORS and lifecycle rules for R2 and S3, credentials, `checkBucket` |
 | [Errors](docs/guide/errors.md) | Every error code, where it comes from and what to do |
@@ -168,13 +202,14 @@ cover `Retry-After`.
 
 - **Server:** Node.js 24+, Bun, Deno or Cloudflare Workers.
 - **Client:** a browser with `fetch` and `AbortSignal`. The browser test lane runs Chromium only.
+- **React:** 18 or 19, only for `cloudrop/react`; `react` is an optional peer dependency.
 - **TypeScript:** 5.4 or newer for cloudrop's types (`route()`'s return type uses `NoInfer`).
 
 ## Development
 
 ```bash
 bun install
-bun run verify             # check, typecheck, test, build and package checks
+bun run verify             # check, typecheck, test, build, the example's typecheck and package checks
 bun run test:rustfs        # storage contract on RustFS in Docker
 bun run test:wrangler      # storage contract on Wrangler's local R2
 bun run test:live          # storage contract and upload protocol on real R2 (credentials: CLOUDROP_R2_ENV_FILE)

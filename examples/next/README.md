@@ -17,12 +17,11 @@ real application reads its own signed session in `authorize`.
 Prerequisites: Docker (for RustFS), Bun and Node.js 24 (Next.js runs on the `node` on your `PATH`). Run every command
 below from this directory unless it says otherwise.
 
-## The build needs the settings
-
-`next build` loads `lib/cloudrop.ts`, so `CLOUDROP_SECRET` and the storage settings must be set when building, from
-`.env.local` or the environment. A build without them fails with `INVALID_CONFIG` naming what is missing. Exported
-variables win over `.env.local`. A build that has no secrets (a Docker build stage with secrets only at run time) must
-pass them as build secrets, or it fails with `INVALID_CONFIG`.
+The settings come from `.env.local` or the environment; exported variables win over `.env.local`. `next build` needs
+none of them: cloudrop reads `CLOUDROP_SECRET` and the storage settings on the first request, so a build without
+secrets works and only the running server needs them. A server started without them answers every upload with
+`SERVER_ERROR` (HTTP 500) and logs what is missing once. `bun run dev` runs with `NODE_ENV=development`, which checks
+them as soon as the server module loads.
 
 ## Run with RustFS (the default)
 
@@ -75,8 +74,10 @@ CLOUDROP_S3_SECRET_ACCESS_KEY=cloudrop-local-secret
 No CORS rule is needed: Wrangler lets any `localhost` page upload. A file above 8 MiB fails at the end with
 `STORAGE_ERROR: The storage service refused the request. Contact the site owner if this keeps happening.`: Wrangler's
 local R2 does not implement ListParts, which the server needs to verify a multipart upload (the server log says "The
-storage service does not support this request"). The client then sends `/abort`, which removes the parts; if a run
-was interrupted before that, stop Wrangler and delete `packages/cloudrop/fixtures/wrangler/.state` to clear them.
+storage service does not support this request"). The failure is not retryable, so nothing is kept for a resume: the
+page keeps the failed file's ticket and parts for a retry until you reload or leave it, and then the client sends
+`/abort`, which removes the parts. If a run was interrupted before that, stop Wrangler and delete
+`packages/cloudrop/fixtures/wrangler/.state` to clear them.
 `api.checkBucket` there reports CORS and lifecycle as unknown: Wrangler cannot report bucket settings.
 
 Delete `.env.local` before switching back to RustFS: Bun loads it before `bun run setup:rustfs` runs, so the script
