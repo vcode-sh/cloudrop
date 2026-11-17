@@ -124,7 +124,7 @@ describe("credential, region and fetch settings", () => {
     [
       "r2() given an account ID that is not text",
       () => r2({ ...goodR2, accountId: 42 as never }),
-      "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given is not text. Copy it from the R2 overview page in the Cloudflare dashboard.",
+      "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); this one is not text. Copy it from the R2 overview page in the Cloudflare dashboard.",
     ],
     [
       "s3() given a fetch that is not a function",

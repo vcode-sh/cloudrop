@@ -67,7 +67,7 @@ describe("r2()", () => {
     const error = thrownBy(() => r2({ ...goodR2, accountId: "my-secret-account" }));
     expect(error.code).toBe("INVALID_CONFIG");
     expect(error.message).toBe(
-      "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given has 17 characters. Copy it from the R2 overview page in the Cloudflare dashboard.",
+      "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); this one has 17 characters. Copy it from the R2 overview page in the Cloudflare dashboard.",
     );
   });
 

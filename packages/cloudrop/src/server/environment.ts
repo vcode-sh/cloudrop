@@ -19,8 +19,9 @@ function readSecrets(secret: unknown): [string, ...string[]] {
   }
   // The secret itself is never quoted: messages end up in logs.
   if (!secrets.every((value) => typeof value === "string" && value.length >= MIN_SECRET_LENGTH)) {
+    const which = secret === undefined ? "CLOUDROP_SECRET" : "Each upload token secret";
     throw configError(
-      "Each upload token secret must be text of at least 32 characters. Generate one with `openssl rand -base64 32`.",
+      `${which} must be text of at least 32 characters. Generate one with \`openssl rand -base64 32\`.`,
     );
   }
   return secrets as [string, ...string[]];

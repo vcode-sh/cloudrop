@@ -1,8 +1,8 @@
 import { fromEnv } from "../env.ts";
-import { configError } from "../errors.ts";
+import { CloudropError, configError } from "../errors.ts";
 import { R2_RULES, S3_RULES } from "../rules.ts";
 import type { FetchLike, StorageDriver } from "./driver.ts";
-import { lazyDriver } from "./lazy-driver.ts";
+import { lazyDriver, readSetting } from "./lazy-driver.ts";
 import { createS3Driver } from "./s3-driver.ts";
 
 export interface R2Options {
@@ -101,13 +101,36 @@ function readSettings<TSetting extends Setting>(
  * start.
  */
 function preset(build: (read: ReadSetting) => StorageDriver): StorageDriver {
-  if (fromEnv("NODE_ENV") === "development") return build(fromEnv);
+  if (fromEnv("NODE_ENV") === "development") return buildFromEnvironment(build);
   let readsEnvironment = false;
   const checked = build((_variable, setting) => {
     readsEnvironment = true;
     return STAND_INS[setting];
   });
-  return readsEnvironment ? lazyDriver(checked, () => build(fromEnv)) : checked;
+  return readsEnvironment ? lazyDriver(checked, () => buildFromEnvironment(build)) : checked;
+}
+
+/**
+ * A value from a variable fails the same check an option would, but nothing in the app's code passed it, so the message
+ * names the variable. Each variable read is tried alone, with stand-ins for the rest, to find the ones at fault.
+ */
+function buildFromEnvironment(build: (read: ReadSetting) => StorageDriver): StorageDriver {
+  const read: string[] = [];
+  try {
+    return build((variable) => {
+      const value = fromEnv(variable);
+      if (value) read.push(variable);
+      return value;
+    });
+  } catch (error) {
+    if (!(error instanceof CloudropError)) throw error;
+    const invalid = read.filter(
+      (variable) =>
+        readSetting(() => build((name, setting) => (name === variable ? fromEnv(name) : STAND_INS[setting]))).error,
+    );
+    if (invalid.length === 0) throw error;
+    throw configError(`${error.message} Environment variables with an invalid value: ${invalid.join(", ")}.`);
+  }
 }
 
 // Deliberately lax: names with a reserved prefix or suffix (xn--, sthree-, -s3alias, --ol-s3) pass here and fail at the
@@ -145,7 +168,7 @@ function checkAccountId(accountId: unknown): string {
   if (account === undefined || !/^[0-9a-f]{32}$/.test(account)) {
     const given = account === undefined ? "is not text" : `has ${account.length} characters`;
     throw configError(
-      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); the one given ${given}. Copy it from the R2 overview page in the Cloudflare dashboard.`,
+      `The R2 account ID must be 32 hexadecimal characters (0-9, a-f); this one ${given}. Copy it from the R2 overview page in the Cloudflare dashboard.`,
     );
   }
   return account;

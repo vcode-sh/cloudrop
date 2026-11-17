@@ -72,9 +72,35 @@ describe("storage presets and the environment", () => {
     expect(thrownBy(make)).toMatchObject({ code: "INVALID_CONFIG", message: expect.stringContaining(says) });
   });
 
-  it("checks a variable's value on first use, by the variable's setting", async () => {
-    stubR2Env({ BUCKET: "media", ACCOUNT_ID: "not-an-account", ACCESS_KEY_ID: "key", SECRET_ACCESS_KEY: "secret" });
-    expect((await firstUseError(r2()))?.message).toContain("The R2 account ID must be 32 hexadecimal characters");
+  // Nothing in the app's code passed the value, so the message must say which variable holds it.
+  it.for([
+    {
+      name: "CLOUDROP_R2_ACCOUNT_ID",
+      make: () => {
+        stubR2Env({ BUCKET: "media", ACCOUNT_ID: "abc123", ACCESS_KEY_ID: "key", SECRET_ACCESS_KEY: "secret" });
+        return r2();
+      },
+      message:
+        "The R2 account ID must be 32 hexadecimal characters (0-9, a-f); this one has 6 characters. Copy it from the R2 overview page in the Cloudflare dashboard. Environment variables with an invalid value: CLOUDROP_R2_ACCOUNT_ID.",
+    },
+    {
+      name: "CLOUDROP_S3_REGION and CLOUDROP_S3_BUCKET",
+      make: () => {
+        vi.stubEnv("CLOUDROP_S3_REGION", "eu west");
+        vi.stubEnv("CLOUDROP_S3_BUCKET", "Media");
+        return s3({ ...goodS3, region: undefined, bucket: undefined });
+      },
+      message: expect.stringMatching(
+        /must be.* Environment variables with an invalid value: CLOUDROP_S3_REGION, CLOUDROP_S3_BUCKET\.$/,
+      ),
+    },
+  ])("names $name when it holds an invalid value", async ({ make, message }) => {
+    expect(await firstUseError(make())).toMatchObject({ code: "INVALID_CONFIG", message });
+  });
+
+  it("names no variable when the invalid value was passed as an option", () => {
+    stubR2Env({ ACCOUNT_ID: ACCOUNT, ACCESS_KEY_ID: "key", SECRET_ACCESS_KEY: "secret" });
+    expect(thrownBy(() => r2({ bucket: "Media" })).message).not.toContain("Environment variables");
   });
 
   it("reads the environment again until the settings are complete, then keeps them", async () => {

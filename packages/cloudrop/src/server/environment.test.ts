@@ -97,6 +97,16 @@ describe("configuration from the environment", () => {
     expect({ status: response.status, logged: logger.errors }).toEqual({ status, logged: [] });
   });
 
+  it("names CLOUDROP_SECRET when the secret it holds is too short", async () => {
+    setEnvironment();
+    vi.stubEnv("CLOUDROP_SECRET", "too short");
+    const { cloudrop } = server();
+    expect((await cloudrop.api.head("a.png")).error).toMatchObject({
+      code: "INVALID_CONFIG",
+      message: "CLOUDROP_SECRET must be text of at least 32 characters. Generate one with `openssl rand -base64 32`.",
+    });
+  });
+
   it("gives cloudrop.api calls the INVALID_CONFIG with what is missing", async () => {
     const { cloudrop } = server();
     expect(await cloudrop.api.head("a.png")).toEqual({
