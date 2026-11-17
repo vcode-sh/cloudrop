@@ -486,8 +486,9 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   `cloudrop/node` 4.5 kB (3.1), `cloudrop/client` 15 kB (11.03), `cloudrop/react` 3 kB (1.96). The spec's goal becomes
   client plus React at most 18 kB. A ceiling is a guard against accidents, not a target: a change that grows an entry by
   more than 5% says so in its commit and decision entry, so growth stays visible without a raise.
-- **Why:** the store interface, the M5 plugins and the registry will add code; ceilings set at measured + 10% forced a
-  decision per task (M3-U91, M4-F23, M4-B10) and spent review time on bytes rather than behaviour.
+- **Why:** the store interface, the M5 plugins and the registry (dropped since, `M4-E1`) will add code; ceilings set at
+  measured + 10% forced a decision per task (M3-U91, M4-F23, M4-B10) and spent review time on bytes rather than
+  behaviour.
 - **If wrong:** a slow drift goes unnoticed until it is large; the 5% rule and the measured sizes kept in
   `scripts/size-limit.config.ts` are the check.
 - **Status:** decided. Supersedes the ceilings of M4-F14, M4-F16's summed budget, M4-F23 and M4-B10.
@@ -751,6 +752,22 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
 - **Source:** task D review M6, re-review N1.
 - **Visible in:** `src/react/types.ts` (`UploadHooksOptions`), `src/react/types.test.ts`.
 
+### M4-B16: `useResumable` gives `discard(upload)` and `forget()`
+
+- **Decision:** `useResumable(route?)` returns `{ uploads, refresh, discard, forget }`. `discard(upload)` calls the
+  client's `discard()` (`M3-U93`) and `forget()` the client's `forget()`, without arguments; each then reads the list
+  again whatever the answer, and resolves the client's `Result` (or the factory's `INVALID_CONFIG`, as `refresh()`
+  does). `forget()` deletes the records of the client's namespace, every route's, not only the hook's route: the store
+  has no per-route clear, and sign-out, its use, clears them all.
+- **Why:** an app that created its hooks with options never holds the client, and needed `{ client }` only to discard
+  or forget (task B's `M4-E9`). Reading again after the call keeps `uploads` in step without the app calling
+  `refresh()`; after a failed discard the upload stays listed.
+- **If wrong:** a route-scoped `forget(route)` would need a records API that clears by route.
+- **Status:** in force (task B fix round 1, M4b). `cloudrop/react` measures 2.02 kB, from 1.96 kB.
+- **Source:** controller ruling on task B's concern 2, 2026-11-17.
+- **Visible in:** `src/react/use-resumable.ts`, `src/react/types.ts`, `src/react/use-resumable.test.ts`,
+  `docs/guide/react.md#resume-after-a-reload`.
+
 <!-- Task D appends its entries above this line. -->
 
 ## M4b: decisions and the Next example (task B)
@@ -869,7 +886,8 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
   removes the parts.
 - **If wrong:** a `client.discard(upload)` that sends `/abort` with the record's token and deletes the record would allow
   a per-row Discard; it is a new client API, listed as a follow-up, not built here.
-- **Status:** in force.
+- **Status:** superseded by `M4-E12` (fix round 1): `discard()` came to the client (`M3-U93`) and to `useResumable`
+  (`M4-B16`), and `lib/upload.ts` creates its client lazily again.
 - **Source:** task B (M4b brief, ruling 1, "discard").
 - **Visible in:** `examples/next/lib/upload.ts`, `examples/next/components/upload/unfinished-uploads.tsx`.
 
@@ -885,7 +903,7 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
 - **If wrong:** a row that needs a real network fault moves to a `*.chaos.browser.test.ts` file.
 - **Status:** in force.
 - **Source:** M4b brief, ruling 3.
-- **Visible in:** `examples/next/app/upload.browser.test.ts`.
+- **Visible in:** `examples/next/app/upload.browser.test.ts`, `examples/next/app/home-page.ts`.
 
 ### M4-E11: the React guide's "Build your upload UI"
 
@@ -897,3 +915,47 @@ guide, holds `M4-E1` to `M4-E19`; the Hono and Vite React examples number from `
 - **Status:** in force.
 - **Source:** M4b brief, ruling 4.
 - **Visible in:** `docs/guide/react.md#build-your-upload-ui`, `examples/next/README.md`.
+
+### M4-E12: the panel discards per row; the example's client is lazy again
+
+- **Decision:** each row of the unfinished-uploads panel has **Discard <name>**, and **Discard all** discards every
+  listed upload, both through `useResumable`'s `discard()` (`M4-B16`): each upload is aborted on the server, which with
+  a store ends its row and frees its reservation. A failed discard shows its message in a `role="alert"` line and the
+  upload stays listed. `lib/upload.ts` is back to `createUploadHooks<typeof cloudrop>()`, the lazy client of `M4-B1`.
+- **Why:** with `discard()` in the hooks, nothing in the app needs the client. Discard all goes through `discard()`
+  rather than `forget()` so that it means what Discard on one row means; `forget()`, which aborts nothing, stays for
+  sign-out. Supersedes `M4-E9`.
+- **If wrong:** Discard all through `forget()` is one line, and leaves the parts and reservations to the lifecycle rule
+  and the sweep.
+- **Status:** in force.
+- **Source:** controller rulings on task B's concerns 1 and 2; task B review "Not re-raised".
+- **Visible in:** `examples/next/components/upload/unfinished-uploads.tsx`, `examples/next/lib/upload.ts`,
+  `examples/next/app/upload.browser.test.ts` (the Discard row), `examples/next/app/upload.store.browser.test.ts`.
+
+### M4-E13: row controls keep keyboard focus
+
+- **Decision:** Pause and Resume are one button whose label and icon follow the status, so React keeps the element and
+  its focus. Retry and Cancel, which remove their own button, move focus to the row (`<li tabIndex={-1}>`, with a
+  visible outline) before they act. The spinner spins only under `motion-safe`.
+- **Why:** with two conditional buttons, Enter on Pause unmounted the focused button and focus fell to `<body>`, so the
+  next Tab started from the top of the page and a screen reader heard nothing (review I1). The row keeps focus inside
+  the list and reads the row's new state.
+- **If wrong:** focusing the list's heading would also keep focus in the list, a step further from the file.
+- **Status:** in force; the browser row "keyboard focus stays on Pause and Resume, and Cancel moves it to the row"
+  asserts it.
+- **Source:** task B review I1.
+- **Visible in:** `examples/next/components/upload/upload-row.tsx`.
+
+### M4-E14: bulk buttons are enabled from the hooks' contracts
+
+- **Decision:** **Pause all** is enabled while a file is queued or uploading; **Cancel all** while a file has not ended
+  done or aborted, failed files included; **Clear finished** while no file has failed and one has ended done or
+  aborted. The totals line leaves out the bytes when nothing is counted ("0 of 1 uploaded, 1 failed"), and time left
+  above 90 s reads in whole minutes.
+- **Why:** `isUploading` counts completing files, which pause ignores, and leaves out failed files, which abort cancels;
+  `clear()` keeps any upload with a failed file, so the old rule offered buttons that did nothing (review M1, M2).
+- **If wrong:** a hook field per bulk action (`canPause`, `canClear`) would move the rule into the library; not needed
+  while it is one line each.
+- **Status:** in force.
+- **Source:** task B review M1, M2.
+- **Visible in:** `examples/next/components/upload/upload-list.tsx`, `examples/next/components/upload/file-status.ts`.

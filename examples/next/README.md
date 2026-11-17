@@ -133,8 +133,8 @@ The [store guide](../../docs/guide/store.md) explains each of these and what cha
 
 ## Home page
 
-The home page is what an app's upload UI looks like when it is built on the headless hooks. cloudrop ships no
-components (decision `M4-E1`); the [React guide](../../docs/guide/react.md#build-your-upload-ui) walks through this page.
+The home page is what an app's upload UI looks like when it is built on the headless hooks. cloudrop ships no components
+(decision `M4-E1`); the [React guide](../../docs/guide/react.md#build-your-upload-ui) walks through this page.
 
 - **Stack:** shadcn on Base UI (`components.json`: style `base-luma`, icon library `tabler`), Tailwind v4 through
   `@tailwindcss/postcss`, and `@tabler/icons-react`. `components/ui/` holds the CLI's `attachment`, `button` and
@@ -144,13 +144,15 @@ components (decision `M4-E1`); the [React guide](../../docs/guide/react.md#build
   Click it or drop files on it; Tab reaches the input and Enter opens the file picker.
 - **`components/upload/upload-list.tsx` and `upload-row.tsx`:** a row per file as an `Attachment`, its state mapped from
   the file's status (`file-status.ts`), with its bar, bytes, speed, time left, the stored key or the error's code and
-  message, and the buttons its status allows: Pause, Resume, Retry, Cancel. Above the rows, the totals with Pause all,
-  Resume all, Retry failed, Cancel all and Clear finished. A visually hidden status line tells screen readers the count
-  and the progress in steps of 10 %.
+  message, and the buttons its status allows: Pause or Resume (one button, so keyboard focus stays on it), Retry and
+  Cancel (which move focus to the row). Above the rows, the totals with Pause all, Resume all, Retry failed, Cancel all
+  and Clear finished, each enabled only when it would act on a file. A visually hidden status line tells screen
+  readers the count and the progress in steps of 10 %.
 - **`components/upload/unfinished-uploads.tsx`:** after a reload, the multipart uploads this browser can continue, each
   with **Pick again**: the same file resumes and sends only the parts the bucket lacks, another file is refused and
-  shows as a failed row. **Discard all** calls `client.forget()` on the client `lib/upload.ts` shares with the hooks:
-  it deletes the browser's records, not the uploads, whose parts the bucket's lifecycle rule removes.
+  shows as a failed row. **Discard** on a row, and **Discard all**, call `useResumable`'s `discard()`: the server aborts
+  the upload (with a store, its row ends and its reserved bytes are free again) and the browser's record is deleted,
+  without the file. A discard that fails shows its message, and the upload stays listed.
 
 ## Lab page
 
@@ -236,13 +238,18 @@ The numbers come from one browser on one network: they show how the client behav
 ## The browser tests
 
 `app/upload.browser.test.ts` drives the home page from Chromium's headless shell: a 14-byte file picked and sent in one
-`PUT`, a 20 MiB file dropped on the zone and sent in three parts, and the same file chosen twice, by a click and by the
-keyboard, each row showing the key it was stored under and the object read back. A file chosen before sign-in shows
-`UNAUTHORIZED` and the server's message; a file the bucket answers with 400 shows `UPLOAD_REJECTED` and its message, and
-**Retry** stores it; **Cancel** during a 20 MiB upload whose PUTs are held shows Cancelled and sends `/abort`. A 20 MiB
-file whose parts 2 and 3 are held is reloaded after part 1: the unfinished-uploads panel lists it, another file picked
-there is refused with `INVALID_INPUT`, and the same file resumes with only parts 2 and 3 and reads back equal. The faults
-come from Playwright's routing of the bucket's requests, so these rows run on R2 too. `app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
+`PUT`, a 20 MiB file dropped on the zone and sent in three parts, and the same 1 MiB file chosen twice, by a click and
+by Tab and Enter, each row showing the key it was stored under and the object read back. A file chosen before sign-in
+shows `UNAUTHORIZED` and the server's message; a file the bucket answers with 400 shows `UPLOAD_REJECTED` and its
+message, and **Retry** stores it. With a 20 MiB upload's PUTs held, Enter on Pause leaves focus on Resume and back, and
+Enter on **Cancel** moves focus to the row, shows Cancelled and sends `/abort`. A 20 MiB file whose parts 2 and 3 are
+held is reloaded after part 1: the unfinished-uploads panel lists it, another file picked there is refused with
+`INVALID_INPUT`, and the same file resumes with only parts 2 and 3 and reads back equal. Of two uploads left unfinished,
+**Discard** on one sends `/abort` (answered 200) and a reload lists only the other, which still resumes. The faults come
+from Playwright's routing of the bucket's requests, so these rows run on R2 too; their helpers are in
+`app/home-page.ts`.
+
+`app/lab.browser.test.ts` checks that the lab page shows a 20 MiB upload as three
 parts, a dropped bucket PUT as renewed and retried, a PUT whose answer was dropped as sent again and answered `412` with
 the note "already stored", a cancel during a delay as nothing sent, a paused file resumed with each part stored once,
 and three files in one job, and that no signed URL reaches the page. Three rows throttle uploads to 4 MiB/s through
@@ -269,9 +276,11 @@ the lab's tests share are in `app/lab-page.ts`.
 `app/lab.store.browser.test.ts` runs in a second pass, with the database store on and a quota of 50 MB. A 20 MiB file
 whose `/complete` answer was held is resumed after a reload: the resume's `/complete` is answered from the row, the
 user's usage grows by the file's size once, and `onComplete` recorded it once. A 51 MiB file is refused with
-`QUOTA_EXCEEDED` after `/upload` alone, and the usage does not change. The first pass runs every other file on the
-stateless example. Run them from the repository root; install the shell once from this
-directory with `bunx playwright install --only-shell chromium`.
+`QUOTA_EXCEEDED` after `/upload` alone, and the usage does not change. `app/upload.store.browser.test.ts`, in the same
+pass, leaves a 20 MiB upload unfinished on the home page, whose reserved bytes then show in the usage, and **Discard**
+frees them: the usage equals what it was before. The first pass runs every other file on the stateless example. Run them
+from the repository root; install the shell once from this directory with `bunx playwright install --only-shell
+chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards.

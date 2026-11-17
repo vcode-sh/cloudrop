@@ -49,9 +49,9 @@ customize the client (base path, persistence, concurrency, plugins); hooks accep
 
 ## 2. Scope
 
-**1.0:** headless client, React bindings, examples that build an upload UI on them (no component registry, `M4-E1`), R2 plus generic S3-compatible
-storage, stateless server with a `store` interface reserved for later adapters, four plugins (content checks,
-checksums, limits, images), and an essential server file API.
+**1.0:** headless client, React bindings, examples that build an upload UI on them (no component registry, `M4-E1`), R2
+plus generic S3-compatible storage, stateless server with a `store` interface reserved for later adapters, four plugins
+(content checks, checksums, limits, images), and an essential server file API.
 
 **1.1:** database adapters, starting with Drizzle: a files table, exactly-once `onComplete`, cross-device resume,
 orphan cleanup and built-in quota. (Amended 2026-11-17, M5-T15: the database store and its SQL, Drizzle and Prisma
