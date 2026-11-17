@@ -884,7 +884,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 - **Decision:** the optional peer is `drizzle-orm >=0.45.0 <1`.
 - **Why:** checked against `drizzle-orm@1.0.0-rc.5` (2026-10-21), the newest RC that is two weeks old, which the
-  owner's app-a uses. At run time it passes: the store contract on node-postgres, postgres.js, better-sqlite3 and
+  owner's Bun + Hono + Drizzle app uses. At run time it passes: the store contract on node-postgres, postgres.js, better-sqlite3 and
   libsql, the handler rows and the table comparison all pass (182 passed, 10 gap skips). The types do not:
   - the declared table types name builder types that 1.0 renamed: `PgTextBuilderInitial`, `PgBigInt53BuilderInitial`,
     `PgIntegerBuilderInitial`, `PgTimestampBuilderInitial` and the `SQLite…BuilderInitial` types are gone, and
@@ -897,7 +897,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task D fix round 1, 2026-11-17 (review M7).
 - **Visible in:** `packages/cloudrop/package.json`.
 - **Amended 2026-11-17 (fix round 2):** the peer range is now **`>=0.45.0 <2`**. drizzle-orm 1.0 must work, types
-  included, because app-a is on 1.0.0-rc.5. What was needed:
+  included, because the owner's Bun + Hono + Drizzle app is on 1.0.0-rc.5. What was needed:
   - **Table types without builder type names.** Each column type is now built from what both lines export: the
     builder functions' return types (`ReturnType<typeof text>`, `ReturnType<typeof timestamp>`, the `data: number`
     member of `bigint`'s return union), their `this`-typed methods (`ReturnType<B["notNull"]>`, `["primaryKey"]`),
@@ -932,6 +932,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   - beside 0.45.4: the new range installs;
   - beside 1.0.0-rc.4, which nothing here checks: the new range refuses it.
   `1.0.0-rc.5` is also the version the CI job `drizzle-1` type-checks.
+- **Amended 2026-11-17 (M4b):** the workspace now installs 1.0.0-rc.5 and the CI job `drizzle-0-45` type-checks the
+  adapter against 0.45.4 instead (M4-E20).
 
 <!-- Task D appends its entries above this line. -->
 
@@ -1612,3 +1614,30 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Visible in:** `src/store/sql/tables.db.integration.test.ts`, `src/testing/db/sql-target.ts`,
   `src/testing/db/postgres.ts`, `src/testing/db/schema.ts`, `src/testing/db/raw-reader.ts`,
   `src/testing/db/raw-tables.ts`, `scripts/size-limit.config.ts`.
+
+## M4b: timestamps at millisecond precision
+
+### M5-T130: every Postgres time column cloudrop declares is `timestamptz(3)`
+
+- **Decision:** `cloudropPgTables` declares its time columns `timestamp(name, { withTimezone: true, precision: 3,
+  mode: "date" })`; the lane's Postgres DDL (`src/testing/db/schema.ts`), the guide's copy of it
+  (`docs/guide/store.md`), the M5 spec's table and the shipped Prisma Postgres models (`@db.Timestamptz(3)`) say the
+  same. The tables' equivalence test now compares types with their precision (`format_type` on the catalogue side), so
+  a Drizzle table and the DDL that disagree on precision fail it. SQLite and D1 are unchanged (integer milliseconds).
+  The bind (`$n::timestamptz`) and the raw reader keep naming the unconstrained type: a cast to `timestamptz` then an
+  assignment to a `timestamptz(3)` column rounds to the column's precision, and the reader decodes both the same.
+- **Why:** the owner's Bun + Hono + better-auth + Drizzle app declares every timestamp `{ withTimezone: true, precision: 3 }`, and a JavaScript
+  `Date` carries milliseconds, so the store never wrote a non-zero microsecond. Checked before the change: every
+  comparison in the Postgres SQL (`src/store/sql/postgres.ts`, the sweep's stale reads, the keyset cursor of
+  M5-T39) sets a column from a bound `Date` and compares it with another bound `Date`, both whole milliseconds, so
+  rounding to 3 digits changes no stored value and no comparison. The one server-side clock, `updated_at = now()` in
+  `reconcile`, is written and never compared (its only comparison is with `'-infinity'`, which is exact at any
+  precision); at precision 3 Postgres rounds it to the nearest millisecond, at most half a millisecond ahead.
+- **If wrong:** tables created from the old DDL (`timestamptz`, microseconds) keep working, since the store writes
+  milliseconds either way; a drizzle-kit diff against them proposes an `ALTER COLUMN … TYPE timestamp(3) with time
+  zone`, which is safe to apply or to skip.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/testing/db/schema.ts`,
+  `src/testing/db/prisma/postgres/cloudrop.prisma`, `src/adapters/drizzle-tables.db.integration.test.ts`,
+  `docs/guide/store.md`.

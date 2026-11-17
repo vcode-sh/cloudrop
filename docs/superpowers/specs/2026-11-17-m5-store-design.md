@@ -7,7 +7,7 @@ under the standing instruction to follow the best recommendations without check-
 
 ## 1. Why, and the evidence
 
-The product-fit review of 2026-11-17 found that in the owner's apps (app-b on Prisma, app-c and app-a on Drizzle) the
+The product-fit review of 2026-11-17 found that in the owner's apps (app-b on Prisma, app-c and a Bun + Hono app on Drizzle) the
 hard part of uploads is not the transfer but the database around it. app-b and app-c each built, by hand, the same
 shape: a row per upload written before anything is signed, a guarded state transition at completion so the app's
 completion work runs once, quota reserved and committed atomically, and a sweep that ends what was never finished.
@@ -77,10 +77,10 @@ as integer milliseconds since the epoch, with the same names.
 | `metadata` | `text` null | Validated metadata as JSON (≤ 2 KiB, the existing cap). |
 | `result` | `text` null | `onComplete`'s JSON result (≤ 16 KiB; larger fails the completion like a throw). |
 | `claim` | `text` null | The claim token of the `/complete` that holds `completing`. |
-| `claimed_at` | `timestamptz` null | When the claim was taken. |
-| `expires_at` | `timestamptz` not null | The token's `exp` (computed before the insert). |
-| `created_at`, `updated_at` | `timestamptz` not null | |
-| `completed_at`, `ended_at`, `cleaned_at` | `timestamptz` null | Completion; reaching a terminal non-completed state or `deleted`; the sweep's cleanup done. |
+| `claimed_at` | `timestamptz(3)` null | When the claim was taken. |
+| `expires_at` | `timestamptz(3)` not null | The token's `exp` (computed before the insert). |
+| `created_at`, `updated_at` | `timestamptz(3)` not null | |
+| `completed_at`, `ended_at`, `cleaned_at` | `timestamptz(3)` null | Completion; reaching a terminal non-completed state or `deleted`; the sweep's cleanup done. |
 | `request_key` | `text` null | The `/upload` request's `idempotencyKey`, or null; a retry with it supersedes the row while it is `pending` (added after M5, M5-T101). |
 
 Indexes: `(status, expires_at)`, `(status, claimed_at)`, `(status, cleaned_at, ended_at)`, `(owner, status)`, `(key)`,
@@ -88,7 +88,7 @@ Indexes: `(status, expires_at)`, `(status, claimed_at)`, `(status, cleaned_at, e
 
 `cloudrop_usage`, maintained for every row with an owner (so turning `quota` on later needs no backfill):
 `owner text primary key`, `reserved_bytes bigint`, `active_bytes bigint`, `files integer` (completed and not deleted),
-`updated_at timestamptz`, all not null, with `CHECK (… >= 0)` on the counters in Postgres (safe because §4's
+`updated_at timestamptz(3)`, all not null, with `CHECK (… >= 0)` on the counters in Postgres (safe because §4's
 `reconcile` locks before it recounts).
 
 The docs ship, for each dialect, a Prisma model snippet (on SQLite with `BigInt` millisecond columns, since Prisma `Int`

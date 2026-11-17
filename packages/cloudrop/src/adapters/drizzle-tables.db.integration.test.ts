@@ -1,8 +1,8 @@
 // cloudropPgTables() and cloudropSqliteTables() against the plain DDL (testing/db/schema.ts, the schema every SQL lane
 // runs on): the tables made from that DDL, read back from the database's catalogue, must declare what the Drizzle
-// tables declare: every column with its type, nullability and primary key, every index with its uniqueness and its
-// columns in order, and Postgres's CHECKs. A migration generated from them then builds the tables the store was proven
-// on.
+// tables declare: every column with its type (precision included), nullability and primary key, every index with its
+// uniqueness and its columns in order, and Postgres's CHECKs. A migration generated from them then builds the tables
+// the store was proven on.
 
 import { PgDialect, getTableConfig as pgConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteConfig } from "drizzle-orm/sqlite-core";
@@ -33,7 +33,9 @@ describe("Postgres", () => {
   async function catalogue(table: string, tableSchema?: string): Promise<Shape> {
     const relation = qualified(tableSchema, table);
     const columns = await db.query(
-      `SELECT c.column_name::text AS name, c.data_type::text AS type, c.is_nullable = 'NO' AS "notNull",
+      `SELECT c.column_name::text AS name, c.is_nullable = 'NO' AS "notNull",
+         (SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a
+           WHERE a.attrelid = $1::text::regclass AND a.attname = c.column_name::text) AS type,
          c.column_name::text IN (SELECT a.attname::text FROM pg_index ix
            JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = ANY (ix.indkey)
            WHERE ix.indrelid = $1::text::regclass AND ix.indisprimary) AS "primaryKey"
@@ -70,7 +72,9 @@ describe("Postgres", () => {
     return {
       columns: table.columns.map((column) => ({
         name: column.name,
-        type: column.getSQLType(),
+        // Drizzle writes a Date-mode timestamp's precision as "timestamp (3)"; format_type, the catalogue's spelling
+        // with precision, writes "timestamp(3)".
+        type: column.getSQLType().replace(" (", "("),
         notNull: column.notNull,
         primaryKey: column.primary,
       })),

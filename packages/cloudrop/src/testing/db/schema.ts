@@ -44,7 +44,7 @@ export interface TestDatabase {
 }
 
 const TYPES = {
-  postgres: { text: "text", bigint: "bigint", integer: "integer", time: "timestamptz" },
+  postgres: { text: "text", bigint: "bigint", integer: "integer", time: "timestamptz(3)" },
   // Times are integer milliseconds since the epoch. A non-INTEGER primary key may hold NULL in SQLite unless told not to.
   sqlite: { text: "TEXT", bigint: "INTEGER", integer: "INTEGER", time: "INTEGER" },
 } as const;

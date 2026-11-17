@@ -752,3 +752,157 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
 - **Visible in:** `src/react/types.ts` (`UploadHooksOptions`), `src/react/types.test.ts`.
 
 <!-- Task D appends its entries above this line. -->
+
+## M4b: the Hono and Vite examples (task A)
+
+Rulings of M4b task A: `examples/hono` and `examples/vite-react`, shaped like the owner's Bun + Hono + better-auth + Drizzle app, the reference for
+its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Paths are from the repository root.
+
+### M4-E20: the workspace installs drizzle-orm 1.0.0-rc.5; the 0.45 line is type-checked on the side
+
+- **Decision:** `packages/cloudrop`'s dev dependency is `drizzle-orm` 1.0.0-rc.5, the version `examples/hono` and the
+  pilot app use, so the workspace has one copy. `scripts/check-drizzle-versions.sh` now defaults to 0.45.4 and the CI
+  job, renamed `drizzle-0-45`, type-checks the adapter and its tests against it; the peer range stays
+  `>=0.45.0 <1 || >=1.0.0-rc.5 <2`. Two test fixtures were adapted to 1.0 (`fixtures.db.integration.test.ts`: execute's
+  answer is one result or a list, read with `.flat()`; the SQLite file is opened with Drizzle's `node-sqlite` driver
+  instead of the proxy driver 0.45 needed). No source file changed.
+- **Why:** with 0.45 in the package and 1.0 in the example, bun's workspace link resolved `drizzle-orm` from the
+  package's folder, so `cloudrop/adapters/drizzle` loaded 0.45 while the app loaded 1.0. Measured: `drizzle-kit
+  generate` (1.0) failed with "Cannot read properties of undefined (reading 'getColumnCasing')" on `cloudropPgTables()`.
+  The first fix round copied the built package into the example's `node_modules`; the controller ruled for one copy
+  instead. With 1.0 installed: `test:db` 594 passed, 12 skipped; `test:wrangler` (Drizzle over D1) 104 passed, 23
+  skipped; `drizzle-kit generate` in the example reports no schema change through the link; the 0.45.4 check passes.
+- **If wrong:** the 0.45 line loses its runtime proof (the db and Wrangler lanes run 1.0 only); the side check catches
+  type drift, and `scripts/check-drizzle-versions.sh 0.45.4` can be paired with a runtime copy if 0.45 users report
+  behaviour differences.
+- **Status:** decided.
+- **Source:** M4b task A, fix round 1 (controller ruling), 2026-11-17.
+- **Visible in:** `packages/cloudrop/package.json`, `scripts/check-drizzle-versions.sh`, `.github/workflows/ci.yml`,
+  `packages/cloudrop/src/testing/db/fixtures.db.integration.test.ts`,
+  `packages/cloudrop/src/adapters/drizzle-tables.db.integration.test.ts`, `AGENTS.md`.
+
+### M4-E21: cloudrop is mounted for POST and OPTIONS, outside the global hono/cors
+
+- **Decision:** `createApp` mounts the handler like better-auth, `app.on(["POST", "OPTIONS"], "/api/cloudrop/*", …)`,
+  the two methods it serves. A global `hono/cors` (exact web origin, credentials) covers the app's own routes and skips
+  every path under `/api/cloudrop/`, with a comment saying why; `docs/guide/hono.md` step 4 says the same.
+- **Why:** measured with the skip removed: `hono/cors` answered cloudrop's preflight itself with its own list
+  (`Allow-Methods: GET,POST,OPTIONS`, `Allow-Headers: Content-Type`, `Max-Age: 86400`) and cloudrop never saw it. A
+  cookie upload still passed, because that list happens to allow `Content-Type`; a preflight asking for
+  `authorization` (a bearer token) got the middleware's `Content-Type` only. With the skip, cloudrop answers
+  `Allow-Methods: POST`, `Allow-Headers: content-type,authorization`, `Cache-Control: no-store`. So the honest claim is
+  "uploads work only while the app's list happens to cover them", not "uploads fail". The browser row "cloudrop answers
+  its own preflight through the app's global CORS middleware" pins cloudrop's answer through the real app; a fault probe
+  that removed the skip failed that row alone, and every upload row passed with the global middleware in place.
+- **If wrong:** wording only; the skip costs nothing.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/hono/src/app.ts`, `examples/vite-react/src/app.browser.test.ts`, `docs/guide/hono.md`.
+
+### M4-E22: the example's routes, quota and multipart threshold
+
+- **Decision:** `avatar`: `image/*`, at most 2 MB, one file per `/upload`, one PUT; `store.route` with `tx`, so
+  `onComplete` reads the user's `avatar` row `FOR UPDATE`, upserts it (`user_id`, `key`, `file_id`) in the
+  completion's transaction and returns `{ replaced }` (the key is already in the response's `file`), and
+  `afterComplete` deletes the replaced avatar with `api.deleteFile`, which frees its quota. The row lock makes two
+  replacements of one avatar take turns, so neither orphans the other's file (review M1). `attachments`: `*/*`, 100
+  MB, 10 files, no `onComplete` (review M2: it only echoed `file.id`). Both have `owner: userId`; the quota is `UPLOAD_QUOTA_MB` (500 by default, 50
+  in the lane). `multipartThreshold: "8MB"`, so a 20 MiB demo file goes in three parts; the comment and the guide say an
+  app keeps the 64 MiB default. The store runs in transaction mode on a node-postgres `Pool` under Drizzle 1.0 with
+  `defineRelations`, as that app's database package does.
+- **Why:** the brief's routes; a deleted-on-replace avatar shows `afterComplete` doing the network call that
+  `onComplete`'s transaction must not hold. The 8 MB threshold keeps the browser rows' files small (the quota row sends
+  51 MiB instead of more than 64 MiB plus a quota above it).
+- **If wrong:** a failed delete of the replaced avatar is logged and leaves that file in the list for a manual delete;
+  so does the loser of two first avatars uploaded at once, which have no row to lock.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/hono/src/uploads.ts`, `examples/hono/src/db/schema/avatars.ts`.
+
+### M4-E23: `files.list` reads cloudrop's table; `delete` goes through the file API
+
+- **Decision:** the oRPC router `files` has `list` (a Drizzle select on `cloudropFiles` where `owner` is the session's
+  user and `status` is `completed`, newest first), `delete` (`api.file(id)` to check owner and status, `NOT_FOUND`
+  otherwise, then `api.deleteFile(id)` and the `avatar` row if it named that file) and `avatar` (a 10-minute
+  `api.getUrl`). The context carries the session's user id, read once per `/rpc` request as that app does. The
+  `RPCHandler` takes oRPC's `SimpleCsrfProtectionHandlerPlugin` and the page's `RPCLink` its
+  `SimpleCsrfProtectionLinkPlugin`; the app's CORS middleware allows the `X-CSRF-Token` header they use (review I1).
+- **Why:** the tables are the app's, so reading them with the app's own Drizzle is the intended pattern (controller
+  ruling), not a gap: a query the app can join and page beats a store listing call. Writes stay with the store so usage
+  stays in step. The CSRF pair because oRPC deserialises `multipart/form-data`, which another origin of the same site
+  can post without a preflight, with the `SameSite=Lax` session cookie: measured, such a post to `/rpc/files/list`
+  answered 200 as the signed-in user before the fix and 403 `CSRF_TOKEN_MISMATCH` after; the browser row "a form posted
+  to an oRPC procedure from another origin of the site is refused" pins it. cloudrop's endpoints were never exposed:
+  they require `application/json` and check `Origin`.
+- **If wrong:** an app whose client cannot send a custom header refuses `/rpc` requests whose `Origin` is not the web
+  origin instead.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/hono/src/rpc/router.ts`.
+
+### M4-E24: discarding unfinished uploads uses `forget()`, all at once; sign-out forgets first
+
+- **Decision:** the unfinished-uploads panel lists `useResumable("attachments")`, resumes a record with the file picked
+  again, and offers "Discard all", which calls the client's `forget()`. Sign-out calls `forget()`, then better-auth's
+  `signOut()`, then reloads the page, which drops the hooks' in-memory uploads and the cached queries. The page creates
+  its client once (`createCloudropClient` with the API's absolute `basePath`) and passes it to `createUploadHooks` as
+  `{ client }`, so it can call `forget()`.
+- **Why:** the client has no call that forgets one record (`forget()` takes nothing or `{ all: true }`), and a record
+  cannot be resumed and aborted without its file. A per-record discard is a client API change outside this task; it is
+  reported as a pilot gap. What a discarded upload left in the bucket goes with the sweep (after its ticket expires plus
+  grace) and the bucket's lifecycle rule.
+- **If wrong:** add `forget(upload)` to the client and a per-row Discard here.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/vite-react/src/components/unfinished-uploads.tsx`,
+  `examples/vite-react/src/components/auth-panel.tsx`, `examples/vite-react/src/lib/upload.ts`.
+
+### M4-E25: Postgres for the example and the lane, and the lane's third pass
+
+- **Decision:** `scripts/postgres.sh up|down` starts `postgres:18.6` (the db lane's image) with its data in a tmpfs:
+  the dev container `cloudrop-example-postgres` on port 19600 (`CLOUDROP_EXAMPLE_POSTGRES_NAME`, `_PORT`) with no
+  `cloudrop.test` label, and with `CLOUDROP_EXAMPLE_POSTGRES_TEST=1` the label, as the browser lane starts it.
+  `scripts/test-browser.sh` runs a third pass after the two Next passes: it checks ports 5181 and the Postgres port
+  (`CLOUDROP_EXAMPLE_POSTGRES_PORT`, default 19610) up front, starts `cloudrop-browser-postgres-<pid>`, which the EXIT
+  trap removes with the RustFS container, runs the Hono example's `setup:rustfs` (bucket `cloudrop-example-hono`,
+  straight to RustFS, not through the chaos proxy) and `db:migrate`, then Playwright starts the API and `vite preview`.
+  `test:browser:live` stays Next-only. `test-db.sh` keeps its own container code.
+- **Why:** the brief; a shared script for two container lifecycles with different names, labels and readiness would
+  save little, so the db lane is unchanged.
+- **If wrong:** chaos rows for this pass would point the API's `CLOUDROP_S3_ENDPOINT` at the proxy.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `scripts/postgres.sh`, `scripts/test-browser.sh`, `examples/vite-react/playwright.config.ts`.
+
+### M4-E26: shadcn on Base UI with Tabler icons, vendored and outside Biome
+
+- **Decision:** `bunx shadcn@4.23.0 init -b base -p luma` (style `base-luma`, the pilot app's), then `iconLibrary` set to
+  `tabler` in `components.json` and `lucide-react` removed before `shadcn add attachment button card input label badge
+  table progress`. The registry offers `Attachment`, so the app uses it unchanged. `src/components/ui/` is excluded
+  from Biome by the root line `"!**/components/ui"` (task B adds the same line); no vendored file passes 250 lines, so
+  `check-file-size.ts` is unchanged. The generated `src/index.css` uses Tailwind directives Biome's CSS parser refuses
+  by default: a nested `examples/vite-react/biome.json` (`"root": false`, `"extends": "//"`) turns on
+  `css.parser.tailwindDirectives` for this example only, so the root file keeps the one agreed line. Buttons that open a
+  file picker are `<label>`s styled with `buttonVariants` around the input, which Biome's a11y rule can follow.
+- **Why:** the brief's UI stack; a root `css` setting would be a second edit to a file shared with task B.
+- **If wrong:** move `tailwindDirectives` to the root config once both examples use Tailwind.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/vite-react/components.json`, `examples/vite-react/biome.json`, `biome.json`.
+
+### M4-E27: settings, auth and the server's types for the web app
+
+- **Decision:** `src/settings.ts` reads the environment once per process with a typed reader (`readSettings(env)`:
+  `DATABASE_URL` and `BETTER_AUTH_SECRET` required, `PORT` 5181, `API_ORIGIN`, `WEB_ORIGIN` http://localhost:5173 as
+  exact origins, `UPLOAD_QUOTA_MB`, `SWEEP_INTERVAL_MINUTES`); cloudrop reads its own variables. better-auth uses its
+  Drizzle adapter (`relations-v2`), email and password, a fixed `baseURL`, the web origin as its only trusted origin,
+  host-only `SameSite=Lax` cookies under the prefix `cloudrop-example`. The Hono package exports `./types`
+  (`Uploads`, `AppRouterClient`), which the web app imports with `import type` through a workspace dev dependency, as
+  a monorepo's web app types its client from its API package. The worker sweeps on a timer; its comment and the guide
+  show the job-queue form, a scheduled queue and a handler.
+- **Why:** the brief (no env-schema dependency, the pilot app's composition-root and factory shape).
+- **If wrong:** nothing outside the examples depends on these names.
+- **Status:** decided.
+- **Source:** M4b task A, 2026-11-17.
+- **Visible in:** `examples/hono/src/settings.ts`, `examples/hono/src/auth.ts`, `examples/hono/src/types.ts`,
+  `examples/hono/src/worker.ts`.

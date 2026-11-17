@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Type-checks the Drizzle adapter and its tests (packages/cloudrop/tsconfig.drizzle.json) against another drizzle-orm
-# release, by default the 1.0 release candidate the owner's app runs on (M5-T51). It works in a temporary copy of the
-# package with its own install, so the workspace's install and bun.lock stay untouched; the copy is removed at the end.
+# release, by default 0.45.4, the 0.x line of the peer range; the workspace installs 1.0.0-rc.5 (M5-T51, M4-E20). It
+# works in a temporary copy of the package with its own install, so the workspace's install and bun.lock stay untouched;
+# the copy is removed at the end.
 # Every other dependency is pinned to the version the workspace has installed, so run `bun install` first.
 #   scripts/check-drizzle-versions.sh [drizzle-orm version]
 # CLOUDROP_DRIZZLE_CHECK_DIR sets where the copy goes (CI: the runner's temp directory); the default is under the
 # repository's git-ignored .superpowers/, never the OS temp directory.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.0.0-rc.5}"
+VERSION="${1:-0.45.4}"
 DEST="${CLOUDROP_DRIZZLE_CHECK_DIR:-$ROOT/.superpowers/drizzle-check}"
 PACKAGE="$ROOT/packages/cloudrop"
 

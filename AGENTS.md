@@ -50,15 +50,16 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes. `test:wrangler` also
   runs the store contract on Wrangler's local D1 (`d1Executor`, Drizzle over D1): run it for those paths too.
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
-- `scripts/check-drizzle-versions.sh` for Drizzle adapter changes: it type-checks the adapter against drizzle-orm 1.0
-  in a temporary copy of the package (CI job `drizzle-1`); the workspace installs 0.45.
+- `scripts/check-drizzle-versions.sh` for Drizzle adapter changes: it type-checks the adapter against drizzle-orm 0.45
+  in a temporary copy of the package (CI job `drizzle-0-45`); the workspace installs 1.0.0-rc.5.
 - `bun run test:db` for store and adapter changes: Postgres 18 in Docker (port 19500, `CLOUDROP_POSTGRES_PORT`) and
   SQLite through `node:sqlite`; it generates the Prisma test clients and fails when Docker is missing.
 - `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a
   fault-injecting proxy, stateless and with a store, and the lane fails when Docker is missing.
 - `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
-  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in two
-  passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store.
+  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in three
+  passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store, then `examples/vite-react` with
+  the `examples/hono` API on its own Postgres (port 19610, `CLOUDROP_EXAMPLE_POSTGRES_PORT`; the API on 5181).
   `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`
   allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with `content-type`, `content-disposition`,
   `if-none-match`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme` and `x-amz-meta-cloudrop-id` and exposes

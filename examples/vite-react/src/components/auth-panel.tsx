@@ -1,0 +1,70 @@
+import { type FormEvent, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { authClient } from "@/lib/auth-client";
+import { uploadClient } from "@/lib/upload";
+
+/** Sign-up and sign-in with email and password (a demo: no email is sent), or the signed-in user with sign-out. */
+export function AuthPanel({ email }: { email: string | null }) {
+  const [error, setError] = useState<string | null>(null);
+
+  if (email) {
+    return (
+      <div className="flex items-center gap-3 text-sm">
+        <span>Signed in as {email}</span>
+        <Button variant="outline" size="sm" onClick={signOut}>
+          Sign out
+        </Button>
+      </div>
+    );
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const fields = { email: String(form.get("email")), password: String(form.get("password")) };
+    const signingUp = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "sign-up";
+    const { error } = signingUp
+      ? await authClient.signUp.email({ ...fields, name: fields.email.split("@")[0] ?? fields.email })
+      : await authClient.signIn.email(fields);
+    setError(error ? (error.message ?? "That did not work. Check the email and password.") : null);
+  }
+
+  return (
+    <Card className="w-full max-w-sm">
+      <CardHeader>
+        <CardTitle>Sign in</CardTitle>
+        <CardDescription>Any email and a password of 8 characters or more. No email is sent.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <Label htmlFor="email">Email</Label>
+          <Input id="email" name="email" type="email" autoComplete="email" required />
+          <Label htmlFor="password">Password</Label>
+          <Input id="password" name="password" type="password" autoComplete="current-password" minLength={8} required />
+          {error && <p role="alert">{error}</p>}
+          <div className="flex gap-2">
+            <Button type="submit" value="sign-in">
+              Sign in
+            </Button>
+            <Button type="submit" value="sign-up" variant="outline">
+              Sign up
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Sign-out forgets this browser's unfinished uploads first: their records hold upload tokens that the next user of
+ * the browser could otherwise finish. The reload drops the uploads the hooks keep in memory and the cached queries.
+ */
+async function signOut() {
+  await uploadClient.forget();
+  await authClient.signOut();
+  window.location.reload();
+}
