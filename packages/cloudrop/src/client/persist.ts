@@ -21,13 +21,17 @@ import { newUpload, type Upload, type UploadContext } from "./upload.ts";
 
 /** `entry`'s upload under the ticket that just arrived; a persisted one is locked at once, and saved once locked. */
 export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): Upload {
-  const { records, namespace } = context;
+  const { records, namespace, held } = context;
   // A single PUT cannot resume, and with persistence off nothing could resume it: neither is saved nor locked. The
   // upload does not wait for the lock: no other holder can know an id /upload just made (ruling M3-U81).
   let unlock = () => {};
   if (ticket.kind === "multipart" && records.enabled) {
     const lock = lockUpload(ticket.id);
-    unlock = lock.release;
+    held.add(ticket.id);
+    unlock = () => {
+      held.delete(ticket.id);
+      lock.release();
+    };
     const { file } = entry;
     // Queued now, while the lock is asked for and then the file's edges are hashed: a letGo of a file that ends at once
     // is queued after it (M3-U80). Saved only under the lock (M3-U88): a record no lock guards could be resumed while

@@ -39,6 +39,11 @@ export interface UploadContext {
   records: Records;
   /** Keeps one signed-in user's records apart from another's (ruling M3-U79). */
   namespace: string;
+  /**
+   * The ids of the uploads whose ticket this client holds, from the ticket's arrival to letGo, or is resuming, from
+   * resume() to its refusal or its ticket's letGo: resumable() leaves them out (M4-F22).
+   */
+  held: Set<string>;
 }
 
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {

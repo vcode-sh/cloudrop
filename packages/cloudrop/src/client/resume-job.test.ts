@@ -23,6 +23,7 @@ import {
   reloaded,
   unreachable,
 } from "../testing/persist-fixture.ts";
+import type { UploadRecord } from "./records.ts";
 import { MAX_ATTEMPTS } from "./retry.ts";
 
 const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
@@ -177,17 +178,23 @@ describe("in the page that holds the upload's ticket (audit C2)", () => {
     const started = setup.client.start("files", fourParts());
     await started.done;
     await setup.drained();
-    const [upload] = (await setup.client.resumable()).data ?? [];
-    if (!upload) throw new Error("The failed file left no record.");
+    // resumable() leaves out an upload this page holds (M4-F22): the record is read from the store.
+    const [record] = Object.values(setup.db.stored()) as UploadRecord[];
+    if (!record) throw new Error("The failed file left no record.");
+    const { id, route, name, size, type, lastModified, expiresAt } = record;
+    const upload = { id, route, name, size, type, lastModified, expiresAt };
     const sent = setup.from();
     const inUse = (await setup.client.resume(upload, fourParts()).done).error?.code;
+    // The refused resume did not hold it: the failed file still does, so it stays out of the list (M4-F22).
+    const listedWhileKept = (await setup.client.resumable()).data;
     started.files[0]?.abort();
     await setup.drained();
     const afterAbort = setup.from();
     const gone = (await setup.client.resume(upload, fourParts()).done).error?.code;
 
-    expect({ inUse, sentMeanwhile: sent(), gone, sentAfterAbort: afterAbort() }).toEqual({
+    expect({ inUse, listedWhileKept, sentMeanwhile: sent(), gone, sentAfterAbort: afterAbort() }).toEqual({
       inUse: "UPLOAD_IN_USE",
+      listedWhileKept: [],
       sentMeanwhile: ["POST /abort"],
       gone: "NOT_FOUND",
       sentAfterAbort: [],

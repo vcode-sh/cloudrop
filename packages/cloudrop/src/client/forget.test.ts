@@ -1,13 +1,24 @@
 // Contract: resume spec §2, §3.6 and §3.7 with rulings M3-U77 and M3-U78 and the plan audit's M10, through the real
 // client. resumable() lists the namespace's unexpired records newest first, as exactly M3-U77's fields, by route when
-// asked, and deletes the expired ones. forget() deletes the namespace's records or, with { all: true }, every one,
+// asked, and deletes the expired ones; it leaves out every upload this client holds: a running or failed file's, and one
+// being resumed, until the page lets it go (M4-F22). forget() deletes the namespace's records or, with { all: true }, every one,
 // refuses any other argument, and leaves a running upload running. A failed store is STORAGE_ERROR; with persistence
 // off, no indexedDB or no Web Locks (M3-U88) nothing is kept and nothing can be resumed.
 // Oracle: what the fake IndexedDB holds, the requests the fixture saw, literal records and literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResumableUpload } from "../client.ts";
-import { fourParts, gate, persistFixture } from "../testing/persist-fixture.ts";
+import { errorResponse } from "../testing/fake-r2/responses.ts";
+import {
+  fourParts,
+  gate,
+  nth,
+  partThree,
+  persistFixture,
+  reloaded,
+  smallFile,
+  threeParts,
+} from "../testing/persist-fixture.ts";
 import { createRecords, type UploadRecord } from "./records.ts";
 
 const NOW = Date.parse("2026-11-16T12:00:00.000Z");
@@ -16,6 +27,13 @@ const STORAGE_ERROR = {
   message:
     "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
 };
+const ids = (uploads: ResumableUpload[] | null) => uploads?.map(({ id }) => id);
+/** Part 2 refused for good: the file ends failed at once. */
+const partTwoRefused = (call: { label: string }) =>
+  call.label === "PUT part 2" ? errorResponse(400, "InvalidArgument", "Invalid.") : undefined;
+/** Part 2 fails through every attempt with a retryable error, which a resume after a reload could fix (M4-F1). */
+const partTwoDown = (call: { label: string }) =>
+  call.label === "PUT part 2" ? errorResponse(500, "InternalError", "Try again.") : undefined;
 const brief = (error: { code: string; message: string } | null) =>
   error && { code: error.code, message: error.message };
 
@@ -84,6 +102,61 @@ describe("resumable()", () => {
     const { client, db } = persistFixture();
     db.failNext("UnknownError");
     expect(brief((await client.resumable()).error)).toEqual(STORAGE_ERROR);
+  });
+});
+
+describe("resumable() and the uploads this client holds (M4-F22)", () => {
+  it("leaves out a running upload, whose record is kept", async () => {
+    const held = gate(partThree);
+    const setup = persistFixture({ fault: held.fault, options: { concurrency: 1 } });
+    setup.client.start("files", threeParts());
+    await held.reached;
+    await setup.drained();
+
+    expect({ listed: await setup.client.resumable(), kept: Object.keys(setup.db.stored()).length }).toEqual({
+      listed: { data: [], error: null },
+      kept: 1,
+    });
+  });
+
+  it("leaves out a failed file of start(), kept for retry()", async () => {
+    const setup = persistFixture({ fault: partTwoRefused });
+    await setup.client.start("files", threeParts()).done;
+    await setup.drained();
+
+    expect({ listed: await setup.client.resumable(), kept: Object.keys(setup.db.stored()).length }).toEqual({
+      listed: { data: [], error: null },
+      kept: 1,
+    });
+  });
+
+  it("lists a failed file of upload(), whose ticket this page gave up (M4-F1)", async () => {
+    const setup = persistFixture({ fault: partTwoDown });
+    await setup.client.upload("files", threeParts());
+    await setup.drained();
+
+    expect(ids((await setup.client.resumable()).data)).toEqual([setup.issued[0]?.id]);
+  });
+
+  it("hides an upload while its resume runs, and lists it again after a refused or cancelled resume", async () => {
+    const probe = gate(nth("POST /complete", 1));
+    const setup = await reloaded(gate(partThree), probe.fault);
+    const refused = (await setup.client.resume(setup.upload, smallFile("other.txt")).done).error?.code;
+    const afterRefused = ids((await setup.client.resumable()).data);
+    const cancelled = setup.client.resume(setup.upload, fourParts());
+    cancelled.abort();
+    await cancelled.done;
+    const afterCancelled = ids((await setup.client.resumable()).data);
+    setup.client.resume(setup.upload, fourParts());
+    await probe.reached;
+    const whileRunning = ids((await setup.client.resumable()).data);
+
+    expect({ refused, afterRefused, afterCancelled, whileRunning }).toEqual({
+      refused: "INVALID_INPUT",
+      afterRefused: [setup.upload.id],
+      afterCancelled: [setup.upload.id],
+      whileRunning: [],
+    });
   });
 });
 

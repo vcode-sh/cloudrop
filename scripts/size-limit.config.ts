@@ -40,13 +40,15 @@ export default [
   // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decisions 2026-11-16: resume
   // after reload is on by default with a raised ceiling, and ceilings get headroom instead of step-by-step raises; the
   // resume plan measured 9.57 kB before its last feature task, so the ceiling was 10.5 kB. The final review's fixes
-  // (M3-U88 to M3-U90) took the client to 10.57 kB, so by that headroom decision the ceiling is 11 kB (M3-U91).
+  // (M3-U88 to M3-U90) took the client to 10.57 kB, so by that headroom decision the ceiling is 11 kB (M3-U91). The
+  // M4a fixes ended at 10.95 kB; resumable() leaving out the uploads this page holds took it to 11.03 kB, so the ceiling
+  // is 11.5 kB, the step design §5.7 allows (M4-F23).
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "11 kB",
+    limit: "11.5 kB",
   },
   // Bundled and minified without react and without the client's chunks (the client and its errors), which an app that
   // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it. The design aimed at

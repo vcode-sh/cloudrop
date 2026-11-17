@@ -23,7 +23,8 @@ export async function resumable(context: UploadContext, route?: string): Promise
   if (listed.error) return listed;
   return ok(
     listed.data
-      .filter((record) => route === undefined || record.route === route)
+      // An upload this client holds is continued through its own job, and resume() would refuse it (M4-F22).
+      .filter((record) => (route === undefined || record.route === route) && !context.held.has(record.id))
       // Exactly these fields (M3-U77).
       .map(({ id, route, name, size, type, lastModified, expiresAt }) => ({
         id,
@@ -58,16 +59,34 @@ async function check(
   id: string,
   file: File,
 ): Promise<CloudropError | { record: UploadRecord; unlock: () => void }> {
+  // Held from the call, before the first await, so resumable() no longer lists it; not by this check when another job
+  // of the client holds it, whose lock then refuses this one. A refusal lets it go, as the upload's unlock does (M4-F22).
+  const { held } = context;
+  const claimed = !held.has(id);
+  if (claimed) held.add(id);
+  const release = () => {
+    if (claimed) held.delete(id);
+  };
+  const refuse = (refusal: CloudropError) => {
+    release();
+    return refusal;
+  };
   const { data, error } = await context.records.list(context.namespace);
   // A store that cannot be read says so; a record that is gone, expired or another namespace's cannot be resumed.
   const record = data?.find((saved) => saved.id === id);
-  if (!record) return error ?? notResumable();
-  if (!(await isSameFile(record, file))) return notSameFile();
+  if (!record) return refuse(error ?? notResumable());
+  if (!(await isSameFile(record, file))) return refuse(notSameFile());
   const lock = lockUpload(id);
   const taken = await lock.taken;
-  if (taken) return { record, unlock: lock.release };
+  if (taken) {
+    const unlock = () => {
+      release();
+      lock.release();
+    };
+    return { record, unlock };
+  }
   // Where the browser refuses Web Locks, nothing can be resumed (M3-U88).
-  return taken === false ? uploadInUse() : notResumable();
+  return refuse(taken === false ? uploadInUse() : notResumable());
 }
 
 /**
