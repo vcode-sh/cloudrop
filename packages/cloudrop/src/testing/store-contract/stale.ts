@@ -80,12 +80,16 @@ export function staleCases(suite: StoreSuite): void {
     await seed("u-1", [newFile("f-1", 1), newFile("f-2", 1), newFile("f-3", 1)]);
     await advance("f-1", "aborted", at(3 * MINUTE));
     await advance("f-2", "aborted", at(MINUTE));
-    // f-2 and f-3 ended at the same time, so the id decides between them.
+    // f-2 and f-3 ended at the same time, so the id decides between them, and one row per page puts the page
+    // boundary inside the tie: a cursor that kept only the time would skip f-3.
     await advance("f-3", "rejected", at(MINUTE));
-    const first = await store.stale({ kind: "cleanup", before, claimedBefore, limit: 2, cursor: null });
-    expect(ids(first)).toEqual(["f-2", "f-3"]);
-    const second = await store.stale({ kind: "cleanup", before, claimedBefore, limit: 2, cursor: first.cursor });
-    expect(second).toMatchObject({ cursor: null });
-    expect(ids(second)).toEqual(["f-1"]);
+    const ask = (cursor: string | null) => store.stale({ kind: "cleanup", before, claimedBefore, limit: 1, cursor });
+    const first = await ask(null);
+    expect(ids(first)).toEqual(["f-2"]);
+    const second = await ask(first.cursor);
+    expect(ids(second)).toEqual(["f-3"]);
+    const third = await ask(second.cursor);
+    expect(third).toMatchObject({ cursor: null });
+    expect(ids(third)).toEqual(["f-1"]);
   });
 }

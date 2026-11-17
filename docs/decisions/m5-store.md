@@ -100,9 +100,11 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   run truncates in `setup` and drops in its own `afterAll`.
 - **Status:** decided.
 - **Amended 2026-11-17 (fix round 1):** `injectFailure` is now `() => Promise<void>` and means "the next write to the
-  usage table fails, once", which a SQL lane implements with a one-shot trigger; it is injected into `reserve` (with a
+  usage table fails, once", which a SQL lane implements with a trigger whose armed state survives the failed
+  statement's rollback (a sequence on Postgres, a registered JS function in `WHEN` on SQLite; D1, which has neither,
+  declares the gap); it is injected into `reserve` (with a
   quota), `complete`, `end` (completed to deleted) and `revoke`, each asserting both tables unchanged, so
-  `failureInjection` need be a gap nowhere. `RawTables` gains `deleteUsage(owner)` and is final. A single-connection
+  `failureInjection` need be a gap only on D1 (re-review N1). `RawTables` gains `deleteUsage(owner)` and is final. A single-connection
   backend should not declare `concurrency`: its concurrent cases run as stated, not as proof (spec §8). The
   transaction cases need a pool of at least two connections.
 - **Source:** task A, 2026-11-17.

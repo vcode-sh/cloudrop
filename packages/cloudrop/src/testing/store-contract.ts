@@ -32,9 +32,11 @@ export interface StoreTarget {
   gaps: Partial<Record<StoreGap, string>>;
   /**
    * Unless "failureInjection" is a gap: makes the **next write to the usage table** fail, once, whichever method makes
-   * it, so the method's unit must roll back the files row it already changed. A SQL lane implements it with a one-shot
-   * trigger on the usage table (Postgres `RAISE EXCEPTION`, SQLite and D1 `RAISE(ABORT, …)`) that drops itself or is
-   * dropped in `teardown`.
+   * it, so the method's unit must roll back the files row it already changed. A SQL lane implements it with a trigger
+   * on the usage table whose "armed" state survives the rollback of the failed statement: on Postgres a sequence
+   * (`IF nextval('…') = 1 THEN RAISE EXCEPTION`), on SQLite a registered JS function in the trigger's `WHEN`. A trigger
+   * that drops itself or clears a flag row does not work: the drop or the write rolls back with the failure. D1 has no
+   * user functions, so it declares "failureInjection" as a gap.
    */
   injectFailure?: () => Promise<void>;
   /** Unless "tables" is a gap: stores built with other table options over the same database. */
