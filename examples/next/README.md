@@ -143,7 +143,8 @@ rule it already has):
   tables and the summary: its first request is `/complete`, which says which parts the bucket lacks, then one `/sign`
   for their URLs, those parts alone and `/complete` again. A resume refused before any request shows the client's
   message in the status line: another file than the one the upload started with, an upload that finished or expired, or
-  one still being sent by this page or another tab of the browser. **Forget unfinished uploads** calls
+  one still being sent by this page or another tab of the browser. The list leaves out an upload this page still holds:
+  a file being sent, or a failed one kept for **Retry** (M4-F22). **Forget unfinished uploads** calls
   `client.forget()`, what an app calls at sign-out; it deletes the records, not the uploads. The lab's clients use the
   default namespace: the demo has one user, and its sign-in cookie is `HttpOnly`, so the page cannot read who it is.
 - **Faults:** fail the next bucket PUT with a network error (the client waits, renews the URL once and sends it again),
@@ -202,8 +203,9 @@ reloads once part 1 is stored; the upload is listed, and picking the same file s
 `/complete` answers held, the page reloads while the object is already in the bucket, and the resume sends `/complete`
 alone and gets the same key. Picking a different file shows the client's "This is not the file the upload started with"
 and sends nothing, and the upload still resumes with the right file. A second page of the same browser that resumes an
-upload the first page is still sending shows "This upload is being sent in this browser". **Forget unfinished
-uploads** empties the list of a file the bucket refused. The helpers
+upload the first page is still sending shows "This upload is being sent in this browser". After a reload leaves an
+upload listed, **Forget unfinished uploads** empties the list, which stays empty after another reload; the test then
+aborts that multipart upload through the example's storage, so the bucket keeps nothing. The helpers
 the lab's tests share are in `app/lab-page.ts`. Run them from the repository root; install the shell once from this
 directory with `bunx playwright install --only-shell chromium`.
 

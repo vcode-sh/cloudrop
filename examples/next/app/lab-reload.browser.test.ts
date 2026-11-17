@@ -144,22 +144,49 @@ test("a resume in a second page is refused while the first page still sends the 
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
 });
 
-test("Forget empties the list of unfinished uploads", async ({ page }) => {
+/**
+ * The key and multipart upload ID of the upload the page's next /upload starts, read from the upload token's payload,
+ * which is signed, not encrypted (server/token.ts). For cleanup only: neither the token nor any URL is ever printed.
+ */
+async function nextUpload(page: Page): Promise<() => Promise<{ key: string; uploadId: string }>> {
+  const answered = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/cloudrop/upload" && response.request().method() === "POST",
+  );
+  return async () => {
+    const { files } = (await (await answered).json()) as { files: { token: string }[] };
+    const body = files[0]?.token.split(".")[0];
+    if (!body) throw new Error("/upload answered no ticket.");
+    const { key, uploadId } = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (typeof key !== "string" || typeof uploadId !== "string")
+      throw new Error("/upload answered no multipart ticket.");
+    return { key, uploadId };
+  };
+}
+
+test("Forget empties the list of unfinished uploads, for good", async ({ page }, testInfo) => {
+  const file = await onDiskFile(testInfo, 20);
   await signIn(page);
-  const refuse = page.getByLabel("Refuse every bucket PUT with 400 while ticked");
-  await refuse.check();
-  await page.getByRole("button", { name: "20 MiB", exact: true }).click();
-  await page.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("failed with UPLOAD_REJECTED");
-  // A failed file keeps its record, so it can be retried, or resumed after a reload.
-  await expect.poll(() => unfinishedRows(page)).toEqual([["random-20-MiB.bin", String(TWENTY_MIB)]]);
+  const ticket = await nextUpload(page);
+  await uploadUntilPartOne(page, file.path);
+  const { key, uploadId } = await ticket();
+  try {
+    // A reload while part 2 waits leaves the upload listed: nothing in the page holds it any more (M4-F22).
+    await page.reload();
+    await expect.poll(() => unfinishedRows(page)).toEqual([[file.name, String(TWENTY_MIB)]]);
+    // The cleanup below aborts this very upload: the bucket holds its part 1.
+    expect((await storage.listParts(key, uploadId)).data?.map((part) => part.partNumber)).toEqual([1]);
 
-  await page.getByRole("button", { name: "Forget unfinished uploads" }).click();
+    await page.getByRole("button", { name: "Forget unfinished uploads" }).click();
 
-  await expect(page.getByText("No unfinished uploads.")).toBeVisible();
-  expect(await unfinishedRows(page)).toEqual([]);
-  // Cleanup: Forget deletes records, not uploads. Leaving the page sends the failed file's /abort with keepalive, which
-  // Playwright does not report from an unloading page; a missed one leaves an upload without parts (the lab refused
-  // every PUT in the bucket's place), which the bucket's lifecycle rule aborts.
-  await page.reload();
+    await expect(page.getByText("No unfinished uploads.")).toBeVisible();
+    expect(await unfinishedRows(page)).toEqual([]);
+    // The records are deleted, not hidden: the reloaded page reads the browser's storage again and finds none.
+    await page.reload();
+    await expect(page.getByText("No unfinished uploads.")).toBeVisible();
+    expect(await unfinishedRows(page)).toEqual([]);
+  } finally {
+    // Forget deletes records, not uploads, and no page sends this one's /abort: abort it in the bucket, which stores
+    // part 1, so that live R2 keeps nothing (the lane deletes objects, not open multipart uploads).
+    expect((await storage.abortMultipart(key, uploadId)).error).toBeNull();
+  }
 });
