@@ -27,6 +27,10 @@
     "./client": {
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
     }
   },
   "scripts": {
@@ -35,14 +39,29 @@
     "test": "vitest run --project unit",
     "package:check": "../../scripts/check-package.sh"
   },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@size-limit/esbuild": "^14.3.0",
     "@size-limit/file": "^14.3.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "aws4fetch": "^1.0.20",
     "fast-check": "^4.10.2",
+    "happy-dom": "^21.0.4",
     "publint": "^0.3.25",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "size-limit": "^14.3.0",
     "tsdown": "^0.23.7",
     "typescript": "^7.0.2",

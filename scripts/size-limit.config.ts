@@ -37,4 +37,19 @@ export default [
     gzip: true,
     limit: "11 kB",
   },
+  // Bundled and minified without react and without the client's chunks, which an app that uses the hooks ships anyway.
+  // react.js holds all of src/react, since no other entry imports it, and imports the client from its chunk. The design
+  // aimed at 1.5 kB (M4-B5); the hooks measured 1.66 kB with every promise of the contract kept, so the ceiling is that
+  // plus about 10% (M4-B10).
+  {
+    name: "cloudrop/react",
+    path: join(dist, "react.js"),
+    import: "{ createUploadHooks }",
+    modifyEsbuildConfig: (config: { external?: string[] }) => ({
+      ...config,
+      external: [...(config.external ?? []), "react", "./client-*"],
+    }),
+    gzip: true,
+    limit: "1.8 kB",
+  },
 ];

@@ -20,8 +20,9 @@ Load the matching skill from `.claude/skills/` before the work:
   `M3-H`, `M3-S`, `M3-U`, `M3-K`, `M4-F`, `M4-B` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets
   an entry there in the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in
   this list.
-- `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`. The compiler enforces
-  it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
+- `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`, with one exception:
+  `cloudrop/react` (`src/react.ts`, `src/react/**`) imports `react`, an optional peer dependency (`M4-B7`). The compiler
+  enforces it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
   `src/node.ts` describes Node's request and response by hand for the same reason; `src/node.test.ts` proves real Node
   objects fit them.
 - Source files aim at about 200 to 220 lines. `bun run check` fails a source file over 250 lines, a `*.test.ts` file

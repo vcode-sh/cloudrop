@@ -27,6 +27,10 @@
   },
   "overrides": [
     {
+      "includes": ["packages/cloudrop/**", "!packages/cloudrop/src/react.ts", "!packages/cloudrop/src/react/**"],
+      "linter": { "domains": { "react": "none" } }
+    },
+    {
       "includes": ["packages/cloudrop/src/client.ts", "packages/cloudrop/src/client/**", "!**/*.test.ts"],
       "linter": {
         "rules": {
