@@ -79,7 +79,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   any (offset paging would skip as many rows as it just ended); the look-ahead saves the sweep a last empty call.
 - **If wrong:** a SQL backend whose collation orders ids or owners differently from another still pages correctly
   within itself; the contract uses ASCII ids that sort alike under every collation, so it does not pin a collation.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (M5-T64): an `expired` row whose `cleaned_at` is null is now cleanup work.
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/server/store.ts` (`stale`, `owners`), `src/testing/store-contract/stale.ts`, `usage.ts`.
 
@@ -192,7 +192,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   effort and logged.
 - **Why:** spec §5.2, with per-file answers so the other files' answers and the response shape stay as they are.
 - **If wrong:** a whole-request failure would be one branch in `handleUpload`; clients already handle both.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): the store error now reads "The server could not reach its
+  upload records. Try again in a moment.", since it also answers failed reads.
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/store-upload.ts`, `src/server/upload.ts`, `src/server/store-upload.test.ts`.
 
@@ -218,7 +219,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** each is the reading of §5.5 that keeps its promises (one `onComplete`, no storage call on replay) without a
   new column or wire change.
 - **If wrong:** the `deleted` replay is the one visible choice; reverting it is one condition in `settled`.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): `tx` reaches only routes from the store's own `route()`
+  (M5-T66); the 16 KiB cap and its encoding run only on the stored path (M5-T67).
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/store-complete.ts`, `src/server/complete-steps.ts`, `src/server/http.ts`.
 
@@ -263,7 +265,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** spec §6; a unit in the name follows the human-friendly rules; one cursor lets a cron call `sweep` in a loop
   without knowing about passes.
 - **If wrong:** renaming `graceMs` later is breaking; decide before 1.0.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): the expire pass takes the row first (M5-T64), and a failing
+  row no longer stops the call (M5-T65). `graceMs` is at least 15 minutes (M5-T64).
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
 
@@ -309,6 +312,125 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
 
+### M5-T64: the sweep's expire pass takes the row before it deletes; cleanup includes uncleaned expired rows
+
+- **Decision:**
+  - For a `pending` row, the expire pass first runs `end(id, "pending", "expired")` without `cleaned`.
+  - Only when that changed the row does it abort the multipart upload, HEAD-check and delete the object, then call
+    `cleaned(id)`.
+  - `stale({ kind: "cleanup" })` now also returns `expired` rows whose `cleaned_at` is null, so a crash or a failure
+    between the `end` and the cleanup is finished by the cleanup pass.
+  - `graceMs` is at least the life of an upload URL, 900,000 ms (15 minutes, `MIN_GRACE_MS` derived from
+    `URL_LIFETIME_SECONDS`); a smaller one is refused with `INVALID_INPUT` naming the minimum. No URL outlives its
+    token's deadline, so no new PUT can start once a row may be cleaned up. Both passes use it as given: the expire pass after the deadline, the cleanup pass
+    after the row ended. (Amended 2026-11-17 by the controller's closing ruling; the first version allowed 0 or more and
+    floored only the cleanup pass.)
+- **Why:**
+  - The review (I1) showed the first order could delete a completed file. A `/complete` that verified in time could
+    claim the row between the sweep's delete and its `end`.
+  - With the row taken first, a `/complete` that claims first keeps its object.
+  - A `/complete` that comes later is refused (`UPLOAD_EXPIRED`) with nothing recorded.
+- **If wrong:** the floor guarantees only that no new PUT starts after the deadline. A PUT already under way (signed
+  before the deadline, slow to upload) may still land after its row was ended and cleaned; the cleanup pass does not
+  return cleaned rows, so that object is left in the bucket, a known cost (at most one object per such upload, never a
+  completed file's). The floor follows `URL_LIFETIME_SECONDS` if URL lifetimes change.
+- **Status:** decided by the controller (fix round 1); it amends M5-T20 ("`expired` rows are never cleanup work") and
+  spec §4 and §6.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:**
+  - `src/server/sweep.ts`;
+  - `src/testing/memory-store-methods.ts` (`CLEANUP`) and `src/store/sql/reads.ts` (`CLEANUP_STATUSES`, both
+    dialects);
+  - `src/server/store.ts` (`stale` TSDoc);
+  - `src/testing/store-contract/stale.ts` (the cleanup case);
+  - spec §4 and §6.
+
+### M5-T65: a sweep row that fails is logged and skipped; `SweepReport.failed`
+
+- **Decision:**
+  - When a row fails (a storage or database error), the sweep logs "the sweep could not finish file <id>. The next
+    sweep tries again." with the error.
+  - It counts the row in a new `failed: number` field of `SweepReport`, leaves the row as the failure left it, and goes
+    on with the rest of the page.
+  - `expired` counts only rows that were ended **and** cleaned.
+  - A failing row never makes the sweep answer an error. A failing listing does when no row was handled yet in the
+    call; after some rows it answers the report so far, the listing counted in `failed`, with `cursor: null` (fix
+    round 2, below).
+- **Why:**
+  - The review (I2): a failure mid-page threw away the `reported` stuck completions the sweep had already ended, which
+    are reported only once.
+  - A row that failed every time blocked every later row for good.
+- **If wrong:** `failed` is public (`SweepReport`); removing it later is a breaking change.
+- **Status:** decided by the controller (fix round 1); it amends M5-T30. Amended 2026-11-17 (fix round 2): a listing that fails no
+  longer answers `ok` with the cursor it was given, on which a `while (cursor)` loop would spin. Before any row was
+  handled in the call it answers the store's error; after, the report so far, the listing counted in `failed`, and
+  `cursor: null`.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
+
+### M5-T66: `tx` reaches only routes made by the store's own `route()`
+
+- **Decision:** in transaction mode, the handler adds `tx` to `onComplete`'s context only for a branded route. A plain
+  `route()` still runs inside the transaction, and its authorize result's own `tx` field stays as it was.
+- **Why:** the review (I3). The types and the `onComplete` TSDoc already promised this; the runtime overwrote the field.
+- **If wrong:** nothing else depends on it.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/store-complete.ts`, `src/server/store-transaction.test.ts`.
+
+### M5-T67: with a store configured, a token without the stored mark keeps every old answer
+
+- **Decision:**
+  - `readTokenRequest` lets an expired token through only when it is stored and a store is configured. Every other
+    expired token is refused with `UPLOAD_EXPIRED` before the route lookup, as without a store.
+  - The 16 KiB result cap and its `TextEncoder` measurement run only on the stored path. `encodeResult` only
+    stringifies.
+- **Why:** review Minor 8 and Minor 2. With a store configured, an expired, unstored token whose route had been removed
+  answered `UNKNOWN_ROUTE`. The stateless path also measured every result for nothing.
+- **If wrong:** nothing; this restores the stateless behaviour exactly.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:**
+  - `src/server/token-request.ts`, `src/server/complete-steps.ts`, `src/server/store-complete.ts`;
+  - `src/server/store-stateless.test.ts`.
+
+### M5-T68: write `afterComplete` after `onComplete`
+
+- **Decision:**
+  - Written before a context-sensitive `onComplete`, `afterComplete` makes TypeScript fix `TResult` to null, so
+    `onComplete`'s result becomes a type error. `NoInfer` does not help (measured by the review).
+  - There is no API change. The `afterComplete` TSDoc says to write it after `onComplete`, and that the client's answer
+    waits for it.
+  - A type test pins the reversed order's error, so the advice is re-checked if TypeScript changes.
+- **Why:** review Minor 1 and Minor 10.
+- **If wrong:** if a TypeScript release infers it, the `@ts-expect-error` fails and the note can go.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/route.ts`, `src/server/store-types.test.ts`.
+
+### M5-T69: the store paths stay statically imported; stateless server apps pay about 4.7 kB
+
+- **Decision:**
+  - The store modules stay statically imported by the endpoints and the file API. No lazy chunk.
+  - Measured 2026-11-17 with `bun run package:check` after this round:
+    - `cloudrop` bundled is 27.05 kB, against 22.38 kB before task B: +4.67 kB gzip, which every server app pays,
+      store or not;
+    - `cloudrop` summed is 44.88 kB.
+  - The review's simplifications are applied:
+    - `encodeResult` without `maxBytes`;
+    - the refusal reason derived from the error code;
+    - one `jsonResponse` in `errorResponse`;
+    - the ticket refusal folded;
+    - `unstarted` picked by index;
+    - no `as number` casts;
+    - the duplicate TSDoc removed.
+- **Why:** the controller's ruling. An `await import()` costs every store app a cold-start round trip and a packaging
+  surface, for 4.7 kB of server code that a browser never ships.
+- **If wrong:** a lazy chunk, or a `cloudrop/store` entry, can be added later without an API change in the first case.
+- **Status:** decided; it extends M5-T33.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
+
 <!-- Task B appends its entries above this line. -->
 
 ## SQL core and the sql adapter (task C)
@@ -352,6 +474,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/postgres.ts`.
+- **Amended 2026-11-17 (fix round 1):** the new-owner race no longer reaches the client. A unique violation (`23505`)
+  on the usage row re-runs the statement once, with an owner and a limit only: see M5-T74.
 
 ### M5-T36: SQLite batches put the usage write first, guarded on the files row as it was
 
@@ -454,6 +578,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/store.ts`, `src/store/sql/executor.ts`.
+- **Amended 2026-11-17 (fix round 1):** the 2 s cap now covers the claim alone. It is set before each claim and reset
+  to the default after it, so the app's statements through `tx` are not capped: see M5-T76.
 
 ### M5-T42: packaging of the three adapter subpaths
 
@@ -471,6 +597,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `packages/cloudrop/package.json`, `tsdown.config.ts`, `scripts/size-limit.config.ts`, `biome.json`.
+- **Amended 2026-11-17 (fix round 1):** the adapters' fence also allows `server/route` (for `routeFor`, M5-T77). The
+  `biome.json` hunks that only re-wrapped existing objects were reverted, so the file's diff is the two fences.
 
 ### M5-T43: one contract target for every SQL store, with failure injection that survives rollback
 
@@ -488,6 +616,85 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/testing/db/sql-target.ts`, `src/testing/db/raw-tables.ts`, `src/adapters/sql.db.integration.test.ts`.
+
+### M5-T74: a reserve that raced another first reserve of a new owner runs again, once
+
+- **Decision:** when Postgres `reserve` with an owner and a limit fails with a unique violation (`23505`, found by
+  `isUniqueViolation` in the `code`/`cause` chain), the store runs the same statement once more. The failed statement
+  ran alone and rolled back whole. The re-run takes a new snapshot, and its `FOR UPDATE` locks the usage row that the
+  other reserve created. A real duplicate file id fails again and is thrown. Without a limit the statement already adds
+  to that row (`ON CONFLICT … DO UPDATE`) and never retries.
+- **Why:** review I1. Measured before the fix: 8 racing first reserves for a new owner gave up to 7 `SERVER_ERROR`s, on
+  both drivers. A single-statement fix cannot work: every CTE shares one snapshot, so the statement cannot see, lock and
+  increment a row created after it began (the reviewer's P2). Ensuring the row in a batch would cost a round trip on
+  every reserve and leave zero rows behind (M5-T18).
+- **If wrong:** two retries would be needed only if a second new row could appear between the attempts. It cannot: the
+  usage row exists after the first failure.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/executor.ts`, `src/adapters/sql.db.integration.test.ts`
+  (concurrent first reserves of new owners, with and without a limit).
+
+### M5-T75: an unchanged Postgres transition answers the row as it is now
+
+- **Decision:** when `complete` or `end` changes nothing, and the row its statement returns still shows the status the
+  update required (`completing`, or `from`), the store reads the row again in a new statement and answers that row.
+- **Why:** review I2, a breach of spec §4's `Transition`. The guarded UPDATE waited for another transaction's row lock,
+  re-checked its guard on the new version and found it false. The statement's own `SELECT` still sees its snapshot,
+  the row as it was before. Measured: a refusal racing a transaction-mode completion answered `pending`, so B's handler
+  sent a non-retryable `UPLOAD_EXPIRED` for a completed upload. It now answers `completed`, on both drivers. The extra
+  read happens only in that race.
+- **If wrong:** a row still in the guarded status can only mean a stale snapshot, because the guard would otherwise
+  have matched. A lost claim (`completing` under another token) costs one extra read.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.
+
+### M5-T76: the 2 s lock timeout covers the claim alone
+
+- **Decision:** in transaction mode the store runs `SET LOCAL lock_timeout = '2s'` before each claim and `SET LOCAL
+  lock_timeout = DEFAULT` after it, rather than once when the transaction opens. `DEFAULT` returns to the session's own
+  value (the server's, or one set at connection start). After a claim that timed out, the transaction is aborted and
+  nothing more runs.
+- **Why:** review M1. `onComplete`'s statements through `tx` inherited the cap, so an app statement waiting more than
+  2 s for a lock it would get failed the completion. Measured: such a statement now waits 2.5 s and commits.
+- **If wrong:** it costs one round trip per transactional claim.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/store.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.
+
+### M5-T77: `sqlStore` over a transactional executor has `route`, typed with the executor's `tx`
+
+- **Decision:** `pgExecutor` and `postgresJsExecutor` return `TransactionalSqlExecutor<TTx>`, whose `transaction` is
+  required. For such an executor `sqlStore` returns `TransactionalSqlStore<TTx>`: a `CloudropStore<TTx>` with
+  `transaction` and `route = routeFor<{ tx: TTx }>(store)` (B's `routeFor`, branded with that very store object). For
+  any other executor it returns `CloudropStore<TTx>` with no `route`.
+  - node-postgres: `tx` is the transaction's client, typed `PgQueryable` (`query`).
+  - postgres.js: `tx` is postgres.js's own `TransactionSql`, so tagged templates type-check. To get that, `PostgresJsSql`
+    mirrors both `begin` overloads, because TypeScript infers from an overloaded method's last signature.
+  - The core's `sqlStore` stays the same. The public one in `cloudrop/adapters/sql` wraps it. Drizzle and Prisma attach
+    their own `route` the same way, with their own `tx`.
+- **Why:** the controller's ruling on review M8 (spec §5.5, "store.route" for transactional adapters).
+- **If wrong:** `adapters/sql` now carries B's route chunk: 12.33 kB summed, up from 9.62 kB, under its 14 kB budget.
+  The drizzle and prisma budgets (13 kB) must be re-measured in their tasks.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/adapters/sql.ts`, `src/adapters/sql/pg.ts`, `src/adapters/sql/postgres-js.ts`,
+  `src/store/sql/executor.ts`, `src/adapters/sql.test.ts`.
+
+### M5-T78: READ COMMITTED is required; node:sqlite files shared by writers need a busy timeout
+
+- **Decision:** the TSDoc of `sqlStore` (both the core's and the entry's), `pgExecutor` and `postgresJsExecutor` says
+  that Postgres must run at its default isolation, READ COMMITTED. `sqliteExecutor`'s TSDoc advises
+  `new DatabaseSync(path, { timeout: 5000 })` when another connection or process writes the same file.
+- **Why:** review M2 and M3. Measured by the reviewer: under REPEATABLE READ, concurrent reserves fail with `40001`.
+  With node:sqlite's default timeout of 0, a second writer fails at once with "database is locked". Neither corrupts
+  data; both turn normal traffic into errors.
+- **If wrong:** documentation only; task F carries it into the guide.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/adapters/sql.ts`, `src/store/sql/store.ts`, `src/adapters/sql/pg.ts`,
+  `src/adapters/sql/postgres-js.ts`, `src/adapters/sql/sqlite.ts`.
 
 <!-- Task C appends its entries above this line. -->
 

@@ -2,9 +2,10 @@
 // by listing the bucket. It deletes only an object whose cloudrop-id is its row's id, never touches a completed row,
 // and is bounded per call, keyset-paged and idempotent, so two sweeps may run at once.
 
-import { fail, ok, type Result } from "../errors.ts";
+import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
+import { URL_LIFETIME_SECONDS } from "./presign.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
@@ -14,8 +15,11 @@ export interface SweepOptions {
   /** The `cursor` an earlier sweep returned, to continue where it stopped. */
   cursor?: string;
   /**
-   * How long past its token's deadline an unfinished upload is left alone, so a request that started in time can end.
-   * Default 3600000 (1 hour). Cleanup after an abort waits at least 15 minutes, the life of a signed URL.
+   * How long past its token's deadline an unfinished upload, and past its end an ended one, is left alone. At least
+   * 900000 (15 minutes, the life of an upload URL), so no new PUT can start once a row may be cleaned up. A PUT already
+   * under way that lands after its row was cleaned is left in the bucket. Default 3600000 (1 hour). The sweep takes
+   * each row before it deletes anything, so a completion that started in time is never harmed; the grace keeps a slow
+   * one from being refused.
    */
   graceMs?: number;
 }
@@ -26,19 +30,30 @@ export interface SweepReport {
   /** Ended uploads whose late objects and parts were removed. */
   cleaned: number;
   /**
+   * Rows that failed this time (a storage or database error, logged with the row's id). Each stays as it was and the
+   * next sweep tries it again; the rows after it were still swept. A listing that failed after some rows counts too.
+   */
+  failed: number;
+  /**
    * Completions stuck past their lease and deadline, now ended as failed. Their objects are kept, because their
    * onComplete may have recorded them: check each one. A row is reported once.
    */
   reported: FileRecord[];
-  /** Pass it to the next sweep to continue; null when every row has been seen. */
+  /**
+   * Pass it to the next sweep to continue; null when every row has been seen, or when a listing failed after this call
+   * had handled rows (counted in `failed`). A listing that fails before any row answers the store's error instead.
+   */
   cursor: string | null;
 }
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 const DEFAULT_GRACE_MS = 3_600_000;
-/** A signed URL's life (URL_LIFETIME_SECONDS): a PUT signed before an abort can land until then. */
-const MIN_CLEANUP_AGE_MS = 900_000;
+/**
+ * A signed URL's life: no URL outlives its token's deadline, so with at least this grace no new PUT can start after a
+ * row's deadline or end once the sweep may clean it up.
+ */
+const MIN_GRACE_MS = URL_LIFETIME_SECONDS * 1000;
 const CURSOR = /^(expire|cleanup):(.*)$/s;
 
 type Pass = "expire" | "cleanup";
@@ -47,15 +62,19 @@ function readOptions(given: unknown): Result<{ limit: number; graceMs: number; p
   const options = given ?? {};
   if (!isPlainObject(options)) return fail(invalidInput("sweep takes options such as { limit: 100 }."));
   const { limit = DEFAULT_LIMIT, graceMs = DEFAULT_GRACE_MS, cursor } = options;
-  if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > MAX_LIMIT) {
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  if (!Number.isSafeInteger(graceMs) || (graceMs as number) < 0) {
-    return fail(invalidInput("graceMs must be a whole number of milliseconds, 0 or more."));
+  if (typeof graceMs !== "number" || !Number.isSafeInteger(graceMs) || graceMs < MIN_GRACE_MS) {
+    return fail(
+      invalidInput(
+        `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.`,
+      ),
+    );
   }
   const match = cursor === undefined ? ["", "expire", ""] : typeof cursor === "string" ? CURSOR.exec(cursor) : null;
   if (!match) return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
-  return ok({ limit: limit as number, graceMs: graceMs as number, pass: match[1] as Pass, cursor: match[2] || null });
+  return ok({ limit, graceMs, pass: match[1] as Pass, cursor: match[2] || null });
 }
 
 /**
@@ -80,61 +99,71 @@ interface Sweeper {
   report: SweepReport;
 }
 
-const call = <T>({ config }: Sweeper, what: string, run: () => Promise<T>) => storeCall(config.logger, what, run);
+/** removeLeftovers for a sweep step, which stops at the first failure by throwing. */
+async function removeOrThrow(config: ServerConfig, record: FileRecord): Promise<void> {
+  const removed = await removeLeftovers(config, record);
+  if (removed.error) throw removed.error;
+}
 
-async function expire(sweeper: Sweeper, record: FileRecord): Promise<Result<void>> {
-  const { store, report } = sweeper;
+/**
+ * The row is taken first: only a sweep whose `end` changed it may delete, so a /complete that claims it in between
+ * keeps its object. A crash after the `end` leaves an expired row without cleaned_at, which the cleanup pass finishes.
+ */
+async function expire({ config, store, report }: Sweeper, record: FileRecord): Promise<void> {
   if (record.status === "completing") {
-    const ended = await call(sweeper, `end the stuck completion of file ${record.id}`, () =>
-      store.end(record.id, "completing", "failed", new Date(), { cleaned: true }),
-    );
-    if (ended.error) return ended;
-    if (ended.data.changed) report.reported.push(ended.data.record);
-    return ok(undefined);
+    const ended = await store.end(record.id, "completing", "failed", new Date(), { cleaned: true });
+    if (ended.changed) report.reported.push(ended.record);
+    return;
   }
-  const removed = await removeLeftovers(sweeper.config, record);
-  if (removed.error) return removed;
-  const ended = await call(sweeper, `expire file ${record.id}`, () =>
-    store.end(record.id, "pending", "expired", new Date(), { cleaned: true }),
-  );
-  if (ended.error) return ended;
-  if (ended.data.changed) report.expired += 1;
-  return ok(undefined);
+  const ended = await store.end(record.id, "pending", "expired", new Date());
+  if (!ended.changed) return;
+  await removeOrThrow(config, ended.record);
+  await store.cleaned(record.id, new Date());
+  report.expired += 1;
 }
 
-async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<Result<void>> {
-  const removed = await removeLeftovers(sweeper.config, record);
-  if (removed.error) return removed;
-  const marked = await call(sweeper, `mark file ${record.id} cleaned`, () =>
-    sweeper.store.cleaned(record.id, new Date()),
-  );
-  if (marked.error) return marked;
-  sweeper.report.cleaned += 1;
-  return ok(undefined);
+async function cleanUp({ config, store, report }: Sweeper, record: FileRecord): Promise<void> {
+  await removeOrThrow(config, record);
+  await store.cleaned(record.id, new Date());
+  report.cleaned += 1;
 }
 
-/** One page of one pass: the rows handled and where the pass goes on, or null when it is done. */
+/**
+ * One page of one pass: the rows handled and where the pass goes on, null when it is done. A row that fails is logged
+ * and counted, and stays as it was for the next sweep: one bad row never stops the rows after it.
+ */
 async function sweepPage(
   sweeper: Sweeper,
   pass: Pass,
   page: { before: number; limit: number; cursor: string | null },
 ): Promise<Result<{ handled: number; cursor: string | null }>> {
-  const claimedBefore = new Date(Date.now() - sweeper.config.completionLeaseMs);
-  const found = await call(sweeper, `find ${pass} work`, () =>
-    sweeper.store.stale({
-      kind: pass,
-      before: new Date(page.before),
-      claimedBefore,
-      limit: page.limit,
-      cursor: page.cursor,
-    }),
+  const { config, store, report } = sweeper;
+  const claimedBefore = new Date(Date.now() - config.completionLeaseMs);
+  const found = await storeCall(config.logger, `find ${pass} work`, () =>
+    store.stale({ kind: pass, before: new Date(page.before), claimedBefore, limit: page.limit, cursor: page.cursor }),
   );
   if (found.error) return found;
   for (const record of found.data.records) {
-    const done = await (pass === "expire" ? expire(sweeper, record) : cleanUp(sweeper, record));
-    if (done.error) return done;
+    try {
+      await (pass === "expire" ? expire(sweeper, record) : cleanUp(sweeper, record));
+    } catch (error) {
+      config.logger.error(`cloudrop: the sweep could not finish file ${record.id}. The next sweep tries again.`, error);
+      report.failed += 1;
+    }
   }
   return ok({ handled: found.data.records.length, cursor: found.data.cursor });
+}
+
+const stoppedAt = (report: SweepReport, cursor: string | null): Result<SweepReport> => ok({ ...report, cursor });
+
+/**
+ * A listing that failed. Before any row was handled in this call: the store's error, so a caller looping on the
+ * cursor stops. After: what was done, the listing counted in `failed`, and no cursor, so the caller stops all the same
+ * and the next sweep starts over.
+ */
+function listingFailed(report: SweepReport, handled: number, error: CloudropError): Result<SweepReport> {
+  if (handled === 0) return fail(error);
+  return stoppedAt({ ...report, failed: report.failed + 1 }, null);
 }
 
 export async function sweep(
@@ -144,21 +173,21 @@ export async function sweep(
 ): Promise<Result<SweepReport>> {
   const options = readOptions(given);
   if (options.error) return options;
-  const { limit, graceMs } = options.data;
-  const sweeper: Sweeper = { config, store, report: { expired: 0, cleaned: 0, reported: [], cursor: null } };
+  const { limit, graceMs, pass } = options.data;
+  const report: SweepReport = { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null };
+  const sweeper: Sweeper = { config, store, report };
   const now = Date.now();
   let budget = limit;
   let cursor = options.data.cursor;
-  if (options.data.pass === "expire") {
+  if (pass === "expire") {
     const page = await sweepPage(sweeper, "expire", { before: now - graceMs, limit, cursor });
-    if (page.error) return page;
-    if (page.data.cursor !== null) return ok({ ...sweeper.report, cursor: `expire:${page.data.cursor}` });
+    if (page.error) return fail(page.error);
+    if (page.data.cursor !== null) return stoppedAt(report, `expire:${page.data.cursor}`);
     budget -= page.data.handled;
     cursor = null;
-    if (budget === 0) return ok({ ...sweeper.report, cursor: "cleanup:" });
+    if (budget === 0) return stoppedAt(report, "cleanup:");
   }
-  const before = now - Math.max(graceMs, MIN_CLEANUP_AGE_MS);
-  const page = await sweepPage(sweeper, "cleanup", { before, limit: budget, cursor });
-  if (page.error) return page;
-  return ok({ ...sweeper.report, cursor: page.data.cursor === null ? null : `cleanup:${page.data.cursor}` });
+  const page = await sweepPage(sweeper, "cleanup", { before: now - graceMs, limit: budget, cursor });
+  if (page.error) return listingFailed(report, limit - budget, page.error);
+  return stoppedAt(report, page.data.cursor === null ? null : `cleanup:${page.data.cursor}`);
 }

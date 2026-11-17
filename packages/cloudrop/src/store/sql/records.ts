@@ -5,10 +5,33 @@
 import type { FileRecord, FileStatus, OwnerUsage } from "../../server/store.ts";
 import type { SqlRow } from "./executor.ts";
 
+/** Every column of the files table, in the order of spec §3. */
+export const FILE_COLUMNS: readonly string[] = [
+  "id",
+  "route",
+  "key",
+  "owner",
+  "status",
+  "name",
+  "type",
+  "size",
+  "upload_id",
+  "metadata",
+  "result",
+  "claim",
+  "claimed_at",
+  "expires_at",
+  "created_at",
+  "updated_at",
+  "completed_at",
+  "ended_at",
+  "cleaned_at",
+];
+
 /** The files columns a `FileRecord` is read from: every column except `claim` and `updated_at`. */
-export const RECORD_COLUMNS: string =
-  "id, route, key, owner, status, name, type, size, upload_id, metadata, result, expires_at, created_at, claimed_at, " +
-  "completed_at, ended_at, cleaned_at";
+export const RECORD_COLUMNS: string = FILE_COLUMNS.filter(
+  (column) => column !== "claim" && column !== "updated_at",
+).join(", ");
 
 function describe(value: unknown): string {
   return typeof value === "string" ? JSON.stringify(value) : `${typeof value} ${String(value)}`;

@@ -7,7 +7,7 @@
 
 import type { NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
-import type { SqlStatement } from "./executor.ts";
+import { runStatement, type SqlStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
 import type { SqlContext, StoreMethods } from "./reads.ts";
 import { RECORD_COLUMNS } from "./records.ts";
@@ -135,8 +135,7 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
         WHERE reserved_bytes <> excluded.reserved_bytes OR active_bytes <> excluded.active_bytes
           OR files <> excluded.files
         RETURNING owner`;
-      const [rows] = await executor.batch([b.statement(sql)]);
-      return (rows?.length ?? 0) > 0;
+      return (await runStatement(executor, b.statement(sql))).length > 0;
     },
   };
 }

@@ -56,10 +56,13 @@ function readStoreObject(given: unknown): CloudropStore<unknown> | undefined {
   if (given === undefined) return undefined;
   const store = (typeof given === "object" && given !== null ? given : {}) as Record<string, unknown>;
   const missing = STORE_METHODS.find((method) => !isFunction(store[method]));
-  if (missing || (store.transaction !== undefined && !isFunction(store.transaction))) {
+  if (missing) {
     throw configError(
-      `store must be a CloudropStore, such as sqlStore(...) from cloudrop/adapters/sql. Its ${missing ?? "transaction"} method is missing.`,
+      `store must be a CloudropStore, such as sqlStore(...) from cloudrop/adapters/sql. Its ${missing} method is missing.`,
     );
+  }
+  if (store.transaction !== undefined && !isFunction(store.transaction)) {
+    throw configError("store.transaction must be a function, or left out for a store without transactions.");
   }
   return given as CloudropStore<unknown>;
 }

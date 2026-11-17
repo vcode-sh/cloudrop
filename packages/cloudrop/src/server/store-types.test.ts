@@ -53,6 +53,19 @@ const albums = txRoute(
   },
 );
 
+// The supported order is onComplete, then afterComplete, as above. Written the other way round, TypeScript fixes the
+// result type to null before it reads onComplete; this pins that, so the advice in afterComplete's TSDoc stays true.
+route(
+  { accept: "*/*", maxSize: 1, authorize: () => ({}) },
+  {
+    afterComplete: ({ data }) => {
+      expectTypeOf(data).toEqualTypeOf<null>();
+    },
+    // @ts-expect-error: in this order the result must be null.
+    onComplete: (context) => ({ id: context.file.key }),
+  },
+);
+
 // @ts-expect-error: owner returns a string or null.
 route({ accept: "*/*", maxSize: 1, authorize: () => ({}) }, { owner: () => 42 });
 

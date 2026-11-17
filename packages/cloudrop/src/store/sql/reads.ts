@@ -3,7 +3,7 @@
 
 import type { CloudropStore, FileRecord } from "../../server/store.ts";
 import { binder } from "./bind.ts";
-import type { SqlDialect, SqlExecutor } from "./executor.ts";
+import { runStatement, type SqlDialect, type SqlExecutor, type SqlStatement } from "./executor.ts";
 import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage } from "./records.ts";
 import type { QuotedTables } from "./tables.ts";
 
@@ -21,7 +21,7 @@ type SingleStatementMethods = Pick<
   "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "owners"
 >;
 
-const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'deleted'";
+const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
 
 /** A keyset page: `limit + 1` rows were asked for, so a row beyond the page means another page follows. */
 function page<T>(rows: T[], limit: number, cursorOf: (last: T) => string) {
@@ -35,8 +35,7 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
   // Byte order on Postgres, whatever the database's collation, so ids and owners page in the same order everywhere;
   // SQLite's default collation already compares bytes.
   const byteOrder = (expression: string) => (dialect === "postgres" ? `${expression} COLLATE "C"` : expression);
-  const run = async (statement: { sql: string; params: readonly unknown[] }) =>
-    executor.query(statement.sql, statement.params);
+  const run = (statement: SqlStatement) => runStatement(executor, statement);
 
   return {
     async attach(id, uploadId, now) {

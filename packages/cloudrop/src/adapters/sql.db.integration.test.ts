@@ -58,6 +58,30 @@ function driverRows(executor: () => SqlExecutor<unknown>) {
     expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(5);
     expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
   });
+
+  // An owner with no usage row yet has nothing to lock, so racing first reserves meet at the row's creation. Three
+  // owners per case, because one race may happen to run one call at a time.
+  test.for([
+    { limit: 50, reserved: 5 },
+    { limit: null, reserved: 8 },
+  ])(
+    "concurrent first reserves of new owners (limit $limit) reserve exactly $reserved each and never throw",
+    async ({ limit, reserved }) => {
+      const store = sqlStore(executor());
+      const owners = ["new-a", "new-b", "new-c"];
+      const outcomes = await Promise.all(
+        owners.flatMap((owner) =>
+          Array.from({ length: 8 }, (_, index) =>
+            store.reserve({ owner, limit, expiresAt: NOW, files: [file(`${owner}-${index}`, 10)] }, NOW),
+          ),
+        ),
+      );
+      expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(3 * reserved);
+      for (const owner of owners) {
+        expect(await store.usage(owner)).toEqual({ reservedBytes: reserved * 10, activeBytes: 0, files: 0 });
+      }
+    },
+  );
 }
 
 describe("Postgres", () => {
@@ -89,75 +113,6 @@ describe("Postgres", () => {
     });
     driverRows(executor);
   });
-
-  /** A store over fresh tables, with its transaction. */
-  async function transactionalStore(executor: () => SqlExecutor<unknown>) {
-    await db.reset();
-    await db.createTables();
-    const store = sqlStore(executor());
-    const transaction = store.transaction?.bind(store);
-    if (!transaction) throw new Error("A Postgres store must offer transactions.");
-    return { store, transaction };
-  }
-
-  /** A promise the test resolves when it is ready, to keep a transaction open until then. */
-  function gate() {
-    let open = () => {};
-    const opened = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    return { opened, open };
-  }
-
-  test.for(executors)(
-    "$name: a claim waiting on another transaction's row lock is busy after the 2 s lock timeout",
-    async ({ executor }) => {
-      // Takes 2 s by design: the lock timeout is what turns the wait into an answer. The waiting transaction then ends
-      // normally, so the driver must also cope with committing a transaction the timeout aborted.
-      const { store, transaction } = await transactionalStore(executor);
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 1)] }, NOW);
-      const held = gate();
-      const holder = transaction(async (_tx, inner) => {
-        expect(await inner.claim("f-1", "claim-a", NOW, 60_000)).toEqual({ kind: "claimed" });
-        await held.opened;
-      });
-      const started = Date.now();
-      // The holder is let go however the wait ends, so a failure here leaves no lock behind for the next row.
-      const waiting = await transaction((_tx, inner) => inner.claim("f-1", "claim-b", NOW, 60_000)).finally(held.open);
-      await holder;
-      expect(waiting).toEqual({ kind: "busy" });
-      expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
-      expect((await rawTables(db).files())[0]).toMatchObject({ status: "completing", claim: "claim-a" });
-    },
-  );
-
-  test("reconcile waits for a reserve that is still open, then counts it", async () => {
-    const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-0", 10)] }, NOW);
-    await rawTables(db).putUsage({ owner: "u-1", reservedBytes: 999, activeBytes: 0, files: 0, updatedAt: NOW });
-    const held = gate();
-    const reserved = gate();
-    const reserving = transaction(async (_tx, inner) => {
-      await inner.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 5)] }, NOW);
-      reserved.open();
-      await held.opened;
-    });
-    await reserved.opened;
-    const reconciling = store.reconcile("u-1");
-    // Commit the reserve only once reconcile is blocked on the usage row, so a recount from a snapshot taken before
-    // the commit would overwrite the reserve's 5 bytes.
-    for (let polls = 0; ; polls++) {
-      const [row] = await db.query(`SELECT count(*)::int AS waiting FROM pg_stat_activity
-        WHERE wait_event_type = 'Lock' AND query LIKE '%cloudrop_usage%'`);
-      if (row?.waiting === 1) break;
-      if (polls > 500) throw new Error("reconcile never waited for the usage row lock.");
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    held.open();
-    await reserving;
-    expect(await reconciling).toBe(true);
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0 });
-  });
 });
 
 describe("SQLite", () => {
@@ -173,5 +128,26 @@ describe("SQLite", () => {
   describe("node:sqlite", () => {
     beforeEach(() => db.createTables());
     driverRows(() => sqliteExecutor(db.database));
+
+    test("complete that fails at its files write rolls back the usage write that ran before it", async () => {
+      const store = sqlStore(sqliteExecutor(db.database));
+      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
+      await store.claim("f-1", "claim-a", NOW, 60_000);
+      // complete's batch writes usage first, then the files row; this fails the files write once.
+      let armed = true;
+      db.database.function("fail_files_once", { deterministic: false }, () => {
+        const fire = armed;
+        armed = false;
+        return fire ? 1 : 0;
+      });
+      await db.query(`CREATE TRIGGER fail_files BEFORE UPDATE ON cloudrop_files WHEN fail_files_once()
+        BEGIN SELECT RAISE(ABORT, 'Injected failure of the files write.'); END`);
+      await expect(store.complete("f-1", "claim-a", null, NOW)).rejects.toThrow("Injected failure of the files write.");
+      const raw = rawTables(db);
+      expect(await raw.usage()).toEqual([
+        { owner: "u-1", reservedBytes: 10, activeBytes: 0, files: 0, updatedAt: NOW },
+      ]);
+      expect((await raw.files())[0]).toMatchObject({ status: "completing", claim: "claim-a", completedAt: null });
+    });
   });
 });

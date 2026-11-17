@@ -139,7 +139,8 @@ export interface CloudropStore<TTx = never> {
   /**
    * One page of sweep work, ordered by its time column, then id. `"expire"`: `pending` rows with `expires_at < before`,
    * and `completing` rows with `expires_at < before` and `claimed_at < claimedBefore`, by `expires_at`. `"cleanup"`:
-   * `aborted`, `rejected`, `failed` and `deleted` rows with `cleaned_at` null and `ended_at < before`, by `ended_at`.
+   * `aborted`, `rejected`, `failed`, `expired` and `deleted` rows with `cleaned_at` null and `ended_at < before`, by
+   * `ended_at`.
    * At most `limit` records; `cursor` continues after the previous page (keyset, so rows that leave the set between
    * pages skip nothing) and is null on the last page. A cursor is opaque and valid only for its own kind.
    */

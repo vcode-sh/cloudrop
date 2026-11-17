@@ -30,19 +30,33 @@ export interface SqlExecutor<TTx = never> {
   transaction?<T>(run: (executor: Omit<SqlExecutor<TTx>, "transaction">, tx: TTx) => Promise<T>): Promise<T>;
 }
 
-/** Postgres's `lock_not_available`, raised when `lock_timeout` runs out. */
-const LOCK_TIMEOUT = "55P03";
+/** An executor that can hold a transaction (node-postgres, postgres.js): its store gets `transaction` and `route`. */
+export type TransactionalSqlExecutor<TTx> = SqlExecutor<TTx> & Required<Pick<SqlExecutor<TTx>, "transaction">>;
+
+/** Runs one built statement. */
+export function runStatement(
+  executor: Pick<SqlExecutor<unknown>, "query">,
+  statement: SqlStatement,
+): Promise<SqlRow[]> {
+  return executor.query(statement.sql, statement.params);
+}
 
 /**
- * True for Postgres's lock timeout: node-postgres and postgres.js set it as `code`, and a wrapper (Drizzle's query
- * error) keeps the driver's error as `cause`, so the chain is followed a few levels.
+ * True when the error carries this Postgres SQLSTATE: node-postgres and postgres.js set it as `code`, and a wrapper
+ * (Drizzle's query error) keeps the driver's error as `cause`, so the chain is followed a few levels.
  */
-export function isLockTimeout(error: unknown): boolean {
+function hasCode(error: unknown, sqlState: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
     const { code, cause } = current as { code?: unknown; cause?: unknown };
-    if (code === LOCK_TIMEOUT) return true;
+    if (code === sqlState) return true;
     current = cause;
   }
   return false;
 }
+
+/** Postgres's `lock_not_available`, raised when `lock_timeout` runs out. */
+export const isLockTimeout = (error: unknown): boolean => hasCode(error, "55P03");
+
+/** Postgres's `unique_violation`. */
+export const isUniqueViolation = (error: unknown): boolean => hasCode(error, "23505");

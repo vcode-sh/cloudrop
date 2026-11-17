@@ -4,23 +4,20 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import type { CompleteResponse, UploadedFile } from "../protocol/types.ts";
-import {
-  checkAfterVerify,
-  completeContext,
-  encodeResult,
-  MAX_RESULT_JSON_BYTES,
-  unfinished,
-  uploadedFile,
-} from "./complete-steps.ts";
+import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFile } from "./complete-steps.ts";
 import { cleanUpRefused, type Verdict, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput, RouteConfig, ServerConfig } from "./config.ts";
 import { busy } from "./http.ts";
 import { nowSeconds } from "./presign.ts";
+import { storeOfRoute } from "./route.ts";
 import type { ClaimOutcome, CloudropStore, FileRecord } from "./store.ts";
 import { cancelled, type FileCalls, fileCalls, storeUnavailable } from "./store-calls.ts";
 import { type UploadTokenPayload, uploadExpired } from "./token.ts";
 
 type Answer = Result<CompleteResponse>;
+
+/** The longest result a row keeps (M5 spec §3): an id or a few fields, not a record. */
+const MAX_RESULT_JSON_BYTES = 16 * 1024;
 /** One completion attempt: its answer, and whether this request recorded the completion. */
 type Attempt = { answer: Answer; recorded: boolean };
 
@@ -84,9 +81,15 @@ async function runOnComplete(
   }
   // No result is stored as null, as the client is sent null (spec §5.4).
   if (result === undefined || result === null) return ok({ data: null, json: null });
-  const encoded = encodeResult(config.logger, route.name, result, MAX_RESULT_JSON_BYTES);
+  const encoded = encodeResult(config.logger, route.name, result);
   if (encoded.error) return encoded;
   const json = encoded.data ?? null;
+  if (json !== null && new TextEncoder().encode(json).length > MAX_RESULT_JSON_BYTES) {
+    config.logger.error(
+      `cloudrop: onComplete for route "${route.name}" returned more than 16 KiB of JSON. Return ids, not records.`,
+    );
+    return fail(unfinished());
+  }
   return ok({ data: json === null ? null : JSON.parse(json), json });
 }
 
@@ -131,7 +134,8 @@ async function inTransaction(
         attempt = { answer: claimAnswer(claimed, file), recorded: false };
         return;
       }
-      const ran = await runOnComplete(completion, { tx });
+      // Only a route made by the store's own route() expects tx; a plain route keeps an authorize field of that name.
+      const ran = await runOnComplete(completion, storeOfRoute(completion.route.definition) ? { tx } : {});
       if (ran.error) return rollBack(ran);
       const done = await store.complete(token.id, claim, ran.data.json, new Date());
       if (!done.changed) return rollBack(lostClaim(done.record, file));

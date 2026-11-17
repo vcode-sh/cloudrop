@@ -17,31 +17,19 @@
       "!**/*.md"
     ]
   },
-  "formatter": {
-    "indentStyle": "space",
-    "lineWidth": 120
-  },
+  "formatter": { "indentStyle": "space", "lineWidth": 120 },
   "linter": {
     "rules": {
       "preset": "recommended",
       "complexity": {
-        "noExcessiveCognitiveComplexity": {
-          "level": "error",
-          "options": {
-            "maxAllowedComplexity": 15
-          }
-        }
+        "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
       }
     }
   },
   "overrides": [
     {
       "includes": ["packages/cloudrop/**", "!packages/cloudrop/src/react.ts", "!packages/cloudrop/src/react/**"],
-      "linter": {
-        "domains": {
-          "react": "none"
-        }
-      }
+      "linter": { "domains": { "react": "none" } }
     },
     {
       "includes": ["packages/cloudrop/src/client.ts", "packages/cloudrop/src/client/**", "!**/*.test.ts"],

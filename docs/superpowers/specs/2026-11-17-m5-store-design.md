@@ -144,8 +144,8 @@ interface CloudropStore<TTx = never> {
   /** pending → aborted for one owner, releasing their reservations; returns the rows changed. */
   revoke(owner: string, now: Date): Promise<number>;
   /** Sweep work, keyset-paged with an opaque cursor. "expire": pending with expires_at < before, and completing with
-   *  expires_at < before and claimed_at < claimedBefore. "cleanup": aborted|rejected|failed|deleted with cleaned_at
-   *  null and ended_at < before. */
+   *  expires_at < before and claimed_at < claimedBefore. "cleanup": aborted|rejected|failed|expired|deleted with
+   *  cleaned_at null and ended_at < before. */
   stale(input: { kind: "expire" | "cleanup"; before: Date; claimedBefore: Date; limit: number;
     cursor: string | null }): Promise<{ records: FileRecord[]; cursor: string | null }>;
   cleaned(id: string, now: Date): Promise<void>;
@@ -245,17 +245,26 @@ With a store only (without one each resolves `INVALID_CONFIG`):
 - `deleteFile(id)`: `end(id, "completed", "deleted")`, then delete the object by the stored key and `cleaned`;
   idempotent (a crash between the two leaves a `deleted` row the cleanup pass finishes).
 - `reconcile({ owner? })`: one owner, or every owner paged through `owners()`.
-- `sweep({ limit = 100, cursor?, grace = 1 h })`, two passes, each keyset-paged:
-  - **expire:** `pending` rows with `expires_at < now − grace` → abort the multipart upload when `upload_id` is set
-    (otherwise the lifecycle rule), HEAD the key and delete the object only when its `cloudrop-id` equals the row id,
-    then `end(id, "pending", "expired", { cleaned: true })`. `completing` rows with a dead token and an expired lease →
+- `sweep({ limit = 100, cursor?, graceMs = 1 h })`, two passes, each keyset-paged. `graceMs` is at least 15 minutes,
+  the life of an upload URL, so no new PUT can start once a row may be cleaned up; a smaller one is `INVALID_INPUT`. A
+  PUT already under way that lands after its row was cleaned is left in the bucket, a known cost: the cleanup pass does
+  not return cleaned rows (amended 2026-11-17, M5-T64):
+  - **expire:** `pending` rows with `expires_at < now − graceMs` → `end(id, "pending", "expired")` first; only when
+    that changed the row, abort the multipart upload when `upload_id` is set (otherwise the lifecycle rule), HEAD the
+    key and delete the object only when its `cloudrop-id` equals the row id, then `cleaned`. Taking the row first means
+    a `/complete` that claims it in between keeps its object; a crash after the `end` leaves an `expired` row without
+    `cleaned_at`, which the cleanup pass finishes. (Amended 2026-11-17, M5-T64: the first draft deleted before the
+    `end`, which could delete a completed file.) `completing` rows with a dead token and an expired lease →
     `end(id, "completing", "failed", { cleaned: true })`: the object is kept (its `onComplete` may have recorded it), the
     reservation released, and the row reported once. Live-token `completing` rows are left alone.
-  - **cleanup:** `aborted | rejected | failed | deleted` with `cleaned_at` null and `ended_at < now − max(grace, 15 min)`
-    → the same abort, HEAD and delete steps, then `cleaned`. This removes late objects (a PUT that lands after an
-    `/abort`'s HEAD or a revoke, a crash inside `deleteFile`).
-  - Returns `{ expired, cleaned, reported, cursor }`; bounded per call so a Workers cron can run it; scheduling is the
-    app's.
+  - **cleanup:** `aborted | rejected | failed | expired | deleted` with `cleaned_at` null and
+    `ended_at < now − graceMs` → the same abort, HEAD and delete steps, then `cleaned`. This removes late
+    objects (a PUT that lands after an `/abort`'s HEAD or a revoke, a crash inside `deleteFile` or the expire pass).
+  - A row that fails (storage or database) is logged and counted, and stays as it was for the next sweep; the rows
+    after it are still swept. A listing that fails answers the store's error when no row was handled yet, otherwise
+    the report so far with the listing counted in `failed` and a null cursor (amended 2026-11-17, M5-T65).
+  - Returns `{ expired, cleaned, failed, reported, cursor }`; bounded per call so a Workers cron can run it;
+    scheduling is the app's.
 
 ## 7. Adapters (`M5-T11` to `M5-T14`)
 

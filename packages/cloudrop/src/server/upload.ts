@@ -120,13 +120,12 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   }
   const exp = nowSeconds() + TOKEN_LIFETIME_SECONDS;
   const refusals = await reserveFiles(config, { route, owner: rowOwner, files: accepted, metadataJson, exp });
-  const decided = prepared.map((file) =>
-    file instanceof CloudropError ? file : (refusals.get(file.id)?.error ?? file),
-  );
   const tickets = await Promise.all(
-    decided.map((file): FileTicket | Promise<FileTicket> =>
-      file instanceof CloudropError
-        ? { kind: "rejected", error: errorBody(file) }
+    prepared.map((file): FileTicket | Promise<FileTicket> => {
+      if (file instanceof CloudropError) return { kind: "rejected", error: errorBody(file) };
+      const refused = refusals.get(file.id);
+      return refused
+        ? { kind: "rejected", error: errorBody(refused) }
         : startFileSafely(config, {
             v: 1,
             route: route.name,
@@ -139,11 +138,13 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
             metadata: signedMetadata,
             exp,
             ...(store && { stored: true as const }),
-          }),
-    ),
+          });
+    }),
   );
   // Files that beforeUpload accepted but could not be started: release what plugins and the store reserved for them.
-  const unstarted = accepted.filter((file) => tickets[prepared.indexOf(file)]?.kind === "rejected");
+  const unstarted = prepared.filter(
+    (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
+  );
   await releaseUnstarted(config, { route: route.name, metadata, auth }, unstarted, refusals);
   return ok({ files: tickets });
 }

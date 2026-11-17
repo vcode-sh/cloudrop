@@ -13,7 +13,9 @@ export interface SqliteDatabase {
 
 /**
  * An executor over node:sqlite: `sqlStore(sqliteExecutor(new DatabaseSync(path)))`. Do not share the connection with
- * code that holds its own transaction open across awaits: a batch's BEGIN would then fail.
+ * code that holds its own transaction open across awaits: a batch's BEGIN would then fail. When another connection or
+ * process writes the same file, open it with a busy timeout, `new DatabaseSync(path, { timeout: 5000 })`: the default
+ * of 0 fails a batch at once with "database is locked" while the other writer holds the file.
  */
 export function sqliteExecutor(db: SqliteDatabase): SqlExecutor {
   const rowsOf = ({ sql, params }: SqlStatement) => db.prepare(sql).all(...params);

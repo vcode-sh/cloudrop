@@ -88,18 +88,12 @@ export function busy(): CloudropError {
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
   // An unknown code would otherwise answer 200.
   if (!hasKnownCode(error)) return errorResponse(serverError(), headers);
-  if (BUSY.has(error)) {
-    // A cross-origin page reads Retry-After only when CORS exposes it.
-    const exposed: ResponseHeaders = headers["access-control-allow-origin"]
-      ? { "access-control-expose-headers": "Retry-After" }
-      : {};
-    return jsonResponse({ error: errorBody(error) }, STATUS[error.code], {
-      ...headers,
-      ...exposed,
-      "retry-after": "2",
-    });
-  }
-  return jsonResponse({ error: errorBody(error) }, STATUS[error.code], headers);
+  // A cross-origin page reads Retry-After only when CORS exposes it.
+  const exposed: ResponseHeaders = headers["access-control-allow-origin"]
+    ? { "access-control-expose-headers": "Retry-After" }
+    : {};
+  const busyHeaders: ResponseHeaders = BUSY.has(error) ? { ...exposed, "retry-after": "2" } : {};
+  return jsonResponse({ error: errorBody(error) }, STATUS[error.code], { ...headers, ...busyHeaders });
 }
 
 /**

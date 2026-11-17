@@ -38,8 +38,10 @@ function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMet
 /**
  * A store over SQL tables. Each method is one atomic unit (one statement on Postgres, one batch on SQLite). The schema
  * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. When the
- * executor can hold a transaction, the store has `transaction` too: Postgres's row lock wait is capped at 2 seconds in
- * it, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish.
+ * executor can hold a transaction, the store has `transaction` too: inside it a claim waits at most 2 seconds for
+ * Postgres's row lock, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish; the
+ * app's own statements through `tx` keep the database's lock timeout. Postgres must run at its default isolation, READ
+ * COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
  */
 export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlStoreOptions = {}): CloudropStore<TTx> {
   const { dialect } = executor;
@@ -69,17 +71,24 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
       let answer: { value: T } | undefined;
       try {
         return await transaction<T>(async (inner, tx) => {
-          if (dialect === "postgres") await inner.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, []);
           const methods = methodsOver({ executor: inner, dialect, tables });
-          // Another /complete holds the row lock past the timeout: the row is busy, not broken.
+          const lockTimeout = async (value: string) => {
+            if (dialect === "postgres") await inner.query(`SET LOCAL lock_timeout = ${value}`, []);
+          };
+          // The cap covers the claim alone: onComplete's own statements through tx wait as long as the database lets
+          // them. Another /complete holding the row lock past the cap makes the row busy, not broken.
           const claim: StoreMethods["claim"] = async (...args) => {
+            await lockTimeout(`'${LOCK_TIMEOUT}'`);
+            let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
             try {
-              return await methods.claim(...args);
+              outcome = await methods.claim(...args);
             } catch (error) {
               if (!isLockTimeout(error)) throw error;
               timedOut = true;
               return { kind: "busy" };
             }
+            await lockTimeout("DEFAULT");
+            return outcome;
           };
           const value = await run(tx, { ...methods, claim });
           answer = { value };

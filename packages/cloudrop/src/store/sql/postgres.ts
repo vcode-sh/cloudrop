@@ -3,8 +3,9 @@
 // UPDATE that waited for a row lock re-reads the row before it applies (READ COMMITTED), which is what makes a claim
 // exclusive. reconcile alone is a two-statement batch: the lock first, so the recount takes a snapshot after it.
 
-import type { NewFile } from "../../server/store.ts";
-import { binder } from "./bind.ts";
+import type { FileStatus, NewFile } from "../../server/store.ts";
+import { type Binder, binder } from "./bind.ts";
+import { isUniqueViolation, runStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
 import type { SqlContext, StoreMethods } from "./reads.ts";
 import { RECORD_COLUMNS, toSafeInteger } from "./records.ts";
@@ -31,11 +32,12 @@ const inputJson = (files: readonly NewFile[]): string =>
 
 export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites {
   const { files, usage } = tables;
-  const run = async (statement: { sql: string; params: readonly unknown[] }) =>
-    executor.query(statement.sql, statement.params);
 
-  /** Files and usage of one guarded transition, then the row as it is: changed, or unchanged as found. */
-  async function transitionRow(update: string, set: string | null, id: string, b: ReturnType<typeof binder>) {
+  /**
+   * Files and usage of one guarded transition, then the row: changed, or unchanged as found. `from` is the status the
+   * update requires.
+   */
+  async function transitionRow(update: string, set: string | null, id: string, from: FileStatus, b: Binder) {
     const counted = set
       ? `, counted AS (UPDATE ${usage} SET ${set} FROM changed WHERE ${usage}.owner = changed.owner)`
       : "";
@@ -43,8 +45,17 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       SELECT true AS changed, ${RECORD_COLUMNS} FROM changed
       UNION ALL
       SELECT false, ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)} AND NOT EXISTS (SELECT 1 FROM changed)`;
-    const [row] = await run(b.statement(sql));
-    return transition(row?.changed === true, row);
+    const [row] = await runStatement(executor, b.statement(sql));
+    const found = transition(row?.changed === true, row);
+    // Unchanged, yet the row still shows the status the update wanted: the update waited for another transaction's
+    // lock and found the row changed, while this statement's snapshot still holds it as it was. Read it as it is now.
+    if (found.changed || found.record?.status !== from) return found;
+    const again = binder("postgres");
+    const [current] = await runStatement(
+      executor,
+      again.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${again.text(id)}`),
+    );
+    return transition(false, current);
   }
 
   return {
@@ -53,7 +64,8 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       const b = binder("postgres");
       const [input, expires, at] = [b.json(inputJson(accepted)), b.time(expiresAt), b.time(now)];
       if (owner === null) {
-        await run(
+        await runStatement(
+          executor,
           b.statement(`INSERT INTO ${files} (${INSERT_COLUMNS})
             SELECT id, route, key, NULL, 'pending', name, type, size, metadata, ${expires}, ${at}, ${at}
             FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS})`),
@@ -62,8 +74,8 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       }
       const who = b.text(owner);
       const fits = limit === null ? "true" : `decided.used + input.size <= ${b.bigint(limit)}`;
-      // Without a limit, a first reserve racing another for the same new owner adds to the row the other created; with
-      // one, that race fails the statement (unique owner), since its quota decisions assumed no row.
+      // Without a limit, a first reserve racing another for the same new owner adds to the row the other created. With
+      // one it cannot: its quota decisions assumed no row, so the insert fails on the unique owner and is run again.
       const onConflict =
         limit === null
           ? `ON CONFLICT (owner) DO UPDATE SET reserved_bytes = ${usage}.reserved_bytes + EXCLUDED.reserved_bytes,
@@ -99,7 +111,14 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
           ${onConflict}
         )
         SELECT reserved FROM decided WHERE ord > 0 ORDER BY ord`;
-      const rows = await run(b.statement(sql));
+      const statement = b.statement(sql);
+      const rows = await runStatement(executor, statement).catch((error: unknown) => {
+        // A first reserve of this owner raced ours and created the usage row after our snapshot (see onConflict). The
+        // failed statement rolled back whole; run again, it takes a new snapshot and its FOR UPDATE locks that row. A
+        // duplicate file id fails the same way again and is thrown.
+        if (limit === null || !isUniqueViolation(error)) throw error;
+        return runStatement(executor, statement);
+      });
       return rows.map((row) => (row.reserved === true ? "reserved" : "over-quota"));
     },
 
@@ -113,7 +132,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
           RETURNING id
         )
         SELECT EXISTS (SELECT 1 FROM claimed) AS claimed, ${RECORD_COLUMNS} FROM ${files} WHERE id = ${key}`;
-      const [row] = await run(b.statement(sql));
+      const [row] = await runStatement(executor, b.statement(sql));
       return claimOutcome(row?.claimed === true, row);
     },
 
@@ -124,7 +143,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
         updated_at = ${at} WHERE id = ${b.text(id)} AND status = 'completing' AND claim = ${b.text(claim)}`;
       const set = `reserved_bytes = reserved_bytes - changed.size, active_bytes = active_bytes + changed.size,
         files = files + 1, updated_at = ${at}`;
-      return transitionRow(update, set, id, b);
+      return transitionRow(update, set, id, "completing", b);
     },
 
     async end(id, from, to, now, options) {
@@ -134,7 +153,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       const update = `UPDATE ${files} SET status = ${b.text(to)}, ended_at = ${at}, updated_at = ${at}${cleaned}
         WHERE id = ${b.text(id)} AND status = ${b.text(from)}`;
       const released = releaseFrom(from, "changed.size");
-      return transitionRow(update, released && `${released}, updated_at = ${at}`, id, b);
+      return transitionRow(update, released && `${released}, updated_at = ${at}`, id, from, b);
     },
 
     async revoke(owner, now) {
@@ -149,7 +168,7 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
           WHERE owner = ${who} AND EXISTS (SELECT 1 FROM revoked)
         )
         SELECT count(*) AS revoked FROM revoked`;
-      const [row] = await run(b.statement(sql));
+      const [row] = await runStatement(executor, b.statement(sql));
       return toSafeInteger(row?.revoked, "revoked");
     },
 
