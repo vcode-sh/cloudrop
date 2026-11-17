@@ -17,4 +17,7 @@ export default defineConfig({
   platform: "neutral",
   dts: true,
   sourcemap: true,
+  // The .d.ts files carry the docs an editor shows; JSDoc in the shipped .js only adds bytes to every app's bundle
+  // (M4-F25). Annotations such as @__PURE__ stay, for tree shaking.
+  outputOptions: { comments: { legal: true, annotation: true, jsdoc: false } },
 });

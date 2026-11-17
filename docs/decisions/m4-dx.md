@@ -494,6 +494,24 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** owner, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.
 
+### M4-F25: the shipped `.js` carries no JSDoc; the `.d.ts` files keep it
+
+- **Decision:** the build drops JSDoc comments from the emitted `.js` (`outputOptions.comments`: legal and annotation
+  comments such as `@__PURE__` stay, `jsdoc: false`). The `.d.ts` files, which editors read, keep every doc comment
+  (counted after the change: `dist/index.d.ts` 69 blocks, `dist/adapters/drizzle.d.ts` 12, as before), and the source
+  maps still point at `src/`. Ceilings stay as M4-F24 set them, so the headroom grows.
+- **Why:** the post-M5 review measured JSDoc at about a quarter of the adapters' published bytes. An app whose bundler
+  minifies loses them anyway, so the size-limit entries measured as a minified bundle (`cloudrop` bundled,
+  `cloudrop/client`, `cloudrop/react`) do not change; the summed entries do, and so does every unminified consumer: a
+  Worker built without `--minify`, a server bundle, `node_modules`. Measured 2026-11-17 on `feat/post-m5`, summed gzip
+  before → after: `cloudrop` 46.27 → 37.01 kB, `cloudrop/next` 1.16 → 0.78 kB, `cloudrop/node` 3.24 → 2.26 kB,
+  `adapters/sql` 14.63 → 10.84 kB, `adapters/drizzle` 16.72 → 12.64 kB, `adapters/prisma` 13.69 → 10.41 kB.
+- **If wrong:** someone reading `dist/*.js` without source maps sees no docs; they are in the `.d.ts` beside it and in
+  `src/` through the source maps. One line in `tsdown.config.ts` restores them.
+- **Status:** decided.
+- **Source:** controller, after the task S review (M6 there), 2026-11-17.
+- **Visible in:** `packages/cloudrop/tsdown.config.ts`, `scripts/size-limit.config.ts`.
+
 <!-- Tasks C and E append their entries above this line. -->
 
 ## Bindings (`M4-B`)

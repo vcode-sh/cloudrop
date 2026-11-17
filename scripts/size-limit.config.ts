@@ -29,7 +29,8 @@ const summed = { disablePlugins: ["@size-limit/esbuild"] };
 export default [
   // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17 after
   // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB; after the /upload idempotency key (M5-T104):
-  // cloudrop 46.27 kB.
+  // cloudrop 46.27 kB. Since the build drops JSDoc from the .js (M4-F25): cloudrop 37.01 kB, next 0.78 kB, node
+  // 2.26 kB.
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
@@ -38,7 +39,8 @@ export default [
   // round: sql 13.72 kB (its own file 1.34 kB, the shared core chunk 9.36 kB), budgeted 18 kB (M5-T97); drizzle
   // 15.7 kB (its own file 3.31 kB), budgeted 17 kB (M5-T48); prisma 12.78 kB (its own file 0.72 kB), budgeted 16 kB
   // (M4-F24, M5-T58). After tables.schema (M5-T124): sql 13.94 kB, drizzle 15.94 kB, prisma 13.00 kB.
-  // After the /upload idempotency key (M5-T104): sql 14.4 kB, drizzle 16.47 kB, prisma 13.47 kB.
+  // After the /upload idempotency key (M5-T104): sql 14.4 kB, drizzle 16.47 kB, prisma 13.47 kB. Both merged, then
+  // without JSDoc in the .js (M4-F25): sql 10.84 kB, drizzle 12.64 kB, prisma 10.41 kB.
   { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "18 kB", ...summed },
   {
     name: "cloudrop/adapters/drizzle",
