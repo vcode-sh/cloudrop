@@ -78,11 +78,11 @@ function refusal(plugin: CloudropPlugin, hook: string, value: unknown): Cloudrop
 
 /** The onAbort context of each file, all from one request: one route, one metadata, one auth. */
 export function abortContexts(
-  request: { route: string; metadata: unknown; auth: unknown },
+  shared: { route: string; metadata: unknown; auth: unknown },
   files: readonly PluginFile[],
   reason: AbortContext["reason"],
 ): AbortContext[] {
-  const { route, metadata, auth } = request;
+  const { route, metadata, auth } = shared;
   return files.map((file) => ({ route, file, metadata, auth, reason }));
 }
 

@@ -27,7 +27,7 @@ export function listCases(suite: ContractSuite): void {
 
   // A route's key() can produce such keys and keyProblem accepts them; a listing that trimmed them would make every
   // later delete miss, so deletePrefix and the suite's own teardown could never empty the prefix.
-  it("lists and deletes keys with edge whitespace exactly as stored", async () => {
+  it("lists and deletes keys whose last segment starts or ends with whitespace, exactly as stored", async () => {
     const { driver } = suite;
     const keys = ["edge/ lead", "edge/trail ", "edge/nbsp\u00a0"].map(key);
     const stored = await Promise.all(keys.map((k) => driver.put(k, "x")));

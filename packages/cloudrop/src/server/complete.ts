@@ -99,7 +99,8 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
     );
   }
   const parts = numbers.map((partNumber) => ({ partNumber, etag: byNumber.get(partNumber)?.etag ?? "" }));
-  // Keys are unique, so a 412 here is this upload completed by a concurrent call, or another writer's object.
+  // Keys are unique, so a 412 here is another writer's object at this key. R2 answers an overlapping completion of
+  // this upload with 200 or NoSuchUpload, never 412 (M4-F12).
   const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
   if (!completed.error) return ok(undefined);
   if (completed.error.code === "NO_SUCH_UPLOAD") return completedBefore(config, token);

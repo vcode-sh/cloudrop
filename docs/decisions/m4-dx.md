@@ -15,8 +15,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 ### M4-F10: keys and other identifiers from storage XML keep their edge whitespace
 
 - **Decision:** `xmlText` decodes an element's text exactly as sent; a new `xmlValue` (and `xmlValues`, which replaces
-  `xmlTexts`) trims, for numbers, dates, booleans, codes and the CORS lists. Keys, upload IDs, ETags, continuation
-  tokens and the lifecycle rule's ID and prefix are read with `xmlText`.
+  `xmlTexts`) trims, for numbers, dates, booleans, codes, ETags (quoted hex, never meaningful whitespace) and the CORS
+  lists. Keys, upload IDs, continuation tokens and the lifecycle rule's ID and prefix are read with `xmlText`.
 - **Why:** audit F10. `keyProblem` accepts `"users/42/a "` and `"users/42/b\u00a0"`, and a route's `key()` can produce
   them, but `list()` returned them trimmed: `delete()` then removed a key that never existed, and `deletePrefix` failed
   forever with "Some keys were still listed after they were deleted". Whitespace inside a typed value carries no meaning
@@ -33,8 +33,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Decision:** `startFile` aborts the multipart upload it just created when signing the first part URLs or the token
   throws, then rethrows, so `startFileSafely` rejects that file with `SERVER_ERROR` as before. A `presignPart` that
   returns an error already aborted it.
-- **Why:** audit F11. `StorageDriver` is public; a custom driver whose `presignPart` throws left an open upload that held
-  its parts until the bucket's lifecycle rule removed it.
+- **Why:** audit F11. `StorageDriver` is public; a custom driver whose `presignPart` throws left an open upload that
+  held its parts until the bucket's lifecycle rule removed it.
 - **If wrong:** an `abortMultipart` that throws too replaces the first error in the log line `startFileSafely` writes;
   the file is rejected either way.
 - **Status:** in force.
@@ -61,14 +61,15 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 - **Decision:** `verifyObject` does its own HEAD and `handleComplete` picks it or `completeParts` in one expression;
   `presignParts` returns `allOk(signed)`; `readJson` joins the body through `new Blob(chunks).arrayBuffer()`; one
-  `abortContexts(request, files, reason)` in `plugins.ts` builds the `onAbort` contexts for `runBeforeUpload`, `/upload`
+  `abortContexts(shared, files, reason)` in `plugins.ts` builds the `onAbort` contexts for `runBeforeUpload`, `/upload`
   and `tokenAbortContexts` (which replaces `abortContext` for `/abort` and `/complete`). Two parts of the design's list
   were narrowed: `allOk` stays in `storage/s3/responses.ts` instead of moving to `errors.ts`, and `node.ts` keeps its
   copy loop.
 - **Why:** design §4 accepted the simplifications. In `errors.ts`, `allOk` lands in the chunk `cloudrop/next` and
   `cloudrop/node` import, measured +0.11 kB gzip on both summed budgets (1.12 of 1.1 kB, 3.21 of 3.2 kB) for code
-  neither runs. `NodeRequest` yields `Uint8Array<ArrayBufferLike>`, which `BlobPart` accepts only through an `as`, and
-  narrowing the public `NodeRequest` type is not worth a loop of six lines.
+  neither runs. `NodeRequest` yields `Uint8Array<ArrayBufferLike>`, which `BlobPart` accepts only through an `as`;
+  narrowing the public type would break only hand-built requests (a real Node stream is typed `any`), still not worth
+  it for a loop of six lines.
 - **If wrong:** none in behaviour: every existing test passes unchanged. `server/presign.ts` importing from
   `storage/s3/` is the cost of the first narrowing.
 - **Status:** in force.

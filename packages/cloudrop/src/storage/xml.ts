@@ -24,15 +24,15 @@ export function xmlBlocks(xml: string, tag: string): string[] {
 }
 
 /**
- * Decoded text of the first `<tag>` element exactly as sent, or undefined when absent. For keys, upload IDs, ETags,
- * tokens and prefixes: whitespace at their edges is part of the value ("users/42/a " is its own key).
+ * Decoded text of the first `<tag>` element exactly as sent, or undefined when absent. For keys, upload IDs,
+ * continuation tokens and prefixes: whitespace at their edges is part of the value ("users/42/a " is its own key).
  */
 export function xmlText(xml: string, tag: string): string | undefined {
   const block = xmlBlocks(xml, tag)[0];
   return block === undefined ? undefined : decodeXml(block);
 }
 
-/** Like xmlText, trimmed: for numbers, dates, booleans and codes, whose edge whitespace means nothing. */
+/** Like xmlText, trimmed: for numbers, dates, booleans, codes and ETags, whose edge whitespace means nothing. */
 export function xmlValue(xml: string, tag: string): string | undefined {
   return xmlText(xml, tag)?.trim();
 }

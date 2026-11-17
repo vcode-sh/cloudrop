@@ -1,7 +1,7 @@
 import { CloudropError, ok, type Result } from "../../errors.ts";
-import { stripQuotes, xmlText } from "../xml.ts";
+import { stripQuotes, xmlValue } from "../xml.ts";
 
-export const etagIn = (xml: string): string => stripQuotes(xmlText(xml, "ETag") ?? "");
+export const etagIn = (xml: string): string => stripQuotes(xmlValue(xml, "ETag") ?? "");
 
 /** A 2xx response without a field cloudrop needs: a fault on the storage side, worth a retry. */
 export function incompleteResponse(missing: string): CloudropError {
