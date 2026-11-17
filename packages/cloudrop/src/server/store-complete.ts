@@ -58,11 +58,14 @@ function claimAnswer(outcome: Exclude<ClaimOutcome, { kind: "claimed" }>, file: 
 const lostClaim = (record: FileRecord | null, file: UploadedFile): Answer =>
   record?.completedAt ? replay(record, file) : fail(unfinished());
 
-/** A refusal takes the row first: only a refusal that ended it may delete the object (M5 spec §5.5 step 4). */
+/**
+ * A refusal takes the row first: only a refusal that ended it may delete the object (M5 spec §5.5 step 4). The row then
+ * decides, so a failed delete is left to the sweep's cleanup pass and the refusal is answered.
+ */
 async function refuse(completion: Completion, refusal: Extract<Verdict, { kind: "refused" }>): Promise<Answer> {
   const ended = await completion.calls.end("pending", "rejected");
   if (ended.error) return ended;
-  if (ended.data.changed) return cleanUpRefused(completion.config, completion.token, refusal);
+  if (ended.data.changed) return cleanUpRefused(completion.config, completion.token, refusal, { rowEnded: true });
   return settled(ended.data.record, completion.file);
 }
 

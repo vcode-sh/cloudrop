@@ -127,6 +127,37 @@ describe("POST /complete with a store: once", () => {
     const [row] = await fixture.store.raw.files();
     expect([row?.status, row?.result]).toEqual(["completed", null]);
   });
+
+  it("answers a refusal whose delete failed, tells plugins, and leaves the object to the sweep", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const { definition, runs } = counted();
+    const fixture = storeFixture({ files: definition }, { store: leaseStore(), plugins: [plugin] });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.storage.put(ticket.key, "hello!", { type: "text/plain", metadata: { "cloudrop-id": ticket.id } });
+    // The network drops every DELETE the server sends; every other request reaches the bucket.
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = (input, init) =>
+      init?.method === "DELETE" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
+    expect((await complete(fixture, ticket.token)).body.error).toEqual({
+      code: "VERIFICATION_FAILED",
+      message: "The uploaded file does not match what was declared, so it was discarded. Upload it again.",
+      retryable: false,
+    });
+    // The rejected row, not yet cleaned, is what the sweep's cleanup pass deletes the object for.
+    const [row] = await fixture.store.raw.files();
+    expect([row?.status, row?.cleanedAt, (await fixture.storage.head(ticket.key)).data?.size]).toEqual([
+      "rejected",
+      null,
+      6,
+    ]);
+    expect(fixture.logger.errors.map(({ message }) => message)).toEqual([
+      `cloudrop: could not delete the refused file ${ticket.id} on route "files". The sweep's cleanup pass will delete it.`,
+    ]);
+    // The row decided: a retry finds the upload ended.
+    expect((await complete(fixture, ticket.token)).body.error).toEqual(cancelled);
+    expect([aborted, runs.count]).toEqual([["rejected"], 0]);
+  });
 });
 
 describe("POST /complete with a store: failures in onComplete", () => {

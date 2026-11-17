@@ -126,17 +126,25 @@ export function verifyUpload(config: ServerConfig, token: UploadTokenPayload): P
 /**
  * Ends a refused upload: cleans up after it, then plugins release what they reserved for it. When the delete fails,
  * the object is kept with its reservation and the client retries: the retry checks the object again and discards it
- * then.
+ * then. With `rowEnded` (a store's row already says `rejected`) no retry can reach the object, so the failure is
+ * logged, the refusal stands, and the sweep's cleanup pass deletes the object later.
  */
 export async function cleanUpRefused(
   config: ServerConfig,
   token: UploadTokenPayload,
   { error, cleanup }: { error: CloudropError; cleanup: Cleanup },
+  { rowEnded = false }: { rowEnded?: boolean } = {},
 ): Promise<Result<never>> {
   const { storage, logger } = config;
   if (cleanup === "delete") {
     const removed = await storage.delete(token.key);
-    if (removed.error) return fail(storageFailure(removed.error, logger));
+    if (removed.error && !rowEnded) return fail(storageFailure(removed.error, logger));
+    if (removed.error) {
+      logger.error(
+        `cloudrop: could not delete the refused file ${token.id} on route "${token.route}". The sweep's cleanup pass will delete it.`,
+        removed.error,
+      );
+    }
   }
   if (cleanup === "abort" && isMultipart(token)) {
     const aborted = await storage.abortMultipart(token.key, token.uploadId);

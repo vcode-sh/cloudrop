@@ -1180,3 +1180,22 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/sqlite.ts`, `src/server/store.ts` TSDoc,
   `src/testing/store-contract/usage.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.
+
+### M5-T91: a stored refusal whose delete fails still answers the refusal and runs `onAbort("rejected")`
+
+- **Decision:** at `/complete` with a store, once `end(pending → rejected)` has changed the row, a failed
+  `storage.delete` is logged ("could not delete the refused file … The sweep's cleanup pass will delete it."), plugins
+  hear `onAbort("rejected")`, and the client gets the refusal (`VERIFICATION_FAILED`). The object stays until the
+  sweep's cleanup pass, which owns every uncleaned `rejected` row. A retry reads the `rejected` row and answers
+  `UPLOAD_EXPIRED` ("cancelled or has expired"), not the refusal again; that is accepted and documented in the store
+  guide. Stateless mode is unchanged: the delete failure answers a retryable `STORAGE_ERROR`, and the retry checks the
+  object again.
+- **Why:** final review M2. The row decided the outcome, so the client's retry could never reach the object again,
+  and the retryable error it was given led to `UPLOAD_EXPIRED` while plugins never heard the refusal. Observed RED:
+  the new row in `store-complete.test.ts` got `STORAGE_ERROR` where it expected `VERIFICATION_FAILED`.
+- **If wrong:** the object lives in the bucket until the next sweep that runs after `graceMs`; a bucket without a
+  sweep keeps it.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/server/complete-verify.ts` (`cleanUpRefused`'s `rowEnded`), `src/server/store-complete.ts`,
+  `src/server/store-complete.test.ts`, `docs/guide/store.md`.
