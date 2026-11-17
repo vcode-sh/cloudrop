@@ -22,6 +22,8 @@
     "src/testing/persist-fixture.ts",
     "src/testing/react-fixture.ts",
     "src/testing/storage-contract.ts",
-    "src/testing/storage-contract/**"
+    "src/testing/storage-contract/**",
+    "src/testing/store-contract.ts",
+    "src/testing/store-contract/**"
   ]
 }
