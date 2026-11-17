@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Wrangler local R2 contract lane. The trap stops the Wrangler this run started (by PID) and deletes its state on
-# success, failure and interrupt.
+# Wrangler lane: the storage contract on Wrangler's local R2 (through `wrangler dev`'s S3 endpoint) and the store
+# contract on its local D1 (through getPlatformProxy, which the test file starts and stops itself, in memory). The trap
+# stops the Wrangler this run started (by PID) and deletes its state on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/packages/cloudrop"
@@ -40,4 +41,5 @@ if [ -z "${READY:-}" ]; then
   exit 1
 fi
 CLOUDROP_WRANGLER_ENDPOINT="http://127.0.0.1:${PORT}/cdn-cgi/local/r2/s3" \
-  bunx vitest run --project integration src/storage/s3-driver.wrangler.integration.test.ts
+  bunx vitest run --project integration src/storage/s3-driver.wrangler.integration.test.ts \
+  src/adapters/sql-d1.wrangler.integration.test.ts

@@ -10,5 +10,7 @@
         "experimental_s3_credentials": { "accessKeyId": "cloudrop-local", "secretAccessKey": "cloudrop-local-secret" }
       }
     }
-  ]
+  ],
+  // The store contract's D1 (src/testing/db/d1.ts). Local only: the id names no real database.
+  "d1_databases": [{ "binding": "DB", "database_name": "contract", "database_id": "cloudrop-contract-local" }]
 }
