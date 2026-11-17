@@ -26,8 +26,9 @@ the server's module graph, where React exports no `useState` or `useSyncExternal
 `createUploadHooks` takes the [client's options](client.md#create-a-client) (`basePath`, `concurrency`, `namespace`
 and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
 client is created at the first upload or the first `useResumable` read in the browser, never while a server renders
-the page. A wrong option never throws: `upload()`, `resume()` and `refresh()` resolve `{ data: null, error }` with its
-`INVALID_CONFIG` error.
+the page. A wrong option never throws from your code: `upload()`, `resume()` and `refresh()` resolve
+`{ data: null, error }` with its `INVALID_CONFIG` error, and a pick or a drop, which has no caller to resolve to, throws
+it in a separate task, so it reaches the console and your error reporting.
 
 The type argument gives the hooks your route names, each route's metadata and what each route's `onComplete` returns.
 `useUpload("avatar")` knows the rest from the route name.
@@ -166,38 +167,53 @@ import { useResumable, useUpload } from "../lib/upload";
 
 export function Unfinished() {
   const { uploads } = useResumable("documents");
-  const { files, resume } = useUpload("documents", { metadata: { folderId: "inbox" } });
+  const { files, resume, clear } = useUpload("documents", { metadata: { folderId: "inbox" } });
   return (
     <ul>
       {uploads.map((upload) => (
         <li key={upload.id}>
-          {upload.name} was not finished. Pick it again to continue:
-          <input type="file" onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (file) void resume(upload, file);
-          }} />
+          {upload.name} was not finished. Pick it again to continue:{" "}
+          <input
+            type="file"
+            aria-label={`Pick ${upload.name} again`}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              if (file) void resume(upload, file);
+            }}
+          />
         </li>
       ))}
-      {files.map((file) => <li key={file.id}>{file.name}: {Math.round(file.progress * 100)}%</li>)}
+      {files.map((file) => (
+        <li key={file.id}>
+          {file.name}: {Math.round(file.progress * 100)}%
+          {file.status === "failed" && (
+            <>
+              <span role="alert"> {file.error?.message}</span>
+              <button type="button" onClick={() => file.retry()}>Retry</button>
+              <button type="button" onClick={() => { file.abort(); clear(); }}>Dismiss</button>
+            </>
+          )}
+        </li>
+      ))}
     </ul>
   );
 }
 ```
 
-`useResumable(route?)` returns `{ uploads, refresh }`: the unfinished uploads this browser keeps, of one route or of
-every route, newest first, without the ones this page holds through these hooks. A file of the hooks that is queued,
-uploading, paused, completing or being resumed is not listed, and neither is one that failed: the client keeps a failed
-file for `retry()`, so continue it with `files[n].retry()`, not `resume()`. A listed upload therefore disappears as soon
-as its resume starts, and appears again if that resume is cancelled before it sends anything.
+`useResumable(route?)` returns `{ uploads, refresh }`: the client's `resumable()` list, of one route or of every route,
+newest first. It leaves out the uploads this page holds: a file that is running, paused, or failed and kept for
+`retry()`, and an upload while its resume runs. A failed file is continued with `files[n].retry()`, never `resume()`,
+which would be refused. A listed upload leaves the list as soon as its resume starts.
 
-It reads the list after mount, when an upload of these hooks starts, and whenever one of its files ends or starts
-again, so a record the client deletes, for a file that ends done or is cancelled, leaves the list at once. `refresh()`
-reads it again and resolves with that list as a `Result`, whose `error` says why the list is empty. `uploads` is `[]` on
-the server, before the first read and when the read failed. An upload started on a shared client directly, not through
-the hooks, is not followed: call `refresh()` after it.
+A refused resume, `UPLOAD_IN_USE` while another tab sends the upload or `INVALID_INPUT` for a different file, stays in
+`files` as a failed file with its error, and the upload is listed again: `retry()` checks again, and `abort()` ends the
+row without touching the upload, which stays listed.
 
-A held upload is matched by its route, name, size, type and `lastModified`, so the same file uploaded anew through the
-hooks also hides an earlier, unfinished upload of it until the new one ends done or is cancelled.
+The list is read after mount, when an upload of these hooks starts, whenever one of its files ends or starts again, and
+when it settles, so a record the client deletes, for a file that ends done or is cancelled, leaves the list at once.
+`refresh()` reads it again and resolves with the client's `Result`, whose `error` says why the list is empty. `uploads`
+is `[]` on the server, before the first read and when the read failed. An upload started on a shared client directly,
+not through the hooks, is not followed: call `refresh()` after it.
 
 `resume(upload, file)` continues a record with the file the user picked again, as one more upload of the hook, so it
 appears in `files`. A browser never gives a page a file back after a reload, so the user has to pick it. What counts as

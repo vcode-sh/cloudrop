@@ -21,7 +21,8 @@ const client = createCloudropClient<typeof cloudrop>({
   // persist: false,  // keeps nothing on disk, and nothing can be resumed after a reload
 });
 
-// After the reload: what can be continued, newest first, for one route (every route without an argument).
+// After the reload: what can be continued, newest first, for one route (every route without an argument). Uploads this
+// client holds itself, running, failed and kept for retry(), or being resumed, are left out.
 const { data: unfinished } = await client.resumable("files"); // null when the browser's storage failed
 const upload = unfinished?.[0]; // { id, route, name, size, type, lastModified, expiresAt }: enough to ask for the file
 
@@ -134,7 +135,11 @@ its `/abort`, or at once when no `/abort` is sent.
 
 - `resume()` of an upload held in another tab, or in this page, ends with `UPLOAD_IN_USE` and sends nothing. Finish or
   cancel it there.
-- `resumable()` still lists held uploads.
+- `resumable()` leaves out the uploads this client holds: from the ticket's arrival until the page gives it up, and from
+  a `resume()` call until its checks refuse it or its upload ends. A failed file of `start()` is continued with its own
+  `retry()`, so it is not listed; one of `upload()`, which has no handle to retry with, is listed once it fails. An
+  upload another tab holds is still listed, since that tab may let it go; `resume()` of it is `UPLOAD_IN_USE` until
+  then.
 - A record is saved only once its lock is held. Without the lock, a second holder could complete an upload whose
   `/abort` this page then sends, deleting the stored file.
 
