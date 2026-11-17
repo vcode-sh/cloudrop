@@ -320,8 +320,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     `cleaned(id)`.
   - `stale({ kind: "cleanup" })` now also returns `expired` rows whose `cleaned_at` is null, so a crash or a failure
     between the `end` and the cleanup is finished by the cleanup pass.
-  - `graceMs` is at least 900,000 ms (15 minutes, the life of an upload URL); a smaller one is refused with
-    `INVALID_INPUT` naming the minimum. Both passes use it as given: the expire pass after the deadline, the cleanup pass
+  - `graceMs` is at least the life of an upload URL, 900,000 ms (15 minutes, `MIN_GRACE_MS` derived from
+    `URL_LIFETIME_SECONDS`); a smaller one is refused with `INVALID_INPUT` naming the minimum. No URL outlives its
+    token's deadline, so no new PUT can start once a row may be cleaned up. Both passes use it as given: the expire pass after the deadline, the cleanup pass
     after the row ended. (Amended 2026-11-17 by the controller's closing ruling; the first version allowed 0 or more and
     floored only the cleanup pass.)
 - **Why:**
@@ -329,9 +330,10 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     claim the row between the sweep's delete and its `end`.
   - With the row taken first, a `/complete` that claims first keeps its object.
   - A `/complete` that comes later is refused (`UPLOAD_EXPIRED`) with nothing recorded.
-- **If wrong:** no URL outlives its token's deadline (`presign.ts` caps it at `exp`) or lives longer than 15 minutes, so
-  with the floor a PUT in flight at the deadline always lands before its row can be cleaned. If URL lifetimes grow,
-  the floor must grow with them.
+- **If wrong:** the floor guarantees only that no new PUT starts after the deadline. A PUT already under way (signed
+  before the deadline, slow to upload) may still land after its row was ended and cleaned; the cleanup pass does not
+  return cleaned rows, so that object is left in the bucket, a known cost (at most one object per such upload, never a
+  completed file's). The floor follows `URL_LIFETIME_SECONDS` if URL lifetimes change.
 - **Status:** decided by the controller (fix round 1); it amends M5-T20 ("`expired` rows are never cleanup work") and
   spec §4 and §6.
 - **Source:** task B fix round 1, 2026-11-17.
@@ -351,14 +353,18 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   - It counts the row in a new `failed: number` field of `SweepReport`, leaves the row as the failure left it, and goes
     on with the rest of the page.
   - `expired` counts only rows that were ended **and** cleaned.
-  - The sweep always answers `ok(report)`. When it cannot even list its work, it answers the report so far, with the
-    cursor it was given.
+  - A failing row never makes the sweep answer an error. A failing listing does when no row was handled yet in the
+    call; after some rows it answers the report so far, the listing counted in `failed`, with `cursor: null` (fix
+    round 2, below).
 - **Why:**
   - The review (I2): a failure mid-page threw away the `reported` stuck completions the sweep had already ended, which
     are reported only once.
   - A row that failed every time blocked every later row for good.
 - **If wrong:** `failed` is public (`SweepReport`); removing it later is a breaking change.
-- **Status:** decided by the controller (fix round 1); it amends M5-T30.
+- **Status:** decided by the controller (fix round 1); it amends M5-T30. Amended 2026-11-17 (fix round 2): a listing that fails no
+  longer answers `ok` with the cursor it was given, on which a `while (cursor)` loop would spin. Before any row was
+  handled in the call it answers the store's error; after, the report so far, the listing counted in `failed`, and
+  `cursor: null`.
 - **Source:** task B fix round 1, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
 

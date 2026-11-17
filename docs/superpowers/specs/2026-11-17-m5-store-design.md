@@ -246,8 +246,9 @@ With a store only (without one each resolves `INVALID_CONFIG`):
   idempotent (a crash between the two leaves a `deleted` row the cleanup pass finishes).
 - `reconcile({ owner? })`: one owner, or every owner paged through `owners()`.
 - `sweep({ limit = 100, cursor?, graceMs = 1 h })`, two passes, each keyset-paged. `graceMs` is at least 15 minutes,
-  the life of an upload URL, so a PUT under way at the deadline lands before its row is cleaned up; a smaller one is
-  `INVALID_INPUT` (amended 2026-11-17, M5-T64):
+  the life of an upload URL, so no new PUT can start once a row may be cleaned up; a smaller one is `INVALID_INPUT`. A
+  PUT already under way that lands after its row was cleaned is left in the bucket, a known cost: the cleanup pass does
+  not return cleaned rows (amended 2026-11-17, M5-T64):
   - **expire:** `pending` rows with `expires_at < now − graceMs` → `end(id, "pending", "expired")` first; only when
     that changed the row, abort the multipart upload when `upload_id` is set (otherwise the lifecycle rule), HEAD the
     key and delete the object only when its `cloudrop-id` equals the row id, then `cleaned`. Taking the row first means
@@ -260,7 +261,8 @@ With a store only (without one each resolves `INVALID_CONFIG`):
     `ended_at < now − graceMs` → the same abort, HEAD and delete steps, then `cleaned`. This removes late
     objects (a PUT that lands after an `/abort`'s HEAD or a revoke, a crash inside `deleteFile` or the expire pass).
   - A row that fails (storage or database) is logged and counted, and stays as it was for the next sweep; the rows
-    after it are still swept (amended 2026-11-17, M5-T65).
+    after it are still swept. A listing that fails answers the store's error when no row was handled yet, otherwise
+    the report so far with the listing counted in `failed` and a null cursor (amended 2026-11-17, M5-T65).
   - Returns `{ expired, cleaned, failed, reported, cursor }`; bounded per call so a Workers cron can run it;
     scheduling is the app's.
 
