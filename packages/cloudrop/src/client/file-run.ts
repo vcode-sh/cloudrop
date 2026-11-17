@@ -190,8 +190,8 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
   // /abort frees the parts and deletes this upload's own object, which no lifecycle rule removes (S-18).
   if (failed) {
     // A failure of upload() keeps the record of a /complete in doubt for a resume, which only /complete can settle, and
-    // lets the lock go: this page cannot send the file again (M3-U82). Any other's /abort finishes in the background:
-    // abort() never rejects, so nothing is left unhandled.
+    // lets the lock go: this page cannot send the file again (M3-U82). Any other is given up (M4-F1); an /abort that
+    // sends finishes in the background: abort() never rejects, so nothing is left unhandled.
     if (mayBeComplete) upload.unlock();
     else giveUp(context, upload);
     return;
