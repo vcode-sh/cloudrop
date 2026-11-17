@@ -193,8 +193,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 ### M4-F22: `resumable()` leaves out the uploads this page holds
 
-- **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.held`), and `resumable()` leaves them
-  out. Each holder makes its own claim with `hold()`, which returns the release for that claim alone: a persisted
+- **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.claims`), and `resumable()` leaves them
+  out. Each holder makes its own claim with `claim()`, which returns the release for that claim alone: a persisted
   multipart ticket from its arrival (`uploadOf`) until its unlock, which every way of giving the ticket up calls
   (`letGo`, `giveUp`, a `/complete` in doubt of `upload()`), and a `resume()` from its call, before its first await,
   until its checks refuse it or its upload's unlock. An upload is left out while any claim on it remains, so a refused
@@ -208,9 +208,11 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   per claim is exact under any interleaving.
 - **If wrong:** listing held uploads again is a behaviour change in a minor version; a page that wants them can keep its
   own jobs' files.
-- **Status:** in force (`516bac5`, `8b864a9`).
+- **Status:** in force (`516bac5`, `8b864a9`). The final review (M3) renamed `held` and `hold()` to `claims` and
+  `claim()`: `held` already names a paused entry's wait (`client/entry.ts`) and the failed tickets of `pagehide`
+  (`client/lifecycle.ts`).
 - **Source:** task D re-review's client proposal; controller rulings, fix rounds 2 and 3.
-- **Visible in:** `client/upload.ts` (`held`, `hold`), `client/persist.ts` (`uploadOf`), `client/resume.ts`
+- **Visible in:** `client/upload.ts` (`claims`, `claim`), `client/persist.ts` (`uploadOf`), `client/resume.ts`
   (`resumable`, `check`), `client/forget.test.ts`, `client/resume-job.test.ts`, `docs/guide/resume.md#two-tabs`.
 
 ### M4-F23: the client's ceiling is 11.5 kB
@@ -219,7 +221,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Why:** the M4a client fixes ended at 10.95 kB; `M4-F22` took it to 11.03 kB. Moving the resume's claim into
   `check()`, which owns the refusals and the lock, kept `resumeRun` unchanged but saved nothing measurable, and no
   other change keeps the behaviour and cuts 30 B.
-- **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.87 kB, within it.
+- **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.96 kB, 12.99 kB after the final
+  review: about 1 kB over the round figure, for the owner to confirm with `M4-B10`.
 - **Status:** in force (`516bac5`). Supersedes `M3-U91`'s 11 kB.
 - **Source:** design §5.7; task D measurement (`bun run package:check`, 2026-11-17).
 - **Visible in:** `scripts/size-limit.config.ts`.
@@ -296,7 +299,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 ### M4-F14: a bundled-and-minified budget for `cloudrop`
 
 - **Decision:** `scripts/size-limit.config.ts` adds "cloudrop (bundled)": `dist/index.js` bundled and minified with
-  every export, gzip, limit 23.5 kB (21.33 kB measured plus about 10%), beside the summed 36 kB budget, which stays.
+  every export, gzip, limit 23.5 kB (21.33 kB measured plus about 10%), beside the summed 36 kB budget, which stays
+  (M4-F16 later raised the summed budget to 40 kB; the final review measured 36.7 kB summed and 22.36 kB bundled).
 - **Why:** audit F14. The summed budget counts the published files with their doc comments and messages (34.08 kB
   now); what a Workers app ships is the bundle, which the summed figure overstates by about 60%.
 - **If wrong:** an app that imports only part of the server ships less than this budget, so it bounds the worst case,
@@ -339,7 +343,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   (`EndpointConfig.tokenKeys`). Every option that needs no environment value, and every value passed explicitly
   (including `secret`), is still checked at construction. With `NODE_ENV === "development"` exactly, the environment
   is read at construction too, so `next dev` fails at start. A value missing at request time:
-  1. The handler answers `SERVER_ERROR` 500 (with CORS headers for a trusted origin) and logs once
+  1. The handler answers `SERVER_ERROR` 500, retryable, "The upload server is not ready. Try again in a moment."
+     (with CORS headers for a trusted origin) and logs once
      `cloudrop: every request answers 500 until this is fixed. <message>` with the `INVALID_CONFIG` as the error; it
      logs again only when the message changes (a partial fix). Preflight, 404 and 405 answers need no environment.
   2. `cloudrop.api.*` resolve `{ data: null, error }` with that `INVALID_CONFIG`.
@@ -360,16 +365,21 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   broken server and saves a restart once it is fixed; memoizing after success keeps the hot path free of environment
   reads and key imports.
 - **If wrong:** a misconfigured production server starts and fails on its first request instead of at boot, which a
-  health check that hits the handler catches; development still fails at start.
+  health check that hits the handler catches; development still fails at start. The 500 is retryable (final review
+  M6): a non-retryable one made a file in flight when a deploy went live without a variable give its ticket up, send
+  `/abort` and delete its resume record (`M4-F1` keeps a record only for a retryable failure), so fixing the variable
+  could not recover it. The cost: a server that stays broken is asked up to six times per request, the client's retry
+  budget.
 - **Size:** M4-F15 to M4-F18 together take the summed `cloudrop` budget from 34.09 to 36.66 kB gzip (published files
   with their doc comments) and the bundled one from 21.32 to 22.32 kB, measured 2026-11-17 after the fix round. The
   bundled budget (23.5 kB, M4-F14) holds; the summed one rises from 36 to 40 kB, the measured size plus about 10% as
   `scripts/size-limit.config.ts` prescribes. `readSetting` lives in `storage/lazy-driver.ts`, not `errors.ts`, which
   would have put it in the chunk `cloudrop/next` and `cloudrop/node` import (+0.15 kB each, measured).
-- **Status:** in force. Amends M3-H14.
+- **Status:** in force. Amends M3-H14; the retryable 500 is the final review's M6.
 - **Source:** design §5.2.
 - **Visible in:** `server/environment.ts`, `server/config.ts` (`ready`, `EndpointConfig`), `server/handler.ts`,
-  `server/api.ts`, `server/cloudrop.ts` (TSDoc), `server/environment.test.ts`, `storage/lazy-driver.ts`
+  `server/api.ts`, `server/cloudrop.ts` (TSDoc), `server/environment.test.ts`, `client/persist-failures.test.ts` (the
+  deploy missing its environment), `storage/lazy-driver.ts`
   (`readSetting`), `scripts/size-limit.config.ts`.
 
 ### M4-F17: `r2()` and `s3()` read every setting from the environment, lazily
@@ -391,7 +401,12 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   building the driver once with valid stand-ins for the settings the environment will supply: every check stays in
   `createS3Driver` and the presets, in one place, instead of a second per-setting copy that could drift. `rules` and
   `publicUrl` need no environment value, so route checks at construction still see them.
-- **If wrong:** an app that relied on an empty `bucket` throwing at construction now learns at the first request.
+- **If wrong:** an app that relied on an empty `bucket` throwing at construction now learns at the first request. A lazy
+  driver that the app copies or wraps (`{ ...r2(), put }`) is not found in the `WeakMap`: with a storage setting
+  missing, `ready()` succeeds, every upload fails with `STORAGE_ERROR` and the logger records `cloudrop: a storage
+  request failed.` with the `INVALID_CONFIG` on every request, not the single not-ready line; nothing reaches the
+  browser (final review M5, probed). `docs/guide/server.md` says to pass the driver as returned; a public readiness
+  member on `StorageDriver` would close it, at the cost of the contract this entry keeps.
 - **Status:** in force.
 - **Source:** design §5.3.
 - **Visible in:** `storage/presets.ts`, `storage/lazy-driver.ts`, `storage/presets-env.test.ts`,
@@ -471,7 +486,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 `M4-B1` to `M4-B6` are the design's §6 as built; `M4-B7` onwards are task D's execution rulings. Fix round 1 of the
 task D review amended `M4-B1` to `M4-B4`, `M4-B10` and `M4-B12` in place, before the branch merged, and added `M4-B13`
 to `M4-B15`; fix round 2 amended `M4-B1`, `M4-B3`, `M4-B10`, `M4-B12` and `M4-B15`, with `M4-F22` and `M4-F23` in the
-client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again).
+client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again); the final
+review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22` and `M4-F23` in place.
 
 ### M4-B1: `createUploadHooks<typeof cloudrop>(options?)`, with a lazy client
 
@@ -493,18 +509,32 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 
 ### M4-B2: `useUpload(route, options?)`
 
-- **Decision:** as design §6.1. `files` lists the files of the hook's jobs in start order, each the client's snapshot
-  plus `pause`, `resume`, `abort` and `retry` bound to its handle; `totals` sums the jobs' totals with the client's own
-  rule (failed and aborted files out of the bytes; an all-empty set is finished once its counted files are done);
-  `upload()` takes a `File`, an array or a `FileList` (`M4-B14`) and resolves `null` for none; `clear()` drops the jobs
-  whose every file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed
-  file's ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
-  latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry` and
-  `clear` never change identity, while `getInputProps()` and `getDropProps()` are built per render.
+- **Decision:** as design §6.1. Each factory keeps the jobs started through it in one store per route
+  (`HookSource.storeOf`), and every `useUpload(route)` of that factory renders that store: two components on one route
+  share one list, and a component that unmounts and mounts again finds its running and failed files. `files` lists the
+  files of the route's jobs in start order, each the client's snapshot plus `pause`, `resume`, `abort` and `retry` bound
+  to its handle; `totals` sums the jobs' totals with the client's own rule (failed and aborted files out of the bytes;
+  an all-empty set is finished once its counted files are done); `upload()` takes a `File`, an array or a `FileList`
+  (`M4-B14`) and resolves `null` for none; the hook's `pause`, `resume`, `abort` and `retry` act on every job of the
+  route; `resume(upload, file)` adds its job to the hook's route, which is the record's route whenever the record came
+  from `useResumable(route)` of the same route; `clear()` drops, for every component on the route, the jobs whose every
+  file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed file's
+  ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
+  latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry`, `clear`
+  and `getDropProps` never change identity; `getInputProps` keeps its identity while `multiple` and `accept` do, since
+  it returns this render's values (final review M2, which added the test and made the two getters stable).
 - **Why:** design §6.1; stable functions keep an effect that lists `upload` in its dependencies from uploading again on
-  every render.
-- **If wrong:** per-render functions would be a breaking change for code that relies on identity.
-- **Status:** in force (`542ae74`, `99f795a`).
+  every render. One store per component stranded a failed file: unmounting cancels nothing (`M4-B4`), the failed file
+  keeps its ticket for `retry()`, and `resumable()` leaves out an upload the page holds (`M4-F22`), so after a
+  navigation and back no list showed it and `resume()` was refused with `UPLOAD_IN_USE` until a reload (final review
+  I1, probed). Keyed by route, not by component, because a remounted component has no identity to find its old store
+  by; sharing a route's list between two mounted components follows from that.
+- **If wrong:** per-render functions would be a breaking change for code that relies on identity. A page that wants two
+  separate lists on one route creates a second factory. A factory created inside a component loses the list on every
+  mount; the guide says to create it at module level. The factory holds every job until `clear()` or a reload.
+- **Status:** in force (`542ae74`, `99f795a`); the per-route store is the final review's I1. The final review (M4)
+  renamed the per-file type `UploadFile` to `UploadItem` before the first publish: `UploadFile` sat one letter from
+  `UploadedFile`, the stored file a done file's `result.file` holds.
 - **Source:** design §6.1; task D review M2.
 - **Visible in:** `src/react/use-upload.ts`, `src/react/upload-store.ts`, `src/react/types.ts`.
 
@@ -519,15 +549,20 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
   once and lets the upload go only when they end. Each read waits for a microtask: a file cancelled while its
   `/complete` is in doubt settles and publishes before the client deletes its record and releases its claim, so a read
   started inside the publish would list the deleted upload (re-review 2, N5; fix round 2 had dropped the microtask).
-  `[]` on the server, before the first read and when the read failed. `refresh()` reads again and resolves with the
-  client's `Result`, so a failure is not lost. A read that answers after a newer read started does not replace the newer
-  list.
+  Changes in one burst share that microtask, and a job whose every file has settled holds the read back until its `done`
+  settles, which reads anyway: one `abort()` of a 20-file job, or one `/upload` that refuses 20 files, costs one read,
+  not 20 (final review M1, measured 21 before). The hold covers every job of the factory, not one route: while a
+  settled job waits for its `done` (a cancelled resume's checks, or a cancelled file's `/abort` answer, up to its 10 s
+  deadline), reads other jobs ask for wait too, then run once (final-fix re-review N1, probed); `refresh()` is not
+  held. `[]` on the server, before the first read and when
+  the read failed. `refresh()` reads again and resolves with the client's `Result`, so a failure is not lost. A read
+  that answers after a newer read started does not replace the newer list.
 - **Why:** design §6.1. The first version read only when `job.done` settled and listed this page's own uploads (review
   I1); fix round 1 matched held files by name, size, type and `lastModified` in the hooks, which hid an earlier upload
   of the same file; fix round 2 moved the filter into the client by id. "Every job of the client" is read as every job
   the hooks started (`M4-B12`).
 - **If wrong:** exposing an `error` field later is non-breaking.
-- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`, `eafa4d4`).
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`, `eafa4d4`); one read per burst is the final review's M1.
 - **Source:** design §6.1; task D review I1, the controller's rulings on it and on the re-review's client proposal;
   re-review 2 N5.
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/job-tracker.ts`, `docs/guide/react.md#resume-after-a-reload`.
@@ -536,14 +571,18 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 
 - **Decision:** `useSyncExternalStore` with a module-level server snapshot (`EMPTY_VIEW`), which is also the browser's
   state before any upload. Uploads start only from `upload()`, the input's `onChange`, a drop and `resume()`, never in
-  an effect or during render. The hook's store listens to its jobs only while React listens to it, and rebuilds its view
-  when React subscribes again, so a component hidden by `<Activity>` shows what its jobs did meanwhile; unmounting
-  unsubscribes and cancels nothing, so the jobs finish and their resume records stay. Tested on React 19.3; React 18.3
+  an effect or during render. A route's store (`M4-B2`) listens to its jobs only while React listens to it, and
+  rebuilds its view when React subscribes again, so a component hidden by `<Activity>` shows what its jobs did
+  meanwhile; unmounting unsubscribes and cancels nothing, so the jobs finish, their resume records stay, and the next
+  component on the route lists them, with a failed file's `retry()` working. Giving a failed file's ticket up on
+  unmount is ruled out: React runs the same cleanup under `<Activity>` and in StrictMode's simulated unmount, and a
+  ticket given up cannot be taken back. Tested on React 19.3; React 18.3
   passed the same tests in a one-off run (all but the `<Activity>` row, an API React 18 lacks), and the library source
   type-checks against `@types/react` 18.3.
 - **Why:** design §6.1.
-- **If wrong:** an opt-in cancel on unmount is a non-breaking option; the guide shows `useEffect(() => abort, [abort])`.
-- **Status:** in force (`542ae74`).
+- **If wrong:** an opt-in cancel on unmount is a non-breaking option; the guide shows `useEffect(() => abort, [abort])`,
+  which cancels every upload of the route, other components' included.
+- **Status:** in force (`542ae74`); amended by the final review's I1 (the route's list survives an unmount).
 - **Source:** design §6.1.
 - **Visible in:** `src/react/upload-store.ts`, `src/react/hooks.test.ts`, `src/react/upload-store.test.ts`,
   `docs/guide/react.md`.
@@ -608,8 +647,9 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 ### M4-B10: the `cloudrop/react` ceiling is 2.05 kB, not 1.5 kB
 
 - **Decision:** the budget is 2.05 kB gzip: the 1.87 kB size-limit measured after fix round 2 (1.88 kB after round 3's
-  microtask), plus about 10%, the rule
-  `size-limit.config.ts` states. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
+  microtask), plus about 10%, the rule `size-limit.config.ts` states. The final review's fixes (per-route lists
+  `M4-B2`, stable prop getters, one read per burst `M4-B3`) took the entry to 1.96 kB, 90 B under the ceiling, which
+  stays. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
   app that uses the hooks ships both with the client.
 - **Why:** with every promise of §6.1 kept (the per-file identity cache, the latest-options handlers, drag counting,
   the stale-read guard), the hooks measured 1.66 kB. Fix round 1 added held-upload matching, configuration errors as
@@ -617,7 +657,7 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
   into the client (`M4-F22`), for 1.87 kB.
 - **If wrong:** the owner may hold 1.5 kB; then a promise of §6.1 has to go, or the code be minified by hand.
 - **Status:** in force (`542ae74`, `99f795a`, `9cacad8`); accepted by the controller, for owner confirmation.
-- **Source:** task D measurement (`bun run package:check`, 2026-11-17).
+- **Source:** task D measurement (`bun run package:check`, 2026-11-17); final review measurement, same day.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M4-B11: a paused file is not uploading

@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
 // Contract: spec §6.1 and §6.2 (M4-B2, M4-B3, M4-B12): useResumable lists the client's resumable(), which leaves out
 // the uploads this page holds (M4-F22), read after mount, when a job of the hooks starts, whenever one of its files
-// ends or starts again, and when it settles; `[]` before the first read. useUpload's resume(upload, file) continues a
-// record into that hook's `files`; refresh() reads again and resolves with the client's Result.
+// ends or starts again, and when it settles, once per burst of such changes; `[]` before the first read. useUpload's
+// resume(upload, file) continues a record into that hook's `files`; refresh() reads again and resolves with the
+// client's Result.
 // Oracle: the page before the reload (persist-fixture's reloaded(): a four-part upload interrupted after two parts)
 // leaves exactly one record; a failed multipart file of start() keeps its record for retry(), and a file that ends done
 // deletes it (resume spec §2, client/persist.ts); the fake IndexedDB holds what the browser keeps.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCloudropClient } from "../client.ts";
 import { createUploadHooks } from "../react.ts";
+import { allowAnyone, route } from "../server/route.ts";
+import { clientFixture } from "../testing/client-fixture.ts";
 import {
   firstOf,
   fourParts,
@@ -18,9 +22,10 @@ import {
   partThree,
   persistFixture,
   reloaded,
+  smallFile,
   threeParts,
 } from "../testing/persist-fixture.ts";
-import { failing, fast } from "../testing/react-fixture.ts";
+import { failing, fast, holdPut, note } from "../testing/react-fixture.ts";
 
 const ids = (uploads: readonly { id: string }[] | null | undefined) => uploads?.map(({ id }) => id);
 /** The ids of the records the fake IndexedDB holds. */
@@ -57,6 +62,57 @@ describe("useResumable", () => {
       error: answer.error,
       files: result.current.hook.files.map((file) => `${file.name} ${file.status}`),
     }).toEqual({ beforeRead: [], error: null, files: ["b.bin done"] });
+  });
+
+  it("reads the list once when cancelling a 20-file upload ends every file at once", async () => {
+    const held = gate((call) => call.label === "POST /upload");
+    const setup = persistFixture({ fault: held.fault });
+    const reads = vi.spyOn(setup.client, "resumable");
+    const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => ({ hook: useUpload("files", { multiple: true }), resumable: useResumable() }));
+    const files = Array.from({ length: 20 }, (_, at) => smallFile(`${at}.txt`));
+    let done: Promise<unknown> = Promise.resolve();
+    act(() => {
+      done = result.current.hook.upload(files);
+    });
+    await act(() => held.reached);
+    const before = reads.mock.calls.length;
+    // Every file is waiting for /upload, so the cancel ends all 20 in one go (M4-F2): each settles and publishes.
+    await act(async () => {
+      result.current.hook.abort();
+      await done;
+    });
+
+    expect({ aborted: result.current.hook.totals.aborted, reads: reads.mock.calls.length - before }).toEqual({
+      aborted: 20,
+      reads: 1,
+    });
+  });
+
+  it("reads the list once when /upload refuses 20 files of a job at once", async () => {
+    const asked = gate((call) => call.label === "POST /upload");
+    const sent = holdPut(5);
+    const notes = route({ accept: "text/plain", maxSize: 16, maxFiles: 21, authorize: allowAnyone });
+    const fixture = clientFixture({ notes }, { fault: firstOf(asked.fault, sent.fault) });
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false });
+    const reads = vi.spyOn(client, "resumable");
+    const { useUpload, useResumable } = createUploadHooks({ client });
+    const { result } = renderHook(() => ({ hook: useUpload("notes", { multiple: true }), resumable: useResumable() }));
+    // 20 bytes is over the route's 16: /upload refuses those 20 in one answer, and the 21st is sent.
+    const files = [...Array.from({ length: 20 }, (_, at) => note("x".repeat(20), `${at}.txt`)), note("alpha", "a.txt")];
+    let done: Promise<unknown> = Promise.resolve();
+    act(() => {
+      done = result.current.hook.upload(files);
+    });
+    await act(() => asked.reached);
+    const before = reads.mock.calls.length;
+    asked.open();
+    await act(() => sent.reached);
+    const burst = reads.mock.calls.length - before;
+    sent.open();
+    await act(() => done);
+
+    expect({ failed: result.current.hook.totals.failed, burst }).toEqual({ failed: 20, burst: 1 });
   });
 
   it("refresh() reads the list again and resolves with the client's answer", async () => {

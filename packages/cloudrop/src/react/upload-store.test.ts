@@ -1,20 +1,21 @@
 // @vitest-environment happy-dom
 // Contract: spec §6.1 (M4-B2, M4-B4, M4-B8, M4-B11) for what useUpload renders, through createUploadHooks on the real
-// client and the fake server: `files` lists every file of the hook's jobs in start order and keeps a file's object
-// until that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs; a hook
-// hidden by <Activity> shows what its jobs did meanwhile; unmounting leaves the jobs running.
+// client and the fake server: `files` lists every file of the route's jobs in start order and keeps a file's object
+// until that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs, for every
+// component on the route; a hook hidden by <Activity> shows what its jobs did meanwhile; unmounting leaves the jobs
+// running, and the next component on the route lists them; two components on one route share one list.
 // Oracle: the server's verdicts for the route below, the requests the fixture saw and the statuses the client reports.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { Activity, createElement } from "react";
+import { Activity, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { allowAnyone, route } from "../server/route.ts";
 import type { Fault } from "../testing/client-fixture.ts";
 import { gate } from "../testing/persist-fixture.ts";
-import { fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
+import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 
-const setup = (fault?: Fault) =>
-  hooksFixture({ notes: route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone }) }, fault);
+const notes = route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone });
+const setup = (fault?: Fault) => hooksFixture({ notes, photos: notes }, fault);
 /** The mode of the test's <Activity> wrapper, read on every render. */
 const visibility: { mode: "visible" | "hidden" } = { mode: "visible" };
 
@@ -167,22 +168,85 @@ describe("what useUpload renders", () => {
     expect(statuses(result.current.files)).toEqual(["a.txt done"]);
   });
 
-  it("leaves the upload running when the component unmounts, and sends no /abort", async () => {
+  it("leaves the upload running when the component unmounts, and shows it to the next mount", async () => {
     const held = holdPut(5);
     const { fixture, useUpload } = setup(held.fault);
-    const { result, unmount } = renderHook(() => useUpload("notes"));
-    let done: ReturnType<typeof result.current.upload> = Promise.resolve(null);
+    const first = renderHook(() => useUpload("notes"));
+    let done: ReturnType<typeof first.result.current.upload> = Promise.resolve(null);
     act(() => {
-      done = result.current.upload(note("alpha", "a.txt"));
+      done = first.result.current.upload(note("alpha", "a.txt"));
     });
     await held.reached;
-    unmount();
+    first.unmount();
+    const { result } = renderHook(() => useUpload("notes"));
+    const remounted = statuses(result.current.files);
     held.open();
-    const answer = await done;
+    const answer = await act(() => done);
 
-    expect({ status: answer?.data?.files[0]?.status, requests: fixture.requests }).toEqual({
+    expect({
+      remounted,
+      status: answer?.data?.files[0]?.status,
+      after: statuses(result.current.files),
+      requests: fixture.requests,
+    }).toEqual({
+      remounted: ["a.txt uploading"],
       status: "done",
+      after: ["a.txt done"],
       requests: ["POST /upload", "PUT object", "POST /complete"],
     });
+  });
+
+  it("lists a file that failed before an unmount to the next mount, whose retry() sends it", async () => {
+    // The page navigated away and back without a reload: the client still holds the failed file's ticket, so
+    // useResumable does not list it and resume() would refuse it; only this list reaches it (M4-B4).
+    const broken = failPut(5);
+    const { useUpload } = setup(broken.fault);
+    const first = renderHook(() => useUpload("notes"));
+    await act(() => first.result.current.upload(note("alpha", "a.txt")));
+    first.unmount();
+    const { result } = renderHook(() => useUpload("notes"));
+    const remounted = statuses(result.current.files);
+    broken.failing.on = false;
+    const retried = await act(() => result.current.files[0]?.retry());
+
+    expect({ remounted, retried: retried?.status, after: statuses(result.current.files) }).toEqual({
+      remounted: ["a.txt failed"],
+      retried: "done",
+      after: ["a.txt done"],
+    });
+  });
+
+  it("shares one list between the components on a route, under StrictMode, and keeps other routes apart", async () => {
+    const { fixture, useUpload } = setup();
+    const options = { wrapper: StrictMode };
+    const sender = renderHook(() => useUpload("notes"), options);
+    const reader = renderHook(() => useUpload("notes"), options);
+    const other = renderHook(() => useUpload("photos"), options);
+    await act(() => sender.result.current.upload(note("alpha", "a.txt")));
+    await act(() => other.result.current.upload(note("bravo", "b.txt")));
+
+    expect({
+      sender: statuses(sender.result.current.files),
+      reader: statuses(reader.result.current.files),
+      readerTotals: reader.result.current.totals.done,
+      other: statuses(other.result.current.files),
+      uploads: fixture.requests.filter((request) => request === "POST /upload").length,
+    }).toEqual({ sender: ["a.txt done"], reader: ["a.txt done"], readerTotals: 1, other: ["b.txt done"], uploads: 2 });
+  });
+
+  it("clear() from one component clears the route's settled uploads for every component on it", async () => {
+    const { useUpload } = setup();
+    const sender = renderHook(() => useUpload("notes"));
+    const reader = renderHook(() => useUpload("notes"));
+    const other = renderHook(() => useUpload("photos"));
+    await act(() => sender.result.current.upload(note("alpha", "a.txt")));
+    await act(() => other.result.current.upload(note("bravo", "b.txt")));
+    act(() => reader.result.current.clear());
+
+    expect({
+      sender: statuses(sender.result.current.files),
+      reader: statuses(reader.result.current.files),
+      other: statuses(other.result.current.files),
+    }).toEqual({ sender: [], reader: [], other: ["b.txt done"] });
   });
 });

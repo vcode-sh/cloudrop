@@ -117,9 +117,11 @@ and last 64 KiB differ. Ask the user to pick the same file again.
 
 ## Every request answers 500 SERVER_ERROR
 
-Every upload fails with `SERVER_ERROR` ("The server could not handle the upload"), `cloudrop.api` calls return
-`INVALID_CONFIG`, and the server log has one line starting with
-`cloudrop: every request answers 500 until this is fixed.`
+Every upload fails with `SERVER_ERROR` ("The upload server is not ready. Try again in a moment."), `cloudrop.api` calls
+return `INVALID_CONFIG`, and the server log has one line starting with
+`cloudrop: every request answers 500 until this is fixed.` The answer is retryable: the client tries each request again
+with its backoff before the file fails, and a large upload in flight keeps its resume record, so once the setting is
+fixed a reload can continue it.
 
 **A setting that comes from the environment is missing or invalid.** cloudrop reads `CLOUDROP_SECRET` and the storage
 presets' variables (`CLOUDROP_R2_*`, `CLOUDROP_S3_*`) on the first request, not when the server is created, so a build

@@ -1,7 +1,7 @@
 // Hooks on a cloudrop server on the in-process fake R2, for the cloudrop/react tests, and the helpers those tests
 // share. Never shipped.
 
-import type { UploadFile } from "../react/types.ts";
+import type { UploadItem } from "../react/types.ts";
 import { createUploadHooks } from "../react.ts";
 import type { Route } from "../server/route.ts";
 import { clientFixture, type Fault, type FaultCall } from "./client-fixture.ts";
@@ -33,5 +33,5 @@ export function failing(matches: (call: FaultCall) => boolean): { failing: { on:
 export const failPut = (size: number): ReturnType<typeof failing> =>
   failing((call) => call.label === "PUT object" && (call.init.body as Blob).size === size);
 /** "a.txt done", "b.txt uploading": a file reduced to its name and status. */
-export const statuses = (files: readonly UploadFile<unknown>[]): string[] =>
+export const statuses = (files: readonly UploadItem<unknown>[]): string[] =>
   files.map((file) => `${file.name} ${file.status}`);

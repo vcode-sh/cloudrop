@@ -119,6 +119,12 @@ as `r2()` does, so with all five variables set `s3()` needs no argument. `endpoi
 query or fragment; a path in it is kept as a prefix of every request, for a service behind a proxy path. `publicUrl` and
 `fetch` work as for `r2()`.
 
+Pass the driver to `createCloudrop` as `r2()` or `s3()` returns it. When a setting comes from the environment, the
+server finds the driver's lazy check by the driver object itself, so a copy or a wrapper, such as `{ ...r2(), put }` for
+logging, loses it. With a storage setting missing, every upload then fails with `STORAGE_ERROR`, and the log has
+`cloudrop: a storage request failed.` with the `INVALID_CONFIG` on every request, instead of the single line saying
+every request answers 500 until it is fixed. A wrapper is safe when every setting is passed as an option.
+
 Which permissions the credentials need: [Bucket setup](bucket-setup.md#credentials-and-permissions).
 
 ## Define routes

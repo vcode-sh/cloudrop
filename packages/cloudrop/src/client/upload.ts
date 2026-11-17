@@ -43,17 +43,17 @@ export interface UploadContext {
    * One claim per holder of an upload: a ticket, from its arrival to its unlock, and a resume, from resume() to its
    * refusal or its upload's unlock. resumable() leaves out every upload with a claim (M4-F22).
    */
-  held: Set<{ id: string }>;
+  claims: Set<{ id: string }>;
 }
 
 /**
  * Claims upload `id` until the returned function is called; again, it does nothing. Each holder releases only its own
  * claim, so two holders of one upload, such as two resumes in flight, never release each other's (M4-F22).
  */
-export function hold({ held }: UploadContext, id: string): () => void {
-  const claim = { id };
-  held.add(claim);
-  return () => held.delete(claim);
+export function claim({ claims }: UploadContext, id: string): () => void {
+  const made = { id };
+  claims.add(made);
+  return () => claims.delete(made);
 }
 
 function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {

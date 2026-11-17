@@ -17,7 +17,7 @@ import type { StandardSchema } from "../server/schema.ts";
 import type { Fault } from "../testing/client-fixture.ts";
 import { firstOf, gate } from "../testing/persist-fixture.ts";
 import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
-import type { UploadFile } from "./types.ts";
+import type { UploadItem } from "./types.ts";
 
 const tagged: StandardSchema<{ tag: string }> = {
   "~standard": { version: 1, vendor: "test", validate: (value) => ({ value: value as { tag: string } }) },
@@ -143,7 +143,7 @@ describe("useUpload", () => {
     await waitFor(() => expect(statuses(result.current.files)).toEqual(["a.txt uploading", "b.txt failed"]), fast);
     const steps: string[][] = [];
     /** Runs `action` on the files of the latest render, then waits for `expected` and records it. */
-    const step = async (action: (files: readonly UploadFile<unknown>[]) => unknown, expected: string[]) => {
+    const step = async (action: (files: readonly UploadItem<unknown>[]) => unknown, expected: string[]) => {
       act(() => void action(result.current.files));
       await waitFor(() => expect(statuses(result.current.files)).toEqual(expected), fast);
       steps.push(statuses(result.current.files));
@@ -208,18 +208,25 @@ describe("useUpload", () => {
     expect(statuses(result.current.files)).toEqual(["a.txt done", "b.txt done"]);
   });
 
-  it("sends the latest render's metadata, unless the call passes its own", async () => {
+  it("sends the latest render's metadata unless the call passes its own, and keeps every control's identity", async () => {
     const { useUpload } = setup();
     const { result, rerender } = renderHook(({ tag }) => useUpload("tagged", { metadata: { tag } }), {
       initialProps: { tag: "first" },
     });
+    const controls = ["upload", "pause", "resume", "abort", "retry", "clear", "getInputProps", "getDropProps"] as const;
+    const before = controls.map((name) => result.current[name]);
     rerender({ tag: "second" });
+    const changed = controls.filter((name, at) => result.current[name] !== before[at]);
     const fromHook = await act(() => result.current.upload(note("alpha", "a.txt")));
     const fromCall = await act(() => result.current.upload(note("bravo", "b.txt"), { metadata: { tag: "call" } }));
 
     const dataOf = (answer: typeof fromHook) =>
       answer?.data?.files[0]?.status === "done" ? answer.data.files[0].result.data : null;
-    expect([dataOf(fromHook), dataOf(fromCall)]).toEqual([{ tag: "second" }, { tag: "call" }]);
+    // An effect that lists a control in its dependencies must not run again on every render (M4-B2).
+    expect({ changed, data: [dataOf(fromHook), dataOf(fromCall)] }).toEqual({
+      changed: [],
+      data: [{ tag: "second" }, { tag: "call" }],
+    });
   });
 
   it("uploads what the input picked and clears it, so that picking the same file again uploads it again", async () => {

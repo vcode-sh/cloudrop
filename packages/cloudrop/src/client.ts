@@ -193,7 +193,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     keepFailed: true,
     records: createRecords(persist),
     namespace,
-    held: new Set(),
+    claims: new Set(),
   };
   // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them
   // at run time: the casts below give the route's result type to what the server sent.
