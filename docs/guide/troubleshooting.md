@@ -124,11 +124,12 @@ Every upload fails with `SERVER_ERROR` ("The server could not handle the upload"
 **A setting that comes from the environment is missing or invalid.** cloudrop reads `CLOUDROP_SECRET` and the storage
 presets' variables (`CLOUDROP_R2_*`, `CLOUDROP_S3_*`) on the first request, not when the server is created, so a build
 needs no secrets and the server starts without them. The log line names every missing setting with its variable, and an
-invalid value with the variable that holds it. Set them where the running server reads its environment: the next
-request reads them again, so no restart is needed. Once they are complete they are kept until the process restarts.
+invalid value with the variable that holds it. Each request reads the environment again until it is complete, so values
+your app sets on `process.env` after start (a secrets loader, say) take effect without a restart. For variables your
+platform sets, restart or redeploy as usual. Once they are complete they are kept until the process restarts.
 
-With `NODE_ENV=development` the same settings are checked when the server is created, so `next dev` fails at start
-instead.
+With `NODE_ENV=development` the same settings are checked when the server is created, so a dev server fails as soon as
+the server module loads instead (in `next dev`, on the first request to the cloudrop route).
 
 ## checkBucket reports unknown
 

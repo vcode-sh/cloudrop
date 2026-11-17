@@ -34,7 +34,7 @@ first mistake it finds, checking the options in a fixed order. Its message names
 misconfigured server fails when it starts, not on a user's first upload. Settings that come from the environment
 (`CLOUDROP_SECRET` and the storage variables) are read on the first request instead, so a build needs no secrets; one
 still missing then makes every request answer 500 and logs `INVALID_CONFIG` once. With `NODE_ENV=development` they are
-checked at start too.
+checked when `createCloudrop` runs too, so a dev server fails as soon as the server module loads.
 
 | Option | What it does | Default |
 | --- | --- | --- |
@@ -88,7 +88,8 @@ const storage = r2({ bucket: "media" });
 | `fetch` | Replaces the global `fetch`. |
 
 An option that is unset or empty falls back to its variable. One `INVALID_CONFIG` error lists everything missing at
-once, on the first request (at start in development). An option you pass is checked when `r2()` is called.
+once, on the first request (when the server is created, in development). An option you pass is checked when `r2()` is
+called.
 
 With every variable set, `r2()` needs no argument at all:
 
@@ -265,6 +266,7 @@ const avatar = route(
 With your own session cookie, read it from the `Cookie` header:
 
 ```ts
+// Returns the value as sent: decodeURIComponent it if your cookie is encoded.
 function readCookie(request: Request, name: string): string | undefined {
   for (const pair of request.headers.get("cookie")?.split(";") ?? []) {
     const [key, ...value] = pair.trim().split("=");
@@ -388,6 +390,10 @@ Hooks can run more than once. A retried or replayed request repeats `afterVerify
 `onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Make their side effects
 idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate.
 
+The client also sends a slow call again. A `/complete` slower than 120 s, or an `/upload` slower than 30 s, counts as no
+answer and is retried (see [Stalled requests](client.md#stalled-requests)), so keep `onComplete` and `authorize` well
+under that, and `onComplete` idempotent.
+
 An app that must refuse a late upload after `/abort` (see [the token](#the-upload-token-and-what-it-allows)) checks its
 own record in `afterVerify`, such as a released quota reservation, and refuses it there, which deletes the object.
 
@@ -494,8 +500,9 @@ export default {
 ```
 
 On Workers, pass `secret` and the storage credentials explicitly unless your Worker exposes `process.env` (see
-[Settings from the environment](#settings-from-the-environment)). How the server's parallel storage calls fit Workers'
-subrequest limits has not been measured yet.
+[Settings from the environment](#settings-from-the-environment)); creating the server from the Worker's `env`:
+[Deployment](deployment.md#cloudflare-workers). How the server's parallel storage calls fit Workers' subrequest limits
+has not been measured yet.
 
 ## Origins
 

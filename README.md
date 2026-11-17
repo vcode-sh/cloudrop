@@ -6,12 +6,12 @@ cloudrop lets a browser upload files straight to your bucket, so the bytes never
 decides who may upload what, signs short-lived upload links, and checks the stored file before it accepts it. The
 browser client sends the bytes, retries what fails, shows progress, and picks up where it left off after a reload.
 
+Until 0.1 is published, the version on npm (`0.0.0`) only reserves the name: to try cloudrop now, clone this repository
+and run [`examples/next`](examples/next/README.md). From 0.1 on:
+
 ```bash
 npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
 ```
-
-Until 0.1 is published, the version on npm (`0.0.0`) only reserves the name: to try cloudrop now, clone this repository
-and run [`examples/next`](examples/next/README.md).
 
 ## How it works
 
@@ -84,9 +84,7 @@ own app's session lookup.
 import { createCloudrop, r2, route, unauthorized } from "cloudrop";
 
 export const cloudrop = createCloudrop({
-  // Reads CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY on the first request.
-  storage: r2({ bucket: "media" }),
-  // The upload token secret comes from CLOUDROP_SECRET. Generate one with: openssl rand -base64 32
+  storage: r2(), // the CLOUDROP_R2_* variables below; the token secret comes from CLOUDROP_SECRET
   routes: {
     avatar: route(
       {
@@ -101,6 +99,26 @@ export const cloudrop = createCloudrop({
     ),
   },
 });
+```
+
+The settings come from the environment, read on the first request, so a build needs none of them. In Next.js, put them
+in `.env.local`; elsewhere, in your platform's environment:
+
+```sh
+CLOUDROP_SECRET=<at least 32 characters>    # generate one with: openssl rand -base64 32
+
+# Cloudflare R2, read by r2()
+CLOUDROP_R2_ACCOUNT_ID=<32 hexadecimal characters>
+CLOUDROP_R2_ACCESS_KEY_ID=<access key id>
+CLOUDROP_R2_SECRET_ACCESS_KEY=<secret access key>
+CLOUDROP_R2_BUCKET=media
+
+# Or any S3-compatible service: use storage: s3() and these instead
+# CLOUDROP_S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+# CLOUDROP_S3_REGION=us-east-1
+# CLOUDROP_S3_BUCKET=media
+# CLOUDROP_S3_ACCESS_KEY_ID=<access key id>
+# CLOUDROP_S3_SECRET_ACCESS_KEY=<secret access key>
 ```
 
 `route()` takes the policy first and, optionally, `prefix`, `key` and `onComplete` second: TypeScript types their
@@ -147,6 +165,9 @@ export function AvatarPicker() {
   );
 }
 ```
+
+Before the first upload, give the bucket a CORS rule for your page's origin ([Set up your bucket](#set-up-your-bucket)):
+without it the browser blocks every upload, which shows as `NETWORK_ERROR`.
 
 Each entry of `files` is one file's live state: `status`, `progress`, `error` and, once done, `result`. Nothing throws
 for an expected failure: a file's `error` carries a `code` for your code to branch on (such as `UNAUTHORIZED`,

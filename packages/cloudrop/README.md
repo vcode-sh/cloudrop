@@ -44,8 +44,8 @@ import { cloudrop } from "../../../../lib/cloudrop";
 export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 ```
 
-Upload from React. `createUploadHooks` takes only the server's type, so no server code reaches the browser. Create the
-hooks once, in their own module when several components upload:
+Upload from React. `createUploadHooks` needs only the server's type (a type import), so no server code reaches the
+browser. Create the hooks once, in their own module when several components upload:
 
 ```tsx
 "use client";

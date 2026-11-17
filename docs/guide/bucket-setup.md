@@ -107,9 +107,10 @@ To apply it with the AWS CLI, see [the next section](#set-both-rules-with-the-aw
 
 ## Set both rules with the AWS CLI
 
-The AWS CLI sets the CORS rule and the lifecycle rule on any S3-compatible service: AWS S3, RustFS, MinIO, Backblaze
-B2, and others. For a service other than AWS, point it at the service with `--endpoint-url`. Save the `CORSRules`
-document above as `cors.json`, and this as `lifecycle.json`:
+The AWS CLI sets the CORS rule and the lifecycle rule on AWS S3 and on S3-compatible services that implement these S3
+calls (checked on RustFS). For a service other than AWS, point it at the service with `--endpoint-url`. Save the
+`CORSRules` document above as `cors-s3.json` (not the R2 `cors.json`, whose format differs), and this as
+`lifecycle.json`:
 
 ```json
 {
@@ -127,10 +128,12 @@ document above as `cors.json`, and this as `lifecycle.json`:
 The empty prefix makes the rule apply to the whole bucket, which `checkBucket` requires. Then apply both:
 
 ```bash
-export AWS_ACCESS_KEY_ID=<access key id> AWS_SECRET_ACCESS_KEY=<secret access key> AWS_REGION=us-east-1
+# AWS CLI v2 reads AWS_REGION; v1 reads only AWS_DEFAULT_REGION, so set both.
+export AWS_ACCESS_KEY_ID=<access key id> AWS_SECRET_ACCESS_KEY=<secret access key>
+export AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1
 ENDPOINT=http://127.0.0.1:9000   # your service's S3 endpoint; leave out --endpoint-url for AWS S3
 
-aws s3api put-bucket-cors --bucket <bucket> --cors-configuration file://cors.json --endpoint-url "$ENDPOINT"
+aws s3api put-bucket-cors --bucket <bucket> --cors-configuration file://cors-s3.json --endpoint-url "$ENDPOINT"
 aws s3api put-bucket-lifecycle-configuration --bucket <bucket> \
   --lifecycle-configuration file://lifecycle.json --endpoint-url "$ENDPOINT"
 

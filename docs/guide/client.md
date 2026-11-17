@@ -301,6 +301,10 @@ In a browser, a bucket `PUT` that makes no progress for 30 s, or whose answer ta
 counts as a network error and is tried again. Through `fetch`, which reports no progress, a `PUT` gets 30 s plus its
 size at 100 KiB/s.
 
+Calls to your server have a deadline for the whole answer: 30 s for `/upload` and `/sign`, 120 s for `/complete`, 10 s
+for `/abort`. A missed deadline is a retryable `NETWORK_ERROR`, tried again within the same attempts. A `/complete`
+that timed out counts as one that may have finished, so a cancel or a failure afterwards keeps the file.
+
 ## Transports: XHR or fetch
 
 - In a browser, bucket `PUT`s go through `XMLHttpRequest`, which reports bytes while they are sent, so progress moves

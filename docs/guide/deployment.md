@@ -26,9 +26,9 @@ rule itself: [Bucket setup](bucket-setup.md).
 
 ## Same origin: the simple setup
 
-When the page and the API share an origin, nothing needs configuring: the client's default `basePath`
-(`/api/cloudrop`) reaches the handler, the browser sends the session cookie as a first-party cookie, and the handler
-accepts requests from its own origin without `trustedOrigins`.
+When the page and the API share an origin, the browser sends the session cookie as a first-party cookie and the
+client's default `basePath` (`/api/cloudrop`) reaches the handler. With one app serving both, no `trustedOrigins` is
+needed; through a proxy or rewrite, list the page's origin (below). The bucket's CORS rule is needed either way.
 
 You get one origin in either of two ways:
 
@@ -109,16 +109,57 @@ request, not when the module loads. So `next build`, or a Docker build stage wit
 without any of them. Pass the secrets to the running server only.
 
 A setting still missing at run time makes every upload request answer `500 SERVER_ERROR`, and the server logs one line
-starting `cloudrop: every request answers 500 until this is fixed.` Once you set the missing values, the next request
-picks them up, with no restart. A health check catches the problem at deploy time: any `cloudrop.api` call returns that
-`INVALID_CONFIG` error. With `NODE_ENV=development`, the settings are checked when the server is created, so `next dev`
-fails at start instead.
+starting `cloudrop: every request answers 500 until this is fixed.` Each request reads the environment again until it is
+complete, so values your app sets on `process.env` after start (a secrets loader, say) take effect without a restart.
+For variables your platform sets, restart or redeploy as usual. A health check catches the problem at deploy time: any
+`cloudrop.api` call returns that `INVALID_CONFIG` error. With `NODE_ENV=development`, the settings are checked when the
+server is created, so a dev server fails as soon as the server module loads (in `next dev`, on the first request to the
+cloudrop route, which Next.js compiles on demand).
 
 ## Cloudflare Workers
 
-- Call `cloudrop.handler(request)` from the Worker's `fetch` (see
-  [Any runtime with Request and Response](server.md#any-runtime-with-request-and-response)).
-- The library reads the environment only through `process.env`. Unless your Worker exposes it, pass `secret` and the
-  storage credentials to `createCloudrop` and `r2()` explicitly (see
-  [Settings from the environment](server.md#settings-from-the-environment)).
-- How the server's parallel storage calls fit Workers' subrequest limits has not been measured yet.
+A Worker gets its settings as the `env` argument of `fetch`, per request, while cloudrop reads only `process.env`. So
+create the server from `env` yourself, passing every setting explicitly, and keep it for the life of the isolate:
+
+```ts
+import { createCloudrop, r2 } from "cloudrop";
+import { routes } from "./routes"; // your routes, built with route()
+
+interface Env {
+  CLOUDROP_SECRET: string;
+  CLOUDROP_R2_ACCOUNT_ID: string;
+  CLOUDROP_R2_ACCESS_KEY_ID: string;
+  CLOUDROP_R2_SECRET_ACCESS_KEY: string;
+  CLOUDROP_R2_BUCKET: string;
+}
+
+const createServer = (env: Env) =>
+  createCloudrop({
+    secret: env.CLOUDROP_SECRET,
+    storage: r2({
+      accountId: env.CLOUDROP_R2_ACCOUNT_ID,
+      accessKeyId: env.CLOUDROP_R2_ACCESS_KEY_ID,
+      secretAccessKey: env.CLOUDROP_R2_SECRET_ACCESS_KEY,
+      bucket: env.CLOUDROP_R2_BUCKET,
+    }),
+    routes,
+  });
+
+export type Server = ReturnType<typeof createServer>; // for createCloudropClient<Server>() in the browser
+
+let cloudrop: Server | undefined;
+
+export default {
+  fetch(request: Request, env: Env) {
+    cloudrop ??= createServer(env); // once per isolate
+    return cloudrop.handler(request);
+  },
+};
+```
+
+- Creating the server per request also works, but every call checks the options again and imports the token secret's
+  key: explicit settings are checked and loaded in `createCloudrop`, not lazily. Memoizing per isolate pays that once.
+- An explicit value that is wrong (a short secret, a malformed account id) throws `INVALID_CONFIG` from `r2()` or
+  `createCloudrop` inside `fetch`, so the Worker fails that request with an exception rather than a cloudrop 500.
+- How the server's parallel storage calls fit Workers' subrequest limits has not been measured yet, and no test lane
+  runs cloudrop on Workers.
