@@ -461,8 +461,9 @@ review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22
   from `useResumable(route)` of the same route; `clear()` drops, for every component on the route, the jobs whose every
   file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed file's
   ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
-  latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry` and
-  `clear` never change identity, while `getInputProps()` and `getDropProps()` are built per render.
+  latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry`, `clear`
+  and `getDropProps` never change identity; `getInputProps` keeps its identity while `multiple` and `accept` do, since
+  it returns this render's values (final review M2, which added the test and made the two getters stable).
 - **Why:** design §6.1; stable functions keep an effect that lists `upload` in its dependencies from uploading again on
   every render. One store per component stranded a failed file: unmounting cancels nothing (`M4-B4`), the failed file
   keeps its ticket for `retry()`, and `resumable()` leaves out an upload the page holds (`M4-F22`), so after a

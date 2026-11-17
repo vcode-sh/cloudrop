@@ -165,7 +165,9 @@ export function PasteTarget() {
 }
 ```
 
-`upload`, `pause`, `resume`, `abort`, `retry` and `clear` keep their identity across renders.
+`upload`, `pause`, `resume`, `abort`, `retry`, `clear` and `getDropProps` keep their identity across renders, and
+`getInputProps` keeps it while `multiple` and `accept` stay the same, so an effect that lists one of them in its
+dependencies does not run again on every render.
 
 ## Resume after a reload
 

@@ -2,7 +2,7 @@
 // useSyncExternalStore. No upload starts in an effect or during render, so StrictMode's second render and second effect
 // start nothing.
 
-import { useInsertionEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useInsertionEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
 import type { CloudropClient, Result, ResumableUpload, UploadJob, UploadResult } from "../client.ts";
 import { createDropHandlers } from "./drop.ts";
@@ -75,7 +75,7 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   const dropProps = createDropHandlers(setDragOver, (files) =>
     take(controller.latest.options.multiple ? files : files.slice(0, 1)),
   );
-  const actions: Pick<Hook, "upload" | "pause" | "resume" | "abort" | "retry" | "clear"> = {
+  const actions: Pick<Hook, "upload" | "pause" | "resume" | "abort" | "retry" | "clear" | "getDropProps"> = {
     upload,
     pause: () => {
       for (const job of jobs()) job.pause();
@@ -88,8 +88,9 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
       await Promise.all(jobs().map((job) => job.retry()));
     },
     clear: () => source.storeOf(controller.latest.route).clear(),
+    getDropProps: () => dropProps,
   };
-  return Object.assign(controller, { actions, onChange, dropProps });
+  return Object.assign(controller, { actions, onChange });
 }
 
 const serverView = () => EMPTY_VIEW;
@@ -103,11 +104,10 @@ export function useUploadWith(source: HookSource, route: string, options: UseUpl
   const store = source.storeOf(route);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
   const { multiple = false, accept } = options;
-  return {
-    ...view,
-    ...controller.actions,
-    isDragOver,
-    getInputProps: () => ({ type: "file", multiple, accept, onChange: controller.onChange }),
-    getDropProps: () => controller.dropProps,
-  };
+  // Built from this render's options, so a changed `accept` reaches the input in the same render.
+  const getInputProps = useCallback(
+    (): InputProps => ({ type: "file", multiple, accept, onChange: controller.onChange }),
+    [multiple, accept, controller],
+  );
+  return { ...view, ...controller.actions, isDragOver, getInputProps };
 }
