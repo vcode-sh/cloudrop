@@ -129,7 +129,7 @@ describe("prismaStore with transaction: true behind the handler", () => {
     // The store's complete runs on the transaction Prisma already closed: a store failure, retryable like any.
     expect((await complete(fixture, ticket.token)).body.error).toEqual({
       code: "SERVER_ERROR",
-      message: "The server could not save the upload. Try again in a moment.",
+      message: "The server could not reach its upload records. Try again in a moment.",
       retryable: true,
     });
     expect(await state()).toEqual({
