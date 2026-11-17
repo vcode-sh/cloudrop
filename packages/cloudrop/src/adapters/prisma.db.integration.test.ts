@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import type { CloudropStore } from "../server/store.ts";
+import { driverRows } from "../testing/db/driver-rows.ts";
 import { usePostgresDatabase } from "../testing/db/postgres.ts";
 import { openPrismaClient, type PrismaTestClient, type SqliteFunctionHost } from "../testing/db/prisma.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
@@ -134,6 +135,14 @@ describe("Postgres", () => {
     );
   });
 
+  describe("driver", () => {
+    beforeEach(async () => {
+      await db.reset();
+      await db.createTables();
+    });
+    driverRows(() => prismaStore(prisma, { dialect: "postgres" }));
+  });
+
   test("a claim waiting on another transaction's row lock is busy after the 2 s lock timeout", async () => {
     // Takes 2 s by design: the lock timeout is what turns the wait into an answer. Prisma reports it as P2010 with the
     // Postgres code inside, and then commits the transaction the timeout aborted.
@@ -243,5 +252,17 @@ describe("SQLite", () => {
       },
       (at) => BigInt(at.getTime()),
     );
+  });
+
+  describe("driver", () => {
+    let prisma: PrismaTestClient | undefined;
+    beforeEach(async () => {
+      await db.createTables();
+      return () => prisma?.$disconnect();
+    });
+    driverRows(async () => {
+      prisma = await openPrismaClient(db);
+      return prismaStore(prisma, { dialect: "sqlite" });
+    });
   });
 });

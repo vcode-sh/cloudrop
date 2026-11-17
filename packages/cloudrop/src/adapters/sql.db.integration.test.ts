@@ -4,13 +4,24 @@
 
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
-import { driverRows, file, NOW } from "../testing/db/driver-rows.ts";
+import { driverRows } from "../testing/db/driver-rows.ts";
 import { usePostgresDatabase } from "../testing/db/postgres.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
 import { sqlStoreTarget } from "../testing/db/sql-target.ts";
 import { useSqliteDatabase } from "../testing/db/sqlite.ts";
 import { describeStoreContract } from "../testing/store-contract.ts";
 import { type PostgresJsSql, pgExecutor, postgresJsExecutor, sqliteExecutor, sqlStore } from "./sql.ts";
+
+const NOW = new Date("2026-11-17T10:20:30.123Z");
+const file = (id: string, size: number) => ({
+  id,
+  route: "files",
+  key: `users/${id}/ünïcode ../name.bin`,
+  name: "name.bin",
+  type: "application/octet-stream",
+  size,
+  metadata: '{"album":"summer"}',
+});
 
 describe("Postgres", () => {
   const db = usePostgresDatabase();
@@ -29,17 +40,17 @@ describe("Postgres", () => {
     sqlStoreTarget(db, (tables) => sqlStore(postgresJsExecutor(sql), { tables })),
   );
 
-  const executors = [
-    { name: "node-postgres", executor: () => pgExecutor(db.pool) },
-    { name: "postgres.js", executor: () => postgresJsExecutor(sql) },
+  const stores = [
+    { name: "node-postgres", store: () => sqlStore(pgExecutor(db.pool)) },
+    { name: "postgres.js", store: () => sqlStore(postgresJsExecutor(sql)) },
   ];
 
-  describe.for(executors)("$name", ({ executor }) => {
+  describe.for(stores)("$name", ({ store }) => {
     beforeEach(async () => {
       await db.reset();
       await db.createTables();
     });
-    driverRows(executor);
+    driverRows(store);
   });
 });
 
@@ -55,7 +66,7 @@ describe("SQLite", () => {
 
   describe("node:sqlite", () => {
     beforeEach(() => db.createTables());
-    driverRows(() => sqliteExecutor(db.database));
+    driverRows(() => sqlStore(sqliteExecutor(db.database)));
 
     test("complete that fails at its files write rolls back the usage write that ran before it", async () => {
       const store = sqlStore(sqliteExecutor(db.database));

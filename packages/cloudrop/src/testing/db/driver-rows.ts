@@ -1,12 +1,13 @@
-// The rows only a real driver can break, for every executor lane (the database lane and D1 in the Wrangler lane):
-// its number and time encodings, and its connections racing.
+// The rows only a real driver can break, for every SQL store (the sql adapter's executors, Drizzle, Prisma, D1):
+// its number and time encodings, and its connections racing for one owner's quota. Call it inside a `describe` whose
+// `beforeEach` gives each row empty tables; `storeOver` builds the store under test over them.
 
 import { expect, test } from "vitest";
-import { type SqlExecutor, sqlStore } from "../../adapters/sql.ts";
+import type { CloudropStore } from "../../server/store.ts";
 
 const MAX_SAFE = 9007199254740991; // 2^53 - 1
-export const NOW = new Date("2026-11-17T10:20:30.123Z");
-export const file = (id: string, size: number) => ({
+const NOW = new Date("2026-11-17T10:20:30.123Z");
+const file = (id: string, size: number) => ({
   id,
   route: "files",
   key: `users/${id}/ünïcode ../name.bin`,
@@ -16,10 +17,9 @@ export const file = (id: string, size: number) => ({
   metadata: '{"album":"summer"}',
 });
 
-/** Run after the tables exist, on an executor over them. */
-export function driverRows(executor: () => SqlExecutor<unknown>) {
+export function driverRows(storeOver: () => CloudropStore<unknown> | Promise<CloudropStore<unknown>>): void {
   test("a size of 2^53 - 1 and millisecond times come back exactly, counted in usage", async () => {
-    const store = sqlStore(executor());
+    const store = await storeOver();
     expect(
       await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", MAX_SAFE)] }, NOW),
     ).toEqual(["reserved"]);
@@ -33,7 +33,7 @@ export function driverRows(executor: () => SqlExecutor<unknown>) {
   });
 
   test("concurrent reserves of one owner never overshoot the quota", async () => {
-    const store = sqlStore(executor());
+    const store = await storeOver();
     await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("q-0", 10)] }, NOW);
     // 10 bytes held, limit 60: room for exactly 5 of the 8 racing 10-byte files.
     const outcomes = await Promise.all(

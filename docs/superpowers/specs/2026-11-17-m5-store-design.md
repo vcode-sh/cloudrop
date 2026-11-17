@@ -89,7 +89,8 @@ Indexes: `(status, expires_at)`, `(status, claimed_at)`, `(status, cleaned_at, e
 
 The docs ship, for each dialect, a Prisma model snippet (on SQLite with `BigInt` millisecond columns, since Prisma `Int`
 is 32-bit and its `DateTime` encoding on SQLite differs: measured in task E), Drizzle table definitions (also exported
-from `cloudrop/adapters/drizzle` as `cloudropTables({ files?, usage? })` for `pg` and `sqlite`) and plain SQL DDL. Each
+from `cloudrop/adapters/drizzle` as `cloudropPgTables({ tables? })` and `cloudropSqliteTables({ tables? })`, amended
+2026-11-17 by M5-T47) and plain SQL DDL. Each
 adapter checks the schema once, lazily, with `SELECT <every column> FROM <table> WHERE 1 = 0`, and fails with
 `INVALID_CONFIG` naming the table and the first missing column.
 
@@ -289,7 +290,9 @@ With a store only (without one each resolves `INVALID_CONFIG`):
 - **`cloudrop/adapters/drizzle` (`M5-T13`).** `drizzleStore(db, { dialect, tables?, transaction? })` over the core using
   Drizzle's raw `sql` execution, normalising each driver's result shape (`{ rows }` for node-postgres, an array for
   postgres.js, `.all()` for SQLite); `transaction: true` (Postgres only, `INVALID_CONFIG` on SQLite) wraps
-  `db.transaction` and passes Drizzle's `tx`; `cloudropTables()` exported. `drizzle-orm` optional peer.
+  `db.transaction` and passes Drizzle's `tx`; `cloudropPgTables()` and `cloudropSqliteTables()` exported (M5-T47).
+  SQLite batches run in a synchronous driver's immediate transaction (better-sqlite3) or through `db.batch` (libsql,
+  D1; M5-T46). `drizzle-orm` optional peer, `>=0.45.0 <2` (M5-T51).
 - **`cloudrop/adapters/prisma` (`M5-T14`).** `prismaStore(prisma, { dialect, tables?, transaction?, transactionOptions? })`
   over the core using `$queryRawUnsafe` and `$transaction([...])` for batches (structurally typed client, no import of
   `@prisma/client`); `transaction: true` (Postgres only) wraps `prisma.$transaction(async tx => …, transactionOptions)`

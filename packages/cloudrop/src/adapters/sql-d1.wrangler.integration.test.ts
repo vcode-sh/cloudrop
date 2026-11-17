@@ -25,6 +25,6 @@ describe("D1", () => {
       await db.reset();
       await db.createTables();
     });
-    driverRows(() => d1Executor(db.binding));
+    driverRows(() => sqlStore(d1Executor(db.binding)));
   });
 });

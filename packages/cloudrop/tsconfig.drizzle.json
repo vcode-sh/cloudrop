@@ -1,0 +1,6 @@
+{
+  // The Drizzle adapter and its tests alone, for type-checking them against another drizzle-orm line
+  // (scripts/check-drizzle-versions.sh); `bun run typecheck` already covers them against the installed one.
+  "extends": "./tsconfig.test.json",
+  "include": ["src/adapters/drizzle.ts", "src/adapters/drizzle/*.ts", "src/adapters/drizzle*.test.ts"]
+}

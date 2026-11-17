@@ -1,5 +1,91 @@
-// cloudrop/adapters/drizzle: `drizzleStore(db, { dialect, tables?, transaction? })` and `cloudropTables()` over the SQL
-// core in src/store/sql (spec M5 §7, M5-T13). The subpath, its build entry, size budget and the optional drizzle-orm
-// peer are in place; the adapter itself is not written yet, so the entry exports nothing.
+// cloudrop/adapters/drizzle: the database store over an app's Drizzle database (spec M5 §7). The SQL core writes every
+// statement; this entry runs them through Drizzle and exports the tables for the app's own schema. `drizzle-orm` is an
+// optional peer: only this entry imports it.
 
-export {};
+import { configError } from "../errors.ts";
+import { type RouteFunction, routeFor } from "../server/route.ts";
+import type { CloudropStore } from "../server/store.ts";
+import { sqlStore } from "../store/sql/store.ts";
+import type { StoreTables } from "../store/sql/tables.ts";
+import { type DrizzlePostgres, type DrizzleTransaction, postgresExecutor } from "./drizzle/postgres.ts";
+import { type DrizzleAsyncSqlite, type DrizzleSqlite, sqliteExecutor } from "./drizzle/sqlite.ts";
+
+export type { StoreTables } from "../store/sql/tables.ts";
+export type { DrizzlePostgres, DrizzlePostgresQueryable, DrizzleTransaction } from "./drizzle/postgres.ts";
+export type { CloudropPostgresTables } from "./drizzle/postgres-tables.ts";
+export { cloudropPgTables } from "./drizzle/postgres-tables.ts";
+export type { DrizzleAsyncSqlite, DrizzleSqlite, DrizzleSqliteQueryable } from "./drizzle/sqlite.ts";
+export type { CloudropSqliteTables } from "./drizzle/sqlite-tables.ts";
+export { cloudropSqliteTables } from "./drizzle/sqlite-tables.ts";
+export type { CloudropTablesOptions } from "./drizzle/tables.ts";
+
+/** What the overloads below take; each one names its dialect as a literal. */
+interface DrizzleStoreOptions {
+  dialect: "postgres" | "sqlite";
+  tables?: StoreTables;
+  transaction?: boolean;
+}
+
+/** A store built with `transaction: true`: its `route` makes routes whose `onComplete` receives Drizzle's `tx`. */
+export type DrizzleTransactionalStore<TTx> = CloudropStore<TTx> &
+  Required<Pick<CloudropStore<TTx>, "transaction">> & { route: RouteFunction<{ tx: TTx }> };
+
+/**
+ * A cloudrop store over a Drizzle database: Postgres (node-postgres over a `Pool`, postgres.js) or SQLite
+ * (better-sqlite3, libsql/Turso, D1). Create the tables first, from `cloudropPgTables` or `cloudropSqliteTables` in
+ * your Drizzle schema or from the documented DDL; the store checks them on its first call. `tables` names them,
+ * defaults `cloudrop_files` and `cloudrop_usage`. A single node-postgres `Client` is refused: every request would
+ * share its one connection, and a transaction on it would take the others' statements with it.
+ *
+ * With `transaction: true` (Postgres only), `onComplete` runs inside the completion's transaction with Drizzle's `tx`:
+ * an app row written through `tx` commits with the upload or not at all, and routes must come from `store.route`.
+ * Postgres waits at most 2 s for the row lock, so a second `/complete` of the same file answers busy. Keep storage and
+ * other network calls out of that `onComplete`; they belong in `afterComplete`.
+ *
+ * Usage:
+ * ```ts
+ * const db = drizzle(new Pool({ connectionString }));
+ * const store = drizzleStore(db, { dialect: "postgres", transaction: true });
+ * const avatars = store.route({ accept: "image/*", maxSize: "5MB", authorize }, {
+ *   owner: ({ userId }) => userId,
+ *   onComplete: async ({ tx, userId, file }) => {
+ *     await tx.update(users).set({ avatar: file.key }).where(eq(users.id, userId));
+ *   },
+ * });
+ * export const cloudrop = createCloudrop({ storage, secret, store, routes: { avatars } });
+ * ```
+ */
+export function drizzleStore<TDb extends DrizzlePostgres>(
+  db: TDb,
+  options: { dialect: "postgres"; tables?: StoreTables; transaction: true },
+): DrizzleTransactionalStore<DrizzleTransaction<TDb>>;
+export function drizzleStore(
+  db: DrizzlePostgres,
+  options: { dialect: "postgres"; tables?: StoreTables; transaction?: false },
+): CloudropStore;
+export function drizzleStore(
+  db: DrizzleSqlite | DrizzleAsyncSqlite,
+  options: { dialect: "sqlite"; tables?: StoreTables },
+): CloudropStore;
+export function drizzleStore(
+  db: DrizzlePostgres | DrizzleSqlite | DrizzleAsyncSqlite,
+  options: DrizzleStoreOptions,
+): CloudropStore<unknown> {
+  const { dialect, tables, transaction = false } = options;
+  if (dialect === "sqlite") {
+    if (transaction) {
+      throw configError(
+        "transaction: true needs Postgres. SQLite has a single writer, so a transaction held open while onComplete runs would block every other upload; leave the option out and completions use a lease.",
+      );
+    }
+    return sqlStore(sqliteExecutor(db as DrizzleSqlite | DrizzleAsyncSqlite), { tables });
+  }
+  if (dialect !== "postgres") {
+    throw configError(
+      `drizzleStore's dialect ${JSON.stringify(dialect)} is not supported. Use "postgres" or "sqlite".`,
+    );
+  }
+  const store = sqlStore(postgresExecutor(db as DrizzlePostgres, transaction), { tables });
+  // routeFor brands routes with this very object, the one the app passes to createCloudrop.
+  return transaction ? Object.assign(store, { route: routeFor(store) }) : store;
+}

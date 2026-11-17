@@ -49,6 +49,8 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run verify` for every change: check (Biome, file size, complexity), typecheck, test, build and package checks.
 - `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes.
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
+- `scripts/check-drizzle-versions.sh` for Drizzle adapter changes: it type-checks the adapter against drizzle-orm 1.0
+  in a temporary copy of the package (CI job `drizzle-1`); the workspace installs 0.45.
 - `bun run test:db` for store and adapter changes: Postgres 18 in Docker (port 19500, `CLOUDROP_POSTGRES_PORT`) and
   SQLite through `node:sqlite`; it generates the Prisma test clients and fails when Docker is missing.
 - `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a

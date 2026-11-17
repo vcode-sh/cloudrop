@@ -704,6 +704,194 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ## Drizzle adapter (task D)
 
+### M5-T44: `drizzleStore`'s overloads, structural database types, and Drizzle's own `tx`
+
+- **Decision:** `drizzleStore(db, { dialect, tables?, transaction? })` has three overloads. Postgres with the literal
+  `transaction: true` returns `DrizzleTransactionalStore<DrizzleTransaction<TDb>>`: a `CloudropStore` with
+  `transaction` and `route = routeFor<{ tx }>(store)`, attached to the store object itself as M5-T77 does for
+  `sqlStore`. Postgres without it, and SQLite, return a plain `CloudropStore`: no `transaction`, so completions use the
+  lease. The database is typed structurally (`DrizzlePostgres`: `execute` and `transaction`; `DrizzleSqlite`: `all`,
+  `run` and a synchronous `transaction`), so any Drizzle Postgres driver fits and no Drizzle class type, with its schema
+  generics, is named. `DrizzleTransaction<TDb>` is the parameter of `TDb["transaction"]`'s callback, which is Drizzle's
+  `PgTransaction<…>` with the app's schema (type tests pin it for node-postgres with a schema and for postgres.js).
+- **Why:** spec §5.5 (typed `tx`) and §7. A structural type avoids the variance trouble of `PgDatabase<…>`'s schema
+  parameters and keeps the import to `SQL` and `sql`.
+- **If wrong:** a `transaction` option passed as a `boolean` variable matches no overload; an app that decides at run
+  time writes two calls. A fourth overload can be added without breaking anyone.
+- **Status:** decided.
+- **Source:** task D, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle.ts`, `src/adapters/drizzle/postgres.ts`, `src/adapters/drizzle.test.ts`.
+- **Amended 2026-11-17 (fix round 1):** the option interfaces no overload could take (`DrizzleStoreOptions`, with a
+  `dialect` union) are no longer exported; callers use the overloads' literal options. The SQLite overload also takes
+  `DrizzleAsyncSqlite` (M5-T46).
+
+### M5-T45: Postgres through Drizzle: statements cut at placeholders, two result shapes, times as text
+
+- **Decision:** each core statement becomes Drizzle SQL by cutting the text at the binder's placeholders: `$n` takes
+  `params[n-1]`, SQLite's `?` the next value. Each placeholder becomes `sql.param`, the text between them `sql.raw`,
+  and Drizzle numbers them again while the `::type` casts stay in the text. `execute()`'s answer is read as rows when it
+  is an array (postgres.js) or has `rows` (node-postgres); any other shape fails with a message naming the supported
+  drivers. Batches and transaction mode run in `db.transaction`, and the store's methods inside it use that `tx`.
+  `isLockTimeout` needed no change: Drizzle's `DrizzleQueryError` keeps the driver's error as `cause` (measured at the
+  handler on both drivers).
+- **Why:** `sql.raw` takes no parameters. Drizzle's node-postgres and postgres.js drivers return `timestamptz` as
+  Postgres text (`2026-11-17 10:20:30.123+00`), not Dates. The core's `toDate` parses it with `Date.parse`, measured
+  exact to the millisecond on Node 24 (V8) and Bun 1.4.4 (JavaScriptCore), including offsets such as `-04:30`.
+- **If wrong:** a server with `DateStyle` other than `ISO` prints times `Date.parse` cannot read, and every read fails
+  loudly rather than wrongly. The fix would be an explicit `to_char` or epoch read in the core.
+- **Status:** decided.
+- **Source:** task D, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/statement.ts`, `src/adapters/drizzle/postgres.ts`.
+- **Amended 2026-11-17 (fix round 1):** an unsupported result shape is a configuration fault: it throws
+  `INVALID_CONFIG` naming the shape by its keys (`{ records, numberOfRecordsUpdated }` for the AWS Data API driver),
+  never its values.
+
+### M5-T46: SQLite through Drizzle needs a synchronous driver; batches in an immediate transaction
+
+- **Decision:** on SQLite, `drizzleStore` takes a synchronous Drizzle database (better-sqlite3, the one tested). A
+  statement runs through `all` when it starts with `SELECT` or contains `RETURNING`, otherwise through `run`. A batch
+  runs in `db.transaction(…, { behavior: "immediate" })`. An asynchronous Drizzle SQLite database (libsql, D1, the
+  proxy) is refused with `INVALID_CONFIG`, which points D1 users to `d1Executor`. `transaction: true` on SQLite is
+  refused with `INVALID_CONFIG` naming why. `better-sqlite3` ^12.11.1 (2026-06-15) and `@types/better-sqlite3` ^9.6.0
+  (2026-08-01) are devDependencies. The contract's failure trigger is armed on the store's own better-sqlite3
+  connection, because a trigger calls the function registered on the connection whose statement fired it.
+- **Why:** Drizzle has no node:sqlite driver (C0). better-sqlite3 refuses `all` for a statement that returns no rows.
+  A synchronous transaction cannot wait for an asynchronous driver's statements, so an asynchronous database would
+  commit before its batch ran. The type already rejects one; the runtime check is for JavaScript callers.
+- **If wrong:** supporting libsql means an `async` batch over `await db.transaction(async (tx) => …)`, proven on its
+  own lane. bun:sqlite should work like better-sqlite3 but is not tested.
+- **Status:** decided.
+- **Source:** task D, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/sqlite.ts`, `src/adapters/drizzle.db.integration.test.ts`,
+  `packages/cloudrop/package.json`.
+- **Amended 2026-11-17 (fix round 1):** asynchronous SQLite is supported, not refused. A Drizzle database with
+  `batch` (libsql/Turso, D1) gets `DrizzleAsyncSqlite`: `query` awaits `all` or `run`, and a batch goes through
+  `db.batch`, which runs its statements in order and atomically (libsql's `client.batch` wraps them in one
+  transaction; D1's batch is atomic). `transaction: true` stays Postgres only. The read/write test is now
+  `/^\s*SELECT\b|\bRETURNING\s/i`: a table named `returning` is quoted, so the word is followed by `"`, not whitespace.
+  `@libsql/client` ^0.18.0 (2026-09-02) is a devDependency, and the store contract runs on a local libsql file
+  database in `test:db`. It declares `transaction` and `failureInjection` as gaps:
+  - libsql 0.5.29's `Database.function` throws "not implemented", and no SQLite state survives the rollback the
+    failure causes. A flag row rolls back with it, and `total_changes()` does not move when the usage write is the
+    statement that fails.
+  - Batch atomicity on libsql is proven by reserve's duplicate-id case (probe F4: sequential statements fail it).
+  Drizzle over D1 is task F's to run, in the Wrangler lane.
+
+### M5-T47: `cloudropTables({ dialect, tables? })`, with explicit types, matched against the DDL
+
+- **Decision:** `cloudropTables` takes the same `{ dialect, tables? }` as `drizzleStore`, not spec §3's
+  `cloudropTables({ files?, usage? })`, so one options object can feed both. It returns `pg-core` or `sqlite-core`
+  tables with spec §3's columns, the plain DDL's index names (`<table>_<columns>_idx`) and, on Postgres, the CHECKs
+  named as Postgres names an unnamed column CHECK (`<table>_<column>_check`). `status` is typed `FileStatus`. Sizes
+  and counters read as numbers. Times read as Dates: `timestamptz` on Postgres, `timestamp_ms` integers on SQLite. The
+  column types are written by hand, because the package emits declarations without inference (`isolatedDeclarations`);
+  the compiler checks the builders against them, and type tests pin `$inferSelect` for both dialects. A db-lane test
+  compares every column, index and CHECK with the catalogue of tables made from the plain DDL, for the default and
+  renamed tables.
+- **Why:** spec §3, so an app's drizzle-kit migration builds the tables the store was proven on. Table names are
+  validated as the store validates them.
+- **If wrong:** a Drizzle release that renames its builder types breaks the declared types at compile time, not at
+  run time; the peer range may then need an upper bound. (Fix round 2: the types now name no builder types; see
+  M5-T51.)
+- **Status:** decided.
+- **Source:** task D, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/tables.ts`, `src/adapters/drizzle/postgres-tables.ts`,
+  `src/adapters/drizzle/sqlite-tables.ts`, `src/adapters/drizzle-tables.db.integration.test.ts`.
+- **Amended 2026-11-17 (fix round 1):** `cloudropTables` is replaced by `cloudropPgTables(options?)` and
+  `cloudropSqliteTables(options?)`, with options `{ tables? }` (`CloudropTablesOptions`). Each lives in its own module
+  and imports only its dialect's Drizzle core, so an app's schema file bundles one of them. The db-lane comparison
+  now includes each index's uniqueness (§3: the `key` index is not unique). Spec §3 and §7 are amended to match.
+
+### M5-T48: `cloudrop/adapters/drizzle` is 13.76 kB summed; its ceiling is 15 kB (M4-F24)
+
+- **Decision:** the drizzle budget goes from 13 kB to 15 kB. Measured: 13.76 kB summed with its chunks (the SQL core
+  8.51 kB, the `routeFor` chunk 1.51 kB, errors 0.88 kB, input 0.39 kB, the entry 2.54 kB). Bundled and minified it is
+  7.49 kB, against 6.53 kB for `cloudrop/adapters/sql`.
+- **Why:** the 13 kB ceiling was "the core plus 3 kB" when the core was smaller. Since then the core grew in task C's
+  fix round, and the adapters share the `routeFor` chunk (M5-T77). Drizzle's own code is about 1 kB minified. The
+  ceiling is a guard against accidents, not a target, so it gets about the same headroom as `adapters/sql`.
+- **If wrong:** the prisma ceiling (13 kB) will likely need the same raise when task E lands.
+- **Status:** decided.
+- **Source:** task D, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts`.
+- **Amended 2026-11-17 (fix round 1):** after the libsql/D1 batch path, the single-`Client` check and the longer
+  TSDoc, the entry is 3.36 kB and the sum 14.84 kB (7.81 kB bundled and minified, against 6.65 kB for
+  `adapters/sql`). The ceiling is now 17 kB, about the headroom prisma has at 16 kB for 12.37 kB.
+
+### M5-T49: a single node-postgres `Client` is refused
+
+- **Decision:** `drizzleStore` refuses, with `INVALID_CONFIG`, a Drizzle database whose `$client` is a node-postgres
+  client that is not a pool. The test is Drizzle's own: `query` and `connect` are present and the constructor's name
+  does not contain "Pool". The message says why and what to pass instead (`drizzle(new Pool(…))`, or postgres.js).
+  The factory's TSDoc says the same.
+- **Why:** Drizzle's node-postgres driver checks out a connection for a transaction only from a pool. With a `Client`,
+  it runs `BEGIN` on the one connection every other request uses. The review measured the result: a reserve made by
+  another request while an `onComplete` transaction was open answered `reserved`, then vanished when that
+  transaction rolled back.
+- **If wrong:** a pool-like client whose class name lacks "Pool" is refused; renaming the class or wrapping it in a
+  pool fixes it. PGlite and other single-connection drivers are not detected; they are not tested.
+- **Status:** decided.
+- **Source:** task D fix round 1, 2026-11-17 (review I1).
+- **Visible in:** `src/adapters/drizzle/postgres.ts`, `src/adapters/drizzle.ts`, `src/adapters/drizzle.test.ts`.
+
+### M5-T50: one set of driver rows for every SQL store
+
+- **Decision:** `src/testing/db/driver-rows.ts` exports `driverRows(storeOver)`: 2^53 − 1 and millisecond times round
+  trip, and eight concurrent reserves of one owner fill a quota exactly. The sql, Drizzle and Prisma db tests call it
+  for each of their drivers. Drizzle's copied `encodingRow` is gone. The raced first reserves of new owners
+  (M5-T74) are a store-contract case since task E's merge, so they run on every Drizzle store: node-postgres,
+  postgres.js, better-sqlite3 and libsql.
+- **Why:** these rows break only through a driver's encodings and connections, so every adapter must run them.
+- **If wrong:** nothing; a driver that needs more rows adds them beside the call.
+- **Status:** decided.
+- **Source:** task D fix round 1, 2026-11-17 (review I2).
+- **Visible in:** `src/testing/db/driver-rows.ts`, `src/adapters/{sql,drizzle,prisma}.db.integration.test.ts`.
+
+### M5-T51: the `drizzle-orm` peer range (`>=0.45.0 <2` since fix round 2)
+
+- **Decision:** the optional peer is `drizzle-orm >=0.45.0 <1`.
+- **Why:** checked against `drizzle-orm@1.0.0-rc.5` (2026-10-21), the newest RC that is two weeks old, which the
+  owner's app-a uses. At run time it passes: the store contract on node-postgres, postgres.js, better-sqlite3 and
+  libsql, the handler rows and the table comparison all pass (182 passed, 10 gap skips). The types do not:
+  - the declared table types name builder types that 1.0 renamed: `PgTextBuilderInitial`, `PgBigInt53BuilderInitial`,
+    `PgIntegerBuilderInitial`, `PgTimestampBuilderInitial` and the `SQLite…BuilderInitial` types are gone, and
+    `TableConfig` gained `isAlias`;
+  - a synchronous database's `transaction` now returns a conditional type, which `DrizzleSqlite` does not accept.
+  The tests' own Drizzle types changed too (`PgTransaction`, `ExtractTablesWithRelations`, `SQLiteSyncDialect`).
+- **If wrong:** supporting 1.0 needs a second set of declared table types for 1.0's builders, chosen through the
+  peer's version, and a looser `DrizzleSqlite.transaction`. The executors themselves need no change.
+- **Status:** decided.
+- **Source:** task D fix round 1, 2026-11-17 (review M7).
+- **Visible in:** `packages/cloudrop/package.json`.
+- **Amended 2026-11-17 (fix round 2):** the peer range is now **`>=0.45.0 <2`**. drizzle-orm 1.0 must work, types
+  included, because app-a is on 1.0.0-rc.5. What was needed:
+  - **Table types without builder type names.** Each column type is now built from what both lines export: the
+    builder functions' return types (`ReturnType<typeof text>`, `ReturnType<typeof timestamp>`, the `data: number`
+    member of `bigint`'s return union), their `this`-typed methods (`ReturnType<B["notNull"]>`, `["primaryKey"]`),
+    `$type<FileStatus>` instantiated on a type-only `declare const` stand-in, and each table's type as
+    `ReturnType<typeof pgTable<string, Columns>>` (`sqliteTable` on SQLite).
+  - **Two SQLite builders by instantiation expression.** `text` erases to `any` through its named overload on both
+    lines, so it comes from `typeof text<string, [string, ...string[]], never>`: `never` satisfies 0.45's length
+    parameter and 1.0's mode parameter alike. The millisecond timestamp comes from `typeof integer<"timestamp_ms">`.
+    Those are the name-less overloads, typed `""` on 0.45, so the SQLite text and time helpers cast their builders
+    to them. That is the only cast, and only the name and length type differ. The row-type tests and the catalogue
+    test pin the result.
+  - **`DrizzleSqlite.transaction` is non-generic**, `(run: (tx) => SqlRow[][], config?) => unknown`. 0.45 types the
+    answer as the callback's; 1.0 uses a conditional type that refuses async callbacks; both fit this shape. The
+    batch casts the answer back to `SqlRow[][]`.
+  - **The type tests name only what both lines export.** The expected `tx` type is Drizzle's own: the parameter of
+    `db.transaction`'s callback. `drizzleSql` on SQLite is checked by running it on better-sqlite3.
+  - **Proof.** Against 1.0.0-rc.5, from a scratch install in the worktree:
+    - `tsconfig.drizzle.json` (the adapter, its tests and their imports) type-checks;
+    - the unit file passes (10);
+    - the Drizzle db files pass (182 passed, 10 gap skips);
+    - a consumer of the built `dist` pins the §3 row types.
+    The same checks pass against the installed 0.45.4.
+  - **Regression guard.** `scripts/check-drizzle-versions.sh [version]` type-checks that config against another
+    drizzle-orm in a temporary copy of the package, with every other dependency pinned to the installed version. The
+    CI job `drizzle-1` runs it for 1.0.0-rc.5. Restoring round 1's generic `transaction` makes it fail (two
+    "No overload matches" errors).
+
 <!-- Task D appends its entries above this line. -->
 
 ## Prisma adapter (task E)

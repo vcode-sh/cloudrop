@@ -34,15 +34,15 @@ export default [
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
   // The database adapters, summed with their chunks: the SQL core (src/store/sql) and route() (for store.route) count
   // toward each adapter that imports them. Measured 2026-11-17: sql 12.79 kB (core and four executors; 9.62 kB before
-  // the core and route() became chunks shared with the ORM adapters); drizzle 20 B, a placeholder until its adapter
-  // lands; prisma 12.18 kB (its own file 0.88 kB, the core 8.59 kB, route() with errors and input 2.78 kB), budgeted
-  // 16 kB for headroom (M4-F24, M5-T58).
+  // the core and route() became chunks shared with the ORM adapters); drizzle 14.84 kB after its fix round (its own
+  // file 3.36 kB, with libsql and D1 batches), budgeted 17 kB (M5-T48); prisma 12.18 kB (its own file 0.88 kB, the
+  // core 8.59 kB, route() with errors and input 2.78 kB), budgeted 16 kB for headroom (M4-F24, M5-T58).
   { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "14 kB", ...summed },
   {
     name: "cloudrop/adapters/drizzle",
     path: withImportedChunks("adapters/drizzle.js"),
     gzip: true,
-    limit: "13 kB",
+    limit: "17 kB",
     ...summed,
   },
   {
