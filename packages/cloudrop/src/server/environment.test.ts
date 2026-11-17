@@ -121,6 +121,9 @@ describe("configuration from the environment", () => {
     setEnvironment();
     expect((await post()).status).toBe(200);
     expect(await cloudrop.api.head("a.png")).toEqual({ data: null, error: null });
+    // Once complete, the settings are kept for the life of the server.
+    for (const name of VARIABLES) vi.stubEnv(name, "");
+    expect((await post()).status).toBe(200);
   });
 
   it("checks the environment at construction in development, so `next dev` fails at start", () => {

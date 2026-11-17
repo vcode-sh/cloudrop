@@ -21,13 +21,16 @@ export interface Refusal {
   readonly message: string;
 }
 
+const SIGN_IN_MESSAGE = "Sign in to upload files here.";
+const NOT_ALLOWED_MESSAGE = "You are not allowed to upload files here.";
+
 /** For a caller who is not signed in. */
-export function unauthorized(message = "Sign in to upload files here."): Refusal {
+export function unauthorized(message: string = SIGN_IN_MESSAGE): Refusal {
   return { [DENIED]: true, code: "UNAUTHORIZED", message };
 }
 
 /** For a signed-in caller who may not upload this: a quota, a plan or a role. */
-export function forbidden(message = "You are not allowed to upload files here."): Refusal {
+export function forbidden(message: string = NOT_ALLOWED_MESSAGE): Refusal {
   return { [DENIED]: true, code: "FORBIDDEN", message };
 }
 
@@ -39,8 +42,8 @@ export function isRefusal(value: unknown): value is Refusal {
 /** A refusal built by plain JavaScript or another copy of cloudrop may lack a code or a message; it still refuses. */
 export function refusalError(refusal: Refusal): CloudropError {
   const forbids = refusal.code === "FORBIDDEN";
-  const fallback = forbids ? forbidden() : unauthorized();
-  const message = typeof refusal.message === "string" && refusal.message !== "" ? refusal.message : fallback.message;
+  const fallback = forbids ? NOT_ALLOWED_MESSAGE : SIGN_IN_MESSAGE;
+  const message = typeof refusal.message === "string" && refusal.message !== "" ? refusal.message : fallback;
   return new CloudropError(forbids ? "FORBIDDEN" : "UNAUTHORIZED", message);
 }
 

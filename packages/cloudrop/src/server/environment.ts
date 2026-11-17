@@ -35,13 +35,16 @@ function readSecrets(secret: unknown): [string, ...string[]] {
 export function environmentReader(secret: unknown, storage: StorageDriver): () => Promise<Result<TokenKeys>> {
   let tokenKeys =
     secret !== undefined || fromEnv("NODE_ENV") === "development" ? importTokenKeys(readSecrets(secret)) : undefined;
+  let resolved: Result<TokenKeys> | undefined;
   return async () => {
+    if (resolved) return resolved;
     const keys = tokenKeys ? ok(tokenKeys) : readSetting(() => importTokenKeys(readSecrets(secret)));
     if (keys.data) tokenKeys = keys.data;
     const storageProblem = storageSettingsProblem(storage);
     if (keys.error || storageProblem) {
       return fail(configError([storageProblem?.message, keys.error?.message].filter(Boolean).join(" ")));
     }
-    return ok(await keys.data);
+    resolved = ok(await keys.data);
+    return resolved;
   };
 }
