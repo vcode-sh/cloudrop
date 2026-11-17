@@ -13,7 +13,7 @@
 // upload() that a /complete may have finished: this page has no handle to send it again (ruling M3-U82).
 
 import type { Ticket } from "./endpoints.ts";
-import type { Entry } from "./file-run.ts";
+import type { Entry } from "./entry.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import type { Job } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";

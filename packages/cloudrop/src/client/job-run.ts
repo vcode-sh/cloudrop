@@ -4,7 +4,8 @@
 
 import { fail } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
-import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile } from "./file-run.ts";
+import { type Entry, outcomeOf, pauseFile, resumeFile } from "./entry.ts";
+import { abortFile, runFile } from "./file-run.ts";
 import { launch } from "./launch.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { letGo } from "./persist.ts";

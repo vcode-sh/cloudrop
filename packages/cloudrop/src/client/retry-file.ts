@@ -3,8 +3,8 @@
 // by every file of one job.retry() that needs one.
 
 import type { CloudropError } from "../errors.ts";
+import type { Entry } from "./entry.ts";
 import { NEEDS_NEW_TICKET } from "./failures.ts";
-import type { Entry } from "./file-run.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
 import type { FileOutcome } from "./types.ts";

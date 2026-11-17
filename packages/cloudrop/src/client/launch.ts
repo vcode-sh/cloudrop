@@ -4,8 +4,8 @@
 
 import { CloudropError, fail, type Result } from "../errors.ts";
 import type { Ticket } from "./endpoints.ts";
+import { type Entry, held, settle } from "./entry.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
-import { type Entry, held, settle } from "./file-run.ts";
 import type { Job } from "./job-run.ts";
 import { uploadOf } from "./persist.ts";
 import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retry.ts";

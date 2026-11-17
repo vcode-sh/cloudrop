@@ -1,7 +1,7 @@
 // The page's events that reach a job: connectivity while a file runs (spec §4.6, rulings M3-U28, M3-U39 and M3-U48),
 // and pagehide while a failed file holds its ticket (spec §4.7, M3-U33).
 
-import type { Entry } from "./file-run.ts";
+import type { Entry } from "./entry.ts";
 import type { Upload } from "./upload.ts";
 
 /**

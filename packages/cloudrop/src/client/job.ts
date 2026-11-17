@@ -4,7 +4,8 @@
 
 import { fail, type Result } from "../errors.ts";
 import { type Arguments, readArguments } from "./arguments.ts";
-import { abortFile, createEntry, type Entry, pauseFile, resumeFile } from "./file-run.ts";
+import { createEntry, type Entry, pauseFile, resumeFile } from "./entry.ts";
+import { abortFile } from "./file-run.ts";
 import { createJob, firstRun, type Job, resultOf } from "./job-run.ts";
 import { snapshotOf } from "./job-snapshot.ts";
 import { type Retried, retryFiles } from "./retry-file.ts";
