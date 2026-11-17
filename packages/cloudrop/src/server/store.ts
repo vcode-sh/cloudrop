@@ -85,6 +85,7 @@ export interface OwnerUsage {
  * given. Every write also sets the row's `updated_at` to `now`.
  *
  * Usage counters change only for rows with an owner, always in the same unit as the status change that moves the bytes.
+ * A change that moves no bytes (an owner-less row, or leaving an ended status) does not write the usage row at all.
  * `TTx` is the transaction handle `onComplete` receives when the store has `transaction`.
  */
 export interface CloudropStore<TTx = never> {
@@ -92,20 +93,27 @@ export interface CloudropStore<TTx = never> {
    * Writes the accepted files of one `/upload` as `pending` rows of one owner, adding each reserved file's size to the
    * owner's reserved bytes. With an owner and a `limit`, each file in order is reserved only when the owner's
    * `reservedBytes + activeBytes + size <= limit` (counting the files reserved before it in this call); otherwise it is
-   * `"over-quota"` and nothing of it is written. Without an owner the limit does not apply. Atomic for the whole call.
-   * Answers one outcome per file, in order.
+   * `"over-quota"` and nothing of it is written. The quota applies from the first file of an owner the store has never
+   * counted (no usage row yet counts as zeros). Without an owner the limit does not apply and no usage is written. The
+   * owner's usage row is created by its first reserved file, so a call that reserves nothing leaves none. A file whose
+   * id already has a row makes the call throw (a primary-key violation, never `ON CONFLICT DO NOTHING`), and then
+   * nothing of the call is written. Atomic for the whole call. Answers one outcome per file, in order.
    */
   reserve(
     input: { owner: string | null; limit: number | null; expiresAt: Date; files: readonly NewFile[] },
     now: Date,
   ): Promise<readonly ("reserved" | "over-quota")[]>;
-  /** Stores the multipart upload id on a `pending` row whose `upload_id` is null or already this id: true (so a repeat
-   *  is true). False for any other row, or none. */
+  /** Stores the multipart upload id on a `pending` row whose `upload_id` is null or already this id: true, and
+   *  `updated_at = now` (a repeat stamps it again). False for any other row, or none, which is left unchanged. */
   attach(id: string, uploadId: string, now: Date): Promise<boolean>;
   get(id: string): Promise<FileRecord | null>;
   /**
    * Takes the row for one `/complete`: a `pending` row, or a `completing` one claimed more than `leaseMs` before `now`,
-   * becomes `completing` with this claim and `claimed_at = now`. A `completing` row with a live claim is `busy`.
+   * becomes `completing` with this claim and `claimed_at = now`. A claim is live through exactly `leaseMs`: at
+   * `claimed_at + leaseMs` the row is still `busy`, one millisecond later it can be taken. A `completing` row with a live
+   * claim is `busy` even for the token that holds it (the store does not know who holds a token). `expires_at` is not
+   * read: the server refuses a dead token before it claims. `completed` answers the record (a replay), an ended status
+   * `ended` with the record; neither changes the row.
    */
   claim(id: string, claim: string, now: Date, leaseMs: number): Promise<ClaimOutcome>;
   /** Hands a claimed row back after `onComplete` threw: `completing` with this claim → `pending`, its claim and
@@ -114,13 +122,15 @@ export interface CloudropStore<TTx = never> {
   /**
    * `completing` with this claim → `completed` with `result` and `completed_at = now`; the owner's reserved bytes drop
    * by the size, active bytes rise by it and files by one. Unchanged for any other row: a repeat answers the completed
-   * row, a lost claim the row another `/complete` holds.
+   * row, a lost claim the row another `/complete` holds. `claim` and `claimed_at` stay as they were, recording which
+   * claim completed the row.
    */
   complete(id: string, claim: string, result: string | null, now: Date): Promise<Transition>;
   /**
    * Moves a row from exactly `from` to `to` and sets `ended_at = now`; `cleaned: true` also sets `cleaned_at = now`.
    * Usage follows `from`: `pending` or `completing` releases the reserved bytes; `completed` releases the active bytes
-   * and one file; an ended status releases nothing. Unchanged when the row is in another status, or missing.
+   * and one file; an ended status releases nothing. `claim` and `claimed_at` stay as they were. Unchanged when the
+   * row is in another status, or missing.
    */
   end(id: string, from: FileStatus, to: EndedStatus, now: Date, options?: { cleaned?: boolean }): Promise<Transition>;
   /** Ends every `pending` row of one owner as `aborted`, releasing their reserved bytes. `completing` and later rows
@@ -146,8 +156,10 @@ export interface CloudropStore<TTx = never> {
   usage(owner: string): Promise<OwnerUsage>;
   /**
    * Repairs an owner's counters: locks the owner's usage row, then recounts it from the owner's rows, so a concurrent
-   * `reserve` is never lost. True when a counter changed. Stamps `updated_at` with the database's clock, as no time is
-   * passed.
+   * `reserve` is never lost. When the owner has rows but no usage row, it creates the row (on Postgres: insert it
+   * with `ON CONFLICT DO NOTHING`, then lock, then recount). A missing row counts as zeros, so an owner whose recount
+   * is all zeros gets no row. True when a counter changed (or the row was created). Writes only then, and stamps
+   * `updated_at` with the database's clock, as no time is passed.
    */
   reconcile(owner: string): Promise<boolean>;
   /** One page of the owners that have counters, in the database's order of owner; `cursor` as for `stale`. */
