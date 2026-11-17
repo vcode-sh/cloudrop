@@ -17,19 +17,31 @@
       "!**/*.md"
     ]
   },
-  "formatter": { "indentStyle": "space", "lineWidth": 120 },
+  "formatter": {
+    "indentStyle": "space",
+    "lineWidth": 120
+  },
   "linter": {
     "rules": {
       "preset": "recommended",
       "complexity": {
-        "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": {
+            "maxAllowedComplexity": 15
+          }
+        }
       }
     }
   },
   "overrides": [
     {
       "includes": ["packages/cloudrop/**", "!packages/cloudrop/src/react.ts", "!packages/cloudrop/src/react/**"],
-      "linter": { "domains": { "react": "none" } }
+      "linter": {
+        "domains": {
+          "react": "none"
+        }
+      }
     },
     {
       "includes": ["packages/cloudrop/src/client.ts", "packages/cloudrop/src/client/**", "!**/*.test.ts"],
@@ -58,6 +70,88 @@
                       "cloudrop"
                     ],
                     "message": "cloudrop/client must not import storage, server or test code, nor another entry that pulls them in. Import from errors, input, part-size, plan or protocol."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cloudrop/src/store/**", "!**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/server/**",
+                      "!**/server/store",
+                      "!**/server/store.ts",
+                      "**/client/**",
+                      "**/storage/**",
+                      "**/testing/**",
+                      "**/protocol/**",
+                      "**/adapters/**",
+                      "**/adapters",
+                      "**/index",
+                      "**/index.*",
+                      "**/next",
+                      "**/next.*",
+                      "**/node",
+                      "**/node.*",
+                      "**/react",
+                      "**/react.*",
+                      "**/client",
+                      "**/client.*",
+                      "cloudrop",
+                      "cloudrop/*"
+                    ],
+                    "message": "The SQL core must not import an adapter, an entry, or server, client, storage or test code. It may import the store types (server/store) and errors."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cloudrop/src/adapters/**", "!**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/server/**",
+                      "!**/server/store",
+                      "!**/server/store.ts",
+                      "**/client/**",
+                      "**/storage/**",
+                      "**/testing/**",
+                      "**/protocol/**",
+                      "**/index",
+                      "**/index.*",
+                      "**/next",
+                      "**/next.*",
+                      "**/node",
+                      "**/node.*",
+                      "**/react",
+                      "**/react.*",
+                      "**/client",
+                      "**/client.*",
+                      "cloudrop",
+                      "cloudrop/*"
+                    ],
+                    "message": "An adapter imports only the SQL core (store/sql), the store types (server/store) and errors, so it pulls no server, client or storage code into an app."
                   }
                 ]
               }

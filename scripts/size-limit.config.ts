@@ -6,7 +6,7 @@
 // is a guard against accidents, not a target. The size measured then is noted beside each; a change that grows an
 // entry by more than 5% says so in its commit and decision entry.
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const dist = join(import.meta.dirname, "../packages/cloudrop/dist");
 
@@ -15,8 +15,11 @@ function withImportedChunks(entry: string): string[] {
   const files = new Set([entry]);
   for (const file of files) {
     const code = readFileSync(join(dist, file), "utf8");
-    // The build writes static imports as `import "./chunk.js"` or `import { a } from "./chunk.js"`.
-    for (const [, chunk] of code.matchAll(/(?:import|from)\s*"\.\/([^"]+\.js)"/g)) if (chunk) files.add(chunk);
+    // The build writes static imports as `import "./chunk.js"` or `import { a } from "./chunk.js"`; an entry in a
+    // subdirectory (dist/adapters/) reaches the chunks with "../".
+    for (const [, chunk] of code.matchAll(/(?:import|from)\s*"(\.\.?\/[^"]+\.js)"/g)) {
+      if (chunk) files.add(join(dirname(file), chunk));
+    }
   }
   return [...files].map((file) => join(dist, file));
 }
@@ -29,6 +32,24 @@ export default [
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
+  // The database adapters, summed with their chunks: the SQL core (src/store/sql) counts toward each adapter that
+  // imports it. Measured 2026-11-17: sql 9.62 kB (core and four executors; 5.89 kB bundled and minified, most of it
+  // the SQL text); drizzle and prisma 20 B, placeholders until their adapters land, budgeted as the core plus 3 kB.
+  { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "14 kB", ...summed },
+  {
+    name: "cloudrop/adapters/drizzle",
+    path: withImportedChunks("adapters/drizzle.js"),
+    gzip: true,
+    limit: "13 kB",
+    ...summed,
+  },
+  {
+    name: "cloudrop/adapters/prisma",
+    path: withImportedChunks("adapters/prisma.js"),
+    gzip: true,
+    limit: "13 kB",
+    ...summed,
+  },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB.
   {
