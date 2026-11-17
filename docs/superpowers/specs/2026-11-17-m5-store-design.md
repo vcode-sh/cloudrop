@@ -283,10 +283,12 @@ With a store only (without one each resolves `INVALID_CONFIG`):
     transaction?<T>(run: (executor: Omit<SqlExecutor, "transaction">, tx: unknown) => Promise<T>): Promise<T>;
   }
   ```
-- **`cloudrop/adapters/sql` (`M5-T12`).** `sqlStore(executor, { tables? })` plus shipped, structurally typed executor
-  factories (code, not doc snippets): `pgExecutor(pool)` (node-postgres, with transactions), `postgresJsExecutor(sql)`
-  (with transactions), `sqliteExecutor(db)` (`node:sqlite`, batch through `BEGIN IMMEDIATE`), `d1Executor(d1)` (batch
-  through `db.batch()`, no transactions).
+- **`cloudrop/adapters/sql` (`M5-T12`).** `sqlStore(executor, { tables?, transaction? })` plus shipped, structurally
+  typed executor factories (code, not doc snippets): `pgExecutor(pool)` (node-postgres, with transactions),
+  `postgresJsExecutor(sql)` (with transactions), `sqliteExecutor(db)` (`node:sqlite`, batch through `BEGIN IMMEDIATE`),
+  `d1Executor(d1)` (batch through `db.batch()`, no transactions). (Amended 2026-11-17, M5-T92: the store uses the
+  executor's transaction only with `transaction: true`, as the ORM adapters do; every transactional store is a
+  `TransactionalStore<TTx>` from `cloudrop`, M5-T93.)
 - **`cloudrop/adapters/drizzle` (`M5-T13`).** `drizzleStore(db, { dialect, tables?, transaction? })` over the core using
   Drizzle's raw `sql` execution, normalising each driver's result shape (`{ rows }` for node-postgres, an array for
   postgres.js, `.all()` for SQLite); `transaction: true` (Postgres only, `INVALID_CONFIG` on SQLite) wraps

@@ -105,7 +105,8 @@ One record per upload, in the IndexedDB database `cloudrop`:
 Never a presigned URL, an ETag or a part list.
 
 The token is a bearer credential for its upload for 24 hours: it signs `PUT`s for its key, completes the upload, and
-through `/abort` cancels it or deletes its finished file. It is signed, not encrypted, so what `authorize` returned and
+through `/abort` cancels it or deletes its finished file (not with a [database store](store.md), which keeps a finished
+file). It is signed, not encrypted, so what `authorize` returned and
 the metadata can be read from it.
 
 ## When a record is deleted
@@ -142,7 +143,7 @@ its `/abort`, or at once when no `/abort` is sent.
   upload another tab holds is still listed, since that tab may let it go; `resume()` of it is `UPLOAD_IN_USE` until
   then.
 - A record is saved only once its lock is held. Without the lock, a second holder could complete an upload whose
-  `/abort` this page then sends, deleting the stored file.
+  `/abort` this page then sends, deleting the stored file (without a [database store](store.md)).
 
 ## Namespace and sign-out
 

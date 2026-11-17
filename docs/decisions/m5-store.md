@@ -1324,3 +1324,30 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts`.
+
+### M5-T98: the store guide after the docs review: quick start, adapter table, and corrected guarantees
+
+- **Decision:**
+  - `docs/guide/store.md` opens with a three-step quick start (create the tables, build the store, pass it to
+    `createCloudrop`) and has one table of the three adapters by databases, completion mode and limits.
+  - "Never swallow an error from `tx`" now states what happens: Postgres refuses cloudrop's own completion record in
+    the aborted transaction, every retry gets a retryable `SERVER_ERROR`, and the sweep later expires the upload and
+    deletes its file. A db-lane row in `drizzle-handler.db.integration.test.ts` pins it on both Postgres drivers (fault
+    probe: an insert that does not fail completes the upload, and the row goes red).
+  - The lease guarantee lists every case in which `onComplete` runs again (a stop or a failed record before the lease
+    ends, an `onComplete` that outlasts `completionLeaseMs`, a throw), and the guide documents `completionLeaseMs`.
+  - The minor findings: a failed row write refuses every file of the `/upload`; status words mapped to
+    `api.file(id).status` and stored bytes to `activeBytes`; Prisma's table names follow `tables`; one Prisma
+    migration order (`--create-only`, add the CHECK line, apply); `--remote` for D1; `mkdir -p` before the Prisma
+    baseline; `revokeUploads` leaves a running completion alone; the sweep's stuck-completion and cleanup rules with
+    `graceMs` and `failed`; resume.md's `/abort` sentences hold without a store only; the README store sample has its
+    own `authorize`; new lines wrapped at 120. The guide also states M5-T91 (a refused file whose delete failed) and
+    M5-T92 (transaction mode is opt-in, and what it costs a pool).
+- **Why:** the docs review's I1, I2, fifteen minors and five stumbles. Every TypeScript sample of the guide and the
+  README store sample type-checked in a scratch folder inside `examples/next` (removed); a deliberate error failed. A
+  link check of ten docs found 101 relative links and anchors, none broken.
+- **If wrong:** wording only.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `docs/guide/store.md`, `README.md`, `docs/guide/resume.md`, `docs/guide/server.md`,
+  `docs/guide/testing.md`, `examples/next/README.md`, the M5 spec §7.

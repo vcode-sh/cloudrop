@@ -363,8 +363,8 @@ Why it works this way: the M2 decisions in [docs/decisions](../decisions/README.
 
 `onComplete` is a route option. It runs inside `/complete`, after the file is verified, at least once per file. Its JSON
 result reaches the client as `data.data`; without `onComplete`, `data.data` is `null`. With a [database store](store.md)
-it runs once per file, and on a transactional store its writes through `tx` commit with the upload; `owner` and
-`afterComplete` are store callbacks, described there.
+it runs once per file, and on a store built with `transaction: true` its writes through `tx` commit with the upload;
+`owner` and `afterComplete` are store callbacks, described there.
 
 ### Plugin hooks
 

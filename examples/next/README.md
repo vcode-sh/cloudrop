@@ -244,8 +244,9 @@ stateless example. Run them from the repository root; install the shell once fro
 directory with `bunx playwright install --only-shell chromium`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
-  serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards. It needs Docker, no credentials, and leaves
-  any `.env.local` alone.
+  serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards.
+  It needs Docker, no credentials, and leaves any `.env.local` alone. A pass that selects no tests fails the run,
+  unless you named files on the command line.
 - `bun run test:browser:live` runs the same tests on a real R2 bucket, with the credentials `bun run test:live` reads
   (`CLOUDROP_R2_ENV_FILE`). The bucket's CORS rule must allow `http://localhost:5173`, as above. Everything it uploads
   goes under a random `live-test/cloudrop-<hex>/` prefix, which it deletes at the end.

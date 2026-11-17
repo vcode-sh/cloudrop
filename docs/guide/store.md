@@ -1,45 +1,58 @@
 # Database store
 
 cloudrop's server is stateless by default: the signed upload token carries everything, and nothing is written
-anywhere. Pass a database store and cloudrop keeps one row per upload in two tables of your database:
+anywhere. Pass a database store and cloudrop keeps one row per upload in two tables of your database.
 
-```ts
-// lib/cloudrop.ts
-import { createCloudrop, r2, unauthorized } from "cloudrop";
-import { pgExecutor, sqlStore } from "cloudrop/adapters/sql";
-import pg from "pg";
+## Quick start
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-const store = sqlStore(pgExecutor(pool));
+1. **Create the two tables.** [Create the tables](#create-the-tables) has the SQL for Postgres and SQLite, the Drizzle
+   tables and the Prisma models. Until they exist, every upload fails with a retryable `SERVER_ERROR`, and the log
+   names the missing table (`INVALID_CONFIG`).
+2. **Build the store** with the adapter for the driver your app already uses ([Set it up](#set-it-up)). Here,
+   node-postgres with a transaction, so `onComplete` can write through `tx`:
 
-export const cloudrop = createCloudrop({
-  storage: r2({ bucket: "media" }),
-  store,
-  quota: () => 1024 * 1024 * 1024, // 1 GiB per owner
-  routes: {
-    avatar: store.route(
-      {
-        accept: "image/*",
-        maxSize: "5MB",
-        authorize: async ({ request }) => {
-          const user = await getUser(request); // your app's session lookup
-          return user ? { userId: user.id } : unauthorized();
-        },
-      },
-      {
-        owner: ({ userId }) => userId,
-        onComplete: async ({ tx, userId, file }) => {
-          await tx.query("UPDATE users SET avatar_key = $1 WHERE id = $2", [file.key, userId]);
-          return { key: file.key };
-        },
-        afterComplete: async ({ userId, file }) => {
-          await notifyFollowers(userId, file.key); // network calls belong here
-        },
-      },
-    ),
-  },
-});
-```
+   ```ts
+   import { pgExecutor, sqlStore } from "cloudrop/adapters/sql";
+   import pg from "pg";
+
+   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+   const store = sqlStore(pgExecutor(pool), { transaction: true });
+   ```
+
+3. **Pass it to `createCloudrop`**, and give each route an `owner`:
+
+   ```ts
+   // lib/cloudrop.ts
+   import { createCloudrop, r2, unauthorized } from "cloudrop";
+
+   export const cloudrop = createCloudrop({
+     storage: r2({ bucket: "media" }),
+     store,
+     quota: () => 1024 * 1024 * 1024, // 1 GiB per owner
+     routes: {
+       avatar: store.route(
+         {
+           accept: "image/*",
+           maxSize: "5MB",
+           authorize: async ({ request }) => {
+             const user = await getUser(request); // your app's session lookup
+             return user ? { userId: user.id } : unauthorized();
+           },
+         },
+         {
+           owner: ({ userId }) => userId,
+           onComplete: async ({ tx, userId, file }) => {
+             await tx.query("UPDATE users SET avatar_key = $1 WHERE id = $2", [file.key, userId]);
+             return { key: file.key };
+           },
+           afterComplete: async ({ userId, file }) => {
+             await notifyFollowers(userId, file.key); // network calls belong here
+           },
+         },
+       ),
+     },
+   });
+   ```
 
 The client needs no change: it speaks the same protocol, and gets two more answers (`QUOTA_EXCEEDED`, and a busy
 `SERVER_ERROR` while another request completes the same file) that it already handles.
@@ -65,18 +78,23 @@ with a stable `file.id`. What it cannot do without a record of its own:
 ## What it guarantees
 
 - **A row before anything is signed.** `/upload` writes one row per accepted file before it signs a URL or creates a
-  multipart upload. A row that cannot be written refuses that file with a retryable error.
-- **`onComplete` once, exactly once for database work on Postgres with a transaction.** With a transactional store
-  (`sqlStore` over `pgExecutor` or `postgresJsExecutor`, `drizzleStore` or `prismaStore` with `transaction: true`), the
-  claim on the file, your `onComplete`'s writes through `tx` and the completion's record commit together, or not at
-  all. A crash, a throw or a timeout rolls everything back, and the next `/complete` runs `onComplete` again from a clean
-  state. Writes through anything other than `tx` (your global database client, an API call) are outside that guarantee.
-- **Otherwise, once per file under a lease.** On SQLite and D1, and with an adapter built without a transaction, a
-  `/complete` claims the file for `completionLeaseMs` (5 minutes by default) while `onComplete` runs. Another
-  `/complete` of the same file is answered busy, and the client retries. `onComplete` runs again only when the server
-  crashes or stops between the claim and the completion's record, after the lease ends. An `onComplete` that throws
-  hands the claim back at once, so the retry runs it without waiting. Keep `onComplete` idempotent in this mode: write
-  with `INSERT … ON CONFLICT`, as the example's `recordUpload` does.
+  multipart upload. When the rows cannot be written, every file of that `/upload` is refused with a retryable error.
+- **`onComplete` once, exactly once for database work on Postgres with a transaction.** With a store built with
+  `transaction: true` (Postgres only, on any of the three adapters), the claim on the file, your `onComplete`'s writes
+  through `tx` and the completion's record commit together, or not at all. A crash, a throw or a timeout rolls
+  everything back, and the next `/complete` runs `onComplete` again from a clean state. Writes through anything other
+  than `tx` (your global database client, an API call) are outside that guarantee.
+- **Otherwise, once per file under a lease.** On SQLite and D1, and with any store built without `transaction: true`,
+  a `/complete` claims the file for `completionLeaseMs` while `onComplete` runs. Another `/complete` of the same file
+  is answered busy, and the client retries. `onComplete` runs again in three cases only:
+  - the server stops, or the completion's record fails, between the claim and that record, and the lease then ends;
+  - `onComplete` runs longer than the lease, which is never extended: the next `/complete` takes the file over and
+    runs `onComplete` beside the first run, whose record is then refused;
+  - `onComplete` throws: the claim is handed back at once, so the retry runs it without waiting.
+
+  `completionLeaseMs` is a `createCloudrop` option, 300000 (5 minutes) by default: set it above your slowest
+  `onComplete`. Keep `onComplete` idempotent in this mode: write with `INSERT … ON CONFLICT`, as the example's
+  `recordUpload` does.
 - **Retries are answered from the row.** A `/complete` of a completed file answers the stored result with no storage
   call and no hook, also after the token expired. So does a file deleted with `api.deleteFile`: its answer still names
   the deleted object, so a resumed client does not upload it again.
@@ -92,22 +110,31 @@ Each method of the store is one atomic unit (one statement on Postgres, one batc
 its tables on its first call: a missing table or column is logged as `INVALID_CONFIG` naming it, and clients get a
 retryable `SERVER_ERROR` until the tables are fixed.
 
+| Adapter | Databases | Completions | Limits |
+| --- | --- | --- | --- |
+| `sqlStore` (`cloudrop/adapters/sql`) | Postgres through node-postgres or postgres.js; SQLite through `node:sqlite`; Cloudflare D1 | Transaction with `{ transaction: true }` on Postgres, otherwise lease | A node-postgres `Pool`, never a single `Client` |
+| `drizzleStore` (`cloudrop/adapters/drizzle`) | Postgres through node-postgres or postgres.js; SQLite through better-sqlite3, libsql (Turso) or D1 | Transaction with `transaction: true` on Postgres, otherwise lease | A single node-postgres `Client` is refused |
+| `prismaStore` (`cloudrop/adapters/prisma`) | Prisma 7 with a driver adapter, on Postgres or SQLite | Transaction with `transaction: true` on Postgres, otherwise lease | Prisma's 5-second transaction timeout includes `onComplete`; SQLite for one process |
+
+`store.route`, and with it `tx` in `onComplete`, exists only on a store built with `transaction: true`. SQLite and D1
+have no transaction mode: an interactive transaction would hold their only writer while `onComplete` awaits.
+
 ### Plain SQL drivers: `cloudrop/adapters/sql`
 
 ```ts
 import { d1Executor, pgExecutor, postgresJsExecutor, sqliteExecutor, sqlStore } from "cloudrop/adapters/sql";
 ```
 
-| Driver | Store | Transaction |
+| Driver | Store | With `{ transaction: true }` |
 | --- | --- | --- |
-| node-postgres | `sqlStore(pgExecutor(new pg.Pool({ connectionString })))` | Yes: `tx` is the transaction's client (`tx.query`) |
-| postgres.js | `sqlStore(postgresJsExecutor(postgres(connectionString)))` | Yes: `tx` is postgres.js's transaction (`` tx`…` ``) |
-| `node:sqlite` | `sqlStore(sqliteExecutor(new DatabaseSync(path, { timeout: 5000 })))` | No: lease |
-| Cloudflare D1 | `sqlStore(d1Executor(env.DB))` | No: lease (D1 has no interactive transaction) |
+| node-postgres | `sqlStore(pgExecutor(new pg.Pool({ connectionString })))` | `tx` is the transaction's client (`tx.query`) |
+| postgres.js | `sqlStore(postgresJsExecutor(postgres(connectionString)))` | `tx` is postgres.js's transaction (`` tx`…` ``) |
+| `node:sqlite` | `sqlStore(sqliteExecutor(new DatabaseSync(path, { timeout: 5000 })))` | Refused: lease only |
+| Cloudflare D1 | `sqlStore(d1Executor(env.DB))` | Refused: lease only (D1 has no interactive transaction) |
 
 Pass a node-postgres `Pool`, never a single `Client`: the store runs a transaction on a connection of its own while
 other requests run their statements. Any other driver fits too: an executor is an object with `dialect`, `query` and an
-atomic, ordered `batch` (`SqlExecutor`).
+atomic, ordered `batch` (`SqlExecutor`), plus `transaction` for `{ transaction: true }`.
 
 On Cloudflare Workers, the D1 binding is reachable at module scope through `cloudflare:workers`:
 
@@ -182,13 +209,15 @@ and round-trips, so they match the store:
 - Postgres: [`cloudrop.prisma`](../../packages/cloudrop/src/testing/db/prisma/postgres/cloudrop.prisma)
 - SQLite: [`cloudrop.prisma`](../../packages/cloudrop/src/testing/db/prisma/sqlite/cloudrop.prisma)
 
-The model and field names are yours to change; the table and column names (`@@map`, `@map`) are fixed.
+The model and field names are yours to change. The column names (`@map`) are fixed; so are the table names
+(`@@map`), unless you pass the same names to `prismaStore` as `tables`.
 
 ## Create the tables
 
 Use the tool you query with:
 
-- **Prisma:** `prisma migrate dev` from the two models above, then add the CHECK constraints (below).
+- **Prisma:** `prisma migrate dev --create-only` from the two models above, add the CHECK line (below) to the
+  generated `migration.sql`, then apply it with `prisma migrate dev`.
 - **Drizzle:** export the tables from your schema file and let drizzle-kit create them:
 
   ```ts
@@ -201,9 +230,9 @@ Use the tool you query with:
   On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`. Read them
   freely (`db.select().from(cloudropFiles)`); write to them only through the store, which keeps the usage counters in
   step with the files.
-- **Everyone else:** run the SQL below in a migration. On D1:
-  `wrangler d1 migrations create DB cloudrop`, paste the SQLite statements into the new file, then
-  `wrangler d1 migrations apply DB`.
+- **Everyone else:** run the SQL below in a migration. On D1: `wrangler d1 migrations create DB cloudrop`, paste the
+  SQLite statements into the new file, then `wrangler d1 migrations apply DB` (it applies to the local database; add
+  `--remote` for the deployed one).
 
 <!-- ddl:postgres -->
 ```sql
@@ -310,9 +339,14 @@ them; they only guard the counters against a bug or a hand edit.
 **Moving a SQLite database from the SQL to Prisma.** Prisma declares its `BigInt` columns `BIGINT` where the SQL says
 `INTEGER`. Both have INTEGER affinity, so storage and behaviour are the same, but Prisma's first `migrate dev` rebuilds
 both tables (the data is kept). To skip the rebuild, write the baseline yourself:
-`prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > prisma/migrations/0_cloudrop/migration.sql`,
-then `prisma migrate resolve --applied 0_cloudrop`. On Postgres Prisma finds nothing to change in tables made from
-the SQL.
+
+```sh
+mkdir -p prisma/migrations/0_cloudrop
+prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > prisma/migrations/0_cloudrop/migration.sql
+prisma migrate resolve --applied 0_cloudrop
+```
+
+On Postgres Prisma finds nothing to change in tables made from the SQL.
 
 ## Owners and quota
 
@@ -335,17 +369,18 @@ createCloudrop({
   runs once per `/upload`, before plugins' `beforeUpload`, and sees the authorize result, the request and the
   metadata, not the files. It is not the authorize result signed into the token.
 - The store counts each owner's usage whether or not you set `quota`, so turning a quota on later needs no backfill.
-- The rule is `reserved + stored + size <= limit`, checked file by file in the order sent: a file that does not fit is
-  refused with `QUOTA_EXCEEDED` (HTTP 403, not retryable), and the files of the same `/upload` that fit go on. Bytes
-  are reserved at `/upload`, move to stored when the upload completes, and are released when it is cancelled, refused,
-  revoked, expires or the file is deleted.
+- The rule is `reserved + stored + size <= limit` (stored is `activeBytes` in `api.usage`), checked file by file in
+  the order sent: a file that does not fit is refused with `QUOTA_EXCEEDED` (HTTP 403, not retryable), and the files
+  of the same `/upload` that fit go on. Bytes are reserved at `/upload`, move to stored when the upload completes, and
+  are released when it is cancelled, refused, revoked, expires or the file is deleted.
 - A `quota` that throws, or answers something other than a non-negative whole number or null, refuses the upload with a
   retryable `SERVER_ERROR`: it fails closed.
 - With `quota` set, a route without `owner` logs a warning at startup: its uploads count against no one.
 
 ## `onComplete` with `tx`
 
-On a transactional store, build routes with `store.route` instead of `route` to get the transaction in `onComplete`:
+On a store built with `transaction: true`, build routes with `store.route` instead of `route` to get the transaction
+in `onComplete`:
 
 ```ts
 const avatar = store.route(policy, {
@@ -361,12 +396,14 @@ const avatar = store.route(policy, {
 - `tx` is the adapter's own transaction handle, typed: node-postgres's client, postgres.js's transaction, Drizzle's or
   Prisma's transaction client. A route from `store.route` works only with that store; `createCloudrop` refuses it with
   any other store or none. Routes from plain `route()` run inside the transaction too, without `tx`.
-- **Keep network calls out.** No storage calls, emails or HTTP requests inside `onComplete` on a transactional store:
+- **Keep network calls out.** No storage calls, emails or HTTP requests inside `onComplete` in transaction mode:
   they hold a database connection and a row lock while they wait, and a rollback cannot undo them. They belong in
   `afterComplete`.
 - **Never swallow an error from `tx`.** On Postgres a failed statement aborts the whole transaction. If `onComplete`
-  catches the error and returns normally, node-postgres turns the commit into a silent rollback, and the upload is
-  recorded as completed while nothing of it was kept. Let the error propagate: the client retries.
+  catches the error and returns normally, Postgres refuses every later statement of the transaction, including
+  cloudrop's record of the completion, so the completion rolls back and the client gets a retryable `SERVER_ERROR`.
+  Every retry fails the same way, until the upload expires and the sweep deletes its file. Let the error propagate, or
+  catch it inside a savepoint (Drizzle's nested `tx.transaction`, `SAVEPOINT` with node-postgres).
 - The store waits at most 2 seconds for the file's row lock, so a second `/complete` of the same file is answered busy
   rather than waiting. Your own statements through `tx` keep your session's lock timeout.
 - Postgres must run at its default isolation level, READ COMMITTED. Under REPEATABLE READ or SERIALIZABLE, concurrent
@@ -398,16 +435,23 @@ short. For work that must happen, write an outbox row through `tx` in `onComplet
 
 - **`/upload`** refuses a file over the quota with `QUOTA_EXCEEDED`, and answers a retryable `SERVER_ERROR` when the
   store cannot be reached ("The server could not reach its upload records. Try again in a moment.").
-- **`/sign` and `/complete`** refuse an upload whose row was ended (cancelled, revoked, refused or expired) with
-  `UPLOAD_EXPIRED`: "This upload was cancelled or has expired. Start it again." The file fails with that code and the
-  client sends its `/abort`. `retry()` asks for a new ticket through `/upload` and `authorize`, so a signed-out user is
-  refused. A `resume()` after a reload asks for a new ticket by itself and starts the file again while the user is
-  still signed in ([Resume](resume.md)).
+- **`/sign` and `/complete`** refuse an upload whose row was ended (cancelled, revoked, refused, failed or expired)
+  with `UPLOAD_EXPIRED`: "This upload was cancelled or has expired. Start it again." The file fails with that code and
+  the client sends its `/abort`. `retry()` asks for a new ticket through `/upload` and `authorize`, so a signed-out
+  user is refused. A `resume()` after a reload asks for a new ticket by itself and starts the file again while the
+  user is still signed in ([Resume](resume.md)).
 - **A second `/complete` of a file being completed** is answered busy: `SERVER_ERROR`, retryable, "Another request is
   completing this upload. Try again in a moment.", with `Retry-After: 2`. The client waits and asks again, and gets
   the stored answer. Busy is not logged as an error.
 - **`/abort`** of a completed file answers `ok` and deletes nothing. An unfinished upload is aborted and its object
   deleted as before.
+- **A refused file whose delete fails** (the object did not match what was declared, and the storage service did not
+  answer the delete) is still answered with the refusal, `VERIFICATION_FAILED`. Its row already says `rejected`, so a
+  retry of the same token answers `UPLOAD_EXPIRED`, and the sweep's cleanup pass deletes the object.
+
+These words map to the `status` of [`api.file(id)`](#file-operations): cancelled and revoked uploads are `aborted`,
+refused ones `rejected`, uploads that could not start and stuck completions `failed`, and expired ones `expired`; a
+file removed with `deleteFile` is `deleted`.
 
 [Errors](errors.md#upload-endpoint-errors) lists every code.
 
@@ -419,8 +463,9 @@ const { data, error } = await cloudrop.api.revokeUploads({ owner: userId });
 // data.revoked: how many unfinished uploads were ended
 ```
 
-Each unfinished upload of that owner is ended and its reservation released; its next `/sign` or `/complete` is refused
-with `UPLOAD_EXPIRED`, and its client's `/abort` removes what it had uploaded. Completed files are not touched.
+Each unfinished upload of that owner that is not already being completed is ended and its reservation released; its
+next `/sign` or `/complete` is refused with `UPLOAD_EXPIRED`, and its client's `/abort` removes what it had uploaded.
+A completion already under way finishes, and completed files are not touched.
 
 ## File operations
 
@@ -463,10 +508,13 @@ cursor }`; pass `cursor` back to continue. It runs two passes:
 
 - **Expire:** an unfinished upload past its token's deadline plus `graceMs` is ended as `expired` first, its
   reservation released; then its multipart upload is aborted and its object deleted only when the object's
-  `cloudrop-id` is this upload's. A completion stuck past its lease and deadline is ended as `failed` and **reported**,
-  and its object is kept: its `onComplete` may have recorded it, so check each reported file.
-- **Cleanup:** an ended upload (cancelled, refused, revoked, expired, deleted) not yet cleaned up has its late parts and
-  object removed, again only when the object is its own. This catches a `PUT` that landed after an `/abort`.
+  `cloudrop-id` is this upload's. A completion stuck past its lease, and past its deadline plus `graceMs`, is ended as
+  `failed` and **reported**, and its object is kept: its `onComplete` may have recorded it, so check each reported
+  file.
+- **Cleanup:** an ended upload (`aborted`, `rejected`, `failed`, `expired` or `deleted`) not yet cleaned up, and ended
+  more than `graceMs` ago, has its late parts and object removed, again only when the object is its own. This catches
+  a `PUT` that landed after an `/abort`, an upload that could not start, and an expired one whose first cleanup
+  failed.
 
 `graceMs` (default 1 hour) must be at least 15 minutes, the life of an upload URL, so no new `PUT` can start once a
 row may be cleaned up. A failing row is logged, counted in `failed` and left for the next sweep; the rows after it are
@@ -494,8 +542,9 @@ as required.
   PrismaPg's `schema` option (`new PrismaPg({ connectionString }, { schema: "app" })`) reaches only model queries, so
   set the search path as well. If `public` also has tables with the same names, the store uses whichever comes first
   in the search path.
-- **Connection pools:** a transactional completion holds one connection for the length of `onComplete`. Size the pool
-  for your concurrent completions plus your other traffic.
+- **Connection pools:** with `transaction: true`, a completion holds one connection and the file's row lock for the
+  length of `onComplete`, plain `route()`s included. Size the pool for your concurrent completions plus your other
+  traffic, or leave `transaction` off and completions use a lease, holding no connection.
 
 ## SQLite notes
 
@@ -520,7 +569,7 @@ as required.
   `onComplete` again: one more reason to keep it idempotent in this mode.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.
-- **Bundle size.** The store paths add about 4.7 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
+- **Bundle size.** The store paths add about 4.8 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.
 
 ## Turning it on, or off, in a running app

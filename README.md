@@ -198,7 +198,7 @@ The server above is stateless: the signed token carries everything, and `onCompl
 a store to keep one row per upload in your own database, in two tables you create once:
 
 ```ts
-import { createCloudrop, r2, route } from "cloudrop";
+import { createCloudrop, r2, route, unauthorized } from "cloudrop";
 import { pgExecutor, sqlStore } from "cloudrop/adapters/sql";
 import pg from "pg";
 
@@ -210,19 +210,27 @@ export const cloudrop = createCloudrop({
   quota: () => 1024 ** 3, // bytes each owner may keep
   routes: {
     avatar: route(
-      { accept: "image/*", maxSize: "5MB", authorize }, // authorize as in the quickstart
+      {
+        accept: "image/*",
+        maxSize: "5MB",
+        authorize: async ({ request }) => {
+          const user = await getUser(request); // your app's session lookup
+          return user ? { userId: user.id } : unauthorized();
+        },
+      },
       { owner: ({ userId }) => userId },
     ),
   },
 });
 ```
 
-With a store, `onComplete` runs once per file (exactly once for its database writes through `tx` on Postgres), each
-owner's files count toward a quota, `api.revokeUploads` stops a signed-out user's uploads, and `api.sweep` cleans up
-after abandoned ones. The adapters are subpaths of the same package: `cloudrop/adapters/sql` (node-postgres,
-postgres.js, `node:sqlite`, Cloudflare D1), `cloudrop/adapters/drizzle` (`drizzle-orm` 0.45 up to 1.x, from 1.0.0-rc.5, an optional peer)
-and `cloudrop/adapters/prisma` (Prisma 7); install only the driver you already use. Setup, the tables and what each
-mode guarantees: [Database store](docs/guide/store.md).
+With a store, `onComplete` runs once per file (exactly once for its database writes through `tx` on Postgres, with
+`{ transaction: true }`), each owner's files count toward a quota, `api.revokeUploads` stops a signed-out user's
+uploads, and `api.sweep` cleans up after abandoned ones. The adapters are subpaths of the same package:
+`cloudrop/adapters/sql` (node-postgres, postgres.js, `node:sqlite`, Cloudflare D1), `cloudrop/adapters/drizzle`
+(`drizzle-orm` 0.45 or later, including 1.x from 1.0.0-rc.5, an optional peer) and `cloudrop/adapters/prisma`
+(Prisma 7); install only the driver you already use. Setup, the tables and what each mode guarantees:
+[Database store](docs/guide/store.md).
 
 ## Set up your bucket
 
