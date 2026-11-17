@@ -198,6 +198,8 @@ update the server with the client.
 | Anything but an upload with a string `id` | `INVALID_INPUT` | unchanged |
 
 With `aborted: false`, the bucket's abort-incomplete-multipart rule removes the parts, and a store's sweep ends the row.
+A tab closed while its `/abort` is on the way keeps the record, so the upload is listed again; discarding it again is
+harmless.
 `forget()` deletes every record of the namespace at once but sends no `/abort`: use it at sign-out, and `discard()` when
 the user drops an upload.
 

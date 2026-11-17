@@ -60,8 +60,9 @@ Load the matching skill from `.claude/skills/` before the work:
   19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in three
   passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store, then `examples/vite-react` with
   the `examples/hono` API on its own Postgres (port 19610, `CLOUDROP_EXAMPLE_POSTGRES_PORT`; the API on 5181).
-  `bun run test:browser:live` runs the Next example's two passes on live R2 (the Vite pass stays on RustFS); the test bucket's CORS rule `cloudrop-browser-tests`
-  allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with `content-type`, `content-disposition`,
-  `if-none-match`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme` and `x-amz-meta-cloudrop-id` and exposes
-  `ETag`, `Retry-After`, `x-amz-checksum-crc32c` and `x-amz-checksum-crc64nvme` (set with `wrangler r2 bucket cors set`
-  at the owner's request and checked from both origins, 2026-11-17). Change it only when the owner asks.
+  `bun run test:browser:live` runs the Next example's two passes on live R2 (the Vite pass stays on RustFS); the test
+  bucket's CORS rule `cloudrop-browser-tests` allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with
+  `content-type`, `content-disposition`, `if-none-match`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme` and
+  `x-amz-meta-cloudrop-id` and exposes `ETag`, `Retry-After`, `x-amz-checksum-crc32c` and `x-amz-checksum-crc64nvme`
+  (set with `wrangler r2 bucket cors set` at the owner's request and checked from both origins, 2026-11-17). Change it
+  only when the owner asks.

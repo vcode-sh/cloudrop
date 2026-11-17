@@ -192,6 +192,7 @@ export const useUploads = () => useContext(UploadsContext);
 
 // apps/web/src/app.tsx: keyed by the user, so a new user's components mount with that user's hooks.
 const userId = authClient.useSession().data?.user.id ?? "";
+// React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
 <UploadsContext key={userId} value={uploadsFor(userId)}>{/* the app */}</UploadsContext>;
 
 // In a component:

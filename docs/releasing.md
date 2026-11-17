@@ -67,7 +67,7 @@ Trusted publishing works from a private repository, with these differences:
    "Until 0.1.0 is published", and stages `README.md` with the others. Commit them in one commit and push it:
 
    ```bash
-   git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md
+   git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md README.md   # README.md for 0.1.0 only
    git commit -m "chore(release): 0.1.0"
    git push origin main
    ```
