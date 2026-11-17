@@ -3,6 +3,7 @@
 // real-time rows 10 and 11 run nightly in stalls.soak.integration.test.ts (M3-K10). Run with `bun run test:chaos`.
 import { expect, test } from "vitest";
 import { MiB } from "../rules.ts";
+import { R2_THROTTLED } from "../testing/chaos-bodies.ts";
 import { chaosFile, SINGLE_FILE_SIZE, useChaosFixture } from "../testing/chaos-fixture.ts";
 
 const chaos = useChaosFixture();
@@ -26,10 +27,7 @@ test("a PUT whose answer is lost after the bucket stored it is sent again, and t
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /sign 200", "POST /complete 200"]);
 });
 
-// R2 throttles with 429 and the S3 code ServiceUnavailable (r2-spike-findings.md, Q9).
-const BUSY =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>ServiceUnavailable</Code><Message>Reduce your concurrent request rate for the same object.</Message></Error>';
-const busy = { kind: "answer", status: 429, body: BUSY } as const;
+const busy = { kind: "answer", status: 429, body: R2_THROTTLED } as const;
 
 /**
  * Row 17: four parts of 8 MiB, all in flight at once (the automatic pool starts at 4 slots, a file sends 4 parts).

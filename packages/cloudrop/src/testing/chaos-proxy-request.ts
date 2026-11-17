@@ -3,6 +3,7 @@
 // values that carry signatures or credentials are never kept.
 
 import type { IncomingMessage } from "node:http";
+import { SLOW_DOWN } from "./chaos-bodies.ts";
 import type { ChaosFault, ChaosMatch, ChaosOperation, ChaosRandom, ChaosRule } from "./chaos-proxy.ts";
 
 export interface RequestIdentity {
@@ -100,9 +101,6 @@ export function seededRandom(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
-const SLOW_DOWN =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>';
 
 /** One draw per request: a reset somewhere in the body, a 503 that browsers can read, or latency before forwarding. */
 export function randomFault(options: ChaosRandom, next: () => number, bodySize: number): ChaosFault | null {

@@ -3,25 +3,20 @@
 // readable 403s (a bad signature, an expired URL in R2's and RustFS's words, ruling M3-K5). Run with
 // `bun run test:chaos`.
 import { expect, test, vi } from "vitest";
+import {
+  BAD_SIGNATURE,
+  INTERNAL_ERROR,
+  R2_EXPIRED,
+  R2_THROTTLED,
+  RUSTFS_EXPIRED,
+  SLOW_DOWN,
+} from "../testing/chaos-bodies.ts";
 import { chaosFile, MULTIPART_FILE_SIZE, SINGLE_FILE_SIZE, useChaosFixture } from "../testing/chaos-fixture.ts";
 import type { ChaosFault, ChaosMatch } from "../testing/chaos-proxy.ts";
 
 const chaos = useChaosFixture();
 
-// Bodies as the services send them: R2's 429 (r2-spike-findings.md, Q9), R2's expired URL (Q7), RustFS's expired URL
-// (s3-driver.rustfs.integration.test.ts); the rest are the standard S3 codes for these statuses.
-const xml = (code: string, message: string) => `<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>${code}</Code><Message>${message}</Message></Error>`;
-const R2_THROTTLED = xml("ServiceUnavailable", "Reduce your concurrent request rate for the same object.");
-const SLOW_DOWN = xml("SlowDown", "Please reduce your request rate.");
-const INTERNAL_ERROR = xml("InternalError", "We encountered an internal error. Please try again.");
-const BAD_SIGNATURE = xml(
-  "SignatureDoesNotMatch",
-  "The request signature we calculated does not match the signature you provided.",
-);
-const R2_EXPIRED = xml("ExpiredRequest", "Request has expired");
-const RUSTFS_EXPIRED = xml("AccessDenied", "Request has expired");
-/** Text of the bodies above that a client message must never repeat (spec §7). */
+/** Text of the bodies (chaos-bodies.ts) that a client message must never repeat (spec §7). */
 const STORAGE_TEXT = /<|internal error|signature we calculated/i;
 
 const SINGLE_PUT: ChaosMatch = { operation: "PutObject" };

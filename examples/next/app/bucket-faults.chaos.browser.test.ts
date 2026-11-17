@@ -3,6 +3,12 @@
 // cannot, an answer lost after the bucket stored the bytes. The oracles: what reached the bucket (the proxy's log), the
 // requests the lab's table shows, and the object read back through the example's own storage.
 import type { Page } from "@playwright/test";
+import {
+  BAD_SIGNATURE,
+  R2_EXPIRED,
+  R2_THROTTLED,
+  RUSTFS_EXPIRED,
+} from "../../../packages/cloudrop/src/testing/chaos-bodies.ts";
 import { bucketPuts, type Chaos, type ChaosEntry, type ChaosRule, expect, test } from "./chaos-control";
 import {
   chooseOnDisk,
@@ -28,17 +34,6 @@ const firstTwo = (match: ChaosRule["match"], fault: ChaosRule["fault"]): ChaosRu
   { match, fault },
   { match: { ...match, nth: 2 }, fault },
 ];
-
-// Error bodies as measured: R2's 429 (r2-spike-findings.md, Q9) and expired URL (row 7), RustFS's expired URL
-// (s3-driver.rustfs.integration.test.ts).
-const R2_BUSY =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>ServiceUnavailable</Code><Message>Reduce your concurrent request rate for the same object.</Message></Error>';
-const R2_EXPIRED =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>ExpiredRequest</Code><Message>Request has expired</Message></Error>';
-const RUSTFS_EXPIRED =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>';
-const BAD_SIGNATURE =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match the signature you provided.</Message></Error>';
 
 async function upload(page: Page, path: string): Promise<void> {
   await chooseOnDisk(page, path);
@@ -179,7 +174,7 @@ for (const { exposed, gap } of [
     chaos,
   }, testInfo) => {
     const file = await onDiskFile(testInfo, 20);
-    const busy = { status: 429, body: R2_BUSY, headers: { "retry-after": "2" }, exposeRetryAfter: exposed };
+    const busy = { status: 429, body: R2_THROTTLED, headers: { "retry-after": "2" }, exposeRetryAfter: exposed };
     await chaos.set([{ match: PART_ONE, fault: { kind: "answer", ...busy } }]);
     await signIn(page);
     await upload(page, file.path);
