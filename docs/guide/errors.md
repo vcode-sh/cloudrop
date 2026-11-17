@@ -65,7 +65,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `TOO_MANY_FILES` | 400 | No | More files than the route's `maxFiles` in one `/upload`. Refuses the whole job. | Send fewer files at once, or raise `maxFiles`. |
 | `FILE_TOO_LARGE` | 400 | No | A file is over the route's `maxSize`. Refuses that file only. | Ask the user for a smaller file. |
 | `FILE_TYPE_NOT_ALLOWED` | 400 | No | A file's type is not in `accept`, is not a valid MIME type, or its extension does not match its type. Refuses that file only. | Ask the user for another file, or rename it so the extension matches. |
-| `QUOTA_EXCEEDED` | 403 | No | With a database store and `quota`: the file would take its owner past their storage limit (reserved plus stored bytes). Refuses that file only; the others of the same `/upload` may fit. | Show the message. The user frees space (`api.deleteFile`) or the app raises their `quota`; then start the upload again. |
+| `QUOTA_EXCEEDED` | 403 | No | With a database store and `quota`: the file would take its owner past their storage limit (reserved plus stored bytes). Refuses that file only; the others of the same `/upload` may fit. | Show the message. The user frees space or the app raises their `quota`; then start the upload again. |
 | `INVALID_TOKEN` | 400 | No | The upload token is not valid: not signed by a configured secret, or damaged. | Start the upload again. The client's `retry()` does this. |
 | `UPLOAD_EXPIRED` | 410 | No | The upload's 24-hour token has expired. | Start the upload again. The client's `retry()` does this. |
 | `NOT_UPLOADED` | 409 | No | `/complete` found no object for a single `PUT`. | Upload the file, then complete it. The client does this in order. |

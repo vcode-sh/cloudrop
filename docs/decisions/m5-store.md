@@ -31,6 +31,11 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   costs nothing and helps an operator.
 - **If wrong:** each is one assignment in the SQL core and the memory store, plus the contract row that pins it.
 - **Status:** decided.
+- **Amended 2026-11-17 (fix round 1):** a change that moves no bytes (an owner-less row, `end` from an ended status)
+  does not write the usage row at all, so its `updated_at` stays. `reconcile` of an owner with rows but no usage row
+  creates the row (Postgres: insert `ON CONFLICT DO NOTHING`, lock, recount); an all-zero recount still creates none.
+  Both are in the TSDoc and pinned by cases, with the reserve rules the contract already enforced (a duplicate id
+  throws; the usage row comes from the first reserved file).
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/server/store.ts` TSDoc, `src/testing/store-contract/claim.ts`, `end.ts`, `usage.ts`.
 
@@ -94,6 +99,12 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **If wrong:** setup per case costs a truncate per case on a database (milliseconds); a lane that wants one schema per
   run truncates in `setup` and drops in its own `afterAll`.
 - **Status:** decided.
+- **Amended 2026-11-17 (fix round 1):** `injectFailure` is now `() => Promise<void>` and means "the next write to the
+  usage table fails, once", which a SQL lane implements with a one-shot trigger; it is injected into `reserve` (with a
+  quota), `complete`, `end` (completed to deleted) and `revoke`, each asserting both tables unchanged, so
+  `failureInjection` need be a gap nowhere. `RawTables` gains `deleteUsage(owner)` and is final. A single-connection
+  backend should not declare `concurrency`: its concurrent cases run as stated, not as proof (spec §8). The
+  transaction cases need a pool of at least two connections.
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/testing/store-contract.ts`, `src/testing/store-rows.ts`.
 
@@ -111,6 +122,11 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **If wrong:** an outside write to a row the transaction also wrote is overwritten by the rollback; under Postgres it
   would have waited. No handler path writes such a row outside the claim the transaction holds.
 - **Status:** decided.
+- **Amended 2026-11-17 (fix round 1):** the review found a rollback losing an outside `reserve` for the same owner (a
+  usage row is shared by all of an owner's files). A rolled-back write to a usage row that an outside call rewrote
+  meanwhile now takes back only its own change (inverse deltas); an untouched row is restored as it was. Files rows
+  are still restored whole. In memory, reads see a transaction's uncommitted writes; Postgres shows `pending` under
+  READ COMMITTED, so handler tests must not assert `busy` against a replay for overlapping transactional completions.
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/testing/memory-store.ts`.
 
