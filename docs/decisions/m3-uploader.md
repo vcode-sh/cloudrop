@@ -1342,7 +1342,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   (`server/complete.ts`, `completedBefore`), so no earlier `/complete` finished the file. Kept sticky, every retry would
   reuse the dead ticket and fail again.
 - **If wrong:** a server that answered `NO_SUCH_UPLOAD` for a finished upload would make a retry store the file a
-  second time under a new key.
+  second time under a new key. Live R2 showed no such moment for a `/complete` that overlaps the first (`M4-F12`).
 - **Status:** in force (`2fe56b7`).
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/persist-failures.test.ts`.
 

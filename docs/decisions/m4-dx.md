@@ -41,6 +41,22 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §4, audit F11.
 - **Visible in:** `server/upload.ts` (`startFile`), `server/upload-storage.test.ts`.
 
+### M4-F12: no retry before `NO_SUCH_UPLOAD`; overlapping completions measured on live R2
+
+- **Decision:** `completedBefore` keeps answering `NO_SUCH_UPLOAD` on the first HEAD that finds no object of this
+  upload; no delayed second HEAD. Nothing in the code changed.
+- **Why:** audit F12 feared that a `/complete` retried while the first `CompleteMultipartUpload` still ran could see
+  `NoSuchUpload` before HEAD showed the object. 23 trials on live R2 (4 to 200 parts, the second Complete 0 to 600 ms
+  after the first, ListParts and HEAD polled every ~35 ms) never showed it: every HEAD started after any `NoSuchUpload`
+  answer saw the object. ListParts during a completion answers `500 InternalError` (a retryable `STORAGE_ERROR`), and
+  a second Complete that starts early succeeds too, so both calls run `onComplete` (`M3-U84`).
+- **If wrong:** a completion much longer than the 0.6 s measured could still open the window; then a cancel after
+  `NO_SUCH_UPLOAD` deletes a recorded file (`M3-U83`, "If wrong"). The fix is the one the design names: retry the HEAD
+  once after a short delay.
+- **Status:** in force.
+- **Source:** design §4, audit F12; `docs/research/r2-spike-findings.md`, "Overlapping completions, 2026-11-17".
+- **Visible in:** `server/complete.ts` (`completedBefore`), unchanged.
+
 <!-- Task B appends its entries above this line. -->
 
 ### API, configuration and documentation (design §5, `M4-F15` to `M4-F21`)
