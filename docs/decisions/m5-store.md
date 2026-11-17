@@ -776,6 +776,11 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     statement that fails.
   - Batch atomicity on libsql is proven by reserve's duplicate-id case (probe F4: sequential statements fail it).
   Drizzle over D1 is task F's to run, in the Wrangler lane.
+- **Amended 2026-11-17 (fix round 3):** libsql no longer declares `failureInjection`. The test arms a trigger on the
+  usage table that always raises, and wraps the `@libsql/client` given to Drizzle in a proxy that drops the trigger
+  (through the fixture's own connection) after the first `batch` or `execute` that fails. The four atomicity cases
+  now run on libsql, and "reserve, with a quota, that fails at its usage write" kills probe F4 there too.
+  `transaction` stays its only gap.
 
 ### M5-T47: `cloudropTables({ dialect, tables? })`, with explicit types, matched against the DDL
 
@@ -815,7 +820,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task D, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts`.
 - **Amended 2026-11-17 (fix round 1):** after the libsql/D1 batch path, the single-`Client` check and the longer
-  TSDoc, the entry is 3.36 kB and the sum 14.84 kB (7.81 kB bundled and minified, against 6.65 kB for
+  TSDoc, the entry is 3.36 kB and the sum 14.86 kB (7.81 kB bundled and minified, against 6.65 kB for
   `adapters/sql`). The ceiling is now 17 kB, about the headroom prisma has at 16 kB for 12.37 kB.
 
 ### M5-T49: a single node-postgres `Client` is refused
@@ -847,7 +852,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task D fix round 1, 2026-11-17 (review I2).
 - **Visible in:** `src/testing/db/driver-rows.ts`, `src/adapters/{sql,drizzle,prisma}.db.integration.test.ts`.
 
-### M5-T51: the `drizzle-orm` peer range (`>=0.45.0 <2` since fix round 2)
+### M5-T51: the `drizzle-orm` peer range (`>=0.45.0 <1 || >=1.0.0-rc.5 <2` since fix round 3)
 
 - **Decision:** the optional peer is `drizzle-orm >=0.45.0 <1`.
 - **Why:** checked against `drizzle-orm@1.0.0-rc.5` (2026-10-21), the newest RC that is two weeks old, which the
@@ -891,6 +896,14 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     drizzle-orm in a temporary copy of the package, with every other dependency pinned to the installed version. The
     CI job `drizzle-1` runs it for 1.0.0-rc.5. Restoring round 1's generic `transaction` makes it fail (two
     "No overload matches" errors).
+- **Amended 2026-11-17 (fix round 3):** the range is **`>=0.45.0 <1 || >=1.0.0-rc.5 <2`**. A prerelease satisfies a
+  semver range only through a comparator on its own `major.minor.patch`, so `>=0.45.0 <2` excluded 1.0.0-rc.5, and
+  npm refused the install with ERESOLVE (the re-review's measurement). Measured with the package packed by
+  `npm pack` and installed by npm 11 in a scratch directory under the worktree:
+  - beside drizzle-orm 1.0.0-rc.5: the old range fails with ERESOLVE, and the new one installs;
+  - beside 0.45.4: the new range installs;
+  - beside 1.0.0-rc.4, which nothing here checks: the new range refuses it.
+  `1.0.0-rc.5` is also the version the CI job `drizzle-1` type-checks.
 
 <!-- Task D appends its entries above this line. -->
 
