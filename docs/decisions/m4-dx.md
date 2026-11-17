@@ -57,6 +57,25 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §4, audit F12; `docs/research/r2-spike-findings.md`, "Overlapping completions, 2026-11-17".
 - **Visible in:** `server/complete.ts` (`completedBefore`), unchanged.
 
+### M4-F13: four simplifications of the server, two of them narrowed
+
+- **Decision:** `verifyObject` does its own HEAD and `handleComplete` picks it or `completeParts` in one expression;
+  `presignParts` returns `allOk(signed)`; `readJson` joins the body through `new Blob(chunks).arrayBuffer()`; one
+  `abortContexts(request, files, reason)` in `plugins.ts` builds the `onAbort` contexts for `runBeforeUpload`, `/upload`
+  and `tokenAbortContexts` (which replaces `abortContext` for `/abort` and `/complete`). Two parts of the design's list
+  were narrowed: `allOk` stays in `storage/s3/responses.ts` instead of moving to `errors.ts`, and `node.ts` keeps its
+  copy loop.
+- **Why:** design §4 accepted the simplifications. In `errors.ts`, `allOk` lands in the chunk `cloudrop/next` and
+  `cloudrop/node` import, measured +0.11 kB gzip on both summed budgets (1.12 of 1.1 kB, 3.21 of 3.2 kB) for code
+  neither runs. `NodeRequest` yields `Uint8Array<ArrayBufferLike>`, which `BlobPart` accepts only through an `as`, and
+  narrowing the public `NodeRequest` type is not worth a loop of six lines.
+- **If wrong:** none in behaviour: every existing test passes unchanged. `server/presign.ts` importing from
+  `storage/s3/` is the cost of the first narrowing.
+- **Status:** in force.
+- **Source:** design §4, audit F13 (S1 to S4).
+- **Visible in:** `server/complete.ts`, `server/presign.ts`, `server/http.ts` (`readJson`), `server/plugins.ts`
+  (`abortContexts`), `server/token-request.ts` (`tokenAbortContexts`), `server/upload.ts`, `server/abort.ts`.
+
 <!-- Task B appends its entries above this line. -->
 
 ### API, configuration and documentation (design §5, `M4-F15` to `M4-F21`)
