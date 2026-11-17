@@ -119,12 +119,24 @@ describe("drizzleSql", () => {
   });
 });
 
+const NO_SQLITE_SCHEMA =
+  "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.";
+
 describe("cloudropPgTables and cloudropSqliteTables", () => {
   test.for([
     { name: "cloudropPgTables", tables: () => cloudropPgTables({ tables: { files: "my files" } }) },
     { name: "cloudropSqliteTables", tables: () => cloudropSqliteTables({ tables: { files: "my files" } }) },
   ])("$name refuses a table name the store would refuse, naming the option", ({ tables }) => {
     expect(tables).toThrow(invalidConfig(expect.stringContaining("The files table name")));
+  });
+
+  test("cloudropSqliteTables and drizzleStore on SQLite refuse tables.schema, which SQLite does not have", () => {
+    // @ts-expect-error: SQLite's tables take no schema.
+    const tables = () => cloudropSqliteTables({ tables: { schema: "app" } });
+    // @ts-expect-error: nor does drizzleStore on SQLite.
+    const store = () => drizzleStore(sqliteDb, { dialect: "sqlite", tables: { schema: "app" } });
+    expect(tables).toThrow(invalidConfig(NO_SQLITE_SCHEMA));
+    expect(store).toThrow(invalidConfig(NO_SQLITE_SCHEMA));
   });
 });
 

@@ -3,7 +3,7 @@
 // milliseconds to Dates). A value of the wrong type fails loudly, naming the column, so an adapter that writes a time
 // as ISO text on SQLite, or a size beyond 2^53, cannot pass unnoticed.
 
-import { resolveTables, type TableNames, type TestDatabase } from "./schema.ts";
+import { qualified, resolveTables, type TableNames, type TestDatabase } from "./schema.ts";
 
 export interface FileRow {
   id: string;
@@ -119,12 +119,12 @@ const FILE_COLUMNS =
   "created_at, updated_at, completed_at, ended_at, cleaned_at";
 const USAGE_COLUMNS = "owner, reserved_bytes, active_bytes, files, updated_at";
 
-/** A reader of the tables under these names (defaults `cloudrop_files`, `cloudrop_usage`). */
+/** A reader of the tables under these names (defaults `cloudrop_files`, `cloudrop_usage`), in their schema if given. */
 export function rawReader(db: TestDatabase, tables?: Partial<TableNames>): RawReader {
-  const { files, usage } = resolveTables(tables);
+  const { files, usage, schema } = resolveTables(tables);
   const placeholder = db.dialect === "postgres" ? "$1" : "?";
   const select = async (columns: string, table: string, where: string, params: unknown[]) =>
-    db.query(`SELECT ${columns} FROM "${table}" ${where}`, params);
+    db.query(`SELECT ${columns} FROM ${qualified(schema, table)} ${where}`, params);
   return {
     async file(id) {
       const [row] = await select(FILE_COLUMNS, files, `WHERE id = ${placeholder}`, [id]);

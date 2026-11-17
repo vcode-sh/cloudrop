@@ -7,7 +7,7 @@ import type { CloudropStore } from "../../server/store.ts";
 import type { SetupStore, StoreGap } from "../store-contract.ts";
 import type { PostgresTestDatabase } from "./postgres.ts";
 import { rawTables } from "./raw-tables.ts";
-import type { TableNames, TestDatabase } from "./schema.ts";
+import { DEFAULT_TABLES, qualified, type TableNames, type TestDatabase } from "./schema.ts";
 import type { SqliteTestDatabase } from "./sqlite.ts";
 
 export const RENAMED: TableNames = { files: "renamed_files", usage: "renamed_usage" };
@@ -21,14 +21,14 @@ const FAILURE = "Injected failure: the usage table refused this write.";
 export type StoreFactory = (tables?: TableNames) => CloudropStore<unknown>;
 
 /** A trigger on the default usage table that fails the first write after it is armed, and passes every later one. */
-async function armPostgres(db: PostgresTestDatabase): Promise<void> {
+async function armPostgres(db: PostgresTestDatabase, schema: string | undefined): Promise<void> {
   await db.query("CREATE SEQUENCE cloudrop_fail_once");
   await db.query(`CREATE FUNCTION cloudrop_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF nextval('cloudrop_fail_once') = 1 THEN RAISE EXCEPTION '${FAILURE}'; END IF;
       RETURN NEW;
     END $$`);
-  await db.query(`CREATE TRIGGER cloudrop_fail_once BEFORE INSERT OR UPDATE ON cloudrop_usage
+  await db.query(`CREATE TRIGGER cloudrop_fail_once BEFORE INSERT OR UPDATE ON ${qualified(schema, DEFAULT_TABLES.usage)}
     FOR EACH ROW EXECUTE FUNCTION cloudrop_fail_once()`);
 }
 
@@ -55,32 +55,45 @@ interface ResettableSqlite extends TestDatabase {
 }
 
 /** D1 has no user functions, so it cannot arm the trigger and declares "failureInjection" as a gap. */
-function armerFor(db: PostgresTestDatabase | SqliteTestDatabase | ResettableSqlite): (() => Promise<void>) | undefined {
-  if (db.dialect === "postgres") return () => armPostgres(db);
+function armerFor(
+  db: PostgresTestDatabase | SqliteTestDatabase | ResettableSqlite,
+  schema: string | undefined,
+): (() => Promise<void>) | undefined {
+  if (db.dialect === "postgres") return () => armPostgres(db, schema);
   return "database" in db ? () => armSqlite(db) : undefined;
 }
 
 /**
  * The contract's setup for a SQL store over `db`. Postgres and D1 start each case from emptied tables; node:sqlite
  * gets a new database per case from its fixture, so `useSqliteDatabase()` must be called in an enclosing scope.
+ * With `schema` (Postgres), every table the cases use is made in that schema, emptied by dropping it, and the stores
+ * get `tables.schema`; the search path keeps empty default tables, so a statement that leaves the schema out lands in
+ * the wrong table and the case fails.
  */
 export function sqlStoreTarget(
   db: PostgresTestDatabase | SqliteTestDatabase | ResettableSqlite,
   storeOver: StoreFactory,
   gaps: Partial<Record<StoreGap, string>> = {},
+  schema?: string,
 ): SetupStore {
+  const inSchema = (tables?: TableNames) => (schema === undefined ? tables : { ...(tables ?? DEFAULT_TABLES), schema });
   return async () => {
     if ("reset" in db) await db.reset();
-    for (const tables of [undefined, RENAMED, BROKEN]) await db.createTables(tables);
-    await db.query(`ALTER TABLE "${BROKEN.files}" DROP COLUMN ${DROPPED}`);
+    if (schema !== undefined) {
+      await db.createTables();
+      await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await db.query(`CREATE SCHEMA "${schema}"`);
+    }
+    for (const tables of [undefined, RENAMED, BROKEN]) await db.createTables(inSchema(tables));
+    await db.query(`ALTER TABLE ${qualified(schema, BROKEN.files)} DROP COLUMN ${DROPPED}`);
     return {
-      store: storeOver(),
-      raw: rawTables(db),
+      store: storeOver(inSchema()),
+      raw: rawTables(db, inSchema()),
       gaps,
-      injectFailure: armerFor(db),
+      injectFailure: armerFor(db, schema),
       tables: {
-        renamed: { store: storeOver(RENAMED), raw: rawTables(db, RENAMED) },
-        missingColumn: { store: storeOver(BROKEN), table: BROKEN.files, column: DROPPED },
+        renamed: { store: storeOver(inSchema(RENAMED)), raw: rawTables(db, inSchema(RENAMED)) },
+        missingColumn: { store: storeOver(inSchema(BROKEN)), table: BROKEN.files, column: DROPPED },
       },
       // Postgres and D1 drop the tables at the next setup or with the file; SQLite's fixture closes the database.
       teardown: async () => {},

@@ -103,6 +103,16 @@ export function usePostgresDatabase(): PostgresTestDatabase {
 }
 
 /**
+ * A second schema for this scope, `<schema>_app`, for stores built with `tables.schema`. Whatever creates it, it is
+ * dropped after the scope's tests; call this after usePostgresDatabase(), so the drop runs before the pool ends.
+ */
+export function useAppSchema(db: PostgresTestDatabase): string {
+  const schema = `${db.schema}_app`;
+  afterAll(() => db.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`));
+  return schema;
+}
+
+/**
  * Resolves once `sql`, which counts waiting sessions as `waiting`, answers exactly 1: a test's race is set up. Each
  * caller filters to its own sessions, because other test files run against the same server at the same time.
  */

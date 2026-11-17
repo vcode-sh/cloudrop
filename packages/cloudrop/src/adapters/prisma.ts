@@ -44,7 +44,10 @@ export type PrismaTransactionClient<TClient> = TClient extends {
 interface StoreOptionsBase {
   /** The provider of the Prisma schema's datasource: `"postgres"` (`postgresql`) or `"sqlite"`. */
   dialect: "postgres" | "sqlite";
-  /** The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`; letters, digits and `_`. */
+  /**
+   * The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`, and on Postgres their schema; letters,
+   * digits and `_`.
+   */
   tables?: StoreTables;
 }
 
@@ -109,11 +112,12 @@ function prismaExecutor(
  * build routes with `store.route` so `onComplete` gets Prisma's transaction client as `tx`, and keep network calls out
  * of it (they belong in `afterComplete`).
  *
- * On Postgres the store's SQL finds its tables through the connection's search path, not PrismaPg's `schema` option,
- * which only model queries use. Tables outside `public` need both: `new PrismaPg({ connectionString }, { schema: "app" })`
- * and the search path, set once for the role with `ALTER ROLE <user> SET search_path = app` (this also works behind a
- * connection pooler) or per connection with `?options=-c%20search_path%3Dapp` in the connection string (some poolers
- * drop or refuse that startup option).
+ * On Postgres, tables outside `public` take `tables: { schema: "app" }`, with both models declared `@@schema("app")`
+ * and `schemas = ["app"]` in the datasource. PrismaPg's `schema` option does not reach the store, whose raw SQL uses
+ * only `tables`. Without `tables.schema` the store's SQL finds its tables through the connection's search path, set
+ * once for the role with `ALTER ROLE <user> SET search_path = app` (this also works behind a connection pooler) or per
+ * connection with `?options=-c%20search_path%3Dapp` in the connection string (some poolers drop or refuse that startup
+ * option).
  *
  * Usage
  * ```ts

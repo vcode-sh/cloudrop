@@ -11,6 +11,8 @@ export type Dialect = "postgres" | "sqlite";
 export interface TableNames {
   files: string;
   usage: string;
+  /** Postgres only: the schema both tables are in; without it, the search path's. */
+  schema?: string;
 }
 
 export const DEFAULT_TABLES: TableNames = { files: "cloudrop_files", usage: "cloudrop_usage" };
@@ -20,13 +22,17 @@ const TABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Fills in the default names and rejects any name that would need more than double quotes to be safe in SQL. */
 export function resolveTables(tables: Partial<TableNames> = {}): TableNames {
   const resolved = { ...DEFAULT_TABLES, ...tables };
-  for (const name of [resolved.files, resolved.usage]) {
-    if (!TABLE_NAME.test(name)) {
+  for (const name of [resolved.files, resolved.usage, resolved.schema]) {
+    if (name !== undefined && !TABLE_NAME.test(name)) {
       throw new Error(`Table name "${name}" is not allowed: use letters, digits and "_", not starting with a digit.`);
     }
   }
   return resolved;
 }
+
+/** The table's name for SQL: quoted, and qualified when the tables have a schema. */
+export const qualified = (schema: string | undefined, table: string): string =>
+  schema === undefined ? `"${table}"` : `"${schema}"."${table}"`;
 
 /** One database of the lane, reached straight through its driver; no store adapter is involved. */
 export interface TestDatabase {
@@ -45,13 +51,13 @@ const TYPES = {
 
 /** The DDL of both tables, one statement per string, so drivers that take a single statement can run them in order. */
 export function schemaStatements(dialect: Dialect, tables?: Partial<TableNames>): string[] {
-  const { files, usage } = resolveTables(tables);
+  const { files, usage, schema } = resolveTables(tables);
   const { text, bigint, integer, time } = TYPES[dialect];
   const nonNegative = (column: string) => (dialect === "postgres" ? ` CHECK (${column} >= 0)` : "");
   const index = (columns: string[]) =>
-    `CREATE INDEX "${files}_${columns.join("_")}_idx" ON "${files}" (${columns.join(", ")})`;
+    `CREATE INDEX "${files}_${columns.join("_")}_idx" ON ${qualified(schema, files)} (${columns.join(", ")})`;
   return [
-    `CREATE TABLE "${files}" (
+    `CREATE TABLE ${qualified(schema, files)} (
   id ${text} NOT NULL PRIMARY KEY,
   route ${text} NOT NULL,
   key ${text} NOT NULL,
@@ -77,7 +83,7 @@ export function schemaStatements(dialect: Dialect, tables?: Partial<TableNames>)
     index(["status", "cleaned_at", "ended_at"]),
     index(["owner", "status"]),
     index(["key"]),
-    `CREATE TABLE "${usage}" (
+    `CREATE TABLE ${qualified(schema, usage)} (
   owner ${text} NOT NULL PRIMARY KEY,
   reserved_bytes ${bigint} NOT NULL${nonNegative("reserved_bytes")},
   active_bytes ${bigint} NOT NULL${nonNegative("active_bytes")},

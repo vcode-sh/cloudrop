@@ -7,8 +7,8 @@
 import { PgDialect, getTableConfig as pgConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteConfig } from "drizzle-orm/sqlite-core";
 import { describe, expect, test } from "vitest";
-import { usePostgresDatabase } from "../testing/db/postgres.ts";
-import type { TableNames } from "../testing/db/schema.ts";
+import { useAppSchema, usePostgresDatabase } from "../testing/db/postgres.ts";
+import { qualified, type TableNames } from "../testing/db/schema.ts";
 import { RENAMED } from "../testing/db/sql-target.ts";
 import { useSqliteDatabase } from "../testing/db/sqlite.ts";
 import { cloudropPgTables, cloudropSqliteTables } from "./drizzle.ts";
@@ -20,23 +20,27 @@ interface Shape {
 }
 
 const byName = <T extends { name: string }>(items: T[]): T[] => items.toSorted((a, b) => a.name.localeCompare(b.name));
-const namings: { name: string; tables?: TableNames }[] = [
+const namings: { name: string; tables?: Partial<TableNames> }[] = [
   { name: "default names" },
   { name: "renamed", tables: RENAMED },
 ];
 
 describe("Postgres", () => {
   const db = usePostgresDatabase();
+  const schema = useAppSchema(db);
 
-  async function catalogue(table: string): Promise<Shape> {
+  /** The table's shape in `tableSchema`, or in the search path's schema without one. */
+  async function catalogue(table: string, tableSchema?: string): Promise<Shape> {
+    const relation = qualified(tableSchema, table);
     const columns = await db.query(
       `SELECT c.column_name::text AS name, c.data_type::text AS type, c.is_nullable = 'NO' AS "notNull",
          c.column_name::text IN (SELECT a.attname::text FROM pg_index ix
            JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = ANY (ix.indkey)
            WHERE ix.indrelid = $1::text::regclass AND ix.indisprimary) AS "primaryKey"
-       FROM information_schema.columns c WHERE c.table_schema = current_schema() AND c.table_name = $1::text
+       FROM information_schema.columns c
+       WHERE c.table_schema = coalesce($3::text, current_schema()) AND c.table_name = $2::text
        ORDER BY c.ordinal_position`,
-      [table],
+      [relation, table, tableSchema ?? null],
     );
     const indexes = await db.query(
       `SELECT i.relname AS name, ix.indisunique AS unique, array_agg(a.attname::text ORDER BY k.ord) AS columns
@@ -44,12 +48,12 @@ describe("Postgres", () => {
        CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
        JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum
        WHERE ix.indrelid = $1::text::regclass AND NOT ix.indisprimary GROUP BY i.relname, ix.indisunique`,
-      [table],
+      [relation],
     );
     const checks = await db.query(
       `SELECT conname AS name, pg_get_constraintdef(oid) AS expression FROM pg_constraint
        WHERE conrelid = $1::text::regclass AND contype = 'c'`,
-      [table],
+      [relation],
     );
     return {
       columns: columns as Shape["columns"],
@@ -90,14 +94,20 @@ describe("Postgres", () => {
     };
   }
 
-  test.for(namings)("cloudropPgTables matches the DDL's tables, $name", async ({ tables }) => {
-    await db.reset();
-    await db.createTables(tables);
-    const { files, usage } = cloudropPgTables({ tables });
-    const [filesConfig, usageConfig] = [pgConfig(files), pgConfig(usage)];
-    expect(declared(filesConfig)).toEqual(await catalogue(filesConfig.name));
-    expect(declared(usageConfig)).toEqual(await catalogue(usageConfig.name));
-  });
+  test.for([...namings, { name: "in a schema", tables: { schema } }])(
+    "cloudropPgTables matches the DDL's tables, $name",
+    async ({ tables }) => {
+      await db.reset();
+      await db.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await db.query(`CREATE SCHEMA ${schema}`);
+      await db.createTables(tables);
+      const { files, usage } = cloudropPgTables({ tables });
+      const [filesConfig, usageConfig] = [pgConfig(files), pgConfig(usage)];
+      expect([filesConfig.schema, usageConfig.schema]).toEqual([tables?.schema, tables?.schema]);
+      expect(declared(filesConfig)).toEqual(await catalogue(filesConfig.name, filesConfig.schema));
+      expect(declared(usageConfig)).toEqual(await catalogue(usageConfig.name, usageConfig.schema));
+    },
+  );
 });
 
 describe("SQLite", () => {

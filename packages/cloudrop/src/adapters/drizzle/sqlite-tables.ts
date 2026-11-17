@@ -4,7 +4,7 @@
 
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { FileStatus } from "../../server/store.ts";
-import { type CloudropTablesOptions, tableNames } from "./tables.ts";
+import { type StoreTables, tableNames } from "../../store/sql/tables.ts";
 
 // drizzle-orm 0.45 and 1.0 share no builder type names, and `text`'s overload that takes a name erases to `any` on both,
 // so each builder type comes from an overload both lines have. `text`'s third type argument is the length in 0.45 and
@@ -69,9 +69,10 @@ const count = (name: string) => integer(name, { mode: "number" }).notNull();
  * ```ts
  * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropSqliteTables();
  * ```
+ * SQLite has no schemas, so `tables` takes no `schema` (a `schema` that gets past the type is `INVALID_CONFIG`).
  */
-export function cloudropSqliteTables(options: CloudropTablesOptions = {}): CloudropSqliteTables {
-  const names = tableNames(options);
+export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "schema"> } = {}): CloudropSqliteTables {
+  const names = tableNames(options.tables, "sqlite");
   const files = sqliteTable(
     names.files,
     {

@@ -30,8 +30,9 @@ interface DrizzleStoreOptions {
  * A cloudrop store over a Drizzle database: Postgres (node-postgres over a `Pool`, postgres.js) or SQLite
  * (better-sqlite3, libsql/Turso, D1). Create the tables first, from `cloudropPgTables` or `cloudropSqliteTables` in
  * your Drizzle schema or from the documented DDL; the store checks them on its first call. `tables` names them,
- * defaults `cloudrop_files` and `cloudrop_usage`. A single node-postgres `Client` is refused: every request would
- * share its one connection, and a transaction on it would take the others' statements with it.
+ * defaults `cloudrop_files` and `cloudrop_usage`, and on Postgres `tables.schema` names their schema (pass the same
+ * `tables` to `cloudropPgTables`). A single node-postgres `Client` is refused: every request would share its one
+ * connection, and a transaction on it would take the others' statements with it.
  *
  * With `transaction: true` (Postgres only), `onComplete` runs inside the completion's transaction with Drizzle's `tx`:
  * an app row written through `tx` commits with the upload or not at all, and routes must come from `store.route`.
@@ -61,7 +62,7 @@ export function drizzleStore(
 ): CloudropStore;
 export function drizzleStore(
   db: DrizzleSqlite | DrizzleAsyncSqlite,
-  options: { dialect: "sqlite"; tables?: StoreTables },
+  options: { dialect: "sqlite"; tables?: Omit<StoreTables, "schema"> },
 ): CloudropStore;
 export function drizzleStore(
   db: DrizzlePostgres | DrizzleSqlite | DrizzleAsyncSqlite,

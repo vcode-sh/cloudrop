@@ -36,7 +36,7 @@ export default [
   // route() (for store.route), count toward each adapter that imports them. Measured 2026-11-17 after M5's final fix
   // round: sql 13.72 kB (its own file 1.34 kB, the shared core chunk 9.36 kB), budgeted 18 kB (M5-T97); drizzle
   // 15.7 kB (its own file 3.31 kB), budgeted 17 kB (M5-T48); prisma 12.78 kB (its own file 0.72 kB), budgeted 16 kB
-  // (M4-F24, M5-T58).
+  // (M4-F24, M5-T58). After tables.schema (M5-T124): sql 13.94 kB, drizzle 16.06 kB, prisma 13.01 kB.
   { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "18 kB", ...summed },
   {
     name: "cloudrop/adapters/drizzle",

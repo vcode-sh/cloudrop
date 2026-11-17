@@ -2,12 +2,14 @@
 // (isolatedDeclarations), so the table types are spelled out, but only through what drizzle-orm 0.45 and 1.0 both
 // export: the builder functions' return types, their `this`-typed methods and `pgTable`'s own signature. The names of
 // the builder types differ between the two lines and are never written here. The compiler checks the builders below
-// against these types, and drizzle.test.ts pins the row types they give on both lines.
+// against these types, and drizzle.test.ts pins the row types they give on both lines. With `tables.schema` the tables
+// come from `pgSchema(schema).table`, so drizzle-kit creates them in that schema and queries name it.
 
 import { sql } from "drizzle-orm";
-import { bigint, check, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, check, index, integer, pgSchema, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { FileStatus } from "../../server/store.ts";
-import { type CloudropTablesOptions, tableNames } from "./tables.ts";
+import { tableNames } from "../../store/sql/tables.ts";
+import type { CloudropTablesOptions } from "./tables.ts";
 
 // Each builder function's last overload names the column; `timestamp`'s mode defaults to Dates, and `bigint`'s answer
 // is a union by mode, of which the number one is taken.
@@ -19,6 +21,8 @@ type Count = NotNull<Extract<ReturnType<typeof bigint>, { _: { data: number } }>
 // A type-only stand-in for a text column, so `$type`, a generic method, can be instantiated with the status type.
 declare const textStandIn: Text;
 type Status = NotNull<ReturnType<typeof textStandIn.$type<FileStatus>>>;
+// A type-only schema, so the tables a schema's `table` builds can be named: they carry the schema name in their type.
+declare const schemaStandIn: ReturnType<typeof pgSchema<string>>;
 
 type FileColumns = {
   id: PrimaryKey<Text>;
@@ -50,10 +54,12 @@ type UsageColumns = {
   updatedAt: NotNull<Time>;
 };
 
-/** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables. */
+/** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables, in a schema with `tables.schema`. */
 export interface CloudropPgTables {
-  files: ReturnType<typeof pgTable<string, FileColumns>>;
-  usage: ReturnType<typeof pgTable<string, UsageColumns>>;
+  files: ReturnType<typeof pgTable<string, FileColumns>> | ReturnType<typeof schemaStandIn.table<string, FileColumns>>;
+  usage:
+    | ReturnType<typeof pgTable<string, UsageColumns>>
+    | ReturnType<typeof schemaStandIn.table<string, UsageColumns>>;
 }
 
 const time = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -66,11 +72,17 @@ const count = (name: string) => bigint(name, { mode: "number" }).notNull();
  *
  * ```ts
  * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables();
+ * // In the schema "app", with the same tables as the store's: drizzleStore(db, { dialect: "postgres", tables })
+ * const tables = { schema: "app" };
+ * export const { files: appFiles, usage: appUsage } = cloudropPgTables({ tables });
  * ```
+ * drizzle-kit creates the schema too when the schema file also exports `pgSchema("app")`.
  */
 export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropPgTables {
-  const names = tableNames(options);
-  const files = pgTable(
+  const names = tableNames(options.tables, "postgres");
+  // Both build the same table; only the schema in its type differs, and CloudropPgTables declares both.
+  const table = (names.schema === undefined ? pgTable : pgSchema(names.schema).table) as typeof pgTable;
+  const files = table(
     names.files,
     {
       id: text("id").primaryKey(),
@@ -102,7 +114,7 @@ export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropP
       index(`${names.files}_key_idx`).on(t.key),
     ],
   );
-  const usage = pgTable(
+  const usage = table(
     names.usage,
     {
       owner: text("owner").primaryKey(),

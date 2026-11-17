@@ -7,10 +7,13 @@ import { isLockTimeout, type SqlExecutor } from "./executor.ts";
 import { postgresWrites } from "./postgres.ts";
 import { type SqlContext, type StoreMethods, singleStatementMethods } from "./reads.ts";
 import { sqliteWrites } from "./sqlite.ts";
-import { checkSchema, quoteTables, type StoreTables } from "./tables.ts";
+import { checkSchema, quoteTables, type StoreTables, tableNames } from "./tables.ts";
 
 export interface SqlStoreOptions {
-  /** The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`; letters, digits and `_`. */
+  /**
+   * The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`, and on Postgres their schema; letters, digits
+   * and `_`.
+   */
   tables?: StoreTables;
   /**
    * Postgres only, with an executor that has `transaction()`. On: each completion's claim, `onComplete` and record
@@ -62,11 +65,11 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
       `The executor's dialect ${JSON.stringify(dialect)} is not supported. Use "postgres" or "sqlite".`,
     );
   }
-  const { names, ...tables } = quoteTables(options.tables);
+  const tables = quoteTables(tableNames(options.tables, dialect));
   let schema: Promise<void> | undefined;
   const ready = () => {
     // A failed check is not kept, so a fixed schema (or a database back up) is picked up by the next call.
-    schema ??= checkSchema(executor, names).catch((error: unknown) => {
+    schema ??= checkSchema(executor, tables).catch((error: unknown) => {
       schema = undefined;
       throw error;
     });

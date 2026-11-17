@@ -81,6 +81,12 @@ test.each([
       "transaction: true needs Postgres. SQLite has one writer at a time, so a transaction held open while onComplete runs would stall every other upload; leave the option out and completions use a lease.",
   },
   {
+    name: "tables.schema on SQLite, which has no schemas",
+    options: { dialect: "sqlite", tables: { schema: "app" } },
+    message:
+      "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.",
+  },
+  {
     name: "transactionOptions without transaction: true",
     options: { dialect: "postgres", transactionOptions: { timeout: 10_000 } },
     message:
