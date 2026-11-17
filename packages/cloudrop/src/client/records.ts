@@ -1,6 +1,6 @@
 // The browser's store of unfinished multipart uploads, so that one can resume after a reload (resume spec §3.1, §3.2;
-// plan rulings R1–R3). An upload only queues writes here: it never waits for the store or fails on it. Reads report a
-// failure as STORAGE_ERROR, never with the browser's own text.
+// rulings M3-U70 to M3-U72). An upload only queues writes here: it never waits for the store or fails on it. Reads
+// report a failure as STORAGE_ERROR, never with the browser's own text.
 
 import { fail, ok, type Result } from "../errors.ts";
 import { countParts } from "../part-size.ts";
@@ -45,7 +45,7 @@ export interface Records {
 
 const STORE = "uploads";
 
-/** A record with less time left than this counts as expired, so a listed upload has time to start (R3, spec §3.6). */
+/** A record with less time left than this counts as expired, so a listed upload has time to start (M3-U72, §3.6). */
 const EXPIRY_MARGIN_MS = 60_000;
 
 const noRecords: Records = {
@@ -56,7 +56,7 @@ const noRecords: Records = {
   clear: async () => ok(0),
 };
 
-/** Database `cloudrop`, version 1, store `uploads` keyed by `id`, no index (R1). */
+/** Database `cloudrop`, version 1, store `uploads` keyed by `id`, no index (M3-U70). */
 function open(factory: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = factory.open("cloudrop", 1);
@@ -119,7 +119,7 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
 
   // Opened on the first operation and kept. A failed open, or a connection the browser closed (site data cleared, a
   // newer schema in another tab), is opened again by the next operation, so one bad moment does not end resuming for
-  // the page's life (R2).
+  // the page's life (M3-U71).
   let database: Promise<IDBDatabase> | undefined;
   const connect = (): Promise<IDBDatabase> => {
     const drop = () => {
@@ -136,7 +136,7 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
     opening.catch(drop);
     return opening;
   };
-  // Every operation runs after the one made before it, so a remove made after a save never runs first (R2).
+  // Every operation runs after the one made before it, so a remove made after a save never runs first (M3-U71).
   let queue: Promise<unknown> = Promise.resolve();
 
   const enqueue = <T>(work: Work<T> | Promise<Work<T>>): Promise<Result<T>> => {

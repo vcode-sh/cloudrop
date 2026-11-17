@@ -1,5 +1,5 @@
 // Contract: resume spec §2, §3.6 and §3.7 with rulings M3-U77 and M3-U78 and the plan audit's M10, through the real
-// client. resumable() lists the namespace's unexpired records newest first, as exactly R8's fields, by route when
+// client. resumable() lists the namespace's unexpired records newest first, as exactly M3-U77's fields, by route when
 // asked, and deletes the expired ones. forget() deletes the namespace's records or, with { all: true }, every one,
 // refuses any other argument, and leaves a running upload running. A failed store is STORAGE_ERROR; with persistence
 // off or no indexedDB nothing is kept and nothing can be resumed.
@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("resumable()", () => {
-  it("lists the namespace's unexpired records newest first, as exactly R8's fields, and deletes the expired", async () => {
+  it("lists the namespace's unexpired records newest first, as exactly M3-U77's fields, and deletes the expired", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const { client, db } = persistFixture();

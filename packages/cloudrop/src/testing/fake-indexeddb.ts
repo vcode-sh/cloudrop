@@ -8,7 +8,7 @@
 export interface FakeIndexedDb {
   /** For vi.stubGlobal("indexedDB", fake.indexedDB). */
   indexedDB: { open(name: string, version: number): unknown };
-  /** The records stored in R1's database `cloudrop`, store `uploads`, by key, as a structured clone keeps them. */
+  /** The records stored in M3-U70's database `cloudrop`, store `uploads`, by key, as a structured clone keeps them. */
   stored(): Record<string, unknown>;
   /** Makes the next n requests (an open or any store request) fail with this DOMException name. */
   failNext(name: "QuotaExceededError" | "UnknownError" | "InvalidStateError", n?: number): void;

@@ -1,7 +1,7 @@
-// Contract: client/records.ts, the store of unfinished multipart uploads (resume spec §3.1, §3.2, §3.6, §3.7; plan
-// rulings R1–R3). One record per upload, kept per namespace; expired ones (less than 60 s left) are never returned and
-// are deleted when seen; operations apply in the order they were made; uploads never hear of a store failure, while
-// list and clear report it as STORAGE_ERROR; off or without IndexedDB nothing is read or written.
+// Contract: client/records.ts, the store of unfinished multipart uploads (resume spec §3.1, §3.2, §3.6, §3.7;
+// rulings M3-U70 to M3-U72). One record per upload, kept per namespace; expired ones (less than 60 s left) are never
+// returned and are deleted when seen; operations apply in the order they were made; uploads never hear of a store
+// failure, while list and clear report it as STORAGE_ERROR; off or without IndexedDB nothing is read or written.
 // Oracle: what the fake IndexedDB holds (`stored()`: structured clones keyed as the browser keys them), literal
 // records and literal timestamps. The fake is the platform boundary; the store under test is the real module.
 
@@ -56,8 +56,8 @@ afterEach(() => {
 const storeAt = (): Records => createRecords(true, () => clock);
 
 /**
- * Resolves once every operation queued before it has run (R2): a clear of a namespace no record has, which, unlike a
- * list, deletes no expired record itself.
+ * Resolves once every operation queued before it has run (M3-U71): a clear of a namespace no record has, which, unlike
+ * a list, deletes no expired record itself.
  */
 const afterQueued = (records: Records) => records.clear("nobody");
 
@@ -104,7 +104,7 @@ it("lists newest first by savedAt, whatever the id or save order", async () => {
   expect((await records.list("user-1")).data?.map((record) => record.id)).toEqual(["u-2", "u-1", "u-3"]);
 });
 
-describe("expiry (R3: less than 60 000 ms left counts as expired)", () => {
+describe("expiry (M3-U72: less than 60 000 ms left counts as expired)", () => {
   // Saved a minute earlier, when both had more than 60 s left; now one has 59 999 ms left and the other 60 000.
   const saveBoth = async (records: Records) => {
     clock = NOW - 60_000;
@@ -141,7 +141,7 @@ describe("expiry (R3: less than 60 000 ms left counts as expired)", () => {
   });
 });
 
-describe("order (R2: operations apply in the order they were made)", () => {
+describe("order (M3-U71: operations apply in the order they were made)", () => {
   it("a remove made right after a save wins", async () => {
     const records = storeAt();
     records.save(SAVED);
@@ -197,7 +197,7 @@ describe("a record still being made (audit C1: the save holds its place in the q
 });
 
 describe("records of another shape (audit M2: another library version or script of the origin)", () => {
-  /** Writes `value` into R1's store as another script on the origin would. */
+  /** Writes `value` into M3-U70's store as another script on the origin would. */
   const putRaw = (value: unknown) =>
     new Promise<void>((resolve) => {
       const request = fake.indexedDB.open("cloudrop", 1) as IDBOpenDBRequest;
@@ -294,7 +294,7 @@ describe.each([
   });
 });
 
-it("opens R1's database once, lazily, for every operation of a client", async () => {
+it("opens M3-U70's database once, lazily, for every operation of a client", async () => {
   const records = storeAt();
   expect(opens).not.toHaveBeenCalled();
   records.save(SAVED);
