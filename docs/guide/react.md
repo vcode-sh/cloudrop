@@ -207,7 +207,9 @@ which would be refused. A listed upload leaves the list as soon as its resume st
 
 A refused resume, `UPLOAD_IN_USE` while another tab sends the upload or `INVALID_INPUT` for a different file, stays in
 `files` as a failed file with its error, and the upload is listed again: `retry()` checks again, and `abort()` ends the
-row without touching the upload, which stays listed.
+row without touching the upload, which stays listed. Dismiss on a file that had already started, a resume that passed
+its checks or a new upload, discards the upload: `abort()` tells the server to delete what it sent, unless a
+`/complete` may have finished it.
 
 The list is read after mount, when an upload of these hooks starts, whenever one of its files ends or starts again, and
 when it settles, so a record the client deletes, for a file that ends done or is cancelled, leaves the list at once.
