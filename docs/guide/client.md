@@ -162,8 +162,9 @@ after a reload starts `queued` while its record is checked, then goes to `comple
 ### Cancel
 
 `abort()` on a file, `job.abort()`, or the `signal` you passed cancels: requests stop, the file ends `aborted`, and the
-server is told to clean up with `/abort`. A failed file ends `aborted` too, and the server is told to drop what it kept
-for `retry()`.
+server is told to clean up with `/abort`. A file still waiting for its ticket ends `aborted` at once; a ticket that
+arrives for it later only gets its `/abort`. A failed file ends `aborted` too, and the server is told to drop what it
+kept for `retry()`.
 
 The one exception: a file after a `/complete` that may have succeeded is kept, never deleted.
 

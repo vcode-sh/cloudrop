@@ -154,15 +154,17 @@ export function giveUp(context: UploadContext, upload: Upload): void {
 }
 
 /**
- * Cancels a file (ruling M3-U38). A running one ends aborted through its run, which tells the server. A failed one
- * ends aborted at once and frees what it kept (M3-U32), unless a /complete may have finished it (keep-or-abort,
- * M3-S14, M3-H16).
+ * Cancels a file (ruling M3-U38). A running one ends aborted through its run, which tells the server. One still
+ * waiting for its ticket has nothing to tell the server and ends aborted at once (M3-U11, M4-F2). A failed one ends
+ * aborted at once and frees what it kept (M3-U32), unless a /complete may have finished it (keep-or-abort, M3-S14,
+ * M3-H16).
  */
 export function abortFile(context: UploadContext, entry: Entry): void {
   const { status, upload } = entry;
   if (status === "done" || status === "aborted") return;
   if (status !== "failed") {
     entry.cancel.abort();
+    if (!upload) settle(entry, "aborted", withFile(aborted(), entry));
     return;
   }
   context.leftovers.release(entry);

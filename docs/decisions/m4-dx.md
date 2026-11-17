@@ -35,6 +35,28 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   `client/persist.test.ts` (the `pagehide` row), `client/persist-failures.test.ts` (the `upload()` rows),
   `docs/guide/client.md` ("What gets cleaned up"), `docs/guide/resume.md` ("When a record is deleted").
 
+### M4-F2: a file cancelled before its ticket ends at once
+
+- **Decision:** cancelling a file that is queued or paused without a ticket (waiting for the job's `/upload`, a re-ask,
+  a retry's new ticket, a start over or `resume()`'s checks) ends it `aborted` at once, with its own `ABORTED` error
+  naming the file. A ticket `/upload` brings for it later gets one background `/abort` and nothing else: no lock, no
+  record, no `PUT`. `job.abort()` and the caller's signal cancel such files the same way, so each ends with its own
+  `ABORTED` error; `done` still answers `{ data: null, error }` with the job's `ABORTED` when the job's own `/upload`
+  was cancelled.
+- **Why:** design §3 F2. A file cancelled while the job's `/upload` was in flight stayed `queued` until `/upload`
+  answered, against `M3-U11` ("a page shows a cancel at once"), and then took a ticket, a Web Lock and an IndexedDB
+  save only to delete them with its `/abort`. A file with no ticket has nothing to tell the server, so nothing needs to
+  wait.
+- **If wrong:** after `job.abort()` during `/upload`, a page that compared a file's snapshot error with `done`'s error
+  by identity now finds two errors with the same code; `error.file` is now set on them, as `M3-U10` asks of every error
+  that belongs to one file.
+- **Status:** in force.
+- **Source:** design §3 F2; code audit of `main` at `907cc77` (probe: statuses `['queued','queued']` 20 ms after the
+  cancel, then `POST /upload, POST /abort, PUT object, POST /complete`).
+- **Visible in:** `client/file-run.ts` (`abortFile`), `client/launch.ts` (`runEntry`), `client/resume.ts`
+  (`resumeRun`), `client/job.test.ts` ("cancels one file while /upload is in flight"), `client/persist.test.ts` ("takes
+  no lock and saves nothing").
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)

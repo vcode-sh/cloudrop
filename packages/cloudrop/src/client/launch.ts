@@ -17,8 +17,7 @@ import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retr
  * it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
  */
 async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
-  const { signal } = entry.cancel;
-  if (refusal.retryable && attempt < MAX_ATTEMPTS && !signal.aborted) {
+  if (refusal.retryable && attempt < MAX_ATTEMPTS) {
     // In one bracket: watching again would call online(), which resumes a file offline paused (M3-U48).
     await job.watch(async () => {
       // pauseFile and a cancel abort the pass, which here is the wait.
@@ -30,7 +29,7 @@ async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: 
     await launch(job, [entry], { reask: true, first: attempt + 1 });
     return entry.run;
   }
-  settle(entry, signal.aborted ? "aborted" : "failed", withFile(signal.aborted ? aborted() : refusal, entry));
+  settle(entry, "failed", withFile(refusal, entry));
 }
 
 /** One file's share of an /upload answer, given at `attempt`. `whole`: the /upload asked for every file of the job. */
@@ -42,16 +41,15 @@ async function runEntry(
   whole: boolean,
   attempt: number,
 ): Promise<void> {
-  if (answer.error) {
-    const cancelled = entry.cancel.signal.aborted;
-    // A file cancelled on its own meanwhile ends as cancelled, with its own error (ruling M3-U10). Otherwise the error
-    // is the job's when /upload asked for every file, and the file's own when a retry asked for some (ruling M3-U3).
-    const own = cancelled && !job.signal.aborted;
-    const error = own ? aborted() : answer.error;
-    return settle(entry, cancelled ? "aborted" : "failed", own || !whole ? withFile(error, entry) : error);
-  }
   // readTickets answers one ticket per file; a missing one would otherwise leave the file queued for good.
-  const ticket = answer.data[index] ?? unreadableAnswer(200);
+  const ticket = answer.error ?? answer.data[index] ?? unreadableAnswer(200);
+  // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else.
+  if (entry.status === "aborted") {
+    if (!(ticket instanceof CloudropError)) void job.context.endpoints.abort(ticket.token);
+    return;
+  }
+  // The error is the job's when /upload asked for every file, and the file's own when a retry asked for some (M3-U3).
+  if (answer.error) return settle(entry, "failed", whole ? answer.error : withFile(answer.error, entry));
   if (ticket instanceof CloudropError) return refused(job, entry, ticket, attempt);
   entry.upload = uploadOf(job, entry, ticket);
   await job.runUpload(entry.upload);

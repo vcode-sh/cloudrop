@@ -6,7 +6,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import { readArguments } from "./arguments.ts";
 import type { Ticket } from "./endpoints.ts";
-import { aborted, notResumable, notSameFile, uploadInUse } from "./failures.ts";
+import { notResumable, notSameFile, uploadInUse } from "./failures.ts";
 import { type Entry, settle } from "./file-run.ts";
 import { isSameFile } from "./fingerprint.ts";
 import { createUploadJob } from "./job.ts";
@@ -85,17 +85,17 @@ async function resumeRun(job: Job, id: string, passed: () => void): Promise<Clou
   const checking = check(context, id, entry.file);
   entry.run = checking.then(() => {});
   const checked = await checking;
-  const refuse = (status: "failed" | "aborted", error: CloudropError) => {
-    settle(entry, status, error);
-    job.idle();
-    return error;
-  };
-  // Cancelled while checking: nothing was sent, and the record stays for a later resume.
+  // Cancelled while checking, it ended then (M4-F2): nothing was sent, and the record stays for a later resume.
   if (entry.cancel.signal.aborted) {
     if (!(checked instanceof CloudropError)) checked.unlock();
-    return refuse("aborted", aborted());
+    job.idle();
+    return entry.error;
   }
-  if (checked instanceof CloudropError) return refuse("failed", checked);
+  if (checked instanceof CloudropError) {
+    settle(entry, "failed", checked);
+    job.idle();
+    return checked;
+  }
   const { record, unlock } = checked;
   passed();
   // From the record: a start over asks /upload with the route and metadata the upload began with (M3-U74).

@@ -224,24 +224,30 @@ describe("start", () => {
     });
   });
 
-  it("cancels one file while /upload is in flight: the /abort goes for its ticket, the others upload", async () => {
+  it("cancels one file while /upload is in flight: aborted at once, its ticket gets only /abort (M4-F2)", async () => {
     let tickets: string[] = [];
     const upload = heldUpload(async (call) => {
       const answer = await call.forward(call.init);
       tickets = (await answer.clone().json()).files.map((ticket: { token: string }) => ticket.token);
       return answer;
     });
-    const { seen, client } = setup(upload.fault);
+    const { fixture, seen, client } = setup(upload.fault);
     const job = client.start("notes", three());
     await upload.seen;
     job.files[1]?.abort();
+    // Before /upload answers: a page shows the cancel at once (M3-U11).
+    const cancelled = job.getSnapshot().files.map((file) => file.status);
     upload.release();
     const { data, error } = await job.done;
     expect({
+      cancelled,
       files: data?.files.map(view),
       error: { code: error?.code, file: error?.file },
       aborted: seen.abortTokens,
+      puts: count(fixture.requests, "PUT object"),
     }).toEqual({
+      cancelled: ["queued", "aborted", "queued"],
+      puts: 2,
       files: [
         { id: "1", status: "done", file: ["a.txt", 5] },
         { id: "2", status: "aborted", code: "ABORTED", file: { id: "2", name: "b.txt" } },

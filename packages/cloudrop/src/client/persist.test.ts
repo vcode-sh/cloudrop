@@ -14,6 +14,7 @@ import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import {
   edgeHash,
+  firstOf,
   gate,
   LAST_MODIFIED,
   persistFixture,
@@ -109,25 +110,33 @@ describe("a multipart file of start()", () => {
     await job.done;
   });
 
-  it("leaves nothing when the file was cancelled while /upload was in flight (audit C1)", async () => {
+  it("takes no lock and saves nothing when the file was cancelled while /upload was in flight (M4-F2)", async () => {
     const held = gate((call) => call.label === "POST /upload");
-    // The fingerprint's hash answers only after the cancel has deleted the record: the save must still come first.
-    const hash = Promise.withResolvers<ArrayBuffer>();
-    const setup = persistFixture({ fault: held.fault, hash: () => hash.promise });
+    const abort = gate((call) => call.label === "POST /abort");
+    // Not drained(): it waits for every multipart ticket's hash, which this ticket must never start.
+    const setup = persistFixture({ fault: firstOf(held.fault, abort.fault) });
     const job = setup.client.start("files", threeParts());
     await held.reached;
     job.files[0]?.abort();
     held.open();
+    await abort.reached;
+    // A ticket that was locked and saved would still hold its lock here, until /abort answers.
+    const whileAborting = { hashed: setup.hashedFiles(), locks: setup.locks.held() };
+    abort.open();
     const { data } = await job.done;
-    hash.resolve(new Uint8Array(32).buffer);
-    await setup.drained();
+    await setup.db.settled();
 
     expect({
       status: data?.files[0]?.status,
       sent: setup.fixture.requests,
+      whileAborting,
       stored: setup.db.stored(),
-      locks: setup.locks.held(),
-    }).toEqual({ status: "aborted", sent: ["POST /upload", "POST /abort"], stored: {}, locks: [] });
+    }).toEqual({
+      status: "aborted",
+      sent: ["POST /upload", "POST /abort"],
+      whileAborting: { hashed: 0, locks: [] },
+      stored: {},
+    });
   });
 });
 
