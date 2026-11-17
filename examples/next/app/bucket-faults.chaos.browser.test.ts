@@ -3,13 +3,14 @@
 // cannot, an answer lost after the bucket stored the bytes. The oracles: what reached the bucket (the proxy's log), the
 // requests the lab's table shows, and the object read back through the example's own storage.
 import type { Page } from "@playwright/test";
-import { bucketPuts, type ChaosEntry, type ChaosRule, expect, test } from "./chaos-control";
+import { bucketPuts, type Chaos, type ChaosEntry, type ChaosRule, expect, test } from "./chaos-control";
 import {
   chooseOnDisk,
   expectStoredAsResult,
   fileRows,
   onDiskFile,
   requestRows,
+  resultKey,
   sampleProgress,
   signIn,
   throttleUploads,
@@ -46,6 +47,23 @@ async function upload(page: Page, path: string): Promise<void> {
 
 /** The presigned PUTs that reached the bucket, sorted: parts sent at once arrive in any order. */
 const sortedPuts = (log: readonly ChaosEntry[]) => bucketPuts(log).toSorted();
+
+/** Milliseconds from the end of part 1's refused attempt to the start of the one after it, as the bucket saw them. */
+async function partOneGap(chaos: Chaos): Promise<number> {
+  const [refused, retried, ...more] = (await chaos.log()).filter((entry) => entry.label === "PUT part 1");
+  expect(more).toEqual([]);
+  return (retried?.startMs ?? 0) - (refused?.endMs ?? 0);
+}
+
+/**
+ * The client's jitter at 99 % of its ceiling, 495 ms before a second attempt, so a wait shows in the gap between two
+ * attempts. In cloudrop's client only the backoff reads Math.random.
+ */
+const JITTER_MS = 495;
+const jitterAtItsCeiling = (page: Page) =>
+  page.addInitScript(() => {
+    Math.random = () => 0.99;
+  });
 
 /** The server's multipart calls: how many uploads it created, completed and aborted. */
 const multipartCalls = (log: readonly ChaosEntry[]) =>
@@ -86,6 +104,7 @@ test("a part reset mid-body is renewed and sent again, and the bar never goes ba
     ["/complete", "200", ""],
   ]);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test("a file whose part 2 was reset six times is retried with its ticket, sending part 2 alone", async ({
@@ -108,6 +127,12 @@ test("a file whose part 2 was reset six times is retried with its ticket, sendin
     ["/sign", "200", "renewal of part 2"],
     ...Array(5).fill(["PUT part 2", "network error", "retry"]),
   ]);
+  const result = page.getByRole("figure", { name: "Result" });
+  await expect(result).toContainText('"code": "NETWORK_ERROR"');
+  await expect(result).toContainText('"retryable": true');
+  // The failed file keeps its ticket, and the bucket its upload, for Retry to finish (§4.7).
+  const ticket = await chaos.uploadsLeft();
+  expect(ticket).toHaveLength(1);
   await chaos.set([]);
 
   await page.getByRole("button", { name: "Retry", exact: true }).click();
@@ -127,16 +152,20 @@ test("a file whose part 2 was reset six times is retried with its ticket, sendin
     ["PUT part 1", 200],
     ["PUT part 3", 200],
   ]);
-  // Each of the client's six attempts reached the bucket, again when Chromium resent it on a reused connection; then
-  // the retry stored it.
+  // Each of the client's six attempts reached the bucket, a second time when Chromium resent it on a reused connection;
+  // then the retry stored it.
   const partTwo = bucketPuts(log)
     .filter(([label]) => label === "PUT part 2")
     .map(([, outcome]) => outcome);
   expect(partTwo.at(-1)).toBe(200);
   expect(partTwo.slice(0, -1).filter((outcome) => outcome !== "reset")).toEqual([]);
   expect(partTwo.length - 1).toBeGreaterThanOrEqual(6);
+  expect(partTwo.length - 1).toBeLessThanOrEqual(12);
   expect(multipartCalls(log)).toEqual(["CreateMultipartUpload", "CompleteMultipartUpload"]);
+  // The same key before and after Retry, and its upload completed.
+  expect([await resultKey(page)]).toEqual(ticket);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 // A 429 with Retry-After: 2, readable through CORS in both variants. Where the bucket exposes the header, the client
@@ -156,10 +185,11 @@ for (const { exposed, gap } of [
     await upload(page, file.path);
 
     await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
-    const [refused, retried, ...more] = (await chaos.log()).filter((entry) => entry.label === "PUT part 1");
-    expect(more).toEqual([]);
-    expect([refused?.outcome, retried?.outcome]).toEqual([429, 200]);
-    gap((retried?.startMs ?? 0) - (refused?.endMs ?? 0));
+    expect(bucketPuts(await chaos.log()).filter(([label]) => label === "PUT part 1")).toEqual([
+      ["PUT part 1", 429],
+      ["PUT part 1", 200],
+    ]);
+    gap(await partOneGap(chaos));
     expect(await requestRows(page)).toEqual([
       ["/upload", "200", ""],
       ["PUT part 1", "429", ""],
@@ -169,6 +199,7 @@ for (const { exposed, gap } of [
       ["/complete", "200", ""],
     ]);
     await expectStoredAsResult(page, file.path);
+    expect(await chaos.uploadsLeft()).toEqual([]);
   });
 }
 
@@ -184,6 +215,8 @@ test("a readable SignatureDoesNotMatch fails the file at once; Retry starts it a
   const result = page.getByRole("figure", { name: "Result" });
   await expect(result).toContainText("its bytes do not match what the server signed");
   await expect(result).toContainText('"retryable": false');
+  const firstTicket = await chaos.uploadsLeft();
+  expect(firstTicket).toHaveLength(1);
 
   await page.getByRole("button", { name: `Retry ${file.name}`, exact: true }).click();
 
@@ -208,9 +241,12 @@ test("a readable SignatureDoesNotMatch fails the file at once; Retry starts it a
   ]);
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
   await expectStoredAsResult(page, file.path);
+  expect(firstTicket).not.toContain(await resultKey(page));
+  expect(await chaos.uploadsLeft()).toEqual(firstTicket);
 });
 
-// An expired URL as R2 and as RustFS answer it, both readable: one renewal through /sign, then the part again (S11).
+// An expired URL as R2 and as RustFS answer it, both readable: one renewal through /sign, then the part again at once,
+// with no backoff (S11).
 for (const { bucket, body } of [
   { bucket: "R2", body: R2_EXPIRED },
   { bucket: "RustFS", body: RUSTFS_EXPIRED },
@@ -221,6 +257,7 @@ for (const { bucket, body } of [
   }, testInfo) => {
     const file = await onDiskFile(testInfo, 20);
     await chaos.set([{ match: PART_ONE, fault: { kind: "answer", status: 403, body } }]);
+    await jitterAtItsCeiling(page);
     await signIn(page);
     await upload(page, file.path);
 
@@ -240,7 +277,10 @@ for (const { bucket, body } of [
       ["PUT part 1", "200", "retry"],
       ["/complete", "200", ""],
     ]);
+    // Only the /sign between the attempts: a backoff would add the jitter's 495 ms.
+    expect(await partOneGap(chaos)).toBeLessThan(JITTER_MS);
     await expectStoredAsResult(page, file.path);
+    expect(await chaos.uploadsLeft()).toEqual([]);
   });
 }
 
@@ -251,6 +291,7 @@ test("a 403 without CORS headers is opaque to the page: renewed, then sent again
   const file = await onDiskFile(testInfo, 20);
   // As R2 answers an expired URL: no CORS headers (r2-spike-findings.md, "Browser refusals and checksums").
   await chaos.set([{ match: PART_ONE, fault: { kind: "answer", status: 403, body: R2_EXPIRED, cors: false } }]);
+  await jitterAtItsCeiling(page);
   await signIn(page);
   await upload(page, file.path);
 
@@ -271,7 +312,10 @@ test("a 403 without CORS headers is opaque to the page: renewed, then sent again
     ["PUT part 1", "200", "retry"],
     ["/complete", "200", ""],
   ]);
+  // An opaque failure waits its backoff as well as renewing (S10), unlike the readable expiry above.
+  expect(await partOneGap(chaos)).toBeGreaterThanOrEqual(JITTER_MS);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test("a single PUT whose answer was cut is sent again, and its 412 counts as stored", async ({

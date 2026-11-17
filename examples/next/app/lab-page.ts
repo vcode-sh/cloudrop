@@ -130,22 +130,34 @@ export async function throttleUploads(page: Page, bytesPerSecond: number): Promi
   return cdp;
 }
 
-/** Reads the value of the file's bar every 100 ms until the returned function is called, which gives the values. */
+/** The bytes the bar of the file named `name` shows. */
+export const barValue = (page: Page, name: string): Promise<number> =>
+  page
+    .getByRole("progressbar", { name: `Progress of ${name}` })
+    .evaluate((element: HTMLProgressElement) => element.value);
+
+/** Keeps a bar's samples with the test's result, as evidence of how the bar moved. */
+export function keepSamples(samples: readonly number[]): void {
+  test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
+}
+
+/** Reads the file's bar every 100 ms until the returned function is called, and once more then; it gives the values. */
 export function sampleProgress(page: Page, name: string): () => Promise<number[]> {
-  const bar = page.getByRole("progressbar", { name: `Progress of ${name}` });
   const samples: number[] = [];
   let sampling = true;
   const loop = (async () => {
     while (sampling) {
-      samples.push(await bar.evaluate((element: HTMLProgressElement) => element.value));
+      samples.push(await barValue(page, name));
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   })();
+  // A row that fails before stopping the sampler closes the page under it: that read's error is not the row's.
+  loop.catch(() => {});
   return async () => {
     sampling = false;
     await loop;
-    // Kept with the test's result, as evidence of how the bar moved.
-    test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
+    samples.push(await barValue(page, name));
+    keepSamples(samples);
     return samples;
   };
 }

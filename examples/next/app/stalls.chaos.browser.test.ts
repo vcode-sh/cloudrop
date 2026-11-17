@@ -5,9 +5,11 @@
 import type { Page } from "@playwright/test";
 import { bucketPuts, type Chaos, expect, test } from "./chaos-control";
 import {
+  barValue,
   chooseOnDisk,
   expectStoredAsResult,
   fileRows,
+  keepSamples,
   onDiskFile,
   requestRows,
   sampleProgress,
@@ -19,11 +21,6 @@ import {
 const MIB = 1024 * 1024;
 const TWENTY_MIB = 20 * MIB;
 const STALL_MS = 30_000;
-
-const barValue = (page: Page, name: string): Promise<number> =>
-  page
-    .getByRole("progressbar", { name: `Progress of ${name}` })
-    .evaluate((element: HTMLProgressElement) => element.value);
 
 /** Uploads `path` and waits until parts 2 and 3 are stored, with part 1 still on its way. */
 async function uploadUntilPartOneAlone(page: Page, chaos: Chaos, path: string): Promise<void> {
@@ -110,6 +107,7 @@ test("a black-holed part stalls after 30 s without progress, is renewed and sent
   );
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test("a part that keeps sending is never stalled, however long it takes", async ({ page, chaos }, testInfo) => {
@@ -131,7 +129,7 @@ test("a part that keeps sending is never stalled, however long it takes", async 
     samples.push(await barValue(page, file.name));
   }
 
-  test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
+  keepSamples(samples);
   // The bar moved between every two jumps, and part 1 was still sending at the last one.
   expect(samples.filter((value, index) => index > 0 && value <= (samples[index - 1] ?? 0))).toEqual([]);
   expect(samples.at(-1)).toBeLessThan(9 * MIB);
@@ -147,6 +145,7 @@ test("a part that keeps sending is never stalled, however long it takes", async 
     ["/complete", "200", ""],
   ]);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test("offline mid-body pauses the file; online sends only the interrupted part again", async ({
@@ -170,7 +169,7 @@ test("offline mid-body pauses the file; online sends only the interrupted part a
   await cdp.send("Network.emulateNetworkConditions", uploadsAt(-1));
 
   await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
-  expect((await partOneAttempts(chaos))[1]).toEqual({ outcome: 200, bytesIn: 8 * MIB });
+  expect((await partOneAttempts(chaos)).slice(1)).toEqual([{ outcome: 200, bytesIn: 8 * MIB }]);
   expect(
     bucketPuts(await chaos.log())
       .filter(([label]) => label !== "PUT part 1")
@@ -188,6 +187,7 @@ test("offline mid-body pauses the file; online sends only the interrupted part a
     ["/complete", "200", ""],
   ]);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test("a pause mid-body sends the interrupted part twice, the others once, and the bar never goes back", async ({
@@ -231,4 +231,5 @@ test("a pause mid-body sends the interrupted part twice, the others once, and th
     ["/complete", "200", ""],
   ]);
   await expectStoredAsResult(page, file.path);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });

@@ -3,7 +3,17 @@
 // (decisions S10 to S12, S14): the page must show exactly those requests, and never a signed URL. The progress rows
 // read the job's snapshot through the page's bars (spec §6).
 import { expect, type Page, test } from "@playwright/test";
-import { expectNoSignedUrl, fileRows, requestRows, signIn, summaryValue, throttleUploads, uploadsAt } from "./lab-page";
+import {
+  barValue,
+  expectNoSignedUrl,
+  fileRows,
+  requestRows,
+  sampleProgress,
+  signIn,
+  summaryValue,
+  throttleUploads,
+  uploadsAt,
+} from "./lab-page";
 
 const MIB = 1024 * 1024;
 const TWENTY_MIB = 20_971_520;
@@ -21,23 +31,10 @@ const THROTTLED = 4 * MIB;
 
 /** The value of the file's bar every 100 ms until the run's status line says how it ended, and once more after. */
 async function sampleUntilEnded(page: Page, name: string): Promise<number[]> {
-  const bar = page.getByRole("progressbar", { name: `Progress of ${name}` });
-  await expect(bar).toBeVisible();
-  const samples: number[] = [];
-  const sample = async () => samples.push(await bar.evaluate((element: HTMLProgressElement) => element.value));
-  await expect
-    .poll(
-      async () => {
-        await sample();
-        return page.getByRole("status").textContent();
-      },
-      { intervals: [100], timeout: 20_000 },
-    )
-    .toContain("completed");
-  await sample();
-  // Kept with the test's result, as evidence that the bar moved.
-  test.info().annotations.push({ type: "progress samples", description: samples.join(" ") });
-  return samples;
+  await expect(page.getByRole("progressbar", { name: `Progress of ${name}` })).toBeVisible();
+  const stopSampling = sampleProgress(page, name);
+  await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+  return stopSampling();
 }
 
 test("the lab shows a 20 MiB upload as three parts", async ({ page }) => {
@@ -228,8 +225,7 @@ test("going offline pauses an upload and coming back online completes it", async
   const cdp = await throttleUploads(page, THROTTLED);
   await page.getByRole("button", { name: "20 MiB", exact: true }).click();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
-  const bar = page.getByRole("progressbar", { name: "Progress of random-20-MiB.bin" });
-  await expect.poll(() => bar.evaluate((element: HTMLProgressElement) => element.value)).toBeGreaterThan(0);
+  await expect.poll(() => barValue(page, "random-20-MiB.bin")).toBeGreaterThan(0);
 
   // Chromium's emulated offline sets navigator.onLine and fires the page's `offline` event, which the client hears.
   await cdp.send("Network.emulateNetworkConditions", uploadsAt(THROTTLED, true));

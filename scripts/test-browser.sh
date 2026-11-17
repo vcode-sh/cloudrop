@@ -30,8 +30,7 @@ PROXY_PID=""
 # One EXIT trap for both resources, since a second `trap … EXIT` would replace the first. Registered before `up` so a
 # container that starts but never becomes ready is still removed; `down` only touches this run's name.
 cleanup() {
-  if [[ -n "$PROXY_PID" ]]; then
-    kill "$PROXY_PID" 2>/dev/null || true
+  if [[ -n "$PROXY_PID" ]] && kill "$PROXY_PID" 2>/dev/null; then
     echo "Chaos proxy stopped"
   fi
   "$ROOT/scripts/rustfs.sh" down
@@ -44,8 +43,14 @@ trap 'exit 143' TERM
 # descriptor 3 until the run ends, so a later write cannot fail on a closed pipe.
 exec 3< <(exec node scripts/chaos-proxy.ts "http://127.0.0.1:${PORT}")
 PROXY_PID=$!
-if ! read -r -t 30 -u 3 READY; then
-  echo "The chaos proxy did not start within 30 seconds; its error is above." >&2
+# read ends above 128 when it times out, and with 1 when the proxy exits before printing.
+READ_STATUS=0
+read -r -t 30 -u 3 READY || READ_STATUS=$?
+if ((READ_STATUS > 128)); then
+  echo "The chaos proxy printed nothing within 30 seconds. Run node scripts/chaos-proxy.ts to see why." >&2
+  exit 1
+elif ((READ_STATUS != 0)); then
+  echo "The chaos proxy exited before it was ready; its error is above." >&2
   exit 1
 fi
 echo "$READY"
