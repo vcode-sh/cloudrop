@@ -1,5 +1,6 @@
 // The database lane's Prisma schema on Postgres: this generator and datasource, plus the models in cloudrop.prisma
-// beside it. scripts/test-db.sh generates the client into packages/cloudrop/.prisma-client/postgres (git-ignored).
+// beside it, which is the model snippet the docs ship: the lane generates, migrates and round-trips that very file.
+// scripts/test-db.sh generates the client into packages/cloudrop/.prisma-client/postgres (git-ignored).
 
 generator client {
   provider = "prisma-client"

@@ -1,6 +1,6 @@
 // cloudrop's tables for prismaStore() on Postgres (spec M5 §3). Copy both models into your schema and create them with
-// a migration: the model and field names are yours to change, the table and column names are fixed. The database tests
-// generate their Prisma client from this file, so it is checked against the store on every run.
+// a migration: the model and field names are yours to change, the table and column names are fixed. Prisma's schema
+// has no CHECK constraints: add the counters' `CHECK (… >= 0)` from the SQL DDL to the generated migration.
 
 model CloudropFile {
   id          String    @id

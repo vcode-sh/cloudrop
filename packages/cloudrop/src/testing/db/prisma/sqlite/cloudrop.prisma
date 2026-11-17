@@ -1,8 +1,7 @@
 // cloudrop's tables for prismaStore() on SQLite (spec M5 §3). Copy both models into your schema and create them with a
 // migration: the model and field names are yours to change, the table and column names are fixed. Times are BigInt
 // milliseconds since the epoch, as the store writes them: Prisma stores DateTime differently on SQLite, and Int is
-// 32-bit. The database tests generate their Prisma client from this file, so it is checked against the store on every
-// run.
+// 32-bit.
 
 model CloudropFile {
   id          String  @id
