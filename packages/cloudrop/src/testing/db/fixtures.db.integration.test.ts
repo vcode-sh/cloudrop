@@ -74,6 +74,7 @@ const postgresBackend = {
     "completed_at timestamp with time zone YES",
     "ended_at timestamp with time zone YES",
     "cleaned_at timestamp with time zone YES",
+    "request_key text YES",
   ],
   usageColumns: [
     "owner text NO",
@@ -113,6 +114,7 @@ const sqliteBackend = {
     "completed_at INTEGER YES",
     "ended_at INTEGER YES",
     "cleaned_at INTEGER YES",
+    "request_key TEXT YES",
   ],
   usageColumns: [
     "owner TEXT NO",
@@ -162,6 +164,7 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
       completed_at: T3,
       ended_at: T2,
       cleaned_at: T2,
+      request_key: "key-of-the-request-1",
     });
     await insert(db, "cloudrop_files", fileValues("nulls", "k"));
     const full: FileRow = {
@@ -184,6 +187,7 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
       completedAt: new Date("2026-11-17T10:20:31.001Z"),
       endedAt: new Date("2026-11-17T11:20:30.999Z"),
       cleanedAt: new Date("2026-11-17T11:20:30.999Z"),
+      requestKey: "key-of-the-request-1",
     };
     expect(await reader.file("full")).toEqual(full);
     expect(await reader.file("nulls")).toEqual({
@@ -201,6 +205,7 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
       completedAt: null,
       endedAt: null,
       cleanedAt: null,
+      requestKey: null,
     });
     expect(await reader.file("absent")).toBeNull();
   });
@@ -235,7 +240,7 @@ describe("postgres only", () => {
     await db.createTables();
   });
 
-  test("creates the five indexes of spec §3 beside the primary key, none of them unique on key", async () => {
+  test("creates the six indexes of spec §3 beside the primary key, none of them unique on key", async () => {
     const rows = await db.query(
       "SELECT replace(indexdef, current_schema() || '.', '') AS def FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname COLLATE \"C\"",
     );
@@ -243,6 +248,7 @@ describe("postgres only", () => {
       "CREATE INDEX cloudrop_files_key_idx ON cloudrop_files USING btree (key)",
       "CREATE INDEX cloudrop_files_owner_status_idx ON cloudrop_files USING btree (owner, status)",
       "CREATE UNIQUE INDEX cloudrop_files_pkey ON cloudrop_files USING btree (id)",
+      "CREATE INDEX cloudrop_files_route_request_key_idx ON cloudrop_files USING btree (route, request_key)",
       "CREATE INDEX cloudrop_files_status_claimed_at_idx ON cloudrop_files USING btree (status, claimed_at)",
       "CREATE INDEX cloudrop_files_status_cleaned_at_ended_at_idx ON cloudrop_files USING btree (status, cleaned_at, ended_at)",
       "CREATE INDEX cloudrop_files_status_expires_at_idx ON cloudrop_files USING btree (status, expires_at)",
@@ -303,7 +309,7 @@ describe("sqlite only", () => {
   const db = useSqliteDatabase({ file: true });
   beforeEach(() => db.createTables());
 
-  test("creates the five indexes of spec §3 beside the primary keys, none of them unique on key", async () => {
+  test("creates the six indexes of spec §3 beside the primary keys, none of them unique on key", async () => {
     // "<index> [UNIQUE] (<columns in key order>)" from SQLite's own catalog, for both tables.
     const rows = await db.query(`SELECT list.name || iif(list."unique", ' UNIQUE', '') || ' (' ||
         (SELECT group_concat(name, ', ') FROM (SELECT name FROM pragma_index_info(list.name) ORDER BY seqno)) || ')' AS def
@@ -312,6 +318,7 @@ describe("sqlite only", () => {
     expect(rows.map((row) => row.def)).toEqual([
       "cloudrop_files_key_idx (key)",
       "cloudrop_files_owner_status_idx (owner, status)",
+      "cloudrop_files_route_request_key_idx (route, request_key)",
       "cloudrop_files_status_claimed_at_idx (status, claimed_at)",
       "cloudrop_files_status_cleaned_at_ended_at_idx (status, cleaned_at, ended_at)",
       "cloudrop_files_status_expires_at_idx (status, expires_at)",

@@ -25,6 +25,7 @@ export interface FileRow {
   completedAt: Date | null;
   endedAt: Date | null;
   cleanedAt: Date | null;
+  requestKey: string | null;
 }
 
 export interface UsageRow {
@@ -101,6 +102,7 @@ function fileRow(row: Row): FileRow {
     completedAt: optionalTime(row, "completed_at"),
     endedAt: optionalTime(row, "ended_at"),
     cleanedAt: optionalTime(row, "cleaned_at"),
+    requestKey: optionalText(row, "request_key"),
   };
 }
 
@@ -116,7 +118,7 @@ function usageRow(row: Row): UsageRow {
 
 const FILE_COLUMNS =
   "id, route, key, owner, status, name, type, size, upload_id, metadata, result, claim, claimed_at, expires_at, " +
-  "created_at, updated_at, completed_at, ended_at, cleaned_at";
+  "created_at, updated_at, completed_at, ended_at, cleaned_at, request_key";
 const USAGE_COLUMNS = "owner, reserved_bytes, active_bytes, files, updated_at";
 
 /** A reader of the tables under these names (defaults `cloudrop_files`, `cloudrop_usage`). */

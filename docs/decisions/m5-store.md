@@ -1351,3 +1351,112 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `docs/guide/store.md`, `README.md`, `docs/guide/resume.md`, `docs/guide/server.md`,
   `docs/guide/testing.md`, `examples/next/README.md`, the M5 spec §7.
+
+## After M5: idempotency key (task I)
+
+### M5-T100: a retry of `/upload` supersedes the lost attempt; the key is a body field
+
+- **Decision:**
+  - A retry with the same key does not replay the first answer. It ends the first attempt's rows and reserves afresh,
+    in one atomic store call, and is answered exactly as a fresh request.
+  - The key is an optional body field, `POST /upload { route, files, metadata, idempotencyKey }`, not an
+    `Idempotency-Key` header. Valid: a string of 16 to 128 characters of `[A-Za-z0-9_-]`. Present and anything else,
+    `null` included, is `INVALID_INPUT`: "Send idempotencyKey as 16 to 128 letters, digits, "-" or "_", such as a UUID,
+    or leave it out." Absent: today's behaviour. `UploadRequest` gains `idempotencyKey?: string` (an optional field of a
+    public wire type: additive).
+- **Why:** rows carry no `authorize` JSON and no per-file outcome, so a faithful replay would need new columns and
+  would skip or double plugins' `beforeUpload`; superseding needs one column. A body field needs no CORS change for
+  existing deployments, and the body is already parsed and validated in one place (`server/upload-request.ts`). JSON
+  `null` is refused because the client never sends it (`JSON.stringify` leaves out `undefined`), so a `null` is some
+  other client's mistake worth naming.
+- **If wrong:** the first attempt's multipart uploads are created twice; the sweep's cleanup pass aborts the old ones
+  (it already handles `aborted` rows with an `upload_id`, M5-T64).
+- **Status:** decided (brief rulings 1 and 2).
+- **Source:** task I, 2026-11-17.
+- **Visible in:** `src/server/upload-request.ts`, `src/protocol/types.ts`, base spec §5, `docs/guide/server.md`,
+  `docs/guide/errors.md`.
+
+### M5-T101: `reserve` takes `requestKey`; which rows a retry ends, and the column that holds the key
+
+- **Decision:**
+  - `CloudropStore.reserve` input gains `requestKey: string | null` (required in the type, so a custom store's
+    author sees it; `null` behaves exactly as before). New rows store it in `cloudrop_files.request_key`.
+  - When not null, the same atomic unit first ends as `aborted`, with `ended_at = now` and `cleaned_at` left null for
+    the sweep, every `pending` row with this key, the route of the call's files (one `/upload` names one route) and
+    the same owner, null-safe (null matches only null), and releases their reserved bytes, so the quota check of the
+    new files counts without them. Rows in any other status are untouched.
+  - The rows are superseded whatever the new files' outcomes, even when every one is `over-quota`: the retry's answer
+    is the only one the client acts on, so the lost attempt's bytes go either way. A call that throws (a reused id)
+    supersedes nothing. A call with no files writes nothing, as before.
+  - Postgres: one more data-modifying CTE in the reserve statement; every CTE reads one snapshot, so the freed bytes
+    are subtracted from the locked usage row's counters rather than seen as gone. SQLite: two statements at the front
+    of the batch (the usage release first, guarded on the rows still being `pending`, then the rows), so the quota
+    checks after them read the released counters.
+  - Schema: `request_key text` null (`TEXT` on SQLite), appended after `cleaned_at` in every copy, and an index
+    `cloudrop_files_route_request_key_idx` on `(route, request_key)` (the owner is checked by the predicate; keys are
+    random, so one key matches a handful of rows). The package is unreleased: DDL changed in place, no migration.
+  - `FileRecord` does not gain `requestKey`: the contract compares whole raw rows (`RawFileRow` gains it), never needs it
+    on a record, and the server never reads it back. `RECORD_COLUMNS` leaves the column out; `FILE_COLUMNS` has it,
+    so the lazy schema check names a missing `request_key`.
+  - Plugins hear no `onAbort` for superseded rows (rows carry no auth JSON), the same known cost as the sweep and
+    `revoke` (M5 spec §5.7).
+  - Only rows committed before the retry's `reserve` are superseded. A first attempt still running when its retry
+    arrives (its `authorize` slow past the client's 30 s) writes its rows after the retry's: on Postgres the
+    superseding `UPDATE` cannot see rows committed after its snapshot, and on SQLite the batches simply run in that
+    order. Those rows keep today's cost (expiry by the sweep). Ending them from the late attempt instead would need to
+    know which attempt is newer, and ending every pending row of the key would end the retry's rows, whose answer the
+    client has. Stated, not fixed.
+- **Why:** brief rulings 5 and 6. The over-quota rule had to be picked: superseding only when something is reserved
+  would leave the lost attempt's bytes held exactly when the user is at the limit, the case this closes.
+- **If wrong:** a store that supersedes too little keeps today's known cost; too much would end a live upload, which
+  the route, owner and pending-only predicate rule out short of a reused random key.
+- **Status:** decided.
+- **Source:** task I, 2026-11-17.
+- **Visible in:** `src/server/store.ts`, `src/store/sql/{postgres,sqlite,records}.ts`, `src/testing/memory-store-methods.ts`,
+  `src/testing/store-contract/supersede.ts`, the Drizzle tables, both Prisma models, `docs/guide/store.md`,
+  `examples/next/lib/cloudrop-tables.sql`, M5 spec §3 and §4.
+
+### M5-T102: the client makes one key per `/upload` ask, from `crypto.getRandomValues`
+
+- **Decision:**
+  - `launch()` (`client/launch.ts`) makes the key, the one place every ask goes through: the job's first `/upload`,
+    a retry of several files, a one-file re-ask after a refusal, a one-file `retry()`, a resumed file's start over.
+    Every attempt of that ask (`withRetry`, and the passes of `askAlone` after a pause) sends the same key; the next
+    `launch()` makes a new one. `Endpoints.start` takes it as a parameter. `Endpoints` is internal: the client exposes
+    no custom `endpoints` option, so nothing outside the package changes.
+  - The key is 128 random bits from `crypto.getRandomValues` as 32 hex digits, not `crypto.randomUUID()` as the brief
+    said: `randomUUID` exists only in a secure context, and the client uploads from plain-http pages (a LAN address in
+    development), where it would throw. `getRandomValues` is available everywhere the client runs.
+- **Why:** brief ruling 3; the deviation keeps uploads working outside secure contexts.
+- **If wrong:** a key per attempt would make every retry a new request and supersede nothing; `launch.test.ts` pins one
+  key per ask (fault probe: a new key per attempt turns two of its three cases red).
+- **Status:** decided; the key source deviates from the brief, for the reason above.
+- **Source:** task I, 2026-11-17.
+- **Visible in:** `src/client/launch.ts`, `src/client/endpoints.ts`, `docs/guide/client.md`.
+
+### M5-T103: the server validates the key always, and passes it to `reserve` only with a store
+
+- **Decision:** without a store the key is validated, then ignored: nothing is reserved, and an orphan multipart
+  upload is the lifecycle rule's, as before. With a store, `reserveFiles` passes it as `requestKey`. A retry that
+  `beforeUpload` refuses, or whose files are all refused by the route's policy, reaches no `reserve` and supersedes
+  nothing; its lost attempt keeps today's cost (expiry by the sweep, or `revokeUploads`).
+- **Why:** brief ruling 4; the policy and plugin paths answer before any store call by design (M5-T25).
+- **If wrong:** the cost of an unsuperseded attempt is the one M5 shipped with.
+- **Status:** decided.
+- **Source:** task I, 2026-11-17.
+- **Visible in:** `src/server/upload.ts`, `src/server/store-upload.ts`, `docs/guide/store.md` (known costs), M5 spec
+  §5.2 and §5.7.
+
+### M5-T104: the key grows the SQL adapters by about 5 % (M4-F24)
+
+- **Decision:** re-measured with size-limit: `cloudrop` 46.08 → 46.27 kB (+0.4 %), `cloudrop (bundled)` 27.19 →
+  27.29 kB, `cloudrop/client` 11.03 → 11.09 kB (+0.5 %), `cloudrop/adapters/sql` 13.72 → 14.37 kB (+4.7 %),
+  `cloudrop/adapters/drizzle` 15.7 → 16.44 kB (+4.7 %), `cloudrop/adapters/prisma` 12.78 → 13.43 kB (+5.1 %, declared
+  here). Baselines are the sizes recorded after M5's final fix round. Budgets unchanged.
+- **Why:** the summed budgets count the unminified SQL core, its statements and its comments; the superseding SQL is
+  in both dialects and reaches every adapter.
+- **If wrong:** drizzle has 0.56 kB left under its 17 kB budget; the next change to the SQL core or the Drizzle tables
+  may need a budget decision.
+- **Status:** decided.
+- **Source:** task I, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts`.

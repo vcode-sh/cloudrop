@@ -100,9 +100,22 @@ export interface CloudropStore<TTx = never> {
    * owner's usage row is created by its first reserved file, so a call that reserves nothing leaves none. A file whose
    * id already has a row makes the call throw (a primary-key violation, never `ON CONFLICT DO NOTHING`), and then
    * nothing of the call is written. Atomic for the whole call. Answers one outcome per file, in order.
+   *
+   * `requestKey` is the `/upload` request's idempotency key, stored on every row written. When it is not null, the call
+   * first ends as `aborted` (`ended_at = now`, `cleaned_at` left null for the sweep) every `pending` row with this key,
+   * the route of the call's files and the same owner (null matches null), releasing their reserved bytes, so the quota
+   * check of the new files counts without them: a retry supersedes an attempt whose answer was lost. Rows in any other
+   * status are left alone. The rows are superseded whatever the new files' outcomes, even when every one is over the
+   * quota, and not at all when the call throws. A call with no files writes nothing.
    */
   reserve(
-    input: { owner: string | null; limit: number | null; expiresAt: Date; files: readonly NewFile[] },
+    input: {
+      owner: string | null;
+      limit: number | null;
+      expiresAt: Date;
+      requestKey: string | null;
+      files: readonly NewFile[];
+    },
     now: Date,
   ): Promise<readonly ("reserved" | "over-quota")[]>;
   /** Stores the multipart upload id on a `pending` row whose `upload_id` is null or already this id: true, and

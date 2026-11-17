@@ -213,11 +213,12 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     await setup.drained();
     const [old, renewed] = setup.issued;
     const outcome = data?.files[0];
+    const { idempotencyKey: _randomKey, ...asked } = uploads.bodies[1] as Record<string, unknown>;
 
     expect({
       error,
       sent: setup.sent(),
-      asked: uploads.bodies[1],
+      asked,
       whileSent,
       key: outcome?.status === "done" ? outcome.result.file.key : outcome?.error.code,
       object: await setup.storedHash(renewed?.key ?? ""),

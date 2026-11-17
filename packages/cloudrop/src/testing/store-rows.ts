@@ -25,6 +25,8 @@ export interface RawFileRow {
   completedAt: Date | null;
   endedAt: Date | null;
   cleanedAt: Date | null;
+  /** The idempotency key of the `/upload` that wrote the row, or null. */
+  requestKey: string | null;
 }
 
 /** A `cloudrop_usage` row. */

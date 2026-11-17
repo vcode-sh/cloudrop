@@ -32,11 +32,20 @@ function readDescriptor(file: unknown): FileDescriptor | null {
   return length > 0 && length <= MAX_NAME_LENGTH ? { name, size: file.size, type: file.type } : null;
 }
 
+/** An `/upload` request's idempotency key: the client's random id of one ask, sent again by each retry of it. */
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,128}$/;
+
 export function readRequest(
   body: unknown,
   config: ServerConfig,
-): Result<{ route: RouteConfig; files: FileDescriptor[]; metadata: unknown }> {
+): Result<{ route: RouteConfig; files: FileDescriptor[]; metadata: unknown; idempotencyKey: string | null }> {
   if (!isPlainObject(body)) return fail(invalidInput("Send a JSON object: { route, files, metadata }."));
+  const { idempotencyKey } = body;
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY.test(idempotencyKey))) {
+    return fail(
+      invalidInput('Send idempotencyKey as 16 to 128 letters, digits, "-" or "_", such as a UUID, or leave it out.'),
+    );
+  }
   if (typeof body.route !== "string")
     return fail(invalidInput('Name the upload route, such as { "route": "avatar" }.'));
   const route = config.routes.get(body.route);
@@ -63,7 +72,12 @@ export function readRequest(
       ),
     );
   }
-  return ok({ route, files: descriptors as FileDescriptor[], metadata: body.metadata });
+  return ok({
+    route,
+    files: descriptors as FileDescriptor[],
+    metadata: body.metadata,
+    idempotencyKey: idempotencyKey ?? null,
+  });
 }
 
 /** The file's key and stored type, or why the route refuses it. */

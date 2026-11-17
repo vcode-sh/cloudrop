@@ -70,7 +70,10 @@ describe("SQLite", () => {
 
     test("complete that fails at its files write rolls back the usage write that ran before it", async () => {
       const store = sqlStore(sqliteExecutor(db.database));
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 10)] },
+        NOW,
+      );
       await store.claim("f-1", "claim-a", NOW, 60_000);
       // complete's batch writes usage first, then the files row; this fails the files write once.
       let armed = true;

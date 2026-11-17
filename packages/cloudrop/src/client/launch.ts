@@ -11,6 +11,13 @@ import { uploadOf } from "./persist.ts";
 import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retry.ts";
 
 /**
+ * A new `/upload` idempotency key: 128 random bits as 32 hex digits. Not `crypto.randomUUID()`, which a page outside a
+ * secure context (plain http on a LAN address) does not have, while uploads work there.
+ */
+const newRequestKey = (): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+/**
  * A file /upload refused at `attempt`. A retryable refusal asks again for this file alone, within the budget and after
  * the wait of any request's retry (M3-U92); the file stays queued meanwhile. A file cancelled meanwhile ends aborted
  * and sends nothing: it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
@@ -95,9 +102,11 @@ export async function launch(
   // job.abort() and the caller's signal cancel every file, so a file's own signal hears them too.
   const signal = own ? own.cancel.signal : job.signal;
   let attempt = (first ?? 1) - 1;
+  // One key per ask, shared by its retries: with a store, a retry after a lost answer supersedes what that answer held.
+  const key = newRequestKey();
   const ask = (at: number) => {
     attempt = at;
-    return context.endpoints.start(args.route, files, args.metadata, signal);
+    return context.endpoints.start(args.route, files, args.metadata, key, signal);
   };
   const started = (own ? askAlone(job, own, ask, () => attempt + 1, waitMs) : withRetry(ask, signal)).then((answer) =>
     answer.error && signal.aborted ? fail(aborted()) : answer,

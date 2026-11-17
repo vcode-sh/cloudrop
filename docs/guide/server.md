@@ -308,9 +308,12 @@ What happens in `/upload`:
 
 1. The handler checks the request: `POST`, an allowed origin, `Content-Type: application/json`, a body of at most
    64 KiB.
-2. The route must exist (`UNKNOWN_ROUTE`), the number of files must be within `maxFiles` (`TOO_MANY_FILES`), and each
-   file entry needs a name, size and type. File names are normalized to NFC before they are counted (1 to 255 Unicode
-   code points) and stored.
+2. The body is `{ route, files, metadata, idempotencyKey }`. The route must exist (`UNKNOWN_ROUTE`), the number of
+   files must be within `maxFiles` (`TOO_MANY_FILES`), and each file entry needs a name, size and type. File names are
+   normalized to NFC before they are counted (1 to 255 Unicode code points) and stored. `idempotencyKey` is optional:
+   16 to 128 letters, digits, `-` or `_` (`INVALID_INPUT` otherwise). The client sends a new one for each ask and the
+   same one on every retry of it; without a store it is checked and ignored, with one a retry
+   [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client).
 3. The route's metadata schema validates the metadata (`INVALID_METADATA`).
 4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
@@ -412,7 +415,8 @@ database store answers a finished upload's retries from its row instead (see
 
 The client also sends a slow call again. A `/complete` slower than 120 s, or an `/upload` slower than 30 s, counts as no
 answer and is retried (see [Stalled requests](client.md#stalled-requests)), so keep `onComplete` and `authorize` well
-under that, and `onComplete` idempotent.
+under that, and `onComplete` idempotent. A retried `/upload` runs `authorize` and `beforeUpload` again: the
+`idempotencyKey` it carries lets a store release what the lost attempt reserved, not plugins.
 
 An app that must refuse a late upload after `/abort` (see [the token](#the-upload-token-and-what-it-allows)) checks its
 own record in `afterVerify`, such as a released quota reservation, and refuses it there, which deletes the object.

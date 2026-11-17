@@ -119,7 +119,14 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     if (refused) return fail(refused);
   }
   const exp = nowSeconds() + TOKEN_LIFETIME_SECONDS;
-  const refusals = await reserveFiles(config, { route, owner: rowOwner, files: accepted, metadataJson, exp });
+  const refusals = await reserveFiles(config, {
+    route,
+    owner: rowOwner,
+    files: accepted,
+    metadataJson,
+    exp,
+    requestKey: parsed.data.idempotencyKey,
+  });
   const tickets = await Promise.all(
     prepared.map((file): FileTicket | Promise<FileTicket> => {
       if (file instanceof CloudropError) return { kind: "rejected", error: errorBody(file) };

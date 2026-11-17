@@ -44,7 +44,10 @@ export function transactionCases(suite: StoreSuite): void {
     await seed("u-1", [file]);
     const failing = transaction(async (_tx, inner) => {
       await inner.claim("f-1", "claim-a", at(MINUTE), LEASE);
-      await store.reserve({ owner: "u-2", limit: null, expiresAt: EXPIRES, files: [newFile("f-2", 7)] }, at(MINUTE));
+      await store.reserve(
+        { owner: "u-2", limit: null, expiresAt: EXPIRES, requestKey: null, files: [newFile("f-2", 7)] },
+        at(MINUTE),
+      );
       throw new Error("onComplete failed");
     });
     await expect(failing).rejects.toThrow("onComplete failed");
@@ -60,7 +63,10 @@ export function transactionCases(suite: StoreSuite): void {
     skipWithout(ctx, "tables");
     const renamed = provided(target.tables, "tables").renamed;
     expect(
-      await renamed.store.reserve({ owner: "u-1", limit: null, expiresAt: EXPIRES, files: [file] }, at(0)),
+      await renamed.store.reserve(
+        { owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: null, files: [file] },
+        at(0),
+      ),
     ).toEqual(["reserved"]);
     expect(await renamed.raw.files()).toEqual([pendingRow(file, "u-1")]);
     expect(await renamed.raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 100 })]);

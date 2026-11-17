@@ -28,7 +28,8 @@ const summed = { disablePlugins: ["@size-limit/esbuild"] };
 
 export default [
   // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17 after
-  // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB.
+  // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB; after the /upload idempotency key (M5-T104):
+  // cloudrop 46.27 kB.
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
@@ -36,7 +37,7 @@ export default [
   // route() (for store.route), count toward each adapter that imports them. Measured 2026-11-17 after M5's final fix
   // round: sql 13.72 kB (its own file 1.34 kB, the shared core chunk 9.36 kB), budgeted 18 kB (M5-T97); drizzle
   // 15.7 kB (its own file 3.31 kB), budgeted 17 kB (M5-T48); prisma 12.78 kB (its own file 0.72 kB), budgeted 16 kB
-  // (M4-F24, M5-T58).
+  // (M4-F24, M5-T58). After the /upload idempotency key (M5-T104): sql 14.37 kB, drizzle 16.44 kB, prisma 13.43 kB.
   { name: "cloudrop/adapters/sql", path: withImportedChunks("adapters/sql.js"), gzip: true, limit: "18 kB", ...summed },
   {
     name: "cloudrop/adapters/drizzle",
@@ -54,7 +55,7 @@ export default [
   },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
-  // after its final fix round (M5-T69).
+  // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104).
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),
@@ -65,7 +66,7 @@ export default [
     modifyEsbuildConfig: (config: object) => ({ ...config, logOverride: { "ignored-bare-import": "silent" } }),
   },
   // Bundled and minified, the size an app ships. History: 8.35 kB after progress plan B, 10.57 kB after resume
-  // (M3-U91), 11.03 kB after M4a (M4-F23). Measured 2026-11-17: 11.03 kB.
+  // (M3-U91), 11.03 kB after M4a (M4-F23), 11.09 kB after the /upload idempotency key (M5-T104).
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),

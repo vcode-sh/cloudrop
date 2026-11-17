@@ -37,6 +37,7 @@ export function pendingRow(file: NewFile, owner: string | null, changes: Partial
     completedAt: null,
     endedAt: null,
     cleanedAt: null,
+    requestKey: null,
     ...changes,
   };
 }
@@ -129,7 +130,7 @@ export function storeSuite(connected: () => StoreTarget): StoreSuite {
       return (await connected().raw.files()).find((row) => row.id === id);
     },
     async seed(owner, files, expiresAt = EXPIRES) {
-      const outcomes = await store().reserve({ owner, limit: null, expiresAt, files }, at(0));
+      const outcomes = await store().reserve({ owner, limit: null, expiresAt, requestKey: null, files }, at(0));
       if (outcomes.some((outcome) => outcome !== "reserved")) throw new Error(`Seeding failed: ${outcomes.join(", ")}`);
     },
     advance,

@@ -22,12 +22,14 @@ model CloudropFile {
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
   endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
   cleanedAt   DateTime? @map("cleaned_at") @db.Timestamptz(6)
+  requestKey  String?   @map("request_key")
 
   @@index([status, expiresAt])
   @@index([status, claimedAt])
   @@index([status, cleanedAt, endedAt])
   @@index([owner, status])
   @@index([key])
+  @@index([route, requestKey])
   @@map("cloudrop_files")
 }
 

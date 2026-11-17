@@ -14,7 +14,8 @@ import { RECORD_COLUMNS } from "./records.ts";
 
 type GuardedWrites = Pick<StoreMethods, "reserve" | "claim" | "complete" | "end" | "revoke" | "reconcile">;
 
-const INSERT_COLUMNS = "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at";
+const INSERT_COLUMNS =
+  "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at, request_key";
 
 /** The database's clock in integer milliseconds, as reconcile is given no time. Valid on every SQLite version. */
 const NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
@@ -41,8 +42,29 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
       WHERE f.id = ${b.text(id)} AND f.status = ${b.text(from)} ${guard?.(b) ?? ""} AND ${usage}.owner = f.owner`);
   }
 
+  /**
+   * A retry of a request whose answer was lost: the statements that end that attempt's pending rows and release their
+   * bytes, the usage first while the rows are still pending, so the quota checks after them count without those bytes.
+   */
+  function supersede(key: string, owner: string | null, accepted: readonly NewFile[], now: Date): SqlStatement[] {
+    const routes = [...new Set(accepted.map((file) => file.route))];
+    const superseded = (b: Binder) =>
+      `request_key = ${b.text(key)} AND ${owner === null ? "owner IS NULL" : `owner = ${b.text(owner)}`}
+        AND route IN (${routes.map((route) => b.text(route)).join(", ")}) AND status = 'pending'`;
+    const b = binder("sqlite");
+    const end = b.statement(`UPDATE ${files} SET status = 'aborted', ended_at = ${b.time(now)},
+      updated_at = ${b.time(now)} WHERE ${superseded(b)}`);
+    if (owner === null) return [end];
+    const counter = binder("sqlite");
+    const rows = (c: Binder) => `FROM ${files} WHERE ${superseded(c)}`;
+    const count = counter.statement(`UPDATE ${usage}
+      SET reserved_bytes = reserved_bytes - (SELECT sum(size) ${rows(counter)}), updated_at = ${counter.time(now)}
+      WHERE owner = ${counter.text(owner)} AND EXISTS (SELECT 1 ${rows(counter)})`);
+    return [count, end];
+  }
+
   return {
-    async reserve({ owner, limit, expiresAt, files: accepted }, now) {
+    async reserve({ owner, limit, expiresAt, requestKey, files: accepted }, now) {
       // The quota check reads the usage row as the earlier files of this batch left it; the same check guards the usage
       // write, which runs before anything else changes that row, so the two always agree.
       const fits = (b: Binder, file: NewFile) =>
@@ -55,7 +77,7 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
         const insert = row.statement(`INSERT INTO ${files} (${INSERT_COLUMNS})
           SELECT ${row.text(file.id)}, ${row.text(file.route)}, ${row.text(file.key)}, ${row.text(owner)}, 'pending',
             ${row.text(file.name)}, ${row.text(file.type)}, ${row.bigint(file.size)}, ${row.text(file.metadata)},
-            ${row.time(expiresAt)}, ${row.time(now)}, ${row.time(now)}
+            ${row.time(expiresAt)}, ${row.time(now)}, ${row.time(now)}, ${row.text(requestKey)}
           WHERE ${fits(row, file)} RETURNING id`);
         if (owner === null) return [insert];
         const counter = binder("sqlite");
@@ -68,7 +90,8 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
         return [insert, count];
       });
       if (statements.length === 0) return [];
-      const results = await executor.batch(statements);
+      const superseded = requestKey === null ? [] : supersede(requestKey, owner, accepted, now);
+      const results = (await executor.batch([...superseded, ...statements])).slice(superseded.length);
       const step = owner === null ? 1 : 2;
       return accepted.map((_, index) => ((results[index * step]?.length ?? 0) > 0 ? "reserved" : "over-quota"));
     },

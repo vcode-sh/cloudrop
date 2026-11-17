@@ -1,7 +1,8 @@
 // Chaos rows with a database store (M5 spec §8): the server keeps a row per upload in node:sqlite through sqlStore.
-// Answers to /complete lost after the server committed, a deadline that passes while onComplete still runs, and a
-// storage acknowledgement lost on the way still run onComplete exactly once and leave the owner's usage exact; a
-// revoke stops an upload at its next call; the sweep after closed tabs leaves no orphan object and no open upload.
+// An /upload answer lost on the way is superseded by the retry that carries its idempotency key. Answers to /complete
+// lost after the server committed, a deadline that passes while onComplete still runs, and a storage acknowledgement
+// lost on the way still run onComplete exactly once and leave the owner's usage exact; a revoke stops an upload at its
+// next call; the sweep after closed tabs leaves no orphan object and no open upload.
 // Run with `bun run test:chaos`.
 import { expect, test, vi } from "vitest";
 import { chaosFile, MULTIPART_FILE_SIZE, SINGLE_FILE_SIZE, useChaosFixture } from "../testing/chaos-fixture.ts";
@@ -28,6 +29,28 @@ async function expectCompletedOnce(id: string, size: number) {
     { owner: CHAOS_OWNER, reservedBytes: 0, activeBytes: size, files: 1 },
   ]);
 }
+
+test("an /upload answer lost to a reset: the retry with the same key supersedes the lost attempt, and usage counts the file once", async () => {
+  chaos.faultApp([{ call: "upload", fault: { kind: "reset" } }]);
+  const file = chaosFile(SINGLE_FILE_SIZE);
+
+  const { data, error } = await chaos.client().upload("files", file);
+
+  expect(error).toBeNull();
+  await chaos.expectStored(data?.file.key ?? "", file);
+  expect(chaos.appRequests()).toEqual(["POST /upload 200 reset", "POST /upload 200", "POST /complete 200"]);
+  // Without the key, the lost attempt's row would still hold its bytes as reserved until the sweep expired it.
+  const rows = await chaos.store.raw.files();
+  expect(rows).toHaveLength(2);
+  expect(Object.fromEntries(rows.map(({ id, status }) => [id === data?.file.id ? "retry" : "lost", status]))).toEqual({
+    lost: "aborted",
+    retry: "completed",
+  });
+  expect(await chaos.store.raw.usage()).toMatchObject([
+    { owner: CHAOS_OWNER, reservedBytes: 0, activeBytes: file.size, files: 1 },
+  ]);
+  expect(await chaos.objectsLeft()).toEqual([data?.file.key]);
+});
 
 test("a /complete answer lost to a reset after the commit: the retry replays the stored answer with no storage call", async () => {
   chaos.faultApp([{ call: "complete", fault: { kind: "reset" } }]);

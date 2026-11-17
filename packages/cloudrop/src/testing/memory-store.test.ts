@@ -22,7 +22,7 @@ describe("memory store transaction handle", () => {
 
   it("records the store calls made inside, in order, and commits app rows written through tx", async () => {
     const store = memoryStore();
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: T, files: [file] }, T);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: T, requestKey: null, files: [file] }, T);
     const calls = await store.transaction(async (tx, inner) => {
       await inner.get("f-1");
       await inner.claim("f-1", "claim-a", T, 60_000);
@@ -49,12 +49,12 @@ describe("memory store transaction handle", () => {
   // transaction waits for it, a deadlock. In memory both run, and the rollback must keep the outside bytes.
   it("keeps an outside reserve for the same owner when a transaction that completed a file rolls back", async () => {
     const store = memoryStore();
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: T, files: [file] }, T);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: T, requestKey: null, files: [file] }, T);
     const failing = store.transaction(async (_tx, inner) => {
       await inner.claim("f-1", "claim-a", T, 60_000);
       await inner.complete("f-1", "claim-a", null, T);
       const other = { ...file, id: "f-2", size: 7 };
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: T, files: [other] }, T);
+      await store.reserve({ owner: "u-1", limit: null, expiresAt: T, requestKey: null, files: [other] }, T);
       throw new Error("onComplete failed");
     });
     await expect(failing).rejects.toThrow("onComplete failed");

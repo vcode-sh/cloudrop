@@ -22,8 +22,12 @@ function recorder(calls: AbortContext[]): CloudropPlugin {
   return { id: "recorder", server: { onAbort: (context) => void calls.push(context) } };
 }
 
-async function upload(fixture: ReturnType<typeof storeFixture>, files: unknown[]): Promise<FileTicket[]> {
-  const response = await fixture.post("upload", { route: "owned", files });
+async function upload(
+  fixture: ReturnType<typeof storeFixture>,
+  files: unknown[],
+  idempotencyKey?: string,
+): Promise<FileTicket[]> {
+  const response = await fixture.post("upload", { route: "owned", files, idempotencyKey });
   expect(response.status).toBe(200);
   return ((await response.json()) as UploadResponse).files;
 }
@@ -50,6 +54,7 @@ function pendingRow(ticket: FileTicket & { id: string; key: string }, file: { na
     completedAt: null,
     endedAt: null,
     cleanedAt: null,
+    requestKey: null,
   };
 }
 
@@ -75,6 +80,37 @@ describe("POST /upload with a store", () => {
       { owner: "u1", reservedBytes: 30, activeBytes: 0, files: 0, updatedAt: NOW },
     ]);
     expect(tokenPayload(first.token).stored).toBe(true);
+  });
+
+  it("lets a retry with the same idempotencyKey replace an attempt whose answer was lost, near the quota", async () => {
+    const fixture = storeFixture({ owned }, { quota: () => 15 * MiB, multipartThreshold: 0 });
+    const key = "0f8e3c2a-5b7d-4e1f-9a6c-2d4b8e0f1a3c";
+    // The client never read this answer: its deadline passed, or the connection dropped on the way back.
+    const [lost] = await upload(fixture, [png(9 * MiB, "big.png")], key);
+    const [retried] = await upload(fixture, [png(9 * MiB, "big.png")], key);
+    const [other] = await upload(fixture, [png(9 * MiB, "big.png")], "another-key-0000000000");
+    if (lost?.kind !== "multipart" || retried?.kind !== "multipart") throw new Error("expected two multipart tickets");
+    expect(other).toEqual(quotaReached);
+    expect(
+      (await fixture.store.raw.files()).map(({ id, status, endedAt, cleanedAt, requestKey }) => ({
+        id,
+        status,
+        endedAt,
+        cleanedAt,
+        requestKey,
+      })),
+    ).toEqual(
+      [
+        { id: lost.id, status: "aborted", endedAt: NOW, cleanedAt: null, requestKey: key },
+        { id: retried.id, status: "pending", endedAt: null, cleanedAt: null, requestKey: key },
+      ].toSorted((a, b) => (a.id < b.id ? -1 : 1)),
+    );
+    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 9 * MiB, activeBytes: 0, files: 0 });
+    // The lost attempt's multipart upload is the sweep's cleanup work, past the grace.
+    expect(fixture.fake.pendingUploads()).toBe(2);
+    vi.setSystemTime(new Date(NOW.getTime() + 2 * 60 * 60_000));
+    expect((await fixture.cloudrop.api.sweep()).data?.cleaned).toBe(1);
+    expect(fixture.fake.pendingUploads()).toBe(1);
   });
 
   it("stores the multipart upload id on the row right after the upload is created", async () => {

@@ -53,7 +53,10 @@ function modelRows(
 ) {
   test("the Prisma models read the rows the store wrote", async () => {
     const { prisma, store } = await open();
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: LATER, files: [file("f-1", MAX_SAFE)] }, NOW);
+    await store.reserve(
+      { owner: "u-1", limit: null, expiresAt: LATER, requestKey: null, files: [file("f-1", MAX_SAFE)] },
+      NOW,
+    );
     await store.claim("f-1", "claim-1", NOW, 60_000);
     await store.complete("f-1", "claim-1", '{"id":7}', LATER);
     expect(await prisma.cloudropFile.findUnique({ where: { id: "f-1" } })).toEqual({
@@ -71,6 +74,7 @@ function modelRows(
       completedAt: time(LATER),
       endedAt: null,
       cleanedAt: null,
+      requestKey: null,
     });
     expect(await prisma.cloudropUsage.findUnique({ where: { owner: "u-1" } })).toEqual({
       owner: "u-1",
@@ -149,7 +153,10 @@ describe("Postgres", () => {
     await db.reset();
     await db.createTables();
     const store = prismaStore(prisma, { dialect: "postgres", transaction: true });
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: LATER, files: [file("f-1", 1)] }, NOW);
+    await store.reserve(
+      { owner: "u-1", limit: null, expiresAt: LATER, requestKey: null, files: [file("f-1", 1)] },
+      NOW,
+    );
     const held = gate();
     const claimed = gate();
     const holder = store.transaction(async (_tx, inner) => {

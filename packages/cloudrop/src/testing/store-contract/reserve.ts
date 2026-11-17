@@ -11,7 +11,7 @@ export function reserveCases(suite: StoreSuite): void {
     const first = { ...newFile("f-1", 1024), metadata: '{"album":"summer"}' };
     const second = newFile("f-2", 2048);
     const outcomes = await store.reserve(
-      { owner: "u-1", limit: null, expiresAt: EXPIRES, files: [first, second] },
+      { owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: null, files: [first, second] },
       at(0),
     );
     expect(outcomes).toEqual(["reserved", "reserved"]);
@@ -41,7 +41,10 @@ export function reserveCases(suite: StoreSuite): void {
     await advance("f-0", "completed", at(0));
     // 30 active: 30 + 40 = 70 fits; 70 + 31 = 101 does not; 70 + 30 = 100 is exactly the limit and fits.
     const files = [newFile("f-1", 40), newFile("f-2", 31), newFile("f-3", 30)];
-    const outcomes = await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(MINUTE));
+    const outcomes = await store.reserve(
+      { owner: "u-1", limit: 100, expiresAt: EXPIRES, requestKey: null, files },
+      at(MINUTE),
+    );
     expect(outcomes).toEqual(["reserved", "over-quota", "reserved"]);
     expect((await raw.files()).map((row) => row.id)).toEqual(["f-0", "f-1", "f-3"]);
     expect(await raw.usage()).toEqual([
@@ -52,7 +55,10 @@ export function reserveCases(suite: StoreSuite): void {
   it("reserve checks the quota of an owner the store has never counted, from the first file", async () => {
     const { store, raw } = suite;
     const files = [newFile("f-1", 101), newFile("f-2", 100)];
-    const outcomes = await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0));
+    const outcomes = await store.reserve(
+      { owner: "u-1", limit: 100, expiresAt: EXPIRES, requestKey: null, files },
+      at(0),
+    );
     expect(outcomes).toEqual(["over-quota", "reserved"]);
     expect(await raw.files()).toEqual([pendingRow(newFile("f-2", 100), "u-1")]);
     expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 100 })]);
@@ -61,14 +67,16 @@ export function reserveCases(suite: StoreSuite): void {
   it("reserve that refuses every file writes no row and no usage", async () => {
     const { store, raw } = suite;
     const files = [newFile("f-1", 101)];
-    expect(await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0))).toEqual(["over-quota"]);
+    expect(
+      await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, requestKey: null, files }, at(0)),
+    ).toEqual(["over-quota"]);
     expect({ files: await raw.files(), usage: await raw.usage() }).toEqual({ files: [], usage: [] });
   });
 
   it("rows without an owner ignore the limit and go through every status without touching usage", async () => {
     const { store, raw } = suite;
     const files = [newFile("f-1", 500), newFile("f-2", 20), newFile("f-3", 30)];
-    expect(await store.reserve({ owner: null, limit: 1, expiresAt: EXPIRES, files }, at(0))).toEqual([
+    expect(await store.reserve({ owner: null, limit: 1, expiresAt: EXPIRES, requestKey: null, files }, at(0))).toEqual([
       "reserved",
       "reserved",
       "reserved",
@@ -93,7 +101,7 @@ export function reserveCases(suite: StoreSuite): void {
     // The second file reuses an existing id, so the database refuses it after the first was written.
     const files = [newFile("f-2", 20), newFile("f-1", 30)];
     await expect(
-      store.reserve({ owner: "u-1", limit: null, expiresAt: EXPIRES, files }, at(MINUTE)),
+      store.reserve({ owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: null, files }, at(MINUTE)),
     ).rejects.toBeInstanceOf(Error);
     expect({ files: await raw.files(), usage: await raw.usage() }).toEqual(before);
   });

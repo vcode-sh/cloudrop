@@ -13,7 +13,10 @@ export function atomicityCases(suite: StoreSuite): void {
     {
       method: "reserve, with a quota",
       act: (store) =>
-        store.reserve({ owner: "u-1", limit: 1000, expiresAt: EXPIRES, files: [newFile("f-4", 1)] }, at(MINUTE)),
+        store.reserve(
+          { owner: "u-1", limit: 1000, expiresAt: EXPIRES, requestKey: null, files: [newFile("f-4", 1)] },
+          at(MINUTE),
+        ),
     },
     { method: "complete", act: (store) => store.complete("f-1", "claim-f-1", "{}", at(MINUTE)) },
     { method: "end from completed to deleted", act: (store) => store.end("f-2", "completed", "deleted", at(MINUTE)) },
