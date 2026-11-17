@@ -19,7 +19,11 @@ import type {
 /** The client's options, to create the client on first use in the browser; or `{ client }` to share one. */
 export type UploadHooksOptions<TCloudrop extends InferableCloudrop> =
   | ClientOptions
-  | { client: CloudropClient<TCloudrop> };
+  | {
+      // The added member is not generic, so a client of another server's routes is refused: the client's own generic
+      // methods compare by their constraints, which would let any CloudropClient pass.
+      client: CloudropClient<TCloudrop> & { resumable(route?: RouteName<TCloudrop>): unknown };
+    };
 
 export interface UseUploadOptions<TMetadata> {
   /** Sent with every upload of the hook, validated by the route's schema; the latest render's value is used. */

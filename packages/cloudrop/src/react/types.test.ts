@@ -4,12 +4,18 @@
 // every expect-error directive is an assertion. Oracle: the route definitions below.
 
 import { describe, expectTypeOf, it } from "vitest";
-import type { CompleteResponse, ResumableUpload, UploadResult } from "../client.ts";
+import { type CompleteResponse, createCloudropClient, type ResumableUpload, type UploadResult } from "../client.ts";
 import { createUploadHooks } from "../react.ts";
 import { createCloudrop } from "../server/cloudrop.ts";
 import { allowAnyone, route } from "../server/route.ts";
+import type { StandardSchema } from "../server/schema.ts";
 import { r2 } from "../storage/presets.ts";
 import { albumSchema } from "../testing/upload-fixture.ts";
+
+/** A schema that accepts undefined: the route's metadata is optional. */
+const optionalSchema: StandardSchema<{ a: string } | undefined> = {
+  "~standard": { version: 1, vendor: "test", validate: (value) => ({ value: value as { a: string } | undefined }) },
+};
 
 const cloudrop = createCloudrop({
   storage: r2({
@@ -28,6 +34,21 @@ const cloudrop = createCloudrop({
       onComplete: ({ file }) => ({ url: file.url }),
     }),
     notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }),
+    optional: route({ accept: "*/*", maxSize: 1, metadata: optionalSchema, authorize: allowAnyone }),
+  },
+});
+
+/** Another server, whose only route returns a different result. */
+const other = createCloudrop({
+  storage: r2({
+    bucket: "other",
+    accountId: "0123456789abcdef0123456789abcdef",
+    accessKeyId: "k",
+    secretAccessKey: "s",
+  }),
+  secret: "test-secret-0123456789abcdef0123456789",
+  routes: {
+    videos: route({ accept: "video/*", maxSize: "1GB", authorize: allowAnyone, onComplete: () => ({ seconds: 1 }) }),
   },
 });
 
@@ -58,6 +79,10 @@ describe("cloudrop/react types", () => {
 
       const notes = useUpload("notes");
       expectTypeOf(notes.files[0]?.result).toEqualTypeOf<CompleteResponse<null> | null | undefined>();
+
+      // A schema that accepts undefined leaves the options optional, and metadata may be passed.
+      useUpload("optional");
+      useUpload("optional", { metadata: { a: "x" } });
     };
     expectTypeOf(component).toBeFunction();
   });
@@ -79,5 +104,14 @@ describe("cloudrop/react types", () => {
       if (any?.route === "notes") void notes.resume(any, file);
     };
     expectTypeOf(component).toBeFunction();
+  });
+
+  it("takes { client } only for the same server's type", () => {
+    createUploadHooks<typeof cloudrop>({ client: createCloudropClient<typeof cloudrop>() });
+    // Never called: a client is created only in the browser.
+    const wrongServer = () =>
+      // @ts-expect-error a client of another server's routes
+      createUploadHooks<typeof cloudrop>({ client: createCloudropClient<typeof other>() });
+    expectTypeOf(wrongServer).toBeFunction();
   });
 });
