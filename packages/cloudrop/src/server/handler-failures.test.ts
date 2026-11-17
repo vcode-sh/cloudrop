@@ -78,7 +78,7 @@ describe("cloudrop.handler failures", () => {
 
   // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status. The
   // client's own codes have none either: the server never sends them.
-  it.each([{ code: "QUOTA_EXCEEDED" }, { code: "ABORTED" }])(
+  it.each([{ code: "OUT_OF_CREDITS" }, { code: "ABORTED" }])(
     "answers a plugin refusal with the code $code, which the server cannot send, as a generic 500",
     async ({ code }) => {
       const plugin: CloudropPlugin = {

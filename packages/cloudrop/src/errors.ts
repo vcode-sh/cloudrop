@@ -23,6 +23,8 @@ export type CloudropErrorCode =
   | "TOO_MANY_FILES"
   | "FILE_TOO_LARGE"
   | "FILE_TYPE_NOT_ALLOWED"
+  // Database store (M5 spec §5.3): a file over its owner's quota.
+  | "QUOTA_EXCEEDED"
   | "INVALID_TOKEN"
   | "UPLOAD_EXPIRED"
   | "NOT_UPLOADED"
@@ -84,6 +86,14 @@ export function ok<T>(data: T): Result<T> {
 
 export function fail(error: CloudropError): { data: null; error: CloudropError } {
   return { data: null, error };
+}
+
+/** One file refused at /upload because its owner's quota has no room for it (M5-T5): per file, not retryable. */
+export function quotaExceeded(): CloudropError {
+  return new CloudropError(
+    "QUOTA_EXCEEDED",
+    "Your storage limit is reached. Delete some files or ask for more space, then try again.",
+  );
 }
 
 /** Construction-time configuration errors are thrown, never returned: they need a code change, not a retry. */
