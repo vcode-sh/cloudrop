@@ -13,7 +13,7 @@ test and a code audit. Decisions are recorded as `M4-F` (fixes and developer exp
   cross-origin deployments (cookies, `trustedOrigins`, which origin the bucket CORS lists); `s3()` reads no environment
   variables; no AWS CLI recipe for CORS and lifecycle on S3-compatible services; the npm tarball has no README or
   LICENSE; the README says nothing usable is published; re-picking the same file fires no `change` event.
-- **Product fit** (app-b, app-c, app-a): app-a waits on cloudrop for uploads; app-b's server-routed image flows
+- **Product fit** (app-b, app-c and a Bun + Hono + Drizzle app): the Hono app waits on cloudrop for uploads; app-b's server-routed image flows
   and 2 GB single-PUT video are good targets; app-c needs React Native and tus, out of scope. The strongest cross-project
   need is a database `store` (pending row before signing, exactly-once completion, orphan sweep) that works with Prisma
   and Drizzle: recorded for the roadmap (§7), not built here.

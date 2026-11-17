@@ -884,7 +884,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 - **Decision:** the optional peer is `drizzle-orm >=0.45.0 <1`.
 - **Why:** checked against `drizzle-orm@1.0.0-rc.5` (2026-10-21), the newest RC that is two weeks old, which the
-  owner's app-a uses. At run time it passes: the store contract on node-postgres, postgres.js, better-sqlite3 and
+  owner's Bun + Hono + Drizzle app uses. At run time it passes: the store contract on node-postgres, postgres.js, better-sqlite3 and
   libsql, the handler rows and the table comparison all pass (182 passed, 10 gap skips). The types do not:
   - the declared table types name builder types that 1.0 renamed: `PgTextBuilderInitial`, `PgBigInt53BuilderInitial`,
     `PgIntegerBuilderInitial`, `PgTimestampBuilderInitial` and the `SQLite…BuilderInitial` types are gone, and
@@ -897,7 +897,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task D fix round 1, 2026-11-17 (review M7).
 - **Visible in:** `packages/cloudrop/package.json`.
 - **Amended 2026-11-17 (fix round 2):** the peer range is now **`>=0.45.0 <2`**. drizzle-orm 1.0 must work, types
-  included, because app-a is on 1.0.0-rc.5. What was needed:
+  included, because the owner's Bun + Hono + Drizzle app is on 1.0.0-rc.5. What was needed:
   - **Table types without builder type names.** Each column type is now built from what both lines export: the
     builder functions' return types (`ReturnType<typeof text>`, `ReturnType<typeof timestamp>`, the `data: number`
     member of `bigint`'s return union), their `this`-typed methods (`ReturnType<B["notNull"]>`, `["primaryKey"]`),
@@ -1626,7 +1626,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   a Drizzle table and the DDL that disagree on precision fail it. SQLite and D1 are unchanged (integer milliseconds).
   The bind (`$n::timestamptz`) and the raw reader keep naming the unconstrained type: a cast to `timestamptz` then an
   assignment to a `timestamptz(3)` column rounds to the column's precision, and the reader decodes both the same.
-- **Why:** the owner's app (app-a) declares every timestamp `{ withTimezone: true, precision: 3 }`, and a JavaScript
+- **Why:** the owner's Bun + Hono + better-auth + Drizzle app declares every timestamp `{ withTimezone: true, precision: 3 }`, and a JavaScript
   `Date` carries milliseconds, so the store never wrote a non-zero microsecond. Checked before the change: every
   comparison in the Postgres SQL (`src/store/sql/postgres.ts`, the sweep's stale reads, the keyset cursor of
   M5-T39) sets a column from a bound `Date` and compares it with another bound `Date`, both whole milliseconds, so

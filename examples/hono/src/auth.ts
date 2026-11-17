@@ -1,5 +1,5 @@
 // better-auth on the app's Drizzle database: email and password, for the demo (no email is sent, so nothing is
-// verified). Cookie model, as in app-a: host-only cookies on the API's host, `SameSite=Lax`. The web app calls the API
+// verified). Cookie model: host-only cookies on the API's host, `SameSite=Lax`. The web app calls the API
 // from another origin of the same site (localhost:5173 to localhost:5181), so the browser sends them with
 // `credentials: "include"`; never move the two to different sites (docs/guide/deployment.md).
 import { drizzleAdapter } from "@better-auth/drizzle-adapter/relations-v2";
@@ -24,5 +24,3 @@ export function createAuth(db: Database, settings: Pick<Settings, "apiOrigin" | 
     telemetry: { enabled: false },
   });
 }
-
-export type Auth = ReturnType<typeof createAuth>;

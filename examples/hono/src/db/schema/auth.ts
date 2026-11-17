@@ -1,6 +1,6 @@
 // better-auth's core tables (user, session, account, verification) as its CLI generates them for Drizzle on
-// Postgres, with one deliberate change, as in app-a: every timestamp is `timestamptz(3)`, the app's precision for
-// instants, which cloudrop's tables share. Keep it when merging a fresh generator diff.
+// Postgres, with one deliberate change: every timestamp is `timestamptz(3)`, the app's precision for instants, which
+// cloudrop's tables share. Keep it when merging a fresh generator diff.
 import { defineRelationsPart } from "drizzle-orm";
 import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 

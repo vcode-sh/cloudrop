@@ -27,13 +27,15 @@ if ss -ltnH "sport = :${PROXY_PORT}" | grep -q .; then
   exit 1
 fi
 # The Hono example's API serves on 5181, which the Vite app calls; its Postgres gets a port of its own.
+if ss -ltnH "sport = :5181" | grep -q .; then
+  echo "Port 5181 is in use. Stop what listens there; the Hono API must serve on it." >&2
+  exit 1
+fi
 POSTGRES_PORT="${CLOUDROP_EXAMPLE_POSTGRES_PORT:-19610}"
-for port in 5181 "$POSTGRES_PORT"; do
-  if ss -ltnH "sport = :${port}" | grep -q .; then
-    echo "Port ${port} is in use. Stop what listens there, or set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port." >&2
-    exit 1
-  fi
-done
+if ss -ltnH "sport = :${POSTGRES_PORT}" | grep -q .; then
+  echo "Port ${POSTGRES_PORT} is in use. Set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port." >&2
+  exit 1
+fi
 export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-browser-rustfs-$$"
 export CLOUDROP_CHAOS_PROXY_PORT="$PROXY_PORT"

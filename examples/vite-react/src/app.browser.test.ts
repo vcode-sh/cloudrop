@@ -38,14 +38,14 @@ async function signUp(page: Page): Promise<string> {
 
 /** The status line of the upload row of `name`. */
 const rowStatus = (page: Page, name: string) =>
-  page.getByRole("list", { name: "Uploads" }).getByLabel(name, { exact: true }).getByRole("status");
+  page.getByRole("list", { name: "Uploads" }).getByRole("group", { name, exact: true }).getByRole("status");
 
 /** The "Your files" table's rows as [name, route, size]. */
 async function listedFiles(page: Page): Promise<string[][]> {
-  const rows = page.getByRole("table", { name: "Your files" }).locator("tbody tr");
-  return rows.evaluateAll((elements) =>
-    elements.map((row) => [...row.querySelectorAll("td")].slice(0, 3).map((cell) => cell.textContent ?? "")),
-  );
+  // The header row has column headers, not cells, so it reads as an empty row and is left out.
+  const rows = await page.getByRole("table", { name: "Your files" }).getByRole("row").all();
+  const cells = await Promise.all(rows.map((row) => row.getByRole("cell").allTextContents()));
+  return cells.filter((row) => row.length > 0).map((row) => row.slice(0, 3));
 }
 
 /** 0, 1, …, 250, 0, 1, …: a part sent at the wrong offset reads back different. */
@@ -82,6 +82,21 @@ test("cloudrop answers its own preflight through the app's global CORS middlewar
   });
 });
 
+test("a form posted to an oRPC procedure from another origin of the site is refused, though it carries the session", async ({
+  page,
+}) => {
+  await signUp(page);
+  // What a page on another localhost port, or a sibling subdomain in production, can make the browser send without a
+  // preflight: a multipart form, with the API's SameSite=Lax session cookie, which page.request shares.
+  const answer = await page.request.post(`${API}/rpc/files/list`, {
+    headers: { origin: "http://localhost:5174" },
+    multipart: { data: JSON.stringify({ json: null }) },
+  });
+
+  expect(answer.status()).toBe(403);
+  expect(await answer.json()).toMatchObject({ json: { code: "CSRF_TOKEN_MISMATCH" } });
+});
+
 test("signed out, an upload is refused with UNAUTHORIZED and the route's message, before any byte is sent", async ({
   page,
 }) => {
@@ -98,7 +113,7 @@ test("signed out, an upload is refused with UNAUTHORIZED and the route's message
 test("a new user uploads an avatar in one PUT, and the page shows it from the bucket", async ({ page }) => {
   const puts = recordBucketPuts(page);
   await signUp(page);
-  await expect(page.getByLabel("No avatar yet")).toBeVisible();
+  await expect(page.getByRole("img", { name: "No avatar yet" })).toBeVisible();
 
   await page.getByLabel("Choose an avatar").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: PNG });
 

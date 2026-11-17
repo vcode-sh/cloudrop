@@ -228,14 +228,16 @@ Use the tool you query with:
   ```
 
   On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`. Read them
-  freely (`db.select().from(cloudropFiles)`); write to them only through the store, which keeps the usage counters in
-  step with the files.
+  freely (`db.select().from(cloudropFiles)`): the tables are your app's, so listing a user's files is your own query,
+  not a store call. Write to them only through the store, which keeps the usage counters in step with the files.
 - **Everyone else:** run the SQL below in a migration. On D1: `wrangler d1 migrations create DB cloudrop`, paste the
   SQLite statements into the new file, then `wrangler d1 migrations apply DB` (it applies to the local database; add
   `--remote` for the deployed one).
 
 Postgres times are `timestamptz(3)`: the store writes milliseconds, the precision of a JavaScript `Date`, so a
-microsecond column would only hold zeros. Tables created earlier with plain `timestamptz` keep working unchanged.
+microsecond column would only hold zeros. Tables created earlier with plain `timestamptz` keep working unchanged;
+drizzle-kit and Prisma then propose altering the columns to `timestamptz(3)`, a change that is safe to apply or to leave
+out.
 
 <!-- ddl:postgres -->
 ```sql

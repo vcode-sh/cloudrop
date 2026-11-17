@@ -14,9 +14,8 @@ const auth = createAuth(db, settings);
 const readSession = (headers: Headers) => auth.api.getSession({ headers });
 const uploads = createUploads({
   db,
-  // The presets read CLOUDROP_S3_* or CLOUDROP_R2_* on the first request (README.md). An empty CLOUDROP_S3_ENDPOINT
-  // counts as unset.
-  storage: process.env.CLOUDROP_S3_ENDPOINT ? s3() : r2(),
+  // The presets read CLOUDROP_S3_* or CLOUDROP_R2_* on the first request (README.md).
+  storage: settings.storage === "s3" ? s3() : r2(),
   readSession,
   webOrigin: settings.webOrigin,
   quotaBytes: settings.quotaBytes,

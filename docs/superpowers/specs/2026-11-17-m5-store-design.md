@@ -7,7 +7,7 @@ under the standing instruction to follow the best recommendations without check-
 
 ## 1. Why, and the evidence
 
-The product-fit review of 2026-11-17 found that in the owner's apps (app-b on Prisma, app-c and app-a on Drizzle) the
+The product-fit review of 2026-11-17 found that in the owner's apps (app-b on Prisma, app-c and a Bun + Hono app on Drizzle) the
 hard part of uploads is not the transfer but the database around it. app-b and app-c each built, by hand, the same
 shape: a row per upload written before anything is signed, a guarded state transition at completion so the app's
 completion work runs once, quota reserved and committed atomically, and a sweep that ends what was never finished.

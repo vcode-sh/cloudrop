@@ -6,11 +6,13 @@ import { eq } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { avatar } from "./db/schema";
 
+/** The session behind the request's cookie: better-auth's `auth.api.getSession`. */
+export type ReadSession = (headers: Headers) => Promise<{ user: { id: string } } | null>;
+
 export interface UploadsDeps {
   db: Database;
   storage: StorageDriver;
-  /** The session behind the request's cookie: better-auth's `auth.api.getSession`. */
-  readSession: (headers: Headers) => Promise<{ user: { id: string } } | null>;
+  readSession: ReadSession;
   /** The web app's origin: it calls the handler from another origin with cookies. */
   webOrigin: string;
   quotaBytes: number;
@@ -39,13 +41,19 @@ export function createUploads(deps: UploadsDeps) {
           prefix: ({ userId }) => `users/${userId}/avatar`,
           owner: ({ userId }) => userId,
           onComplete: async ({ tx, userId, file }) => {
-            const [previous] = await tx.select({ fileId: avatar.fileId }).from(avatar).where(eq(avatar.userId, userId));
+            // FOR UPDATE: two replacements of one avatar take turns, so each deletes the file the other replaced. Two
+            // first avatars at once still race (no row to lock): the loser's file stays in the list for a delete.
+            const [previous] = await tx
+              .select({ fileId: avatar.fileId })
+              .from(avatar)
+              .where(eq(avatar.userId, userId))
+              .for("update");
             const row = { key: file.key, fileId: file.id, updatedAt: new Date() };
             await tx
               .insert(avatar)
               .values({ userId, ...row })
               .onConflictDoUpdate({ target: avatar.userId, set: row });
-            return { key: file.key, replaced: previous?.fileId ?? null };
+            return { replaced: previous?.fileId ?? null };
           },
           // After the record commits: the old avatar's object and its bytes in the quota go. A storage call, so not in
           // onComplete, whose transaction would wait for it. If it fails, the old file stays in the list for a delete.
@@ -61,7 +69,6 @@ export function createUploads(deps: UploadsDeps) {
         {
           prefix: ({ userId }) => `users/${userId}/attachments`,
           owner: ({ userId }) => userId,
-          onComplete: ({ file }) => ({ id: file.id }),
         },
       ),
     },

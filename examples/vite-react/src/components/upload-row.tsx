@@ -16,7 +16,7 @@ import { formatBytes } from "@/lib/format";
 type AttachmentState = "idle" | "uploading" | "processing" | "error" | "done";
 
 /**
- * How a cloudrop file maps onto the states of shadcn's Attachment, the component app-a vendors: waiting and paused
+ * How a cloudrop file maps onto the states of shadcn's Attachment: waiting and paused
  * files are idle, the bytes going out are uploading, `/complete` (the server verifies the object and runs onComplete)
  * is processing, and a cancelled file shows idle with its own line.
  */
@@ -54,7 +54,7 @@ function statusLine(file: UploadItem<unknown>): string {
 export function UploadRow({ file }: { file: UploadItem<unknown> }) {
   const running = file.status === "queued" || file.status === "uploading" || file.status === "paused";
   return (
-    <Attachment state={ATTACHMENT_STATE[file.status]} className="w-full" aria-label={file.name}>
+    <Attachment state={ATTACHMENT_STATE[file.status]} className="w-full" role="group" aria-label={file.name}>
       <AttachmentMedia>{file.type.startsWith("image/") ? <IconPhoto /> : <IconFile />}</AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>{file.name}</AttachmentTitle>

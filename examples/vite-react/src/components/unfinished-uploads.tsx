@@ -12,7 +12,7 @@ import { uploadClient, useResumable, useUpload } from "@/lib/upload";
  */
 export function UnfinishedUploads() {
   const { uploads, refresh } = useResumable("attachments");
-  const { resume } = useUpload("attachments", { multiple: true });
+  const { resume } = useUpload("attachments");
   if (uploads.length === 0) return null;
 
   return (

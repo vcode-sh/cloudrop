@@ -8,7 +8,11 @@ const port = { port: 5173, strictPort: true };
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // cloudrop/react resolves react from the linked package's folder; one copy, whatever the two installs pin.
+    dedupe: ["react", "react-dom"],
+  },
   server: port,
   preview: port,
 });

@@ -34,7 +34,6 @@ export const router = {
           name: cloudropFiles.name,
           type: cloudropFiles.type,
           size: cloudropFiles.size,
-          completedAt: cloudropFiles.completedAt,
         })
         .from(cloudropFiles)
         .where(and(eq(cloudropFiles.owner, context.userId), eq(cloudropFiles.status, "completed")))

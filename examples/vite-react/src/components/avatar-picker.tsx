@@ -26,7 +26,7 @@ export function AvatarPicker() {
           {avatar.data ? (
             <img src={avatar.data.url} alt="Your avatar" className="size-full object-cover" />
           ) : (
-            <IconUser aria-label="No avatar yet" />
+            <IconUser role="img" aria-label="No avatar yet" />
           )}
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2">

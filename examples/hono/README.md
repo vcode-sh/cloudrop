@@ -7,7 +7,8 @@ setup step by step.
 
 - `src/index.ts` is the composition root: settings, the `pg` pool under Drizzle, better-auth, cloudrop and `Bun.serve`.
 - `src/app.ts` builds the Hono app (`createApp(deps)`): a global `hono/cors` for the app's own routes that skips
-  `/api/cloudrop/*`, better-auth at `/api/auth/*`, cloudrop at `/api/cloudrop/*` and the oRPC router at `/rpc/*`.
+  `/api/cloudrop/*`, better-auth at `/api/auth/*`, cloudrop at `/api/cloudrop/*` and the oRPC router at `/rpc/*`, with
+  oRPC's CSRF plugin (a form posted from another origin of the site is refused).
 - `src/uploads.ts` creates cloudrop (`createUploads(deps)`): `avatar` (one image of at most 2 MB, one PUT; its
   `onComplete` writes the `avatar` row through the completion's transaction, and `afterComplete` deletes the replaced
   avatar) and `attachments` (up to 10 files of 100 MB, in parts of 8 MiB above 8 MB), with a quota per user

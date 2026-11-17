@@ -8,7 +8,8 @@ no rewrite. [Hono with better-auth and Drizzle](../../docs/guide/hono.md) walks 
 - `src/lib/upload.ts` creates the cloudrop client with the API's absolute `basePath` and the `cloudrop/react` hooks from
   it, typed by `import type { Uploads } from "cloudrop-example-hono/types"`: no server code reaches the bundle.
 - `src/lib/auth-client.ts` is better-auth's React client with the API as `baseURL`; `src/lib/orpc.ts` is the oRPC client
-  for the `files` router, with TanStack Query. Both send `credentials: "include"`.
+  for the `files` router, with TanStack Query and oRPC's CSRF link plugin, which the API requires. Both send
+  `credentials: "include"`.
 - `src/components/` is built on the hooks with shadcn on Base UI and Tabler icons:
   - `drop-zone.tsx`: the attachments route, with `getDropProps`, `getInputProps` and `isDragOver`;
   - `upload-row.tsx`: one upload as shadcn's `Attachment`, with progress, Cancel, Retry and the error's message. It maps
@@ -44,5 +45,6 @@ own RustFS and Postgres containers, applies the API's migrations and lets Playwr
 up a new user: an avatar uploaded in one PUT and shown from the bucket; three attachments, one in three parts, listed
 by `files.list`, then one deleted; a 51 MiB file refused with `QUOTA_EXCEEDED` at a 50 MB quota before any byte is sent;
 an upload while signed out refused with `UNAUTHORIZED`; a multipart upload interrupted by a reload and resumed by
-picking the same file, sending only the missing parts; and cloudrop's own preflight answered through the API's global
-CORS middleware. Install the shell once with `bunx playwright install --only-shell chromium`.
+picking the same file, sending only the missing parts; cloudrop's own preflight answered through the API's global CORS
+middleware; and a multipart form posted to an oRPC procedure from another origin, with the session cookie, refused with
+403 (`CSRF_TOKEN_MISMATCH`). Install the shell once with `bunx playwright install --only-shell chromium`.

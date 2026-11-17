@@ -1,5 +1,5 @@
-// The database, created by each composition root: an explicit node-postgres Pool under Drizzle, as in app-a. The
-// caller ends the pool (`db.$client.end()`) when it shuts down.
+// The database, created by each composition root: an explicit node-postgres Pool under Drizzle. The caller ends the
+// pool (`db.$client.end()`) when it shuts down.
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { relations } from "./relations";

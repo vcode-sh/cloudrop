@@ -755,7 +755,7 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
 
 ## M4b: the Hono and Vite examples (task A)
 
-Rulings of M4b task A: `examples/hono` and `examples/vite-react`, shaped like the owner's app app-a, the reference for
+Rulings of M4b task A: `examples/hono` and `examples/vite-react`, shaped like the owner's Bun + Hono + better-auth + Drizzle app, the reference for
 its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Paths are from the repository root.
 
 ### M4-E20: the workspace installs drizzle-orm 1.0.0-rc.5; the 0.45 line is type-checked on the side
@@ -765,8 +765,7 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
   job, renamed `drizzle-0-45`, type-checks the adapter and its tests against it; the peer range stays
   `>=0.45.0 <1 || >=1.0.0-rc.5 <2`. Two test fixtures were adapted to 1.0 (`fixtures.db.integration.test.ts`: execute's
   answer is one result or a list, read with `.flat()`; the SQLite file is opened with Drizzle's `node-sqlite` driver
-  instead of the proxy driver 0.45 needed), and the tables' equivalence test lost its 0.45 spelling fix
-  (`"timestamp (3)"`), which only that line needed. No source file changed.
+  instead of the proxy driver 0.45 needed). No source file changed.
 - **Why:** with 0.45 in the package and 1.0 in the example, bun's workspace link resolved `drizzle-orm` from the
   package's folder, so `cloudrop/adapters/drizzle` loaded 0.45 while the app loaded 1.0. Measured: `drizzle-kit
   generate` (1.0) failed with "Cannot read properties of undefined (reading 'getColumnCasing')" on `cloudropPgTables()`.
@@ -803,16 +802,19 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
 ### M4-E22: the example's routes, quota and multipart threshold
 
 - **Decision:** `avatar`: `image/*`, at most 2 MB, one file per `/upload`, one PUT; `store.route` with `tx`, so
-  `onComplete` upserts the app's `avatar` row (`user_id`, `key`, `file_id`) in the completion's transaction and returns
-  `{ key, replaced }`, and `afterComplete` deletes the replaced avatar with `api.deleteFile`, which frees its quota.
-  `attachments`: `*/*`, 100 MB, 10 files. Both have `owner: userId`; the quota is `UPLOAD_QUOTA_MB` (500 by default, 50
+  `onComplete` reads the user's `avatar` row `FOR UPDATE`, upserts it (`user_id`, `key`, `file_id`) in the
+  completion's transaction and returns `{ replaced }` (the key is already in the response's `file`), and
+  `afterComplete` deletes the replaced avatar with `api.deleteFile`, which frees its quota. The row lock makes two
+  replacements of one avatar take turns, so neither orphans the other's file (review M1). `attachments`: `*/*`, 100
+  MB, 10 files, no `onComplete` (review M2: it only echoed `file.id`). Both have `owner: userId`; the quota is `UPLOAD_QUOTA_MB` (500 by default, 50
   in the lane). `multipartThreshold: "8MB"`, so a 20 MiB demo file goes in three parts; the comment and the guide say an
   app keeps the 64 MiB default. The store runs in transaction mode on a node-postgres `Pool` under Drizzle 1.0 with
-  `defineRelations`, as app-a's database package does.
+  `defineRelations`, as that app's database package does.
 - **Why:** the brief's routes; a deleted-on-replace avatar shows `afterComplete` doing the network call that
   `onComplete`'s transaction must not hold. The 8 MB threshold keeps the browser rows' files small (the quota row sends
   51 MiB instead of more than 64 MiB plus a quota above it).
-- **If wrong:** a failed delete of the replaced avatar is logged and leaves that file in the list for a manual delete.
+- **If wrong:** a failed delete of the replaced avatar is logged and leaves that file in the list for a manual delete;
+  so does the loser of two first avatars uploaded at once, which have no row to lock.
 - **Status:** decided.
 - **Source:** M4b task A, 2026-11-17.
 - **Visible in:** `examples/hono/src/uploads.ts`, `examples/hono/src/db/schema/avatars.ts`.
@@ -822,10 +824,18 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
 - **Decision:** the oRPC router `files` has `list` (a Drizzle select on `cloudropFiles` where `owner` is the session's
   user and `status` is `completed`, newest first), `delete` (`api.file(id)` to check owner and status, `NOT_FOUND`
   otherwise, then `api.deleteFile(id)` and the `avatar` row if it named that file) and `avatar` (a 10-minute
-  `api.getUrl`). The context carries the session's user id, read once per `/rpc` request as app-a does.
-- **Why:** the store has no per-owner listing call, and the store guide allows reads of its tables; writes stay with the
-  store so usage stays in step. No new library API was needed for the pilot.
-- **If wrong:** if many apps want the listing, an `api.files({ owner })` would be a new public call (owner decision).
+  `api.getUrl`). The context carries the session's user id, read once per `/rpc` request as that app does. The
+  `RPCHandler` takes oRPC's `SimpleCsrfProtectionHandlerPlugin` and the page's `RPCLink` its
+  `SimpleCsrfProtectionLinkPlugin`; the app's CORS middleware allows the `X-CSRF-Token` header they use (review I1).
+- **Why:** the tables are the app's, so reading them with the app's own Drizzle is the intended pattern (controller
+  ruling), not a gap: a query the app can join and page beats a store listing call. Writes stay with the store so usage
+  stays in step. The CSRF pair because oRPC deserialises `multipart/form-data`, which another origin of the same site
+  can post without a preflight, with the `SameSite=Lax` session cookie: measured, such a post to `/rpc/files/list`
+  answered 200 as the signed-in user before the fix and 403 `CSRF_TOKEN_MISMATCH` after; the browser row "a form posted
+  to an oRPC procedure from another origin of the site is refused" pins it. cloudrop's endpoints were never exposed:
+  they require `application/json` and check `Origin`.
+- **If wrong:** an app whose client cannot send a custom header refuses `/rpc` requests whose `Origin` is not the web
+  origin instead.
 - **Status:** decided.
 - **Source:** M4b task A, 2026-11-17.
 - **Visible in:** `examples/hono/src/rpc/router.ts`.
@@ -866,7 +876,7 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
 
 ### M4-E26: shadcn on Base UI with Tabler icons, vendored and outside Biome
 
-- **Decision:** `bunx shadcn@4.23.0 init -b base -p luma` (style `base-luma`, app-a's), then `iconLibrary` set to
+- **Decision:** `bunx shadcn@4.23.0 init -b base -p luma` (style `base-luma`, the pilot app's), then `iconLibrary` set to
   `tabler` in `components.json` and `lucide-react` removed before `shadcn add attachment button card input label badge
   table progress`. The registry offers `Attachment`, so the app uses it unchanged. `src/components/ui/` is excluded
   from Biome by the root line `"!**/components/ui"` (task B adds the same line); no vendored file passes 250 lines, so
@@ -888,9 +898,9 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
   Drizzle adapter (`relations-v2`), email and password, a fixed `baseURL`, the web origin as its only trusted origin,
   host-only `SameSite=Lax` cookies under the prefix `cloudrop-example`. The Hono package exports `./types`
   (`Uploads`, `AppRouterClient`), which the web app imports with `import type` through a workspace dev dependency, as
-  app-a's web app types its client from `@app/api/client`. The worker sweeps on a timer; its comment and the guide show
-  the app-a form, a `defineQueue` schedule and a handler.
-- **Why:** the brief (no Varlock dependency, app-a's composition-root and factory shape).
+  a monorepo's web app types its client from its API package. The worker sweeps on a timer; its comment and the guide
+  show the job-queue form, a scheduled queue and a handler.
+- **Why:** the brief (no env-schema dependency, the pilot app's composition-root and factory shape).
 - **If wrong:** nothing outside the examples depends on these names.
 - **Status:** decided.
 - **Source:** M4b task A, 2026-11-17.

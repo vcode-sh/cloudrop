@@ -51,8 +51,9 @@ export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables()
 Export it from the schema index (`export * from "./cloudrop"`), as you do for every feature. The time columns are
 `timestamptz(3)`, millisecond precision, the same as `timestamp(name, { withTimezone: true, precision: 3 })`.
 
-Read these tables freely, for example to list a user's files; write to them only through cloudrop, which keeps each
-owner's usage in step with their files.
+The tables are your app's: read them with your own Drizzle queries, which is how you list a user's files (step 6).
+cloudrop's file API has no listing call because you already have the better one, a query you can join and page as
+you like. Write to them only through cloudrop, which keeps each owner's usage in step with their files.
 
 ## 3. Generate and apply the migration
 
@@ -128,10 +129,15 @@ avatar: store.route(
     prefix: ({ userId }) => `users/${userId}/avatar`,
     owner: ({ userId }) => userId,
     onComplete: async ({ tx, userId, file }) => {
-      const [previous] = await tx.select({ fileId: avatar.fileId }).from(avatar).where(eq(avatar.userId, userId));
+      // FOR UPDATE: two replacements of one avatar take turns, so each deletes what it replaced.
+      const [previous] = await tx
+        .select({ fileId: avatar.fileId })
+        .from(avatar)
+        .where(eq(avatar.userId, userId))
+        .for("update");
       const row = { key: file.key, fileId: file.id, updatedAt: new Date() };
       await tx.insert(avatar).values({ userId, ...row }).onConflictDoUpdate({ target: avatar.userId, set: row });
-      return { key: file.key, replaced: previous?.fileId ?? null };
+      return { replaced: previous?.fileId ?? null };
     },
     afterComplete: async ({ data }) => {
       if (data.replaced) await uploads.api.deleteFile(data.replaced);
@@ -148,9 +154,16 @@ attachments: store.route(
   upload, or neither does. Keep network calls out of it; the old avatar's object is deleted in `afterComplete`, after
   the commit.
 - Files above 64 MiB go in parts (`multipartThreshold` changes it; the example uses 8 MB so a demo file shows parts).
-- To list a user's files, read `cloudropFiles` where `owner` is the user and `status` is `completed`. To delete one,
-  check its owner with `uploads.api.file(id)`, then call `uploads.api.deleteFile(id)`, which removes the object and
-  frees its bytes in the quota. The example's oRPC router `files` (`list`, `delete`, `avatar`) does both.
+- To list a user's files, select from `cloudropFiles` with your app's Drizzle, where `owner` is the user and `status`
+  is `completed`: the intended way, since the tables are yours. To delete one, check its owner with
+  `uploads.api.file(id)`, then call `uploads.api.deleteFile(id)`, which removes the object and frees its bytes in the
+  quota. The example's oRPC router `files` (`list`, `delete`, `avatar`) does both.
+- Protect the RPC router against cross-site requests. oRPC accepts a `multipart/form-data` body, which a page on
+  another origin of the same site can post without a preflight, and the browser sends the `SameSite=Lax` session
+  cookie with it. Add oRPC's pair: `SimpleCsrfProtectionHandlerPlugin` from `@orpc/server/plugins` on the
+  `RPCHandler`, `SimpleCsrfProtectionLinkPlugin` from `@orpc/client/plugins` on the `RPCLink`, and allow its
+  `X-CSRF-Token` header in your CORS middleware. cloudrop's own endpoints need nothing: they require
+  `application/json` and check `Origin`.
 
 ## 7. The web client
 
@@ -212,7 +225,7 @@ uploads. Both, for R2 and S3: [Bucket setup](bucket-setup.md).
 
 ## 10. Map uploads onto your Attachment component
 
-shadcn's `Attachment` (in the registry; app-a vendors it) has five states. A file from `useUpload` maps onto them by
+shadcn's `Attachment` (in its registry) has five states. A file from `useUpload` maps onto them by
 its `status`:
 
 | cloudrop `status` | `Attachment` state | Second line |
