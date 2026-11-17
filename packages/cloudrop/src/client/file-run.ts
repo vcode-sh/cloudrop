@@ -6,7 +6,7 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
-import { aborted, withFile } from "./failures.ts";
+import { aborted, NEEDS_NEW_TICKET, withFile } from "./failures.ts";
 import { letGo } from "./persist.ts";
 import { createMeter, createProgress, type Meter, type Progress } from "./progress.ts";
 import type { FileOutcome, FileStatus } from "./types.ts";
@@ -145,10 +145,13 @@ export function drop(context: UploadContext, upload: Upload): Promise<void> {
 /**
  * Gives a failed file's ticket up (M4-F1). A multipart ticket a reload can resume keeps its record and sends no
  * /abort, now or later: another tab may resume and complete the upload, and the bucket's lifecycle rule removes parts
- * never resumed. Any other ticket is dropped.
+ * never resumed. Any other ticket is dropped: a single PUT, one of a client that keeps no records, and one whose
+ * failure the same ticket can never fix (a refusal, M3-U31), which a resume would only repeat.
  */
 export function giveUp(context: UploadContext, upload: Upload): void {
-  if (upload.ticket.kind === "single" || !context.records.enabled) return void drop(context, upload);
+  const { error } = upload.entry;
+  const resumable = upload.ticket.kind === "multipart" && context.records.enabled && error?.retryable;
+  if (!resumable || NEEDS_NEW_TICKET.has(error.code)) return void drop(context, upload);
   upload.dropped = true;
   upload.unlock();
 }

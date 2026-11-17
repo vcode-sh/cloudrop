@@ -95,11 +95,18 @@ describe("a retry's new ticket", () => {
 describe("upload() persists too (audit I5)", () => {
   it.each([
     {
-      name: "a failed multipart file keeps the record for a reload, sending no /abort (M4-F1)",
+      name: "a multipart file the network failed keeps the record for a reload, sending no /abort (M4-F1)",
+      file: threeParts,
+      fault: (call: FaultCall) => (call.label === "PUT part 2" ? unreachable() : undefined),
+      expected: { code: "NETWORK_ERROR", aborted: false, stored: 1 },
+    },
+    {
+      // M3-U31's failures: the same ticket can never finish the upload, so no resume could either (M4-F1).
+      name: "a refused multipart file still sends /abort and leaves no record",
       file: threeParts,
       fault: (call: FaultCall) =>
         call.label === "PUT part 2" ? errorResponse(400, "InvalidArgument", "Invalid argument.") : undefined,
-      expected: { code: "UPLOAD_REJECTED", aborted: false, stored: 1 },
+      expected: { code: "UPLOAD_REJECTED", aborted: true, stored: 0 },
     },
     {
       name: "a /complete that may have finished keeps the record for a resume, sending no /abort",

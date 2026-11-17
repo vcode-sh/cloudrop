@@ -108,18 +108,23 @@ the metadata can be read from it.
 
 ## When a record is deleted
 
-- when its file ends done or is cancelled, also `abort()` of a failed file of `start()`;
-- when a new ticket replaces it;
+- when its file ends done or is cancelled, also `abort()` of a failed file of `start()` that still holds its ticket;
+- when a new ticket replaces it (except the record of a ticket `pagehide` already gave up, which another tab may hold);
+- when its file fails for a reason the same ticket can never fix (the bucket or the server refused it, or the ticket
+  expired), with the `/abort` that gives the ticket up;
 - when it is found expired, by `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time
   to start);
 - on `forget()`.
 
-A failed file keeps its record: a failure of `upload()` and `pagehide` give its ticket up without `/abort`, so a reload
-lists it and `resume()` sends only the parts the bucket lacks. So after a reload, the uploads left to resume are those
-that were still uploading, paused or failed. A file that failed and was given up this way is not cancelled by a later
-`abort()` from the same page, which sends nothing: another tab may have resumed it.
-Resuming it finds the upload gone when the `/abort` reached the server, and starts over with a new ticket, sending every
-byte. When the `/abort` did not reach the server, only the missing parts are sent.
+Any other failed file keeps its record, such as one the network failed: a failure of `upload()` and `pagehide` give its
+ticket up without `/abort`, so a reload lists it and `resume()` sends only the parts the bucket lacks. So after a
+reload, the uploads left to resume are those that were still uploading, paused or failed for a reason a resume can
+fix. A file given up this way is not cancelled by a later `abort()` from the same page, which sends nothing: another
+tab may have resumed it.
+
+A delete issued just before the page unloads (a cancel, then the tab closes) may not commit, so the next page still
+lists that upload. Resuming it finds the upload gone when the `/abort` reached the server, and starts over with a new
+ticket, sending every byte; when the `/abort` did not reach the server, only the missing parts are sent.
 
 ## Two tabs
 

@@ -214,7 +214,8 @@ otherwise.
   M3-S31 and M3-H16 (their `/abort` now follows a failure too) and M2-D21 (when `onAbort` runs). Amended by M3-U50
   (`4f1887a`): a failed file of a `start()` job keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or
   the ticket's expiry; `upload()` keeps this rule (M3-U29). Amended by `M4-F1` (2026-11-17): a failed multipart file
-  of a client that keeps records sends no `/abort` and keeps its record for a resume after a reload.
+  of a client that keeps records, whose failure the same ticket could fix (retryable, outside `M3-U31`'s set), sends no
+  `/abort` and keeps its record for a resume after a reload.
 - **Visible in:** `client/file-run.ts` (`end`, `giveUp`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked

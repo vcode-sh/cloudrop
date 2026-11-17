@@ -477,8 +477,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   for good: the cost `M3-S15` was made to remove.
 - **If wrong:** a page that wants to retry a failure of `upload()` calls `start()` instead.
 - **Status:** in force (`4f1887a`: `upload()` passes `keepFailed: false`). Spec §4.7's first bullet says so. Amended
-  by `M4-F1` (2026-11-17): a failed multipart file of a client that keeps records sends no `/abort`; it keeps its
-  record, so a reload can resume it.
+  by `M4-F1` (2026-11-17): a failed multipart file of a client that keeps records, whose failure the same ticket could
+  fix (retryable, outside `M3-U31`'s set), sends no `/abort`; it keeps its record, so a reload can resume it.
 - **Visible in:** `client.ts` (`upload`), `client/file-run.ts` (`end`), `client/upload-abort.test.ts`.
 
 ### M3-U30: `retry()` chooses its branch when it is called
@@ -537,7 +537,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   a restored page re-sends the whole file under a new key.
 - **Status:** in force (`4f1887a`). An expired ticket is let go without an `/abort` (audit M7), and the failed file is
   held before its status changes (`M3-U53`). Amended by `M4-F1` (2026-11-17): a multipart ticket of a client that keeps
-  records is given up without `/abort` and keeps its record for a reload; only other tickets get the `/abort`.
+  records, whose failure the same ticket could fix, is given up without `/abort` and keeps its record for a reload;
+  only other tickets get the `/abort`.
 - **Visible in:** `client/lifecycle.ts` (`createLeftovers`), `client/file-run.ts` (`end`), `client.ts` (`leftovers`),
   `client/retry-abort.test.ts` (the `pagehide` rows).
 

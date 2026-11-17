@@ -3,20 +3,11 @@
 // by every file of one job.retry() that needs one.
 
 import type { CloudropError } from "../errors.ts";
+import { NEEDS_NEW_TICKET } from "./failures.ts";
 import type { Entry } from "./file-run.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
 import type { FileOutcome } from "./types.ts";
-
-/** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
-const NEEDS_NEW_TICKET = new Set<string | undefined>([
-  "UPLOAD_EXPIRED",
-  "INVALID_TOKEN",
-  "UPLOAD_REJECTED",
-  "VERIFICATION_FAILED",
-  // The upload is gone and nothing of it was stored (M3-U74): its ticket can never finish it.
-  "NO_SUCH_UPLOAD",
-]);
 
 /**
  * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): never when

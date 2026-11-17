@@ -93,8 +93,9 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
  * from no parts and no bytes (M3-U36).
  */
 export function forgetTicket(context: UploadContext, entry: Entry): void {
-  // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
-  if (entry.upload) letGo(context, entry.upload);
+  // The new ticket's record replaces this one's, under the new id (resume spec §3.2). A ticket already given up let
+  // go then: a record giveUp kept may be another tab's now (M4-F1).
+  if (entry.upload && !entry.upload.dropped) letGo(context, entry.upload);
   entry.upload = null;
   entry.landed.clear();
   entry.progress = createProgress();

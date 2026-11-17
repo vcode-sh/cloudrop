@@ -15,24 +15,38 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   the record stays, so a reload lists the upload and `resume()` sends only the parts the bucket lacks. This is what a
   failure of `upload()` does at once, and what `pagehide` does to a failed file of `start()` (and of `resume()`). A
   dropped ticket sends no later `/abort` from this page: `abort()` of the file, `job.abort()` and the caller's signal
-  then only settle it `aborted`. A single `PUT`, and every ticket of a client that keeps no records, still sends
-  `/abort` (`M3-S15`); the caller's `abort()` of a failed file that still holds its ticket still sends it (`M3-U32`).
+  then only settle it `aborted`, and a later `retry()`'s new ticket leaves its record in place. Only a failure the same
+  ticket could fix qualifies: one that is retryable and outside `M3-U31`'s set (`NEEDS_NEW_TICKET`, now in
+  `client/failures.ts` and shared with `retry-file.ts`). A refusal (`UPLOAD_REJECTED`, `VERIFICATION_FAILED`, any
+  other non-retryable error) or a dead ticket (`UPLOAD_EXPIRED`, `INVALID_TOKEN`, `NO_SUCH_UPLOAD`) still sends
+  `/abort` and loses its record, as do a single `PUT` and every ticket of a client that keeps no records (`M3-S15`);
+  the caller's `abort()` of a failed file that still holds its ticket still sends it (`M3-U32`).
 - **Why:** design §3 F1. A resumed 10 GB upload whose parts all failed (the network gone without an `offline` event)
   ended `failed`; the reload a user makes to recover then fired `pagehide`, whose `/abort` deleted the parts and the
   record, so every byte was sent again. `/abort` is needed for a single `PUT`, whose object no lifecycle rule removes;
   multipart parts nobody resumes are removed by the bucket's abort-incomplete-multipart rule. A given-up ticket must not
   `/abort` later: another tab may resume and complete the upload, and an `/abort` with a live token would then delete
-  the finished object (the `M3-U88` hazard).
+  the finished object (the `M3-U88` hazard). A refused file is excluded because a reload cannot recover it: `resume()`
+  would repeat the refusal, and a file `afterVerify` refused, whose object the server deleted, would be found gone and
+  sent again whole by a start over at every load (fix round 1, review I1). Exactness about the save is not worth its
+  cost: knowing at `pagehide`, synchronously, whether the save committed takes a three-state flag in which a pending
+  save still counts as saved. When no record was saved no other tab can know the upload's id, so an `/abort` there
+  could not hit the `M3-U88` hazard; that is the refinement to make if the cost below ever matters.
 - **If wrong:** parts of a failed upload nobody resumes stay in the bucket until the lifecycle rule removes them (a day
   on the recommended rule) instead of at once, and a plugin's `onAbort` hook does not run for them. "Keeps records" is
-  read from the client (`records.enabled`), not from the record's own save: where the browser refuses the lock request
-  (`M3-U88`) or can no longer read the file to hash it, nothing was saved and still no `/abort` is sent, so those
-  parts too wait for the lifecycle rule. After a back-forward cache restore, `abort()` of a given-up file leaves its
-  record listed until it expires or `forget()` runs.
-- **Status:** in force. Amends `M3-S15`, `M3-U29` and `M3-U33`.
+  read from the client (`records.enabled`), not from the record's own save, so where nothing was saved still no
+  `/abort` is sent and those parts too wait for the lifecycle rule: where IndexedDB exists but cannot be used (opening
+  it throws, as in an opaque-origin frame, or storage is blocked or full), which costs that for every failed multipart
+  file of the page and leaves nothing to resume; where the browser refuses the lock request (`M3-U88`); and where it can
+  no longer read the file to hash it. After a back-forward cache restore, `abort()` of a given-up file, and a `retry()`
+  that takes a new ticket, leave its record listed (a second one for the same file, after that retry) until it
+  expires, a resume of it ends, or `forget()` runs: deleting it could take a record another tab is resuming.
+- **Status:** in force; narrowed in fix round 1 to failures the same ticket could fix, and a retry's new ticket no
+  longer deletes a given-up record (review I1, M4). Amends `M3-S15`, `M3-U29` and `M3-U33`.
 - **Source:** design §3 F1; code audit of `main` at `907cc77`.
-- **Visible in:** `client/file-run.ts` (`giveUp`, `end`), `client.ts` (`leftovers`), `client/lifecycle.ts`,
-  `client/persist.test.ts` (the `pagehide` row), `client/persist-failures.test.ts` (the `upload()` rows),
+- **Visible in:** `client/file-run.ts` (`giveUp`, `end`), `client/failures.ts` (`NEEDS_NEW_TICKET`),
+  `client/job-run.ts` (`forgetTicket`), `client.ts` (`leftovers`), `client/lifecycle.ts`, `client/persist.test.ts`
+  (the `pagehide` rows, the retry after a restore), `client/persist-failures.test.ts` (the `upload()` rows),
   `docs/guide/client.md` ("What gets cleaned up"), `docs/guide/resume.md` ("When a record is deleted").
 
 ### M4-F2: a file cancelled before its ticket ends at once
