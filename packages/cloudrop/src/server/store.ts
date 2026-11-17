@@ -158,9 +158,9 @@ export interface CloudropStore<TTx = never> {
   /**
    * Repairs an owner's counters: locks the owner's usage row, then recounts it from the owner's rows, so a concurrent
    * `reserve` is never lost. When the owner has rows but no usage row, it creates the row (on Postgres: insert it
-   * with `ON CONFLICT DO NOTHING`, then lock, then recount). A missing row counts as zeros, so an owner whose recount
-   * is all zeros gets no row. True when a counter changed (or the row was created). Writes only then, and stamps
-   * `updated_at` with the database's clock, as no time is passed.
+   * with `ON CONFLICT DO NOTHING`, then lock, then recount, in one transaction). A missing row counts as zeros, so an
+   * owner whose recount is all zeros gets no row. True when a counter changed (or the row was created). Writes only
+   * then, and stamps `updated_at` with the database's clock, as no time is passed.
    */
   reconcile(owner: string): Promise<boolean>;
   /** One page of the owners that have counters, in the database's order of owner; `cursor` as for `stale`. */

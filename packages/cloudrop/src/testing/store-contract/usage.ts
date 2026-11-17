@@ -28,8 +28,12 @@ export function usageCases(suite: StoreSuite): void {
     expect(await store.reconcile("u-2")).toBe(false);
   });
 
-  it("reconcile of an owner without rows or counters changes nothing", async () => {
+  it("reconcile of an owner whose rows count nothing, or who has none, creates no usage row", async () => {
     const { store, raw } = suite;
+    await seed("u-1", [newFile("f-1", 0)]);
+    await raw.deleteUsage("u-1");
+    // An empty pending file counts zero bytes and no file, and a missing row already counts as zeros.
+    expect(await store.reconcile("u-1")).toBe(false);
     expect(await store.reconcile("nobody")).toBe(false);
     expect(await raw.usage()).toEqual([]);
   });

@@ -211,4 +211,31 @@ describe("Postgres under lock contention", () => {
     expect(await reconciling).toBe(true);
     expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0 });
   });
+
+  test("reconcile after the usage row was deleted by hand keeps a reserve that created it meanwhile", async () => {
+    const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-0", 10)] }, NOW);
+    await db.query("DELETE FROM cloudrop_usage");
+    const held = gate();
+    const reserved = gate();
+    let holder: unknown;
+    // This reserve finds no usage row, so it inserts one; it stays uncommitted until reconcile waits for it.
+    const reserving = transaction(async (tx, inner) => {
+      holder = await executors[0]?.backendPid(tx);
+      await inner.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 5)] }, NOW);
+      reserved.open();
+      await held.opened;
+    });
+    await reserved.opened;
+    const reconciling = store.reconcile("u-1");
+    try {
+      await untilBlockedBy(holder);
+    } finally {
+      held.open();
+      await reserving;
+    }
+    // The reserve's new row held only its own 5 bytes: the recount adds f-0's 10 and keeps f-1's 5.
+    expect(await reconciling).toBe(true);
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0 });
+  });
 });

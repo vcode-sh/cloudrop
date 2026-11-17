@@ -1,7 +1,8 @@
 // The Postgres statements of the methods that write both tables or must decide in one step. Each is one statement:
 // data-modifying CTEs run with the statement, so the files change and its usage change commit together, and a guarded
 // UPDATE that waited for a row lock re-reads the row before it applies (READ COMMITTED), which is what makes a claim
-// exclusive. reconcile alone is a two-statement batch: the lock first, so the recount takes a snapshot after it.
+// exclusive. reconcile alone is a batch: the usage row made to exist and locked first, so the recount takes a snapshot
+// after it.
 
 import type { FileStatus, NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
@@ -173,23 +174,32 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
     },
 
     async reconcile(owner) {
-      const lock = binder("postgres");
-      const b = binder("postgres");
-      const who = b.text(owner);
-      // In READ COMMITTED each statement takes a new snapshot, so the recount, run after the lock, sees every reserve
-      // committed before it; a reserve that starts later waits for the lock and adds to the recounted row.
-      const recount = `INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at)
-        SELECT ${who}, ${RECOUNT.reserved}, ${RECOUNT.active}, ${RECOUNT.files}, now() FROM ${files} WHERE owner = ${who}
-        HAVING count(CASE WHEN status IN ('pending', 'completing', 'completed') THEN 1 END) > 0
-          OR EXISTS (SELECT 1 FROM ${usage} WHERE owner = ${who})
-        ON CONFLICT (owner) DO UPDATE SET reserved_bytes = EXCLUDED.reserved_bytes,
-          active_bytes = EXCLUDED.active_bytes, files = EXCLUDED.files, updated_at = EXCLUDED.updated_at
-        WHERE (${usage}.reserved_bytes, ${usage}.active_bytes, ${usage}.files)
-          IS DISTINCT FROM (EXCLUDED.reserved_bytes, EXCLUDED.active_bytes, EXCLUDED.files)
-        RETURNING owner`;
-      const [, changed] = await executor.batch([
-        lock.statement(`SELECT 1 FROM ${usage} WHERE owner = ${lock.text(owner)} FOR UPDATE`),
-        b.statement(recount),
+      /** A statement whose one parameter is the owner. */
+      const forOwner = (sql: (who: string) => string) => {
+        const b = binder("postgres");
+        return b.statement(sql(b.text(owner)));
+      };
+      // One transaction. The usage row is made to exist first (a zero row marked -infinity, which nobody else sees
+      // before the commit), then locked, so every reserve of this owner either committed before the recount or waits
+      // behind it: in READ COMMITTED the recount takes its snapshot after the lock. An upsert recount would compute its
+      // values before waiting for a reserve that inserted the row meanwhile, and drop that reserve's bytes. The marked
+      // row is removed again when the recount left it at zeros: an owner counted as all zeros gets no row.
+      const [, , changed] = await executor.batch([
+        forOwner(
+          (who) => `INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at)
+            VALUES (${who}, 0, 0, 0, '-infinity') ON CONFLICT (owner) DO NOTHING`,
+        ),
+        forOwner((who) => `SELECT 1 FROM ${usage} WHERE owner = ${who} FOR UPDATE`),
+        forOwner(
+          (who) => `UPDATE ${usage} SET reserved_bytes = counted.reserved, active_bytes = counted.active,
+              files = counted.files, updated_at = now()
+            FROM (SELECT ${RECOUNT.reserved} AS reserved, ${RECOUNT.active} AS active, ${RECOUNT.files} AS files
+              FROM ${files} WHERE owner = ${who}) AS counted
+            WHERE ${usage}.owner = ${who} AND (${usage}.reserved_bytes, ${usage}.active_bytes, ${usage}.files)
+              IS DISTINCT FROM (counted.reserved, counted.active, counted.files)
+            RETURNING ${usage}.owner`,
+        ),
+        forOwner((who) => `DELETE FROM ${usage} WHERE owner = ${who} AND updated_at = '-infinity'`),
       ]);
       return (changed?.length ?? 0) > 0;
     },

@@ -36,6 +36,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   creates the row (Postgres: insert `ON CONFLICT DO NOTHING`, lock, recount); an all-zero recount still creates none.
   Both are in the TSDoc and pinned by cases, with the reserve rules the contract already enforced (a duplicate id
   throws; the usage row comes from the first reserved file).
+- **Amended 2026-11-17 (final fix round):** the Postgres `reconcile` now does what the amendment above says, in one
+  transaction (M5-T90); until then it locked first and recounted with an upsert (M5-T37). An owner whose rows count
+  nothing (only empty pending files) gets no row on every backend; SQLite used to create a zero row.
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/server/store.ts` TSDoc, `src/testing/store-contract/claim.ts`, `end.ts`, `usage.ts`.
 
@@ -511,7 +514,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **If wrong:** one race remains: an owner whose usage row was deleted by hand, a first reserve and a reconcile all at
   once. The lock then finds no row to hold, so the recount can overwrite the reserve. A `reconcile` afterwards repairs
   it.
-- **Status:** decided.
+- **Status:** superseded on Postgres by M5-T90, which closes the race above. SQLite keeps the upsert, but creates a
+  row only when the recount is not all zeros.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/sqlite.ts`, `src/store/sql/outcomes.ts`.
 
@@ -1149,3 +1153,30 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Visible in:** the files named above.
 
 <!-- Task F appends its entries above this line. -->
+
+## Final fix round
+
+### M5-T90: Postgres `reconcile` makes the usage row exist, locks it, then recounts
+
+- **Decision:** on Postgres, `reconcile` is a batch of four statements in one transaction:
+  1. insert a zero usage row marked `updated_at = '-infinity'`, `ON CONFLICT (owner) DO NOTHING`;
+  2. `SELECT … FOR UPDATE` on that row;
+  3. an `UPDATE` that recounts from the owner's rows, only where a counter differs, `RETURNING` the owner;
+  4. delete the row if it still carries the mark, i.e. the recount left the inserted row at zeros.
+
+  It answers true when step 3 changed the row. The mark is never visible outside the transaction. SQLite's upsert
+  now creates a row only when the recount is not all zeros, as the memory store does.
+- **Why:** final review M1. M5-T37's upsert computed its values from a snapshot taken before it waited for a reserve
+  that had created the row meanwhile, and dropped that reserve's bytes. This happens after a usage row was deleted by
+  hand, which is the case `api.reconcile` exists for. Inserting first makes every reserve of the owner either commit
+  before the lock or wait behind it, and the recount's snapshot comes after the lock (READ COMMITTED). The insert is
+  unconditional, not only when live rows exist as the review proposed: otherwise a brand-new owner whose first reserve
+  commits between the lock and the recount, while a second reserve holds the row, still loses the second one.
+  Observed RED: the new db-lane row (`sql-postgres.db.integration.test.ts`, "reconcile after the usage row was deleted
+  by hand…") read `reservedBytes: 10`, expecting 15. The new contract row (rows that count nothing) failed on the four
+  SQLite targets until SQLite was aligned.
+- **If wrong:** four statements in a method called rarely; a two-statement form would reopen the race.
+- **Status:** decided; corrects M5-T17 and supersedes M5-T37 on Postgres.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/sqlite.ts`, `src/server/store.ts` TSDoc,
+  `src/testing/store-contract/usage.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.

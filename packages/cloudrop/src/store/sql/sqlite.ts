@@ -124,11 +124,12 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
 
     async reconcile(owner) {
       // One statement, and SQLite runs one writer at a time, so nothing can change the rows between count and write.
+      // An owner without a row whose rows count nothing gets none: a missing row already counts as zeros.
       const b = binder("sqlite");
       const sql = `INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at)
         SELECT ${b.text(owner)}, ${RECOUNT.reserved}, ${RECOUNT.active}, ${RECOUNT.files}, ${NOW_MS}
         FROM ${files} WHERE owner = ${b.text(owner)}
-        HAVING count(CASE WHEN status IN ('pending', 'completing', 'completed') THEN 1 END) > 0
+        HAVING ${RECOUNT.reserved} + ${RECOUNT.active} + ${RECOUNT.files} > 0
           OR EXISTS (SELECT 1 FROM ${usage} WHERE owner = ${b.text(owner)})
         ON CONFLICT (owner) DO UPDATE SET reserved_bytes = excluded.reserved_bytes,
           active_bytes = excluded.active_bytes, files = excluded.files, updated_at = excluded.updated_at
