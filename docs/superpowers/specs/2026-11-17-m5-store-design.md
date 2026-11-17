@@ -59,8 +59,8 @@ Two tables. Table names are configurable (`{ tables: { files, usage } }`, defaul
 `cloudrop_usage`, validated `^[A-Za-z_][A-Za-z0-9_]*$` and quoted). On Postgres, `tables.schema` (validated the same
 way) qualifies both everywhere the core writes SQL, `"app"."cloudrop_files"`; without it the names stand alone and the
 search path finds them; on SQLite it is `INVALID_CONFIG` (amended 2026-11-17 by M5-T120 to M5-T122). Column names are
-fixed snake_case (Prisma users map fields with `@map`). Postgres types shown; SQLite uses `TEXT` and `INTEGER`, times as integer milliseconds since the
-epoch, with the same names.
+fixed snake_case (Prisma users map fields with `@map`). Postgres types shown; SQLite uses `TEXT` and `INTEGER`, times
+as integer milliseconds since the epoch, with the same names.
 
 `cloudrop_files`:
 

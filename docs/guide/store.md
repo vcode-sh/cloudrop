@@ -356,8 +356,8 @@ connection's search path is. SQLite has no schemas, so every adapter refuses the
 
 - **Plain SQL:** `CREATE SCHEMA app;`, then the SQL above with each table name written `app.cloudrop_files` and
   `app.cloudrop_usage`. Pass `sqlStore(executor, { tables: { schema: "app" } })`.
-- **Drizzle:** pass the same `tables` to the tables and the store, and export the schema from your schema file too, so
-  drizzle-kit creates it:
+- **Drizzle:** pass the same `tables` to the tables and the store, and export the schema from your schema file too, as
+  Drizzle's [schemas page](https://orm.drizzle.team/docs/schemas) does, whose SQL starts with `CREATE SCHEMA`:
 
   ```ts
   // db/schema.ts
@@ -365,11 +365,13 @@ connection's search path is. SQLite has no schemas, so every adapter refuses the
   import { pgSchema } from "drizzle-orm/pg-core";
 
   export const app = pgSchema("app");
-  export const cloudropTables = { schema: "app" };
+  export const cloudropTables = { schema: app.schemaName };
   export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables({ tables: cloudropTables });
   ```
 
-  and build the store with them: `drizzleStore(db, { dialect: "postgres", tables: cloudropTables })`.
+  and build the store with them: `drizzleStore(db, { dialect: "postgres", tables: cloudropTables })`. `drizzle-kit
+  push` and `pull` manage all schemas by default; if your `drizzle.config.ts` sets `schemaFilter`, list `app` there
+  ([config file](https://orm.drizzle.team/docs/drizzle-config-file)).
 
 - **Prisma:** list the schema in the datasource and put both models in it, then pass
   `prismaStore(prisma, { dialect: "postgres", tables: { schema: "app" } })`. Prisma 7 needs no preview feature for

@@ -1368,8 +1368,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   option of its own.
 - **Why:** the owner asked for it. M5-T59 had ruled it once for every adapter if wanted; the names were already quoted
   once in the core, so the statements needed no change beyond the quoted text they interpolate. Postgres accepts the
-  qualified name in `ON CONFLICT … SET reserved_bytes = "app"."cloudrop_usage".reserved_bytes` and in `UPDATE … FROM`
-  (measured: the contract passes in a schema).
+  qualified name in `ON CONFLICT … SET reserved_bytes = "app"."cloudrop_usage".reserved_bytes` and in
+  `UPDATE … FROM` (measured: the contract passes in a schema).
 - **If wrong:** the option is additive; leaving it out behaves as before.
 - **Status:** decided.
 - **Source:** task S, 2026-11-17.
@@ -1380,8 +1380,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 - **Decision:** on SQLite (`sqliteExecutor`, `d1Executor`, Drizzle and Prisma on SQLite) a `schema` is
   `INVALID_CONFIG` at construction, from the core's `tableNames`, so every adapter and `cloudropSqliteTables` share the
-  message: `SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables };
-  SQLite finds the tables by their names alone.` The types refuse it too where the dialect is known statically:
+  message: `SQLite has no schemas: remove schema from { tables }.` (shortened in fix round 1: it says what happened
+  and what to do, in fewer shipped bytes). The types refuse it too where the dialect is known statically:
   `cloudropSqliteTables` takes `{ tables?: Omit<StoreTables, "schema"> }` and so does `drizzleStore`'s SQLite overload
   (an object literal with `schema` does not compile; anything that gets past the type is refused at run time).
   `sqlStore` and `prismaStore` learn the dialect from the executor or a union option and refuse at run time only. An
@@ -1394,22 +1394,34 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Visible in:** `src/store/sql/tables.ts`, `src/adapters/drizzle/sqlite-tables.ts`, `src/adapters/drizzle.ts`,
   `src/adapters/sql.test.ts`, `src/adapters/drizzle.test.ts`, `src/adapters/prisma.test.ts`.
 
-### M5-T122: `cloudropPgTables` declares the tables with `pgSchema(schema).table`
+### M5-T122: `cloudropPgTables` declares the tables in the schema's `table`, typed `PgTableFn<string | undefined>`
 
-- **Decision:** with `tables.schema`, `cloudropPgTables` builds both tables with `pgSchema(schema).table(...)`, so a
-  drizzle-kit migration creates them in that schema and Drizzle's queries name it; without it, `pgTable` as before.
-  `CloudropPgTables`' members are each a union of the two table types (`schema: undefined` and `schema: string`),
-  spelled through `ReturnType<typeof pgSchema<string>>`, which drizzle-orm 0.45 and 1.0 both export; the row types
-  are unchanged on both lines (the existing `$inferSelect` pins pass on the union). The guide shows exporting
-  `pgSchema("app")` from the schema file so drizzle-kit creates the schema (Drizzle's documented behaviour; drizzle-kit
-  is not installed here, so not run). The equivalence test (`drizzle-tables.db.integration.test.ts`) gains a schema
-  row: the tables made by the DDL in a schema match the declared tables, and both declared tables report that schema.
-- **Why:** ruling 3 of the task: typed queries and migrations in the app's schema with no Drizzle-only option.
-- **If wrong:** if the union type gets in an app's way, overloads keyed on `schema` could return one type each; that
-  adds an exported type.
+- **Decision:** with `tables.schema`, `cloudropPgTables` builds both tables with
+  `new PgSchema(schema, undefined).table`, so a drizzle-kit migration creates them in that schema and Drizzle's queries
+  name it; without it, `pgTable` as before. The constructor, not `pgSchema()`: `pgSchema()` throws a plain `Error` on `"public"` in 0.45 and in
+  1.0.0-rc.5, while the store accepts `"public"` and writes `"public"."cloudrop_files"`, so the Drizzle tables would
+  crash at import for a value the store takes. For every other name `pgSchema()` is that constructor call (1.0 passes
+  `casing`, undefined; 0.45 has no such parameter), so the constructor is used for every schema. 1.0 declares `casing`
+  as required, so the constructor is held as `new (name: string, casing: undefined) => { table: PgTableFn<string> }`,
+  which both lines' `PgSchema` satisfies without a cast, and called with `undefined`. `CloudropPgTables`' members are
+  one table type each, `ReturnType` of a `PgTableFn<string | undefined>` stand-in (`PgTableFn` is exported under that
+  name by 0.45 and 1.0), so `_.schema` is `string | undefined` and the builder needs no cast. The row types are
+  unchanged on both lines (the `$inferSelect` pins pass; a pin holds `_.schema`). A unit row pins that
+  `tables: { schema: "public" }` gives tables whose config names `"public"`. The guide shows exporting the schema from
+  the schema file, as Drizzle's schemas page does beside SQL that starts with `CREATE SCHEMA`, and `schemaFilter`
+  only as Drizzle's config docs state it: push and pull manage all schemas by default, and a set filter must list the
+  schema. drizzle-kit is not installed here, so neither was run. The equivalence test
+  (`drizzle-tables.db.integration.test.ts`) gains a schema row: the tables made by the DDL in a schema match the
+  declared tables, and both declared tables report that schema. `CloudropTablesOptions` moved into
+  `postgres-tables.ts`, its only user, and stays exported from `cloudrop/adapters/drizzle`; `drizzle/tables.ts` is
+  gone.
+- **Why:** ruling 3 of the task, and fix round 1's I1 and I2: typed queries and migrations in the app's schema with no
+  Drizzle-only option, and the Drizzle tables qualified exactly as the store qualifies its statements.
+- **If wrong:** if a later drizzle-orm validates the name in `PgSchema`'s constructor, map `"public"` to `pgTable` and
+  say that the Drizzle reads then follow the search path.
 - **Status:** decided.
-- **Source:** task S, 2026-11-17.
-- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/drizzle/tables.ts`,
+- **Source:** task S, 2026-11-17; fix round 1.
+- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/drizzle.ts`, `src/adapters/drizzle.test.ts`,
   `src/adapters/drizzle-tables.db.integration.test.ts`, `scripts/check-drizzle-versions.sh` (passes on 1.0.0-rc.5).
 
 ### M5-T123: Prisma gets `tables.schema` through `tables`; the models take `@@schema`
@@ -1439,8 +1451,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   server) and drops it after the file. The test DDL (`schemaStatements`), raw reader and raw tables take an optional
   `schema` and qualify names through one `qualified(schema, table)` helper. Unit rows cover only what the db rows do
   not: the exact message for a bad schema name and the SQLite refusal per entry point. The tables were created through
-  the lane's DDL, which the equivalence test ties to the Drizzle tables. Sizes (M4-F24, summed): sql 13.72 → 13.94 kB,
-  drizzle 15.70 → 16.06 kB, prisma 12.78 → 13.01 kB, each under 5 % growth and within its budget.
+  the lane's DDL, which the equivalence test ties to the Drizzle tables. Sizes (M4-F24, summed, after fix round 1):
+  sql 13.72 → 13.94 kB, drizzle 15.70 → 15.94 kB, prisma 12.78 → 13.00 kB, each under 5 % growth and within its
+  budget.
 - **Why:** the brief's test plan, with the decoy tables making every contract case discriminate the qualifier.
 - **If wrong:** add the Prisma adapter to the schema contract; its raw SQL is the same core's.
 - **Status:** decided.
