@@ -338,39 +338,53 @@ describe("the URLs a paused file signed", () => {
     vi.setSystemTime(T0);
     const upload = heldCalls((call) => call.label === "POST /upload");
     const part2 = heldCalls((call) => call.label === "PUT part 2" && call.nth === 1);
+    // Every part's renewal answered before the pause, so none is cut off by it and asked again.
+    const renewed = Promise.withResolvers<void>();
+    let renewals = 0;
     const fixture = clientFixture(
       { files },
       {
         multipartThreshold: "8MB",
         // The ticket is signed at T0; it reaches the page 850 s later, when its 900 s URLs expire within the minute.
-        fault: firstOf(async (call) => {
-          if (call.label !== "POST /upload") return undefined;
-          const answer = await call.forward(call.init);
-          await upload.fault(call);
-          return answer;
-        }, part2.fault),
+        fault: firstOf(
+          async (call) => {
+            if (call.label !== "POST /upload") return undefined;
+            const answer = await call.forward(call.init);
+            await upload.fault(call);
+            return answer;
+          },
+          async (call) => {
+            if (call.label !== "POST /sign") return undefined;
+            const answer = await call.forward(call.init);
+            if (++renewals === 3) renewed.resolve();
+            return answer;
+          },
+          part2.fault,
+        ),
       },
     );
-    // fetch PUTs, one at a time, so the requests come in a fixed order.
+    // fetch PUTs, one at a time.
     const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, concurrency: 1 });
     const job = client.start("files", threeParts());
     await upload.reached;
     vi.setSystemTime(T0 + 850_000);
     upload.open();
-    await part2.reached;
+    await Promise.all([part2.reached, renewed.promise]);
+    await everyMicrotask();
     job.pause();
     await everyMicrotask();
+    const beforeResume = fixture.requests.length;
     job.resume();
     const { error } = await job.done;
+    const signs = (requests: string[]) => requests.filter((label) => label === "POST /sign").length;
 
-    expect({ error, requests: fixture.requests }).toEqual({
-      error: null,
-      requests: [
-        // Each part's worker renews its URL before it waits for the one connection.
-        ...["POST /upload", "POST /sign", "POST /sign", "POST /sign", "PUT part 1", "PUT part 2"],
-        // The next pass sends parts 2 and 3 on the URLs renewed above, renewing neither again.
-        ...["PUT part 2", "PUT part 3", "POST /complete"],
-      ],
-    });
+    // Each part's worker renews its URL before it waits for the one connection, so the order of the PUTs before the
+    // pause depends on which /sign answers first; the counts do not.
+    expect({
+      error,
+      renewedBeforePause: signs(fixture.requests.slice(0, beforeResume)),
+      renewedAfterResume: signs(fixture.requests.slice(beforeResume)),
+      last: fixture.requests.at(-1),
+    }).toEqual({ error: null, renewedBeforePause: 3, renewedAfterResume: 0, last: "POST /complete" });
   });
 });
