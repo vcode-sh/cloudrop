@@ -1,10 +1,11 @@
 "use client";
 
-import { IconPlayerPause } from "@tabler/icons-react";
+import { IconPlayerPause, IconTrash } from "@tabler/icons-react";
 import type { ResumableUpload } from "cloudrop/client";
-import type { ChangeEvent } from "react";
+import { type ChangeEvent, useState } from "react";
 import {
   Attachment,
+  AttachmentAction,
   AttachmentActions,
   AttachmentContent,
   AttachmentDescription,
@@ -12,7 +13,7 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { client, useResumable, useUpload } from "@/lib/upload";
+import { useResumable, useUpload } from "@/lib/upload";
 import { formatBytes } from "./file-status";
 
 const until = (expiresAt: string): string =>
@@ -21,10 +22,13 @@ const until = (expiresAt: string): string =>
 /**
  * The multipart uploads this browser kept when the page closed or reloaded mid-upload. A browser never hands a file
  * back after a reload, so the person picks it again; the resumed upload then joins the list below as a new file.
+ * Discard tells the server to abort the upload, without the file, and deletes the browser's record of it.
  */
 export function UnfinishedUploads() {
-  const { uploads, refresh } = useResumable("files");
+  const { uploads, discard } = useResumable("files");
   const { resume } = useUpload("files");
+  // The message of the last discard that failed, such as an unreachable server: its upload stays listed for a retry.
+  const [problem, setProblem] = useState<string | null>(null);
   if (uploads.length === 0) return null;
 
   const pickAgain = (upload: ResumableUpload<"files">) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -34,10 +38,10 @@ export function UnfinishedUploads() {
     // Another file than the one the upload started with is refused before any request, and shows as a failed file.
     if (file) void resume(upload, file);
   };
-  // Deletes this browser's records, not the uploads: the bucket's lifecycle rule removes their parts.
-  const discardAll = async () => {
-    await client.forget();
-    await refresh();
+  const discardEach = async (chosen: readonly ResumableUpload<"files">[]) => {
+    setProblem(null);
+    const answers = await Promise.all(chosen.map((upload) => discard(upload)));
+    setProblem(answers.find((answer) => answer.error)?.error?.message ?? null);
   };
 
   return (
@@ -47,8 +51,13 @@ export function UnfinishedUploads() {
       </h2>
       <p className="text-muted-foreground text-sm">
         These stopped before they finished. Pick the same file again to continue: only the parts the bucket lacks are
-        sent.
+        sent. Discard drops an upload without its file.
       </p>
+      {problem && (
+        <p role="alert" className="text-destructive text-sm">
+          {problem}
+        </p>
+      )}
       <ul aria-labelledby="unfinished-heading" className="space-y-2">
         {uploads.map((upload) => (
           <li key={upload.id}>
@@ -62,8 +71,15 @@ export function UnfinishedUploads() {
                   {formatBytes(upload.size)}, can be resumed until {until(upload.expiresAt)}
                 </AttachmentDescription>
               </AttachmentContent>
-              <AttachmentActions>
-                <label className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <AttachmentActions className="gap-1">
+                {/* The ring follows the hidden input's focus: the label itself never takes it. */}
+                <label
+                  className={buttonVariants({
+                    variant: "outline",
+                    size: "sm",
+                    className: "has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/30",
+                  })}
+                >
                   Pick again
                   <input
                     type="file"
@@ -72,12 +88,15 @@ export function UnfinishedUploads() {
                     onChange={pickAgain(upload)}
                   />
                 </label>
+                <AttachmentAction aria-label={`Discard ${upload.name}`} onClick={() => void discardEach([upload])}>
+                  <IconTrash />
+                </AttachmentAction>
               </AttachmentActions>
             </Attachment>
           </li>
         ))}
       </ul>
-      <Button variant="ghost" size="sm" onClick={() => void discardAll()}>
+      <Button variant="ghost" size="sm" onClick={() => void discardEach(uploads)}>
         Discard all
       </Button>
     </section>

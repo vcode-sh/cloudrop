@@ -10,7 +10,7 @@ import {
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
-import { memo } from "react";
+import { memo, useRef } from "react";
 import {
   Attachment,
   AttachmentAction,
@@ -21,7 +21,7 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { Progress } from "@/components/ui/progress";
-import { type AttachmentState, attachmentState, type FileItem, percent, statusLine } from "./file-status";
+import { ATTACHMENT_STATE, type AttachmentState, type FileItem, percent, statusLine } from "./file-status";
 
 const ICONS: Record<AttachmentState, typeof IconCheck> = {
   idle: IconClock,
@@ -36,15 +36,25 @@ const ICONS: Record<AttachmentState, typeof IconCheck> = {
  * does, so a row renders again only for its own progress.
  */
 export const UploadRow = memo(function UploadRow({ file }: { file: FileItem }) {
-  const state = attachmentState(file.status);
+  // Retry and Cancel remove their own button: focus moves to the row first, so a keyboard user stays in the list and a
+  // screen reader reads the row's new state.
+  const row = useRef<HTMLLIElement>(null);
+  const thenFocusRow = (action: () => unknown) => () => {
+    row.current?.focus();
+    void action();
+  };
+  const state = ATTACHMENT_STATE[file.status];
   const Icon = ICONS[state];
   const moving = file.status === "queued" || file.status === "uploading";
   const ended = file.status === "done" || file.status === "aborted";
   return (
-    <li>
+    <li ref={row} tabIndex={-1} className="rounded-3xl outline-offset-2 focus-visible:outline-2">
       <Attachment state={state} className="w-full">
         <AttachmentMedia>
-          <Icon aria-hidden className={state === "uploading" || state === "processing" ? "animate-spin" : undefined} />
+          <Icon
+            aria-hidden
+            className={state === "uploading" || state === "processing" ? "motion-safe:animate-spin" : undefined}
+          />
         </AttachmentMedia>
         <AttachmentContent>
           <AttachmentTitle>{file.name}</AttachmentTitle>
@@ -55,23 +65,22 @@ export const UploadRow = memo(function UploadRow({ file }: { file: FileItem }) {
           )}
         </AttachmentContent>
         <AttachmentActions>
-          {moving && (
-            <AttachmentAction aria-label={`Pause ${file.name}`} onClick={file.pause}>
-              <IconPlayerPause />
-            </AttachmentAction>
-          )}
-          {file.status === "paused" && (
-            <AttachmentAction aria-label={`Resume ${file.name}`} onClick={file.resume}>
-              <IconPlayerPlay />
+          {/* One button for both, so React keeps the element and its keyboard focus when the file pauses or resumes. */}
+          {(moving || file.status === "paused") && (
+            <AttachmentAction
+              aria-label={`${moving ? "Pause" : "Resume"} ${file.name}`}
+              onClick={moving ? file.pause : file.resume}
+            >
+              {moving ? <IconPlayerPause /> : <IconPlayerPlay />}
             </AttachmentAction>
           )}
           {file.status === "failed" && (
-            <AttachmentAction aria-label={`Retry ${file.name}`} onClick={() => void file.retry()}>
+            <AttachmentAction aria-label={`Retry ${file.name}`} onClick={thenFocusRow(file.retry)}>
               <IconRefresh />
             </AttachmentAction>
           )}
           {!ended && (
-            <AttachmentAction aria-label={`Cancel ${file.name}`} onClick={file.abort}>
+            <AttachmentAction aria-label={`Cancel ${file.name}`} onClick={thenFocusRow(file.abort)}>
               <IconX />
             </AttachmentAction>
           )}

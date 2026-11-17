@@ -18,7 +18,9 @@ export function DropZone() {
     >
       <IconUpload aria-hidden className="size-6 text-muted-foreground" />
       <span className="font-medium">{isDragOver ? "Drop to upload" : "Drop files here, or click to choose"}</span>
-      <span className="text-muted-foreground text-xs">Text, PDF, images, audio and video, up to 100 MB each</span>
+      <span className="text-muted-foreground text-xs">
+        Text, PDF, images, audio, video and other binary files, up to 100 MB each
+      </span>
       <input {...getInputProps()} aria-label="Files to upload" className="sr-only" />
     </label>
   );

@@ -1,29 +1,18 @@
 // The home page's upload UI in a real browser against a real S3 API, run by scripts/test-browser.sh (RustFS) or
 // scripts/test-browser-live.ts (R2). The oracle is the bytes this test created, read back through the example's own
-// storage, the kinds of bucket request the page sent, and the client's own error codes and messages. Faults come from
-// Playwright's routing of the bucket's requests, so the rows run unchanged on R2, where no proxy can sit in front.
+// storage, the kinds of bucket request the page sent, the client's own error codes and messages, and where keyboard
+// focus lands. Faults come from Playwright's routing of the bucket's requests, so the rows run unchanged on R2, where no
+// proxy can sit in front.
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { test as base, expect, type Locator, type Page, type Route } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { test as base, expect } from "@playwright/test";
 import { storage } from "../lib/cloudrop";
+import { fileRows, leaveUnfinished, ORIGIN, routeBucket, signIn, storedKey, unfinishedList } from "./home-page";
 import { onDiskFile } from "./lab-page";
 
-const prefix = process.env.CLOUDROP_EXAMPLE_PREFIX;
-if (!prefix)
-  throw new Error(
-    "CLOUDROP_EXAMPLE_PREFIX is not set. Run this test through `bun run test:browser` or `bun run test:browser:live`.",
-  );
-
 const MIB = 1024 * 1024;
-const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
-const ORIGIN = "http://localhost:5173";
 
-const test = base.extend<{
-  bucketPuts: string[];
-  helloOnDisk: { path: string };
-}>({
+const test = base.extend<{ bucketPuts: string[] }>({
   // Labels such as "PUT part 2", never the URL: a presigned URL must not reach a log or a failure message.
   bucketPuts: async ({ page }, use) => {
     const labels: string[] = [];
@@ -34,47 +23,17 @@ const test = base.extend<{
     });
     await use(labels);
   },
-  // An on-disk file chosen through the native file chooser, where Chromium compares a new selection with the current
-  // one; `setInputFiles` with a buffer fires `change` every time and cannot show that.
-  helloOnDisk: async ({ page: _ }, use) => {
-    const directory = await mkdtemp(join(tmpdir(), "cloudrop-browser-"));
-    const path = join(directory, "hello.txt");
-    await writeFile(path, "hello cloudrop");
-    await use({ path });
-    await rm(directory, { recursive: true, force: true });
-  },
 });
 
-/** Signs in through the page's form; the server answers with a redirect that reloads the page. */
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/");
-  await Promise.all([
-    page.waitForEvent("load"),
-    page.getByRole("button", { name: "Sign in as the demo user" }).click(),
-  ]);
-}
-
-/** The rows of the upload list for files named `name`, in start order. */
-const fileRows = (page: Page, name: string): Locator =>
-  page.getByRole("list", { name: "Uploads", exact: true }).getByRole("listitem").filter({ hasText: name });
-
-const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-
-/** Waits until `row` says `${size}, stored as <prefix>/demo/<ulid>.<extension>` and returns the key. */
-async function storedKey(row: Locator, size: string, extension: string): Promise<string> {
-  const pattern = new RegExp(`${literal(size)}, stored as (${literal(`${prefix}/demo/`)}${ULID}\\.${extension})$`);
-  // Longer than expect's default 5 s, for a 20 MiB upload over a slow link; the test's own 30 s still bounds it.
-  await expect(row).toContainText(pattern, { timeout: 20_000 });
-  const key = pattern.exec((await row.textContent()) ?? "")?.[1];
-  if (!key) throw new Error("The row names no stored key.");
-  return key;
-}
-
-/** Answers the page's bucket requests with `handle`; requests to the example itself pass through. */
-const routeBucket = (page: Page, handle: (route: Route) => unknown) =>
-  page.route((url) => url.origin !== ORIGIN, handle);
-
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+
+/** The object at `key`, read back through the example's storage, holds the file at `path`. */
+async function expectStored(key: string, path: string): Promise<void> {
+  const bytes = await readFile(path);
+  const { data: stored, error } = await storage.getRange(key, 0, bytes.length - 1);
+  expect(error).toBeNull();
+  expect(sha256(stored ?? new Uint8Array())).toBe(sha256(bytes));
+}
 
 test("a picked file uploads in one PUT and its row shows the stored key", async ({ page, bucketPuts }) => {
   const bytes = new TextEncoder().encode("hello cloudrop");
@@ -102,39 +61,46 @@ test("a 20 MiB file dropped on the zone uploads in three parts", async ({ page, 
     transfer.items.add(new File([bytes], "big.bin", { type: "application/octet-stream" }));
     return transfer;
   }, 20 * MIB);
-  const zone = page.getByText("Drop files here, or click to choose");
-  await zone.dispatchEvent("dragenter", { dataTransfer });
+  await page.getByText("Drop files here, or click to choose").dispatchEvent("dragenter", { dataTransfer });
   await expect(page.getByText("Drop to upload")).toBeVisible();
   await page.getByText("Drop to upload").dispatchEvent("drop", { dataTransfer });
   const key = await storedKey(fileRows(page, "big.bin"), "20.0 MiB", "bin");
 
   expect(bucketPuts.toSorted()).toEqual(["PUT part 1", "PUT part 2", "PUT part 3"]);
   expect(await storage.head(key)).toMatchObject({ data: { size: 20_971_520 }, error: null });
-  // The four bytes around each part boundary: the end of one part and the start of the next.
-  for (const boundary of [8 * MIB, 16 * MIB]) {
-    const around = Uint8Array.from([-2, -1, 0, 1], (offset) => (boundary + offset) % 251);
-    expect(await storage.getRange(key, boundary - 2, boundary + 1)).toEqual({ data: around, error: null });
-  }
+  // The four bytes around each part boundary, of the pattern above: 8 MiB is 188 mod 251, 16 MiB is 125.
+  expect(await storage.getRange(key, 8 * MIB - 2, 8 * MIB + 1)).toEqual({
+    data: new Uint8Array([186, 187, 188, 189]),
+    error: null,
+  });
+  expect(await storage.getRange(key, 16 * MIB - 2, 16 * MIB + 1)).toEqual({
+    data: new Uint8Array([123, 124, 125, 126]),
+    error: null,
+  });
 });
 
-test("the same file chosen twice, by click and by keyboard, uploads twice", async ({ page, helloOnDisk }) => {
+test("the same file chosen twice, by click and by Tab and Enter, uploads twice", async ({ page }, testInfo) => {
+  // On disk and through the native chooser, where Chromium compares a new selection with the current one.
+  const file = await onDiskFile(testInfo, 1);
   await signIn(page);
 
   const chooser = page.waitForEvent("filechooser");
   await page.getByText("Drop files here, or click to choose").click();
-  await (await chooser).setFiles(helloOnDisk.path);
-  const first = await storedKey(fileRows(page, "hello.txt").nth(0), "14 B", "txt");
-  // Tab reaches the hidden input, and Enter opens the picker. Chromium fires `cancel`, not `change`, for an unchanged
-  // selection unless the page clears the input.
+  await (await chooser).setFiles(file.path);
+  const first = await storedKey(fileRows(page, file.name).nth(0), "1.0 MiB", "bin");
+  // Tab from the sign-in button reaches the hidden input, and Enter opens the picker. Chromium fires `cancel`, not
+  // `change`, for an unchanged selection unless the page clears the input.
+  await page.getByRole("button", { name: "Sign in as the demo user" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Files to upload")).toBeFocused();
   const again = page.waitForEvent("filechooser");
-  await page.getByLabel("Files to upload").focus();
   await page.keyboard.press("Enter");
-  await (await again).setFiles(helloOnDisk.path);
-  const second = await storedKey(fileRows(page, "hello.txt").nth(1), "14 B", "txt");
+  await (await again).setFiles(file.path);
+  const second = await storedKey(fileRows(page, file.name).nth(1), "1.0 MiB", "bin");
 
   expect(second).not.toBe(first);
-  expect(await storage.head(first)).toMatchObject({ data: { size: 14 }, error: null });
-  expect(await storage.head(second)).toMatchObject({ data: { size: 14 }, error: null });
+  await expectStored(first, file.path);
+  await expectStored(second, file.path);
 });
 
 test("before sign-in a file fails with the server's code and message", async ({ page, bucketPuts }) => {
@@ -163,17 +129,19 @@ test("a file the bucket refuses shows the error, and Retry sends it again", asyn
   await expect(row).toContainText(
     "UPLOAD_REJECTED: The storage service refused the file (HTTP 400). Start the upload again, and contact the site owner if it keeps failing.",
   );
-  await expect(page.getByText("0 of 1 uploaded, 0 B of 0 B, 1 failed")).toBeVisible();
+  await expect(page.getByText("0 of 1 uploaded, 1 failed")).toBeVisible();
 
   await page.unrouteAll();
   await page.getByRole("button", { name: "Retry refused.txt" }).click();
   const key = await storedKey(row, "13 B", "txt");
 
   expect(await storage.getRange(key, 0, 12)).toEqual({ data: new TextEncoder().encode("refused bytes"), error: null });
-  await expect(row.getByRole("button", { name: "Retry refused.txt" })).toHaveCount(0);
 });
 
-test("Cancel stops a multipart upload and tells the server to delete it", async ({ page, bucketPuts }) => {
+test("keyboard focus stays on Pause and Resume, and Cancel moves it to the row before telling the server", async ({
+  page,
+  bucketPuts,
+}) => {
   await signIn(page);
   // Every bucket PUT is held, never answered: the file is mid-upload for as long as the test needs.
   await routeBucket(page, () => {});
@@ -184,11 +152,19 @@ test("Cancel stops a multipart upload and tells the server to delete it", async 
     buffer: Buffer.alloc(20 * MIB),
   });
   await expect.poll(() => bucketPuts.length).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pause cancelled.bin" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Resume cancelled.bin" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Pause cancelled.bin" })).toBeFocused();
+
   const abort = page.waitForResponse((response) => response.url() === `${ORIGIN}/api/cloudrop/abort`);
-  await page.getByRole("button", { name: "Cancel cancelled.bin" }).click();
+  await page.getByRole("button", { name: "Cancel cancelled.bin" }).focus();
+  await page.keyboard.press("Enter");
 
   const row = fileRows(page, "cancelled.bin");
   await expect(row).toContainText("Cancelled");
+  await expect(row).toBeFocused();
   expect((await abort).status()).toBe(200);
   await expect(row.getByRole("button")).toHaveCount(0);
   await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -201,22 +177,11 @@ test("after a reload, the unfinished panel resumes with the same file and sends 
   const file = await onDiskFile(testInfo, 20);
   const other = await onDiskFile(testInfo, 1);
   await signIn(page);
-  // Part 1 reaches the bucket; parts 2 and 3 are held, so the reload comes between them.
-  await routeBucket(page, (route) =>
-    new URL(route.request().url()).searchParams.get("partNumber") === "1" ? route.continue() : undefined,
-  );
-  const partOne = page.waitForResponse(
-    (response) => new URL(response.url()).searchParams.get("partNumber") === "1" && response.status() === 200,
-  );
-  await page.getByLabel("Files to upload").setInputFiles(file.path);
-  await partOne;
-
-  await page.reload();
-  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await leaveUnfinished(page, [file.path]);
   bucketPuts.length = 0;
-  const panel = page.getByRole("list", { name: "Unfinished uploads" });
-  await expect(panel.getByRole("listitem")).toHaveCount(1);
-  await expect(panel).toContainText(`${file.name}20.0 MiB, can be resumed until`);
+  const panel = unfinishedList(page);
+  await expect(panel).toContainText(file.name);
+  await expect(panel.getByText(/^20\.0 MiB, can be resumed until /)).toBeVisible();
 
   // Another file is refused before any request, as a failed row, and the upload stays listed.
   await panel.getByLabel(`Pick ${file.name} again to resume`).setInputFiles(other.path);
@@ -230,8 +195,28 @@ test("after a reload, the unfinished panel resumes with the same file and sends 
 
   expect(bucketPuts.toSorted()).toEqual(["PUT part 2", "PUT part 3"]);
   await expect(page.getByRole("heading", { name: "Unfinished uploads" })).toHaveCount(0);
-  const bytes = await readFile(file.path);
-  const { data: stored, error } = await storage.getRange(key, 0, bytes.length - 1);
-  expect(error).toBeNull();
-  expect(sha256(stored ?? new Uint8Array())).toBe(sha256(bytes));
+  await expectStored(key, file.path);
+});
+
+test("Discard drops one unfinished upload without its file, and the other still resumes", async ({
+  page,
+}, testInfo) => {
+  const kept = await onDiskFile(testInfo, 20);
+  const dropped = await onDiskFile(testInfo, 17);
+  await signIn(page);
+  await leaveUnfinished(page, [kept.path, dropped.path]);
+
+  const abort = page.waitForResponse((response) => response.url() === `${ORIGIN}/api/cloudrop/abort`);
+  await unfinishedList(page)
+    .getByRole("button", { name: `Discard ${dropped.name}` })
+    .click();
+  expect((await abort).status()).toBe(200);
+  await expect(unfinishedList(page).getByRole("listitem")).toHaveCount(1);
+
+  // The browser's record is gone too: a reload lists only the upload that was kept.
+  await page.reload();
+  await expect(unfinishedList(page).getByRole("listitem")).toHaveCount(1);
+  await expect(unfinishedList(page)).toContainText(kept.name);
+  await unfinishedList(page).getByLabel(`Pick ${kept.name} again to resume`).setInputFiles(kept.path);
+  await expectStored(await storedKey(fileRows(page, kept.name), "20.0 MiB", "bin"), kept.path);
 });

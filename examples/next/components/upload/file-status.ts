@@ -1,16 +1,18 @@
 // What the home page says about one file: the Attachment state it shows and the line under its name.
 import type { RouteResult } from "cloudrop/client";
 import type { UploadItem } from "cloudrop/react";
+import type { ComponentProps } from "react";
+import type { Attachment } from "@/components/ui/attachment";
 import type { cloudrop } from "@/lib/cloudrop";
 
 /** One entry of useUpload("files").files: the route's onComplete returns `{ key }`. */
 export type FileItem = UploadItem<RouteResult<typeof cloudrop, "files">>;
 
-/** The states of shadcn's Attachment, the ones the owner's apps already style. */
-export type AttachmentState = "idle" | "uploading" | "processing" | "error" | "done";
+/** The states of shadcn's Attachment, read from the vendored component so that a CLI update carries them. */
+export type AttachmentState = NonNullable<ComponentProps<typeof Attachment>["state"]>;
 
 /** The client's seven statuses on the Attachment's five: a file that moves no bytes and has not failed is idle. */
-const STATES: Record<FileItem["status"], AttachmentState> = {
+export const ATTACHMENT_STATE: Record<FileItem["status"], AttachmentState> = {
   queued: "idle",
   paused: "idle",
   aborted: "idle",
@@ -19,8 +21,6 @@ const STATES: Record<FileItem["status"], AttachmentState> = {
   failed: "error",
   done: "done",
 };
-
-export const attachmentState = (status: FileItem["status"]): AttachmentState => STATES[status];
 
 const UNITS = ["B", "KiB", "MiB", "GiB"];
 
@@ -37,10 +37,13 @@ export function formatBytes(bytes: number): string {
 
 export const percent = (progress: number): number => Math.floor(progress * 100);
 
+/** Seconds up to a minute and a half, then whole minutes: "2000 s left" means nothing at a glance. */
+const timeLeft = (eta: number): string => (eta <= 90 ? `${Math.ceil(eta)} s left` : `${Math.ceil(eta / 60)} min left`);
+
 /** Speed and time left while bytes move; empty when the client has no measure yet. */
 export function pace(speed: number, eta: number | null): string {
   if (speed === 0) return "";
-  return eta === null ? `, ${formatBytes(speed)}/s` : `, ${formatBytes(speed)}/s, ${Math.ceil(eta)} s left`;
+  return eta === null ? `, ${formatBytes(speed)}/s` : `, ${formatBytes(speed)}/s, ${timeLeft(eta)}`;
 }
 
 /** The line under the file's name: what a person needs to know about it now. */
