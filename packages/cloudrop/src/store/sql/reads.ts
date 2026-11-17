@@ -21,7 +21,7 @@ type SingleStatementMethods = Pick<
   "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "owners"
 >;
 
-const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'deleted'";
+const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
 
 /** A keyset page: `limit + 1` rows were asked for, so a row beyond the page means another page follows. */
 function page<T>(rows: T[], limit: number, cursorOf: (last: T) => string) {

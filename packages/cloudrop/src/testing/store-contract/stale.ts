@@ -28,9 +28,10 @@ export function staleCases(suite: StoreSuite): void {
     expect(found.cursor).toBeNull();
   });
 
-  it("cleanup finds aborted, rejected, failed and deleted rows not yet cleaned that ended before the cut-off", async () => {
+  it("cleanup finds aborted, rejected, failed, expired and deleted rows not yet cleaned that ended before the cut-off", async () => {
     const { store } = suite;
-    const names = ["c-aborted", "c-rejected", "c-failed", "c-deleted", "n-expired", "n-cleaned", "n-at", "n-pending"];
+    const names = ["c-aborted", "c-rejected", "c-failed", "c-deleted", "c-expired"];
+    names.push("n-expired", "n-cleaned", "n-at", "n-pending");
     await seed(
       "u-1",
       names.map((id) => newFile(id, 1)),
@@ -40,12 +41,15 @@ export function staleCases(suite: StoreSuite): void {
     await advance("c-rejected", "rejected", ended);
     await advance("c-failed", "failed", ended);
     await advance("c-deleted", "deleted", ended);
+    // The sweep ends an expired row before it cleans up after it: one it has not cleaned yet is cleanup work.
+    await advance("c-expired", "expired", ended);
     await advance("n-expired", "expired", ended);
+    await store.cleaned("n-expired", ended);
     await advance("n-cleaned", "aborted", ended);
     await store.cleaned("n-cleaned", ended);
     await advance("n-at", "aborted", before);
     const found = await store.stale({ kind: "cleanup", before, claimedBefore, limit: 10, cursor: null });
-    expect(ids(found)).toEqual(["c-aborted", "c-deleted", "c-failed", "c-rejected"]);
+    expect(ids(found)).toEqual(["c-aborted", "c-deleted", "c-expired", "c-failed", "c-rejected"]);
   });
 
   it("expire pages by deadline then id, skips nothing when the sweep ends rows between pages, and ends with null", async () => {

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CloudropError, fail } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { complete } from "../testing/complete-fixture.ts";
 import { gate, hello, leaseStore, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { FileApi } from "./api.ts";
+import type { CloudropPlugin } from "./plugins.ts";
 import { route } from "./route.ts";
 
 beforeEach(() => {
@@ -35,9 +35,21 @@ describe("api.sweep: expire", () => {
     await complete(fixture, done.token);
     await fixture.storage.put("no-row/file.txt", "x");
     vi.setSystemTime(at(25 * HOUR));
-    expect((await fixture.cloudrop.api.sweep()).data).toEqual({ expired: 0, cleaned: 0, reported: [], cursor: null });
+    expect((await fixture.cloudrop.api.sweep()).data).toEqual({
+      expired: 0,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      cursor: null,
+    });
     vi.setSystemTime(PAST_GRACE);
-    expect((await fixture.cloudrop.api.sweep()).data).toEqual({ expired: 3, cleaned: 0, reported: [], cursor: null });
+    expect((await fixture.cloudrop.api.sweep()).data).toEqual({
+      expired: 3,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      cursor: null,
+    });
     expect(await statuses(fixture)).toEqual({
       [multipart.id]: ["expired", PAST_GRACE],
       [landed.id]: ["expired", PAST_GRACE],
@@ -76,6 +88,45 @@ describe("api.sweep: expire", () => {
     expect((await fixture.storage.head(stuck.key)).data?.size).toBe(5);
     // Its lease has passed, but its token is still within the grace: a resumed client may still complete it.
     expect((await statuses(fixture))[live.id]).toEqual(["completing", null]);
+  });
+
+  it("takes the row before it deletes, so a completion that verified in time can never lose its object", async () => {
+    const verifying = gate();
+    let paused = false;
+    const slowCheck: CloudropPlugin = {
+      id: "slow-check",
+      server: {
+        afterVerify: async () => {
+          if (paused) return;
+          paused = true;
+          await verifying.pass();
+        },
+      },
+    };
+    const fixture = storeFixture({ owned }, { store: leaseStore(), plugins: [slowCheck] });
+    const ticket = await fixture.single("owned", TEXT);
+    await fixture.send(ticket.put, hello);
+    const completing = complete(fixture, ticket.token);
+    await verifying.arrived;
+    // The sweep runs just past the deadline with no grace, and stops at its delete.
+    const deleting = gate();
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = async (input, init) => {
+      if (init?.method === "DELETE") await deleting.pass();
+      return fetch(input, init);
+    };
+    vi.setSystemTime(at(24 * HOUR + 1000));
+    const sweeping = fixture.cloudrop.api.sweep({ graceMs: 0 });
+    await deleting.arrived;
+    verifying.open();
+    const answer = await completing;
+    deleting.open();
+    await sweeping;
+    expect([
+      answer.status,
+      (await statuses(fixture))[ticket.id]?.[0],
+      (await fixture.storage.head(ticket.key)).data,
+    ]).toEqual([410, "expired", null]);
   });
 
   it("leaves alone a completion it races while that completion's lease is live", async () => {
@@ -123,7 +174,13 @@ describe("api.sweep: cleanup", () => {
     const [first, second] = await Promise.all([fixture.cloudrop.api.sweep(), fixture.cloudrop.api.sweep()]);
     expect((first.data?.expired ?? 0) + (second.data?.expired ?? 0)).toBe(3);
     const callsBefore = fixture.storageCalls.length;
-    expect((await fixture.cloudrop.api.sweep()).data).toEqual({ expired: 0, cleaned: 0, reported: [], cursor: null });
+    expect((await fixture.cloudrop.api.sweep()).data).toEqual({
+      expired: 0,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      cursor: null,
+    });
     expect([fixture.storageCalls.length - callsBefore, fixture.logger.errors]).toEqual([0, []]);
   });
 });
@@ -136,24 +193,51 @@ describe("api.sweep: paging and failures", () => {
     const first = await fixture.cloudrop.api.sweep({ limit: 2 });
     expect([first.data?.expired, typeof first.data?.cursor]).toEqual([2, "string"]);
     const second = await fixture.cloudrop.api.sweep({ limit: 2, cursor: first.data?.cursor ?? undefined });
-    expect(second.data).toEqual({ expired: 1, cleaned: 0, reported: [], cursor: null });
+    expect(second.data).toEqual({ expired: 1, cleaned: 0, failed: 0, reported: [], cursor: null });
   });
 
-  it("stops with the storage's error and leaves the row for the next sweep", async () => {
-    const { storage } = storeFixture({ owned });
-    const fixture = storeFixture(
-      { owned },
-      {
-        storage: {
-          ...storage,
-          head: async () => fail(new CloudropError("STORAGE_ERROR", "R2 answered 500.", { retryable: true })),
-        },
-      },
-    );
-    await fixture.single("owned", TEXT);
-    vi.setSystemTime(PAST_GRACE);
-    expect((await fixture.cloudrop.api.sweep()).error).toMatchObject({ code: "STORAGE_ERROR", retryable: true });
-    expect((await fixture.store.raw.files())[0]?.status).toBe("pending");
+  it("logs a row that fails every time, goes on past it and still reports what it ended", async () => {
+    const fixture = storeFixture({ owned });
+    const stuck = await fixture.single("owned", TEXT);
+    await fixture.store.claim(stuck.id, "crashed", NOW, 300_000);
+    vi.setSystemTime(at(1000));
+    const poison = await fixture.single("owned", TEXT);
+    vi.setSystemTime(at(2000));
+    const later = await fixture.single("owned", TEXT);
+    await fixture.send(later.put, hello);
+    // Every storage request for the poison row's key fails; the rows are swept oldest first: stuck, poison, later.
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = (input, init) =>
+      String(input instanceof Request ? input.url : input).includes(poison.key)
+        ? Promise.reject(new TypeError("network down"))
+        : fetch(input, init);
+    vi.setSystemTime(at(25 * HOUR + 3000));
+    const first = await fixture.cloudrop.api.sweep();
+    expect({ ...first.data, reported: first.data?.reported.map((record) => record.id) }).toEqual({
+      expired: 1,
+      cleaned: 0,
+      failed: 1,
+      reported: [stuck.id],
+      cursor: null,
+    });
+    expect([(await statuses(fixture))[later.id], (await fixture.storage.head(later.key)).data]).toEqual([
+      ["expired", at(25 * HOUR + 3000)],
+      null,
+    ]);
+    expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
+      `cloudrop: the sweep could not finish file ${poison.id}. The next sweep tries again.`,
+    ]);
+    // Ended but not cleaned: the cleanup pass finishes it once the storage answers.
+    fixture.fake.fetch = fetch;
+    vi.setSystemTime(at(26 * HOUR + 4000));
+    expect((await fixture.cloudrop.api.sweep()).data).toEqual({
+      expired: 0,
+      cleaned: 1,
+      failed: 0,
+      reported: [],
+      cursor: null,
+    });
+    expect((await statuses(fixture))[poison.id]).toEqual(["expired", at(26 * HOUR + 4000)]);
   });
 
   it.for([

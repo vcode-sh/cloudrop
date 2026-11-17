@@ -19,7 +19,7 @@ type Methods = Omit<CloudropStore<never>, "transaction">;
 
 const ZERO: OwnerUsage = { reservedBytes: 0, activeBytes: 0, files: 0 };
 const RESERVING: ReadonlySet<FileStatus> = new Set(["pending", "completing"]);
-const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "deleted"]);
+const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
 
 function toRecord(row: RawFileRow): FileRecord {
   const { claim: _claim, updatedAt: _updatedAt, ...record } = structuredClone(row);
