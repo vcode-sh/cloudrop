@@ -9,8 +9,10 @@
 // holds, the locks the fake LockManager holds, and the bucket's object hashed by node:crypto against the file's bytes.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { UploadJob } from "../client.ts";
 import { MiB } from "../rules.ts";
 import { type FaultCall, lostPart, storageBusy } from "../testing/client-fixture.ts";
+import { type PageEvents, pageEvents } from "../testing/page-events.ts";
 import {
   bodiesOf,
   bytesHash,
@@ -301,11 +303,12 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     // After the reload, which waits on the store's setTimeout: only the backoff's timers are fake.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     vi.mocked(Math.random).mockReturnValue(0.999);
+    const page = pageEvents();
     const job = setup.client.resume(setup.upload, fourParts());
     await busy.promise;
     // A macrotask, which fake timers leave alone: the 503 has been read and the backoff has begun.
     await new Promise((resolve) => setImmediate(resolve));
-    return { setup, job, status: () => job.getSnapshot().files[0]?.status };
+    return { setup, job, page, status: () => job.getSnapshot().files[0]?.status };
   }
 
   it("cancelled in the backoff of its new /upload, ends aborted at once and sends nothing more (M3-U92)", async () => {
@@ -323,31 +326,43 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     });
   });
 
-  it("paused in the backoff of its new /upload, asks nothing until resume(), then sends the file (M3-U92)", async () => {
-    const { setup, job, status } = await inNewTicketBackoff();
-    job.pause();
-    const paused = status();
-    await vi.advanceTimersByTimeAsync(60_000);
-    const whilePaused = setup.sent();
-    job.resume();
-    const { error } = await job.done;
+  type Held = { job: UploadJob<unknown>; page: PageEvents };
+  it.each([
+    { name: "paused by the caller", hold: ({ job }: Held) => job.pause(), free: ({ job }: Held) => job.resume() },
+    {
+      // The start over runs inside its run's connectivity bracket (M3-U49), so offline reaches its backoff.
+      name: "paused by offline",
+      hold: ({ page }: Held) => page.fire("offline"),
+      free: ({ page }: Held) => page.fire("online"),
+    },
+  ])(
+    "$name in the backoff of its new /upload, asks nothing until freed, then sends the file (M3-U92)",
+    async ({ hold, free }) => {
+      const { setup, job, page, status } = await inNewTicketBackoff();
+      hold({ job, page });
+      const paused = status();
+      await vi.advanceTimersByTimeAsync(60_000);
+      const whilePaused = setup.sent();
+      free({ job, page });
+      const { error } = await job.done;
 
-    expect({ paused, whilePaused, error, sent: setup.sent() }).toEqual({
-      paused: "paused",
-      whilePaused: ["POST /complete", "POST /upload"],
-      error: null,
-      sent: [
-        "POST /complete",
-        "POST /upload",
-        "POST /upload",
-        "PUT part 1",
-        "PUT part 2",
-        "PUT part 3",
-        "PUT part 4",
-        "POST /complete",
-      ],
-    });
-  });
+      expect({ paused, whilePaused, error, sent: setup.sent() }).toEqual({
+        paused: "paused",
+        whilePaused: ["POST /complete", "POST /upload"],
+        error: null,
+        sent: [
+          "POST /complete",
+          "POST /upload",
+          "POST /upload",
+          "PUT part 1",
+          "PUT part 2",
+          "PUT part 3",
+          "PUT part 4",
+          "POST /complete",
+        ],
+      });
+    },
+  );
 
   it("cancelled while its new /upload is in flight, stops that /upload and sends nothing more (I1, M3-U92)", async () => {
     const newTicket = gate(nth("POST /upload", 2));
