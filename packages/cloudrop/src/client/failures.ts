@@ -3,7 +3,6 @@
 
 import { CloudropError } from "../errors.ts";
 
-/** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
 /** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31), so neither can a resume (M4-F1). */
 export const NEEDS_NEW_TICKET: Set<string | undefined> = new Set([
   "UPLOAD_EXPIRED",
@@ -14,6 +13,7 @@ export const NEEDS_NEW_TICKET: Set<string | undefined> = new Set([
   "NO_SUCH_UPLOAD",
 ]);
 
+/** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
 export const withFile = (error: CloudropError, { id, file }: { id: string; file: File }): CloudropError =>
   // The spread copies the error's own fields (retryable, status, storageCode, parts), never its message or cause.
   new CloudropError(error.code, error.message, { ...error, file: { id, name: file.name }, cause: error });
