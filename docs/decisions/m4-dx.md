@@ -28,6 +28,19 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `storage/xml.ts`, `storage/s3/objects.ts`, `storage/s3/multipart.ts`, `storage/s3/bucket-settings.ts`,
   `storage/s3/objects.test.ts`, `server/api.test.ts` (`api.deletePrefix`), `testing/storage-contract/list.ts`.
 
+### M4-F11: `/upload` aborts the multipart upload when signing its first parts throws
+
+- **Decision:** `startFile` aborts the multipart upload it just created when signing the first part URLs or the token
+  throws, then rethrows, so `startFileSafely` rejects that file with `SERVER_ERROR` as before. A `presignPart` that
+  returns an error already aborted it.
+- **Why:** audit F11. `StorageDriver` is public; a custom driver whose `presignPart` throws left an open upload that held
+  its parts until the bucket's lifecycle rule removed it.
+- **If wrong:** an `abortMultipart` that throws too replaces the first error in the log line `startFileSafely` writes;
+  the file is rejected either way.
+- **Status:** in force.
+- **Source:** design §4, audit F11.
+- **Visible in:** `server/upload.ts` (`startFile`), `server/upload-storage.test.ts`.
+
 <!-- Task B appends its entries above this line. -->
 
 ### API, configuration and documentation (design §5, `M4-F15` to `M4-F21`)

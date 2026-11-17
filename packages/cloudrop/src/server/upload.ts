@@ -36,9 +36,16 @@ async function startFile(
   if (created.error) return rejected(created.error);
   const token: MultipartToken = { ...base, uploadId: created.data.uploadId, partSize: plan.partSize };
   const first = Array.from({ length: Math.min(PARTS_PER_SIGN, plan.partCount) }, (_, index) => index + 1);
-  const [parts, signed] = await Promise.all([presignParts(storage, token, first), signToken(token, signing)]);
+  const abort = () => storage.abortMultipart(token.key, token.uploadId);
+  const [parts, signed] = await Promise.all([presignParts(storage, token, first), signToken(token, signing)]).catch(
+    // A custom driver's presignPart may throw: the upload created above must not stay open in the bucket.
+    async (error: unknown) => {
+      await abort();
+      throw error;
+    },
+  );
   if (parts.error) {
-    await storage.abortMultipart(token.key, token.uploadId);
+    await abort();
     return rejected(parts.error);
   }
   return {
