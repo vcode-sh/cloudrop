@@ -21,6 +21,7 @@ const appUploads = pgTable("app_uploads", { fileId: text("file_id").primaryKey()
 
 const RETRY = "The file was uploaded, but the server could not finish processing it. Try again in a moment.";
 const BUSY = "Another request is completing this upload. Try again in a moment.";
+const UNREACHABLE = "The server could not reach its upload records. Try again in a moment.";
 
 const db = usePostgresDatabase();
 // Connections of this file only, so a lock wait can be told apart from other files' on the same server.
@@ -105,6 +106,38 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect((await rawTables(db).files())[0]).toMatchObject({ status: "pending", claim: null, claimedAt: null });
     expect((await complete(fixture, ticket.token)).body.data).toEqual({ run: 2 });
     expect([runs(), await appRows()]).toEqual([2, [{ file_id: ticket.id, owner: "u1" }]]);
+  });
+
+  test("an onComplete that swallows a failed tx statement records nothing, and every retry fails the same way", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    const files = store.route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onComplete: async ({ tx, userId, file }) => {
+          // The app row exists already, so the insert fails and aborts the transaction; catching it undoes nothing.
+          await tx
+            .insert(appUploads)
+            .values({ fileId: file.id, owner: userId })
+            .catch(() => undefined);
+          return { id: file.id };
+        },
+      },
+    );
+    const fixture = serverFixture({ files }, { store });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.send(ticket.put, hello);
+    await db.query("INSERT INTO app_uploads VALUES ($1, 'someone')", [ticket.id]);
+    const failed = { code: "SERVER_ERROR", message: UNREACHABLE, retryable: true };
+    // cloudrop's own record of the completion is refused in the aborted transaction, which then rolls back.
+    expect([
+      (await complete(fixture, ticket.token)).body.error,
+      (await complete(fixture, ticket.token)).body.error,
+    ]).toEqual([failed, failed]);
+    expect((await rawTables(db).files())[0]).toMatchObject({ status: "pending", claim: null, completedAt: null });
+    expect(fixture.logger.errors.map(({ message }) => message)).toEqual(
+      Array(2).fill(`cloudrop: the store failed to complete file ${ticket.id} on route "files".`),
+    );
   });
 
   test("two concurrent completions run onComplete once: the second waits for the row, then answers busy", async () => {
