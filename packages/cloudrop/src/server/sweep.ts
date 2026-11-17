@@ -14,9 +14,10 @@ export interface SweepOptions {
   /** The `cursor` an earlier sweep returned, to continue where it stopped. */
   cursor?: string;
   /**
-   * How long past its token's deadline an unfinished upload is left alone, 0 or more. Default 3600000 (1 hour). The
-   * sweep takes each row before it deletes anything, so a completion that started in time is never harmed; the grace
-   * keeps a slow one from being refused. Cleanup after an abort waits at least 15 minutes, the life of a signed URL.
+   * How long past its token's deadline an unfinished upload, and past its end an ended one, is left alone. At least
+   * 900000 (15 minutes, the life of an upload URL), so a PUT under way at the deadline lands before its row is cleaned
+   * up. Default 3600000 (1 hour). The sweep takes each row before it deletes anything, so a completion that started in
+   * time is never harmed; the grace keeps a slow one from being refused.
    */
   graceMs?: number;
 }
@@ -43,8 +44,11 @@ export interface SweepReport {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 const DEFAULT_GRACE_MS = 3_600_000;
-/** A signed URL's life (URL_LIFETIME_SECONDS): a PUT signed before an abort can land until then. */
-const MIN_CLEANUP_AGE_MS = 900_000;
+/**
+ * A signed URL's life (URL_LIFETIME_SECONDS): a PUT signed before a row ended can land until then, so no row is
+ * cleaned up sooner after its deadline or its end.
+ */
+const MIN_GRACE_MS = 900_000;
 const CURSOR = /^(expire|cleanup):(.*)$/s;
 
 type Pass = "expire" | "cleanup";
@@ -56,8 +60,12 @@ function readOptions(given: unknown): Result<{ limit: number; graceMs: number; p
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  if (typeof graceMs !== "number" || !Number.isSafeInteger(graceMs) || graceMs < 0) {
-    return fail(invalidInput("graceMs must be a whole number of milliseconds, 0 or more."));
+  if (typeof graceMs !== "number" || !Number.isSafeInteger(graceMs) || graceMs < MIN_GRACE_MS) {
+    return fail(
+      invalidInput(
+        `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so a PUT under way at the deadline lands first.`,
+      ),
+    );
   }
   const match = cursor === undefined ? ["", "expire", ""] : typeof cursor === "string" ? CURSOR.exec(cursor) : null;
   if (!match) return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
@@ -165,9 +173,7 @@ export async function sweep(
     cursor = null;
     if (budget === 0) return stoppedAt(report, "cleanup:");
   }
-  // Cleanup waits for the life of a signed URL, so a PUT signed before the row ended has landed by then.
-  const before = now - Math.max(graceMs, MIN_CLEANUP_AGE_MS);
-  const page = await sweepPage(sweeper, "cleanup", { before, limit: budget, cursor });
+  const page = await sweepPage(sweeper, "cleanup", { before: now - graceMs, limit: budget, cursor });
   if (page.error) return stoppedAt(report, `cleanup:${cursor ?? ""}`);
   return stoppedAt(report, page.data.cursor === null ? null : `cleanup:${page.data.cursor}`);
 }

@@ -108,15 +108,15 @@ describe("api.sweep: expire", () => {
     await fixture.send(ticket.put, hello);
     const completing = complete(fixture, ticket.token);
     await verifying.arrived;
-    // The sweep runs just past the deadline with no grace, and stops at its delete.
+    // The sweep runs just past the deadline and the shortest grace, and stops at its delete.
     const deleting = gate();
     const { fetch } = fixture.fake;
     fixture.fake.fetch = async (input, init) => {
       if (init?.method === "DELETE") await deleting.pass();
       return fetch(input, init);
     };
-    vi.setSystemTime(at(24 * HOUR + 1000));
-    const sweeping = fixture.cloudrop.api.sweep({ graceMs: 0 });
+    vi.setSystemTime(at(24 * HOUR + 15 * 60_000 + 1000));
+    const sweeping = fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 });
     await deleting.arrived;
     verifying.open();
     const answer = await completing;
@@ -152,15 +152,15 @@ describe("api.sweep: expire", () => {
 });
 
 describe("api.sweep: cleanup", () => {
-  it("removes a late PUT of a revoked upload once 15 minutes have passed, with no grace, and marks it cleaned", async () => {
+  it("removes a late PUT of a revoked upload once 15 minutes have passed, and marks it cleaned", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);
     await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
     await fixture.send(ticket.put, hello);
     vi.setSystemTime(at(15 * 60_000));
-    expect((await fixture.cloudrop.api.sweep({ graceMs: 0 })).data?.cleaned).toBe(0);
+    expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned).toBe(0);
     vi.setSystemTime(at(15 * 60_000 + 1));
-    expect((await fixture.cloudrop.api.sweep({ graceMs: 0 })).data?.cleaned).toBe(1);
+    expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned).toBe(1);
     expect([(await fixture.storage.head(ticket.key)).data, (await statuses(fixture))[ticket.id]]).toEqual([
       null,
       ["aborted", at(15 * 60_000 + 1)],
@@ -240,10 +240,25 @@ describe("api.sweep: paging and failures", () => {
     expect((await statuses(fixture))[poison.id]).toEqual(["expired", at(26 * HOUR + 4000)]);
   });
 
+  it("refuses a grace under 15 minutes, the life of an upload URL, and takes exactly 15", async () => {
+    const fixture = storeFixture({ owned });
+    const ticket = await fixture.single("owned", TEXT);
+    vi.setSystemTime(at(24 * HOUR + 15 * 60_000 + 1));
+    expect(await fixture.cloudrop.api.sweep({ graceMs: 14 * 60_000 })).toEqual({
+      data: null,
+      error: expect.objectContaining({
+        code: "INVALID_INPUT",
+        message:
+          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so a PUT under way at the deadline lands first.",
+      }),
+    });
+    expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.expired).toBe(1);
+    expect((await statuses(fixture))[ticket.id]?.[0]).toBe("expired");
+  });
+
   it.for([
     { name: "a limit of 0", options: { limit: 0 } },
     { name: "a limit over 1000", options: { limit: 1001 } },
-    { name: "a negative grace", options: { graceMs: -1 } },
     { name: "a cursor it did not issue", options: { cursor: "garbage" } },
   ] satisfies { name: string; options: Parameters<FileApi["sweep"]>[0] }[])(
     "answers INVALID_INPUT for $name",

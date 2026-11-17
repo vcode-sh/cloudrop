@@ -266,7 +266,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   without knowing about passes.
 - **If wrong:** renaming `graceMs` later is breaking; decide before 1.0.
 - **Status:** decided; amended 2026-11-17 (fix round 1): the expire pass takes the row first (M5-T64), and a failing
-  row no longer stops the call (M5-T65). `graceMs` stays 0 or more.
+  row no longer stops the call (M5-T65). `graceMs` is at least 15 minutes (M5-T64).
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
 
@@ -320,15 +320,18 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     `cleaned(id)`.
   - `stale({ kind: "cleanup" })` now also returns `expired` rows whose `cleaned_at` is null, so a crash or a failure
     between the `end` and the cleanup is finished by the cleanup pass.
-  - `graceMs` stays 0 or more. The cleanup pass keeps `max(graceMs, 15 min)`, which guards late PUTs.
+  - `graceMs` is at least 900,000 ms (15 minutes, the life of an upload URL); a smaller one is refused with
+    `INVALID_INPUT` naming the minimum. Both passes use it as given: the expire pass after the deadline, the cleanup pass
+    after the row ended. (Amended 2026-11-17 by the controller's closing ruling; the first version allowed 0 or more and
+    floored only the cleanup pass.)
 - **Why:**
   - The review (I1) showed the first order could delete a completed file. A `/complete` that verified in time could
     claim the row between the sweep's delete and its `end`.
   - With the row taken first, a `/complete` that claims first keeps its object.
   - A `/complete` that comes later is refused (`UPLOAD_EXPIRED`) with nothing recorded.
-- **If wrong:** a single PUT already in flight at `exp` can still land after an expire pass run with a small grace,
-  once that row is cleaned. The default 1 h grace makes that practically unreachable; a later pass could re-check
-  recently cleaned rows.
+- **If wrong:** no URL outlives its token's deadline (`presign.ts` caps it at `exp`) or lives longer than 15 minutes, so
+  with the floor a PUT in flight at the deadline always lands before its row can be cleaned. If URL lifetimes grow,
+  the floor must grow with them.
 - **Status:** decided by the controller (fix round 1); it amends M5-T20 ("`expired` rows are never cleanup work") and
   spec §4 and §6.
 - **Source:** task B fix round 1, 2026-11-17.
