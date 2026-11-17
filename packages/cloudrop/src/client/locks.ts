@@ -2,7 +2,7 @@
 // as long as this page keeps the upload's ticket alive, not for one run (audit C2). Persistence needs it: no record is
 // saved or resumed without the lock.
 
-export interface UploadLock {
+interface UploadLock {
   /**
    * true once this page holds the lock; false when another holder has it, this page included; undefined when the
    * browser refuses Web Locks here (no navigator.locks, a document no longer active, an opaque origin).

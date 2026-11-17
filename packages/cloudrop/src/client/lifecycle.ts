@@ -1,7 +1,7 @@
 // The page's events that reach a job: connectivity while a file runs (spec §4.6, rulings M3-U28, M3-U39 and M3-U48),
 // and pagehide while a failed file holds its ticket (spec §4.7, M3-U33).
 
-import type { Entry } from "./file-run.ts";
+import type { Entry } from "./entry.ts";
 import type { Upload } from "./upload.ts";
 
 /**
@@ -23,7 +23,7 @@ export function watchConnectivity(offline: () => void, online: () => void): () =
   };
 }
 
-/** Keeps a keepalive /abort ready for failed files' tickets: one pagehide listener while any is held (M3-U33). */
+/** Gives failed files' tickets up when the page hides: one pagehide listener while any is held (M3-U33). */
 export interface Leftovers {
   hold(entry: Entry): void;
   release(entry: Entry): void;
@@ -35,11 +35,11 @@ function unexpired({ upload }: Entry) {
 }
 
 /**
- * On pagehide, calls `abort` (drop in file-run.ts: a keepalive /abort, the ticket marked dropped so a retry after a
- * back-forward cache restore asks for a new one, its record deleted) for every held ticket that has not expired.
- * Expired tickets are let go on pagehide and on hold.
+ * On pagehide, calls `giveUp` (file-run.ts: the ticket marked dropped, so a retry after a back-forward cache restore
+ * asks for a new one; a keepalive /abort unless a reload can resume it, M4-F1) for every held ticket that has not
+ * expired. Expired tickets are let go on pagehide and on hold.
  */
-export function createLeftovers(abort: (upload: Upload) => void): Leftovers {
+export function createLeftovers(giveUp: (upload: Upload) => void): Leftovers {
   const held = new Set<Entry>();
   // The page adds the same listener once, and removing one it does not hold does nothing.
   const sync = () => {
@@ -52,7 +52,7 @@ export function createLeftovers(abort: (upload: Upload) => void): Leftovers {
   function pagehide() {
     for (const entry of held) {
       const upload = unexpired(entry);
-      if (upload) abort(upload);
+      if (upload) giveUp(upload);
     }
     held.clear();
     sync();

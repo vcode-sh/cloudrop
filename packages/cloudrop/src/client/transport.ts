@@ -3,9 +3,8 @@
 // when it is stored (spec §4.1, ruling M3-U6).
 
 import type { SignedRequest } from "../protocol/types.ts";
-import { type BucketOutcome, classifyAnswer, putObject, STORAGE_CODE, unreachable } from "./bucket.ts";
+import { type BucketOutcome, classifyAnswer, putObject, unreachable } from "./bucket.ts";
 import type { ClientFetch } from "./endpoints.ts";
-import { parseRetryAfter } from "./retry.ts";
 
 export type PutObject = (
   target: SignedRequest,
@@ -51,8 +50,7 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
         return settle({ kind: "stored" });
       }
       if (xhr.status === 0) return settle(unreachable(signal));
-      const code = STORAGE_CODE.exec(xhr.responseText)?.[1];
-      settle(classifyAnswer(xhr.status, code, parseRetryAfter(xhr.getResponseHeader("retry-after"))));
+      settle(classifyAnswer(xhr.status, xhr.responseText, xhr.getResponseHeader("retry-after")));
     };
     // A network failure and a refusal without CORS headers look the same here, as with fetch (decision S10).
     const lost = () => settle(unreachable(signal));

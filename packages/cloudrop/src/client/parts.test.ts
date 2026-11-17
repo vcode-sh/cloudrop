@@ -50,7 +50,7 @@ function double({ first, put = () => stored, sign, signal = new AbortController(
   let inFlight = 0;
   const sender: PartSender = {
     signal,
-    first,
+    urls: new Map(first.map((part) => [part.partNumber, part])),
     async sign(partNumbers) {
       log.calls.push(`sign ${partNumbers.join(",")}`);
       log.signs.push([...partNumbers]);

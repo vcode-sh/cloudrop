@@ -11,6 +11,7 @@ import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault, lostPart } from "../testing/client-fixture.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
+import { firstOf, gate as heldCalls, threeParts } from "../testing/persist-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone });
@@ -328,5 +329,62 @@ describe("abort of a paused file", () => {
       code: "ABORTED",
       last: "POST /abort",
     });
+  });
+});
+
+describe("the URLs a paused file signed", () => {
+  it("serve its next pass: a URL renewed before the pause is not renewed again (M4-F8)", async () => {
+    const T0 = Date.parse("2026-11-17T12:00:00.000Z");
+    vi.setSystemTime(T0);
+    const upload = heldCalls((call) => call.label === "POST /upload");
+    const part2 = heldCalls((call) => call.label === "PUT part 2" && call.nth === 1);
+    // Every part's renewal answered before the pause, so none is cut off by it and asked again.
+    const renewed = Promise.withResolvers<void>();
+    let renewals = 0;
+    const fixture = clientFixture(
+      { files },
+      {
+        multipartThreshold: "8MB",
+        // The ticket is signed at T0; it reaches the page 850 s later, when its 900 s URLs expire within the minute.
+        fault: firstOf(
+          async (call) => {
+            if (call.label !== "POST /upload") return undefined;
+            const answer = await call.forward(call.init);
+            await upload.fault(call);
+            return answer;
+          },
+          async (call) => {
+            if (call.label !== "POST /sign") return undefined;
+            const answer = await call.forward(call.init);
+            if (++renewals === 3) renewed.resolve();
+            return answer;
+          },
+          part2.fault,
+        ),
+      },
+    );
+    // fetch PUTs, one at a time.
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, concurrency: 1 });
+    const job = client.start("files", threeParts());
+    await upload.reached;
+    vi.setSystemTime(T0 + 850_000);
+    upload.open();
+    await Promise.all([part2.reached, renewed.promise]);
+    await everyMicrotask();
+    job.pause();
+    await everyMicrotask();
+    const beforeResume = fixture.requests.length;
+    job.resume();
+    const { error } = await job.done;
+    const signs = (requests: string[]) => requests.filter((label) => label === "POST /sign").length;
+
+    // Each part's worker renews its URL before it waits for the one connection, so the order of the PUTs before the
+    // pause depends on which /sign answers first; the counts do not.
+    expect({
+      error,
+      renewedBeforePause: signs(fixture.requests.slice(0, beforeResume)),
+      renewedAfterResume: signs(fixture.requests.slice(beforeResume)),
+      last: fixture.requests.at(-1),
+    }).toEqual({ error: null, renewedBeforePause: 3, renewedAfterResume: 0, last: "POST /complete" });
   });
 });

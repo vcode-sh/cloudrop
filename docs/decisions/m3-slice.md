@@ -184,7 +184,9 @@ otherwise.
   lifecycle rule. A single `PUT` cancelled after its bytes reached the bucket may land after `/abort`'s HEAD; that
   object is an orphan the lifecycle rule does not remove (the 1.1 database adapters close this gap).
 - **Status:** in force (`bc06db2`, `cec31c9`). Spec §5.5 says the client never sends `/abort` after a `/complete` that
-  may have succeeded.
+  may have succeeded. Amended by `M4-F3` (2026-11-17): a `/complete` gets 120 s for its answer, then counts as one that
+  got none (`NETWORK_ERROR`, which may have finished), so a server that never answers no longer holds a cancelled
+  `upload()` open.
 - **Visible in:** `client/upload.ts` (`complete`, `uploadFile`), `client/endpoints.ts` (`complete`, `abort`),
   `client/upload-failures.test.ts` (the four `/complete` cancel rows).
 
@@ -211,8 +213,12 @@ otherwise.
   accepted under M3-O4), which left parts to the lifecycle rule and single objects in the bucket for good. Amends
   M3-S31 and M3-H16 (their `/abort` now follows a failure too) and M2-D21 (when `onAbort` runs). Amended by M3-U50
   (`4f1887a`): a failed file of a `start()` job keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or
-  the ticket's expiry; `upload()` keeps this rule (M3-U29).
-- **Visible in:** `client/file-run.ts` (`end`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
+  the ticket's expiry; `upload()` keeps this rule (M3-U29). Amended by `M4-F1` (2026-11-17): a failed multipart file
+  of a client that keeps records, whose failure the same ticket could fix (retryable, outside `M3-U31`'s set), sends no
+  `/abort` and keeps its record for a resume after a reload. Amended by `M4-F2` (2026-11-17): a ticket that arrives for a
+  file already cancelled while it waited for it gets its `/abort` in the background, and `upload()` answers `ABORTED`
+  without waiting for it.
+- **Visible in:** `client/file-run.ts` (`end`, `giveUp`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
 

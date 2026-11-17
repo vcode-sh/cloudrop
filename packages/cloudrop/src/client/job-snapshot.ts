@@ -1,7 +1,7 @@
 // The snapshot a page renders of a job (spec §2.1, §4.2, §4.3): each file's bytes, progress, speed and time left, and
 // totals over the files that did not fail or abort.
 
-import type { Entry } from "./file-run.ts";
+import type { Entry } from "./entry.ts";
 import type { FileSnapshot, FileStatus, JobSnapshot } from "./types.ts";
 
 /** `part` of `whole`; when the whole is 0 bytes, 1 once `finished` and 0 before. */

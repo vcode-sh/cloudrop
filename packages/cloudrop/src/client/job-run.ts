@@ -4,7 +4,8 @@
 
 import { fail } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
-import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile } from "./file-run.ts";
+import { type Entry, outcomeOf, pauseFile, resumeFile } from "./entry.ts";
+import { abortFile, runFile } from "./file-run.ts";
 import { launch } from "./launch.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { letGo } from "./persist.ts";
@@ -93,8 +94,9 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
  * from no parts and no bytes (M3-U36).
  */
 export function forgetTicket(context: UploadContext, entry: Entry): void {
-  // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
-  if (entry.upload) letGo(context, entry.upload);
+  // The new ticket's record replaces this one's, under the new id (resume spec §3.2). A ticket already given up let
+  // go then: a record giveUp kept may be another tab's now (M4-F1).
+  if (entry.upload && !entry.upload.dropped) letGo(context, entry.upload);
   entry.upload = null;
   entry.landed.clear();
   entry.progress = createProgress();
@@ -110,7 +112,7 @@ async function startOver(job: Job, entry: Entry): Promise<void> {
   forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
-  await launch(job, [entry], { reask: false, first: 1 });
+  await launch(job, [entry], 1);
   await entry.run;
 }
 
