@@ -58,30 +58,6 @@ function driverRows(executor: () => SqlExecutor<unknown>) {
     expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(5);
     expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
   });
-
-  // An owner with no usage row yet has nothing to lock, so racing first reserves meet at the row's creation. Three
-  // owners per case, because one race may happen to run one call at a time.
-  test.for([
-    { limit: 50, reserved: 5 },
-    { limit: null, reserved: 8 },
-  ])(
-    "concurrent first reserves of new owners (limit $limit) reserve exactly $reserved each and never throw",
-    async ({ limit, reserved }) => {
-      const store = sqlStore(executor());
-      const owners = ["new-a", "new-b", "new-c"];
-      const outcomes = await Promise.all(
-        owners.flatMap((owner) =>
-          Array.from({ length: 8 }, (_, index) =>
-            store.reserve({ owner, limit, expiresAt: NOW, files: [file(`${owner}-${index}`, 10)] }, NOW),
-          ),
-        ),
-      );
-      expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(3 * reserved);
-      for (const owner of owners) {
-        expect(await store.usage(owner)).toEqual({ reservedBytes: reserved * 10, activeBytes: 0, files: 0 });
-      }
-    },
-  );
 }
 
 describe("Postgres", () => {

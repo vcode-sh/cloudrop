@@ -1,4 +1,5 @@
-// reconcile and owners: counters repaired from the rows without losing a concurrent reserve, and every owner paged.
+// Usage across calls: counters repaired from the rows without losing a concurrent reserve, racing first reserves of
+// new owners, and every owner paged.
 
 import { expect, it } from "vitest";
 import { at, EXPIRES, MINUTE, newFile, type StoreSuite, usageRow } from "./suite.ts";
@@ -54,6 +55,31 @@ export function usageCases(suite: StoreSuite): void {
     // 1 + 8 × 2, whichever order the calls ran in.
     expect(await store.usage("u-1")).toEqual({ reservedBytes: 17, activeBytes: 0, files: 0 });
   });
+
+  // An owner with no usage row yet has nothing to lock, so racing first reserves meet at the row's creation; a Postgres
+  // store reruns the loser (M5-T74), which needs its driver's unique violation recognised. Five owners per case, because
+  // one race may happen to run one call at a time.
+  it.for([
+    { limit: 50, reserved: 5 },
+    { limit: null, reserved: 8 },
+  ])(
+    "concurrent first reserves of new owners (limit $limit) reserve exactly $reserved each and never throw",
+    async ({ limit, reserved }, ctx) => {
+      const { store } = suite;
+      skipWithout(ctx, "concurrency");
+      const owners = ["new-a", "new-b", "new-c", "new-d", "new-e"];
+      const outcomes = await Promise.all(
+        owners.flatMap((owner) =>
+          Array.from({ length: 8 }, (_, index) =>
+            store.reserve({ owner, limit, expiresAt: EXPIRES, files: [newFile(`${owner}-${index}`, 10)] }, at(0)),
+          ),
+        ),
+      );
+      expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(owners.length * reserved);
+      const usages = await Promise.all(owners.map((owner) => store.usage(owner)));
+      expect(usages).toEqual(owners.map(() => ({ reservedBytes: reserved * 10, activeBytes: 0, files: 0 })));
+    },
+  );
 
   it("owners pages every owner with counters, a page at a time, and ends with null", async () => {
     const { store } = suite;
