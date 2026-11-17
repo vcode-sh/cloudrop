@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type FakeIndexedDb, fakeIndexedDb } from "../testing/fake-indexeddb.ts";
+import { fakeLocks } from "../testing/fake-locks.ts";
 import { createRecords, type Records, type UploadRecord } from "./records.ts";
 
 const NOW = Date.parse("2026-11-16T12:00:00.000Z");
@@ -46,6 +47,8 @@ beforeEach(() => {
   fake = fakeIndexedDb();
   opens = vi.spyOn(fake.indexedDB, "open");
   vi.stubGlobal("indexedDB", fake.indexedDB);
+  // The store needs Web Locks (M3-U88); a fake, so the rows never depend on the runtime having them.
+  vi.stubGlobal("navigator", { locks: fakeLocks().locks });
   clock = NOW;
 });
 
