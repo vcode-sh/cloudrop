@@ -1488,7 +1488,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   byte.
 - **If wrong:** spec §1's "client plus React" target of about 12 kB leaves M4's bindings about 1 kB when the client
   reaches its ceiling; M4 decides whether that target moves.
-- **Status:** in force (`260489c`). Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
+- **Status:** superseded by `M4-F23` (11.5 kB). Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.
 
 ## Chaos soak rulings

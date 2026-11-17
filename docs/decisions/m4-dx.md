@@ -191,6 +191,36 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   `outcomeOf`, `settle`, `held`, `pauseFile` and `resumeFile` from `client/file-run.ts` to `client/entry.ts`, which
   takes `file-run.ts` from 242 lines to 125; M3 entries that name those symbols in `file-run.ts` now find them there.
 
+### M4-F22: `resumable()` leaves out the uploads this page holds
+
+- **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.held`), and `resumable()` leaves them
+  out. An id is held from a persisted multipart ticket's arrival (`uploadOf`) until its unlock, which every way of
+  giving the ticket up calls (`letGo`, `giveUp`, a `/complete` in doubt of `upload()`), and from a `resume()` call,
+  before its first await, until its checks refuse it or its upload's unlock. A resume of an upload another job of the
+  client holds claims nothing, so its refusal (`UPLOAD_IN_USE`) does not list that upload. An upload another tab holds
+  is still listed.
+- **Why:** `resumable()` listed a running upload and a failed file of `start()` kept for `retry()`, which `resume()`
+  refuses with `UPLOAD_IN_USE` in the same page. `cloudrop/react` matched held files by name, size, type and
+  `lastModified` to hide them, which also hid an earlier unfinished upload of the same file (task D re-review). By id
+  it is exact, and the hooks drop their matching (`M4-B3`).
+- **If wrong:** listing held uploads again is a behaviour change in a minor version; a page that wants them can keep its
+  own jobs' files.
+- **Status:** in force (`516bac5`).
+- **Source:** task D re-review's client proposal; controller ruling, fix round 2.
+- **Visible in:** `client/upload.ts` (`held`), `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumable`,
+  `check`), `client/forget.test.ts`, `client/resume-job.test.ts`, `docs/guide/resume.md#two-tabs`.
+
+### M4-F23: the client's ceiling is 11.5 kB
+
+- **Decision:** the bundled `cloudrop/client` ceiling rises from 11 kB to 11.5 kB gzip, the step design §5.7 allows.
+- **Why:** the M4a client fixes ended at 10.95 kB; `M4-F22` took it to 11.03 kB. Moving the resume's claim into
+  `check()`, which owns the refusals and the lock, kept `resumeRun` unchanged but saved nothing measurable, and no
+  other change keeps the behaviour and cuts 30 B.
+- **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.87 kB, within it.
+- **Status:** in force (`516bac5`). Supersedes `M3-U91`'s 11 kB.
+- **Source:** design §5.7; task D measurement (`bun run package:check`, 2026-11-17).
+- **Visible in:** `scripts/size-limit.config.ts`.
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)
@@ -282,7 +312,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 `M4-B1` to `M4-B6` are the design's §6 as built; `M4-B7` onwards are task D's execution rulings. Fix round 1 of the
 task D review amended `M4-B1` to `M4-B4`, `M4-B10` and `M4-B12` in place, before the branch merged, and added `M4-B13`
-to `M4-B15`.
+to `M4-B15`; fix round 2 amended `M4-B1`, `M4-B3`, `M4-B10`, `M4-B12` and `M4-B15`, with `M4-F22` and `M4-F23` in the
+client section.
 
 ### M4-B1: `createUploadHooks<typeof cloudrop>(options?)`, with a lazy client
 
@@ -291,12 +322,15 @@ to `M4-B15`.
   or `useResumable` read: in a handler or an effect, so never during a server render. A wrong option is caught there
   (`createCloudropClient` throws only its configuration error) and kept: `upload()`, `resume()` and `refresh()` resolve
   `{ data: null, error }` with that `INVALID_CONFIG`, and nothing throws from a handler or rejects unhandled from an
-  effect. Fix round 1 (review M1) replaced a synchronous throw.
+  effect. A pick or a drop has no caller to resolve to, so there the error is thrown in a `setTimeout`, as the client
+  reports a throwing listener (`M3-U8`): the handler returns normally and the error still reaches the console. Fix
+  round 1 (review M1) replaced a synchronous throw; fix round 2 (re-review N2) stopped the pick and drop path from
+  being silent.
 - **Why:** a factory lets `useUpload("documents")` infer the route's metadata and result without a second type
   argument; a client created at module load would run on the server, which loads `"use client"` modules too.
 - **If wrong:** an eager option check would need the client to export its option reader; adding it is non-breaking.
-- **Status:** in force (`542ae74`, `99f795a`).
-- **Source:** design §6.1; task D review M1.
+- **Status:** in force (`542ae74`, `99f795a`, `83fc0a7`).
+- **Source:** design §6.1; task D review M1, re-review N2.
 - **Visible in:** `src/react.ts`, `docs/guide/react.md#set-up`.
 
 ### M4-B2: `useUpload(route, options?)`
@@ -318,25 +352,22 @@ to `M4-B15`.
 
 ### M4-B3: `useResumable(route?)`
 
-- **Decision:** `{ uploads, refresh }`. `uploads` is the client's `resumable()` list of the route (or of every route)
-  minus every upload this page holds through the factory's hooks: one whose file, in a job those hooks started or
-  resumed, is `queued`, `uploading`, `paused`, `completing`, or `failed` and kept for `retry()`. A held upload is
-  matched by the record's route, name, size, type and `lastModified` against that file, because a file's snapshot does
-  not carry the upload's id. So a failed file of this page is never listed (it is continued with `files[n].retry()`;
-  `resume()` would be refused, since this page holds its lock), a listed upload leaves the list when its resume starts,
-  and the same file uploaded anew hides an earlier unfinished upload of it until the new one ends done or aborted. The
-  list is read after mount, when a job of the hooks starts, and whenever one of its files ends or starts again (its
-  `done + failed + aborted` changes), in a microtask: the client queues a cancelled file's record removal right after
-  its status publishes, and the store reads in order, so a deleted record is gone from the next read. `[]` on the
-  server, before the first read and when the read failed. `refresh()` reads again and resolves with the listed
-  `Result`, so a failure is not lost. A read that answers after a newer read started does not replace the newer list.
-- **Why:** design §6.1. The first version read only when `job.done` settled, once per job, and listed this page's own
-  uploads, so a retried or cancelled file left a stale entry and a failed one offered a resume the client refuses
-  (review I1). "Every job of the client" is read as every job the hooks started (`M4-B12`).
-- **If wrong:** an exact match needs the upload id on the client's file snapshot, a client API change; exposing an
-  `error` field later is non-breaking.
-- **Status:** in force (`542ae74`, `99f795a`).
-- **Source:** design §6.1; task D review I1 and the controller's ruling on it.
+- **Decision:** `{ uploads, refresh }`. `uploads` is the client's `resumable()` list of the route (or of every route),
+  which leaves out the uploads this page holds, by id (`M4-F22`): a running, paused or completing file, a failed file
+  kept for `retry()`, and an upload while its resume runs. So a failed file of this page is never listed (it is
+  continued with `files[n].retry()`), a listed upload leaves the list when its resume starts, and a refused resume lists
+  it again. The list is read after mount, when a job of the hooks starts, whenever one of its files ends or starts again
+  (its `done + failed + aborted` changes), and when the job settles: a resume cancelled while its checks run ends at
+  once and lets the upload go only when they end. `[]` on the server, before the first read and when the read failed.
+  `refresh()` reads again and resolves with the client's `Result`, so a failure is not lost. A read that answers after
+  a newer read started does not replace the newer list.
+- **Why:** design §6.1. The first version read only when `job.done` settled and listed this page's own uploads (review
+  I1); fix round 1 matched held files by name, size, type and `lastModified` in the hooks, which hid an earlier upload
+  of the same file; fix round 2 moved the filter into the client by id. "Every job of the client" is read as every job
+  the hooks started (`M4-B12`).
+- **If wrong:** exposing an `error` field later is non-breaking.
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`).
+- **Source:** design §6.1; task D review I1, the controller's rulings on it and on the re-review's client proposal.
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/job-tracker.ts`, `docs/guide/react.md#resume-after-a-reload`.
 
 ### M4-B4: behaviour under server rendering, StrictMode and unmounting
@@ -412,17 +443,17 @@ to `M4-B15`.
 - **Source:** task D ruling.
 - **Visible in:** `src/react/use-upload.ts`, `docs/guide/react.md#drag-and-drop`.
 
-### M4-B10: the `cloudrop/react` ceiling is 2.3 kB, not 1.5 kB
+### M4-B10: the `cloudrop/react` ceiling is 2.05 kB, not 1.5 kB
 
-- **Decision:** the budget is 2.3 kB gzip: the 2.07 kB size-limit measured after fix round 1, plus about 10%, the rule
+- **Decision:** the budget is 2.05 kB gzip: the 1.87 kB size-limit measured after fix round 2, plus about 10%, the rule
   `size-limit.config.ts` states. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
   app that uses the hooks ships both with the client.
 - **Why:** with every promise of §6.1 kept (the per-file identity cache, the latest-options handlers, drag counting,
-  the stale-read guard), the hooks measured 1.66 kB; the review's fixes added the resumable list's tracking of held
-  uploads (`M4-B3`), configuration errors as results (`M4-B1`) and file-drag checks (`M4-B13`), for 2.07 kB. The
-  controller accepted the raised ceiling with about 10% headroom.
+  the stale-read guard), the hooks measured 1.66 kB. Fix round 1 added held-upload matching, configuration errors as
+  results (`M4-B1`) and file-drag checks (`M4-B13`), for 2.07 kB under a 2.3 kB ceiling. Fix round 2 moved the matching
+  into the client (`M4-F22`), for 1.87 kB.
 - **If wrong:** the owner may hold 1.5 kB; then a promise of §6.1 has to go, or the code be minified by hand.
-- **Status:** in force (`542ae74`, `99f795a`); accepted by the controller, for owner confirmation.
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`); accepted by the controller, for owner confirmation.
 - **Source:** task D measurement (`bun run package:check`, 2026-11-17).
 - **Visible in:** `scripts/size-limit.config.ts`.
 
@@ -439,14 +470,13 @@ to `M4-B15`.
 
 ### M4-B12: `useResumable` follows the jobs the hooks start
 
-- **Decision:** `useResumable` follows the jobs started or resumed through the same factory's `useUpload`: it reads
-  again when one starts and when one of its files ends or starts again, and leaves out the uploads they hold
-  (`M4-B3`). A job started on a shared client directly (`client.start()`) is neither followed nor left out; `refresh()`
-  reads again after it.
-- **Why:** the client offers no event for every job it runs, and task D does not change `src/client/**`.
-- **If wrong:** a client-wide settle event would need a client API; the hook would then use it.
-- **Status:** in force (`542ae74`, `99f795a`).
-- **Source:** task D ruling; amended by review I1.
+- **Decision:** `useResumable` re-reads for the jobs started or resumed through the same factory's `useUpload`, at the
+  moments `M4-B3` lists. A job started on a shared client directly (`client.start()`) is left out of the list by the
+  client like any held upload (`M4-F22`), but does not trigger a read; `refresh()` reads again after it.
+- **Why:** the client offers no event for every job it runs.
+- **If wrong:** a client-wide change event would need a client API; the hook would then use it.
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`).
+- **Source:** task D ruling; amended by review I1 and fix round 2.
 - **Visible in:** `src/react/job-tracker.ts`, `docs/guide/react.md#resume-after-a-reload`.
 
 ### M4-B13: drop zones take only drags that carry files
@@ -474,14 +504,15 @@ to `M4-B15`.
 
 ### M4-B15: `{ client }` must be created for the same server's routes
 
-- **Decision:** the `client` option is typed `CloudropClient<T> & { resumable(route?: RouteName<T>): unknown }`. The
-  added, non-generic member makes a client of another server's routes a type error.
+- **Decision:** the `client` option is typed `CloudropClient<T> & { resumable: (route?: RouteName<T>) => unknown }`.
+  The added, non-generic member makes a client of another server's routes a type error; written as a property, its
+  parameter is compared strictly, so a client of a server with fewer routes is refused too (re-review N1).
 - **Why:** `CloudropClient`'s methods are generic over the route name, and TypeScript compares generic methods by their
   constraints, so any `CloudropClient` was assignable to any other (review M6). A client whose route names include
   `T`'s still passes; results with the same route names are not compared.
 - **If wrong:** a phantom type member on `CloudropClient` would make the check exact; that is a client API change.
-- **Status:** in force (`d85022a`).
-- **Source:** task D review M6.
+- **Status:** in force (`d85022a`, `43c1269`).
+- **Source:** task D review M6, re-review N1.
 - **Visible in:** `src/react/types.ts` (`UploadHooksOptions`), `src/react/types.test.ts`.
 
 <!-- Task D appends its entries above this line. -->
