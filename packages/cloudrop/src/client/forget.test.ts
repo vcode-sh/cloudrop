@@ -38,7 +38,8 @@ const partTwoDown = (call: { label: string }) =>
 const brief = (error: { code: string; message: string } | null) =>
   error && { code: error.code, message: error.message };
 
-/** A record of 50 MiB in five 10 MiB parts, valid for a day. */
+/** A record of 50 MiB in five 10 MiB parts, valid for a day from now (the faked clock's now where a test fakes it, so a
+ * fixed date cannot expire under tests that run on the real clock). */
 const recordOf = (id: string, changes: Partial<UploadRecord> = {}): UploadRecord => ({
   id,
   namespace: "",
@@ -53,7 +54,7 @@ const recordOf = (id: string, changes: Partial<UploadRecord> = {}): UploadRecord
   key: `uploads/${id}.bin`,
   partSize: 10_485_760,
   partCount: 5,
-  expiresAt: "2026-11-17T12:00:00.000Z",
+  expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
   savedAt: NOW,
   ...changes,
 });
