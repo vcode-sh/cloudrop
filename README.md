@@ -9,11 +9,11 @@ Nothing usable is published yet; `cloudrop@0.0.0` on npm only reserves the name.
 - M0 (real-R2 spike) and M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite): done.
 - M2 (the server: `createCloudrop`, routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js
   and Node adapters): done.
-- M3 (the upload engine and the browser client): the first slice and both progress plans are done on this branch.
-  `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with retries, URL renewal, a
-  connection pool shared by the client that sizes itself, progress, speed and time left, pause, resume, cancel and
-  retry per file, recovery from stalled requests and lost connectivity, and resume after a reload. React hooks
-  (`useUpload`) arrive in M4.
+- M3 (the upload engine and the browser client): the first slice, both progress plans and the resume plan are done on
+  this branch. `cloudrop/client` uploads one file or several per call, as one `PUT` or in parts, with retries, URL
+  renewal, a connection pool shared by the client that sizes itself, progress, speed and time left, pause, resume,
+  cancel and retry per file, recovery from stalled requests and lost connectivity, and resume after a reload. React
+  hooks (`useUpload`) arrive in M4.
 
 Why the code is the way it is, and what the M2 reviews changed: [docs/decisions](docs/decisions/README.md).
 
@@ -163,7 +163,7 @@ import { createCloudropClient } from "cloudrop/client";
 import type { cloudrop } from "../lib/cloudrop"; // a type import: no server code or secret reaches the browser
 
 // options: basePath (default "/api/cloudrop"), fetch, concurrency (bucket PUTs at once: "auto", the default, or 1 to
-// 16), order ("added", the default, or "smallest-first")
+// 16), order ("added", the default, or "smallest-first"), persist and namespace (see Resume after reload)
 const client = createCloudropClient<typeof cloudrop>();
 
 const controller = new AbortController();
@@ -249,11 +249,11 @@ const again = await job.retry(); // or job.files[0].retry(): the failed files ag
   when its `/upload` for every file was refused, as with `done`). A retry reuses the file's ticket when it can, so the
   parts that landed are not sent again and the bytes stay counted. It asks `/upload` for a new ticket when the old one
   expired or was given up, or the failure was one a new attempt with it cannot fix (`UPLOAD_EXPIRED`, `INVALID_TOKEN`,
-  `UPLOAD_REJECTED`, `VERIFICATION_FAILED`, or a file that never got a ticket); `job.retry()` asks for all of those
-  files in one `/upload`. On a new ticket the file starts again under a new key, and its `bytes` drop to 0. When a
-  `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload. `retry()` of a file that
-  is still running waits for it to settle; of a done or aborted file, it answers that outcome at once. `job.done` keeps
-  each file's first outcome whatever a retry does later; the snapshot shows the current one.
+  `UPLOAD_REJECTED`, `VERIFICATION_FAILED`, `NO_SUCH_UPLOAD`, or a file that never got a ticket); `job.retry()` asks for
+  all of those files in one `/upload`. On a new ticket the file starts again under a new key, and its `bytes` drop to 0.
+  When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload. `retry()` of a
+  file that is still running waits for it to settle; of a done or aborted file, it answers that outcome at once.
+  `job.done` keeps each file's first outcome whatever a retry does later; the snapshot shows the current one.
 - A failed file of `start()` keeps its ticket and the parts that landed, so `retry()` can reuse them, until `abort()`
   of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours); `abort()` and
   `pagehide` tell the server with `/abort`, and after expiry the bucket's lifecycle rule removes unfinished parts. A
@@ -324,27 +324,27 @@ await client.forget();
   `/abort` cancels it or deletes its finished file. It is signed, not encrypted, so what `authorize` returned and the
   metadata can be read from it.
 - **When a record is deleted:** when its file ends done or is cancelled, or `upload()` cleans up a failed file; when a
-  new ticket replaces it; when `pagehide` gives up a failed file's ticket with `/abort`; when it is found
-  expired, by `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time to start); and on
-  `forget()`. So after a reload, the uploads left to resume are those that were still uploading or paused, and failed
-  files after a `/complete` that may have succeeded. A delete issued in `pagehide` may not commit before the page
-  unloads: the next page then still lists that upload. Resuming it finds the upload gone when the `/abort` reached the
-  server, and starts over with a new ticket, sending every byte; when the `/abort` did not, only the missing parts are
-  sent.
+  new ticket replaces it; when `pagehide` gives up a failed file's ticket with `/abort`; when it is found expired, by
+  `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time to start); and on `forget()`.
+  So after a reload, the uploads left to resume are those that were still uploading or paused, and failed files after a
+  `/complete` that may have succeeded (every failed file, when the page crashed and `pagehide` never fired). A delete
+  issued in `pagehide` may not commit before the page unloads: the next page then still lists that upload. Resuming it
+  finds the upload gone when the `/abort` reached the server, and starts over with a new ticket, sending every byte;
+  when the `/abort` did not, only the missing parts are sent.
 - **Two tabs.** The page that holds an upload's ticket holds a Web Lock on it (`cloudrop:upload:<id>`) as long as it
-  keeps the ticket: while the file runs, and while a failed file waits for `retry()`. `resume()` of an upload held in
-  another tab, or in this page, ends with `UPLOAD_IN_USE` and sends nothing: finish or cancel it there. `resumable()`
-  still lists held uploads. Without Web Locks (a page that is not a secure context) two tabs may send the same parts:
-  the stored file is still right, but the bytes are wasted.
+  keeps the ticket: while the file runs, while a failed file waits for `retry()`, and until the server answered the
+  `/abort` that gives it up. `resume()` of an upload held in another tab, or in this page, ends with `UPLOAD_IN_USE` and
+  sends nothing: finish or cancel it there. `resumable()` still lists held uploads. Without Web Locks (a page that is
+  not a secure context) two tabs may send the same parts: the stored file is still right, but the bytes are wasted.
 - **Namespace and sign-out.** Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by
-  default): a client sees only its namespace's records, and the namespace is fixed when the client is created, so
-  create a new client when the user changes. Call `forget()` at sign-out: it deletes the namespace's records and
-  resolves `{ data: { forgotten }, error }`; `forget({ all: true })` deletes every record of this origin, and any other
-  argument is `INVALID_INPUT`. Uploads that
-  are running keep going; abort their jobs to stop them. Without `forget()`, a signed-out user's unfinished uploads,
-  tokens included, stay on the browser profile for up to 24 hours, and another user signed in on the same profile and
-  namespace could finish them. They stay the first user's files, since `authorize` runs only in `/upload`: re-check the
-  session in `onComplete` when that matters.
+  default): a client sees only its namespace's records, and the namespace is fixed when the client is created, so create
+  a new client when the user changes. Call `forget()` at sign-out: it deletes the namespace's records and resolves
+  `{ data: { forgotten }, error }`, counting the records it deleted, expired ones included; `forget({ all: true })`
+  deletes every record of this origin, and any other argument is `INVALID_INPUT`. Uploads that are running keep going;
+  abort their jobs to stop them. Without `forget()`, a signed-out user's unfinished uploads, tokens included, stay on
+  the browser profile for up to 24 hours, and another user signed in on the same profile and namespace could finish
+  them. They stay the first user's files, since `authorize` runs only in `/upload`: re-check the session in `onComplete`
+  when that matters.
 - **Off, or no storage.** With `persist: false`, or where there is no `indexedDB` (Node, Bun, Deno, Workers), nothing
   is read or written: `resumable()` resolves `[]`, `resume()` ends with `NOT_FOUND` and `forget()` with
   `{ forgotten: 0 }`. `resumable()` and `forget()` never reject; when the browser's storage fails they resolve
