@@ -28,7 +28,8 @@ async function armPostgres(db: PostgresTestDatabase, schema: string | undefined)
       IF nextval('cloudrop_fail_once') = 1 THEN RAISE EXCEPTION '${FAILURE}'; END IF;
       RETURN NEW;
     END $$`);
-  await db.query(`CREATE TRIGGER cloudrop_fail_once BEFORE INSERT OR UPDATE ON ${qualified(schema, DEFAULT_TABLES.usage)}
+  const usage = qualified(schema, DEFAULT_TABLES.usage);
+  await db.query(`CREATE TRIGGER cloudrop_fail_once BEFORE INSERT OR UPDATE ON ${usage}
     FOR EACH ROW EXECUTE FUNCTION cloudrop_fail_once()`);
 }
 

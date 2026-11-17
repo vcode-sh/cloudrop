@@ -1,9 +1,9 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `main` after M5 (the database store). This file is the one place
-that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
-done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
-in [`docs/decisions/`](../../decisions/README.md).
+Updated 2026-11-17 on `main` after the post-M5 follow-ups (the `/upload` idempotency key and `tables.schema`). This file
+is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
+stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
+decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## Milestones (spec §14)
 
@@ -33,6 +33,16 @@ in [`docs/decisions/`](../../decisions/README.md).
 | [M3 chaos](2026-11-17-m3-chaos.md) ([audit](2026-11-17-m3-chaos.audit.md)), design [`2026-11-17-chaos-design.md`](../specs/2026-11-17-chaos-design.md) | Done, from `11eb34d`, merged to `main` 2026-11-17 | A fault-injecting proxy in front of RustFS; `test:chaos` on every pull request (Node rows 1–8, 12–14, 17), the browser rows through the proxy in `test:browser` (stall under Playwright's clock), a nightly `test:chaos:soak` (seeded random faults, a mid-run abort, the real-time stall and throttle rows); the lab shows a stall as a stall; one client fix the soak found (`M3-U92`: a retryable refusal at `/upload` is asked again within the attempt budget); decisions `M3-K1`..`M3-K11`, `M3-U92` |
 | M5 (no plan file: tasks A–F, C0 in the design's §9), design [`2026-11-17-m5-store-design.md`](../specs/2026-11-17-m5-store-design.md) | Done, merged to `main` 2026-11-17 | `createCloudrop({ store, quota, completionLeaseMs })`: a row before signing, `onComplete` once (exactly once for writes through `tx` on Postgres), hard quota, `QUOTA_EXCEEDED`, revocation, `/abort` that never deletes a completed file, `api.file/usage/revokeUploads/deleteFile/reconcile/sweep`; `cloudrop/adapters/sql` (node-postgres, postgres.js, `node:sqlite`, D1), `/drizzle` (drizzle-orm `>=0.45.0 <1 \|\| >=1.0.0-rc.5 <2`), `/prisma` (Prisma 7); `test:db`, D1 in `test:wrangler`, store rows in `test:chaos` and the browser lanes, the example's opt-in SQLite store, the [store guide](../../guide/store.md); decisions `M5-T16`..`M5-T98` |
 | M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
+| Post-M5 follow-ups (no plan file: tasks I and S, then M4-F25) | Done, merged to `main` 2026-11-17 | `POST /upload` takes an optional `idempotencyKey`. The client sends one per ask, and with a store a retry supersedes the lost attempt's pending rows of the same owner (owner-less rows are never superseded, `M5-T105`): `reserve` gains `requestKey`, and `cloudrop_files` gains `request_key` and an index on `(route, request_key)`. `tables.schema` puts both tables in a Postgres schema for every adapter (Drizzle tables in the schema, Prisma `@@schema`) and is refused on SQLite. The build drops JSDoc from the shipped `.js` and keeps it in the `.d.ts`. Decisions `M5-T100`..`M5-T105`, `M5-T120`..`M5-T124`, `M4-F25` |
+
+## State of `main` after the post-M5 follow-ups (2026-11-17)
+
+- **Gates:** `bun run verify` 1636 passed / 3 skipped; `test:db` 594 / 12 skipped; `test:wrangler` 104 / 23 skipped;
+  `test:rustfs` 24 / 3 skipped; `test:live` 32/32; `test:chaos` 23/23; `test:browser` 35 + 2 (store pass);
+  `test:browser:live` 22 + 2; drizzle-1 passes on 1.0.0-rc.5. The skips are declared gaps.
+- **Summed gzip:** `cloudrop` 37.01 of 50 kB, `cloudrop/next` 0.78, `cloudrop/node` 2.26, `cloudrop/adapters/sql`
+  10.84, `/drizzle` 12.64, `/prisma` 10.41 kB.
+- **Bundled:** `cloudrop` 27.29 of 30 kB, `cloudrop/client` 11.09, `cloudrop/react` 1.95 kB.
 
 ## State of `main` after M4a (2026-11-17)
 
@@ -80,9 +90,9 @@ per-route `Cache-Control`, batches over 100 files.
 
 ### After M5 (from its tasks' concerns)
 
-- A core-wide `tables.schema` for tables outside `public`, instead of the search path (`M5-T59`).
-- An idempotency key on `/upload`, so a lost answer stops holding its reservation (M5 spec §5.7).
-- The store paths behind their own entry, if the 4.7 kB they add to stateless server apps matters (`M5-T69`).
+- The store paths behind their own entry, if the 4.93 kB they add to stateless server apps matters (`M5-T69`).
+- A retry of exactly the failed ask's files could reuse its key, so an ask whose every attempt lost its answer stops
+  holding its last attempt's reservation until the sweep (`M5-T101`).
 
 ### Owner steps
 
@@ -112,7 +122,7 @@ per-route `Cache-Control`, batches over 100 files.
     tickets, which the client already honours.
   - A soak seed replays the files and the fault stream, not which request draws which fault (requests draw in arrival
     order, `M3-K7`); exact replay needs a per-request draw key in the proxy.
-  - `client/job-run.ts` and `client/launch.ts` were split at 249 lines; `resume.test.ts` is at 398 of 400, so its next
+  - `client/job-run.ts` and `client/launch.ts` were split at 249 lines; `resume.test.ts` is at 400 of 400, so its next
     row needs a split first.
 
 - The findings' "Browser, 2026-11-16" row U2 was measured the same way as the section with the erratum (a routed

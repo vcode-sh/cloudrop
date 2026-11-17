@@ -102,7 +102,9 @@ Runs the `*.db.integration.test.ts` files (Vitest project `db`) against two data
 
 - **Postgres 18** (`postgres:18.6`) in Docker on port **19500**, data in a tmpfs. Set `CLOUDROP_POSTGRES_PORT` to use
   another port; the lane stops if the port is in use. Each test file gets its own schema (`cloudrop_test_<hex>`),
-  dropped after the file. The lane removes the container on success, failure and interrupt.
+  dropped after the file. Files that test `tables.schema` also make a second schema, `<schema>_app`, dropped after
+  the file; the store contract runs there with empty decoy tables on the search path. The lane removes the container
+  on success, failure and interrupt.
 - **SQLite** through `node:sqlite`, a fresh database per test: in memory, or a file under `.superpowers/test-db/` when
   a second client must open it.
 
@@ -127,8 +129,10 @@ Each row checks that the upload ends with the file's exact bytes and nothing lef
 - `test:chaos` runs the `*.chaos.integration.test.ts` files (Vitest project `chaos`). `store.chaos.integration.test.ts`
   gives the server a database store (`useChaosFixture({ store: true })`: `sqlStore` over in-memory `node:sqlite`) and
   loses `/complete` answers on the way back to the client (`faultApp`): a reset, a deadline that passes while
-  `onComplete` runs, a gateway `503`. Its rows check that `onComplete` ran once and the owner's usage is exact, that a
-  revoke stops an upload at its next call, and that the sweep after closed tabs leaves no orphan object or open upload.
+  `onComplete` runs, a gateway `503`. It also loses an `/upload` answer to a reset, whose retry with the same
+  `idempotencyKey` supersedes the lost attempt, so usage counts the file once. Its rows check that `onComplete` ran
+  once and the owner's usage is exact, that a revoke stops an upload at its next call, and that the sweep after closed
+  tabs leaves no orphan object or open upload.
 - `test:chaos:soak` runs the nightly `*.soak.integration.test.ts` files (Vitest project `soak`): seeded random faults, a
   mid-run abort, and the real-time stall and throttle rows. To replay a run, set `CLOUDROP_CHAOS_SEED` to the seed in a
   test's title.

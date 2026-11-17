@@ -11,8 +11,8 @@ import { checkSchema, quoteTables, type StoreTables, tableNames } from "./tables
 
 export interface SqlStoreOptions {
   /**
-   * The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`, and on Postgres their schema; letters, digits
-   * and `_`.
+   * The two tables' names, defaults `cloudrop_files` and `cloudrop_usage`, and on Postgres their schema; letters,
+   * digits and `_`.
    */
   tables?: StoreTables;
   /**

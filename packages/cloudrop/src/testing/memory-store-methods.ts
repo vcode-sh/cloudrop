@@ -87,7 +87,8 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
     reserve: ({ owner, limit, expiresAt, requestKey, files: accepted }, now) =>
       atomic("reserve", (write) => {
         if (accepted.length === 0) return [];
-        // A retry of a request whose answer was lost: its earlier attempt's pending rows end first, freeing their bytes.
+        // A retry of a request whose answer was lost: its earlier attempt's pending rows end first, freeing their
+        // bytes.
         const routes = new Set(accepted.map((file) => file.route));
         const superseded =
           requestKey === null

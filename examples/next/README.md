@@ -116,7 +116,9 @@ CLOUDROP_EXAMPLE_STORE=/path/to/uploads.db bun run dev
 ```
 
 `lib/store.ts` opens the file, creates cloudrop's tables from `lib/cloudrop-tables.sql` and the app's own
-`example_uploads` table, and passes `sqlStore(sqliteExecutor(database))` to `createCloudrop`. With it:
+`example_uploads` table, and passes `sqlStore(sqliteExecutor(database))` to `createCloudrop`. A database file made
+before the `request_key` column existed stops the start with "no such column: request_key": delete `.data/cloudrop.db`
+(or your own file) after upgrading. With it:
 
 - each user's uploads count toward a quota, 500 MB unless `CLOUDROP_EXAMPLE_QUOTA_MB` says otherwise; a file that does
   not fit is refused with `QUOTA_EXCEEDED` before a byte is sent;

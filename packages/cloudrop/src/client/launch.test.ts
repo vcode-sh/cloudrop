@@ -1,6 +1,6 @@
-// Contract: every /upload ask carries an idempotencyKey of its own, and every automatic retry of that ask sends the same
-// one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request. Oracle: the bodies of
-// the /upload requests the fixture saw.
+// Contract: every /upload ask carries an idempotencyKey of its own, and every automatic retry of that ask sends the
+// same one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request. Oracle: the
+// bodies of the /upload requests the fixture saw.
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
