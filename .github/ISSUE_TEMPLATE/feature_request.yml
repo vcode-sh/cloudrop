@@ -1,0 +1,54 @@
+name: Feature Request
+description: Something cloudrop should do and does not.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. Every feature is code someone maintains for good, and every export is a promise under semver,
+        so the most useful request starts from the problem, not the API.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what stops you today? "When I upload X, I cannot Y" is a problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How it could work. Options, functions, hooks, endpoints, behaviour.
+      render: typescript
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Server (cloudrop)
+        - Client (cloudrop/client)
+        - React hooks (cloudrop/react)
+        - Database store or an adapter
+        - Storage driver (r2, s3)
+        - Framework adapter (next, node)
+        - Documentation or examples
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or how other libraries solve it.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, code, screenshots. No credentials or presigned URLs.

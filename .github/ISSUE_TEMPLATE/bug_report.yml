@@ -1,0 +1,101 @@
+name: Bug Report
+description: Something does not work the way the docs say it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Before you file, check you are on the latest release, and look through
+        [Troubleshooting](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/troubleshooting.md): most
+        `NETWORK_ERROR`s are a missing bucket CORS rule.
+
+        **Never paste credentials, presigned URLs, upload tokens or cookies**, in the reproduction or the logs. Redact
+        them; the shape is enough. A security issue goes through
+        [private vulnerability reporting](https://github.com/vcode-sh/cloudrop/security/advisories/new), not here.
+
+  - type: input
+    id: version
+    attributes:
+      label: cloudrop version
+      description: From your lockfile or `npm ls cloudrop`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Server runtime
+      options:
+        - Node.js
+        - Bun
+        - Deno
+        - Cloudflare Workers
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: runtime-version
+    attributes:
+      label: Runtime and browser versions
+      description: The server runtime's version, and the browser if the client is involved.
+      placeholder: "Node.js 24.11.0, Chrome 142"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Storage provider
+      options:
+        - Cloudflare R2
+        - AWS S3
+        - RustFS or MinIO
+        - Wrangler's local R2
+        - Other S3-compatible service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: adapter
+    attributes:
+      label: Adapters in use
+      description: Every one that applies.
+      multiple: true
+      options:
+        - cloudrop/next
+        - cloudrop/node
+        - cloudrop.handler directly (Hono, Bun, Workers, ...)
+        - cloudrop/client
+        - cloudrop/react
+        - No database store
+        - cloudrop/adapters/sql
+        - cloudrop/adapters/drizzle
+        - cloudrop/adapters/prisma
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include the error's `code` and `message`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest route, client call or repository that shows it. A link to a repository is best.
+      render: typescript
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server logs and the browser console or network tab. Redact credentials, presigned URLs, tokens and cookies.
+      render: text
