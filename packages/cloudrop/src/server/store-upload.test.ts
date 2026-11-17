@@ -202,6 +202,16 @@ describe("POST /upload with a store", () => {
     ]);
   });
 
+  it("leaves the first attempt pending when /upload reuses its idempotencyKey on a route without owner", async () => {
+    const anyone = route({ accept: "*/*", maxSize: "1GB", authorize: () => ({}) });
+    const fixture = storeFixture({ anyone });
+    // On such a route every row is owner-less, so a reused key could otherwise end other users' uploads.
+    const ask = { route: "anyone", files: [png(10)], idempotencyKey: "app-upload-request" };
+    await fixture.post("upload", ask);
+    await fixture.post("upload", ask);
+    expect((await fixture.store.raw.files()).map(({ status }) => status)).toEqual(["pending", "pending"]);
+  });
+
   it.for([
     { name: "an empty owner", owner: "" },
     { name: "an owner over 255 characters", owner: "x".repeat(256) },

@@ -436,6 +436,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided; it extends M5-T33.
 - **Amended 2026-11-17 (final fix round):** after task E moved `route()` into a shared chunk and the final fix round,
   `cloudrop` bundled is 27.19 kB (+4.81 kB against 22.38 kB) and summed 46.08 kB.
+- **Re-measured 2026-11-17 (after the post-M5 follow-ups):** `cloudrop` bundled is 27.29 kB, +4.93 kB against
+  22.36 kB.
 - **Source:** task B fix round 1, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
 
@@ -1382,12 +1384,15 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 ### M5-T101: `reserve` takes `requestKey`; which rows a retry ends, and the column that holds the key
 
 - **Decision:**
-  - `CloudropStore.reserve` input gains `requestKey: string | null` (required in the type, so a custom store's
-    author sees it; `null` behaves exactly as before). New rows store it in `cloudrop_files.request_key`.
+  - `CloudropStore.reserve` input gains `requestKey: string | null`, required so every caller states it (the server
+    always does; `null` behaves exactly as before). A custom store that leaves it out still type-checks, because a
+    wider input is assignable, and then keeps M5's cost. Nothing outside the internal contract suite checks
+    superseding. New rows store it in `cloudrop_files.request_key`.
   - When not null, the same atomic unit first ends as `aborted`, with `ended_at = now` and `cleaned_at` left null for
     the sweep, every `pending` row with this key, the route of the call's files (one `/upload` names one route) and
     the same owner, null-safe (null matches only null), and releases their reserved bytes, so the quota check of the
-    new files counts without them. Rows in any other status are untouched.
+    new files counts without them. Rows in any other status are untouched. Amended by M5-T105: the server passes a
+    key only with an owner, so only owned rows are superseded; the store contract is unchanged.
   - The rows are superseded whatever the new files' outcomes, even when every one is `over-quota`: the retry's answer
     is the only one the client acts on, so the lost attempt's bytes go either way. A call that throws (a reused id)
     supersedes nothing. A call with no files writes nothing, as before.
@@ -1398,8 +1403,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   - Schema: `request_key text` null (`TEXT` on SQLite), appended after `cleaned_at` in every copy, and an index
     `cloudrop_files_route_request_key_idx` on `(route, request_key)` (the owner is checked by the predicate; keys are
     random, so one key matches a handful of rows). The package is unreleased: DDL changed in place, no migration.
-  - `FileRecord` does not gain `requestKey`: the contract compares whole raw rows (`RawFileRow` gains it), never needs it
-    on a record, and the server never reads it back. `RECORD_COLUMNS` leaves the column out; `FILE_COLUMNS` has it,
+  - `FileRecord` does not gain `requestKey`: the contract compares whole raw rows (`RawFileRow` gains it), never needs
+    it on a record, and the server never reads it back. `RECORD_COLUMNS` leaves the column out; `FILE_COLUMNS` has it,
     so the lazy schema check names a missing `request_key`.
   - Plugins hear no `onAbort` for superseded rows (rows carry no auth JSON), the same known cost as the sweep and
     `revoke` (M5 spec §5.7).
@@ -1415,16 +1420,18 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
     superseding `UPDATE` cannot see rows committed after its snapshot, and on SQLite the batches simply run in that
     order. Those rows keep today's cost (expiry by the sweep). Ending them from the late attempt instead would need to
     know which attempt is newer, and ending every pending row of the key would end the retry's rows, whose answer the
-    client has. Stated, not fixed.
+    client has. Stated, not fixed. Nor is an ask whose every attempt lost its answer: its last attempt's rows hold
+    their bytes until the sweep, since `retry()` and `resume()` ask again with a new key (`launch()` makes one per
+    ask, M5-T102). One-file retries of one ask sharing its key would end each other's live rows.
 - **Why:** brief rulings 5 and 6. The over-quota rule had to be picked: superseding only when something is reserved
   would leave the lost attempt's bytes held exactly when the user is at the limit, the case this closes.
 - **If wrong:** a store that supersedes too little keeps today's known cost; too much would end a live upload, which
   the route, owner and pending-only predicate rule out short of a reused random key.
 - **Status:** decided.
 - **Source:** task I, 2026-11-17.
-- **Visible in:** `src/server/store.ts`, `src/store/sql/{postgres,sqlite,records}.ts`, `src/testing/memory-store-methods.ts`,
-  `src/testing/store-contract/supersede.ts`, the Drizzle tables, both Prisma models, `docs/guide/store.md`,
-  `examples/next/lib/cloudrop-tables.sql`, M5 spec §3 and §4.
+- **Visible in:** `src/server/store.ts`, `src/store/sql/{postgres,sqlite,records}.ts`,
+  `src/testing/memory-store-methods.ts`, `src/testing/store-contract/supersede.ts`, the Drizzle tables, both Prisma
+  models, `docs/guide/store.md`, `examples/next/lib/cloudrop-tables.sql`, M5 spec §3 and §4.
 
 ### M5-T102: the client makes one key per `/upload` ask, from `crypto.getRandomValues`
 
@@ -1467,9 +1474,35 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   in both dialects and reaches every adapter.
 - **If wrong:** drizzle has 0.53 kB left under its 17 kB budget; the next change to the SQL core or the Drizzle tables
   may need a budget decision.
+- **Amended 2026-11-17 (final review):** merged with task S: sql / drizzle / prisma 14.63 / 16.72 / 13.69 kB (drizzle
+  0.28 kB under its budget); M4-F25 then brought them to 10.84 / 12.64 / 10.41 kB.
 - **Status:** decided.
 - **Source:** task I, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts`.
+
+### M5-T105: only owned uploads are superseded; the server passes a key only with an owner
+
+- **Decision:**
+  - `reserveFiles` (`server/store-upload.ts`) passes `requestKey: null` to `reserve` when the row owner is null: on a
+    route without `owner`, or when `owner` answers null. That rows store no key then is a consequence, not a goal.
+  - The rule lives in the server, in one place. The store contract is unchanged: a store still matches null to null
+    if it is ever given a key with a null owner, and the `reserve` TSDoc says the server passes a key only with an
+    owner.
+  - Amends brief ruling 5 of task I ("the same owner (null-safe: null matches null)") and M5-T101, which points here.
+  - The key-reuse sentence goes into `UploadRequest`'s TSDoc, `docs/guide/server.md` and base spec §5: never reuse a
+    key for a new ask; a request with a key ends the pending uploads of earlier requests with the same key, route and
+    owner, and on a route without `owner` the key does nothing.
+- **Why:** owner-less rows count against no quota, so superseding them frees nothing and only moves their cleanup
+  earlier. On an owner-less route every row's owner is null, so one key reused by a custom client (say a hardcoded
+  `"app-upload-request"`) would end every other user's pending uploads, and their `/sign` and `/complete` would
+  answer `UPLOAD_EXPIRED` (final review M3).
+- **If wrong:** an owner-less retry keeps M5's cost, its lost attempt's rows ending with the sweep; they hold no
+  quota, so nobody is refused for them.
+- **Status:** decided (controller ruling, the final review's option for M3).
+- **Source:** post-M5 final fix round, 2026-11-17.
+- **Visible in:** `src/server/store-upload.ts`, `src/server/store.ts`, `src/protocol/types.ts`,
+  `src/server/store-upload.test.ts`, `docs/guide/server.md`, `docs/guide/store.md`, base spec §5, M5 spec §5.2 and
+  §5.7.
 
 ## After M5: tables.schema (task S)
 
@@ -1517,20 +1550,20 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Decision:** with `tables.schema`, `cloudropPgTables` builds both tables with
   `new PgSchema(schema, undefined).table`, so a drizzle-kit migration creates them in that schema and Drizzle's queries
   name it; without it, `pgTable` as before. The constructor, not `pgSchema()`: `pgSchema()` throws a plain `Error`
-  on `"public"` in 0.45 and in 1.0.0-rc.5, while the store accepts `"public"` and writes `"public"."cloudrop_files"`, so the Drizzle tables would
-  crash at import for a value the store takes. For every other name `pgSchema()` is that constructor call (1.0 passes
-  `casing`, undefined; 0.45 has no such parameter), so the constructor is used for every schema. 1.0 declares `casing`
-  as required, so the constructor is held as `new (name: string, casing: undefined) => { table: PgTableFn<string> }`,
-  which both lines' `PgSchema` satisfies without a cast, and called with `undefined`. `CloudropPgTables`' members are
-  one table type each, `ReturnType` of a `PgTableFn<string | undefined>` stand-in (`PgTableFn` is exported under that
-  name by 0.45 and 1.0), so `_.schema` is `string | undefined` and the builder needs no cast. The row types are
-  unchanged on both lines (the `$inferSelect` pins pass; a pin holds `_.schema`). A unit row pins that
-  `tables: { schema: "public" }` gives tables whose config names `"public"`. The guide shows exporting the schema from
-  the schema file, as Drizzle's schemas page does beside SQL that starts with `CREATE SCHEMA`, and `schemaFilter`
-  only as Drizzle's config docs state it: push and pull manage all schemas by default, and a set filter must list the
-  schema. drizzle-kit is not installed here, so neither was run. The equivalence test
-  (`drizzle-tables.db.integration.test.ts`) gains a schema row: the tables made by the DDL in a schema match the
-  declared tables, and both declared tables report that schema. `CloudropTablesOptions` moved into
+  on `"public"` in 0.45 and in 1.0.0-rc.5, while the store accepts `"public"` and writes `"public"."cloudrop_files"`,
+  so the Drizzle tables would crash at import for a value the store takes. For every other name `pgSchema()` is that
+  constructor call (1.0 passes `casing`, undefined; 0.45 has no such parameter), so the constructor is used for every
+  schema. 1.0 declares `casing` as required, so the constructor is held as
+  `new (name: string, casing: undefined) => { table: PgTableFn<string> }`, which both lines' `PgSchema` satisfies
+  without a cast, and called with `undefined`. `CloudropPgTables`' members are one table type each, `ReturnType` of a
+  `PgTableFn<string | undefined>` stand-in (`PgTableFn` is exported under that name by 0.45 and 1.0), so `_.schema` is
+  `string | undefined` and the builder needs no cast. The row types are unchanged on both lines (the `$inferSelect` pins
+  pass; a pin holds `_.schema`). A unit row pins that `tables: { schema: "public" }` gives tables whose config names
+  `"public"`. The guide shows exporting the schema from the schema file, as Drizzle's schemas page does beside SQL that
+  starts with `CREATE SCHEMA`, and `schemaFilter` only as Drizzle's config docs state it: push and pull manage all
+  schemas by default, and a set filter must list the schema. drizzle-kit is not installed here, so neither was run. The
+  equivalence test (`drizzle-tables.db.integration.test.ts`) gains a schema row: the tables made by the DDL in a schema
+  match the declared tables, and both declared tables report that schema. `CloudropTablesOptions` moved into
   `postgres-tables.ts`, its only user, and stays exported from `cloudrop/adapters/drizzle`; `drizzle/tables.ts` is
   gone.
 - **Why:** ruling 3 of the task, and fix round 1's I1 and I2: typed queries and migrations in the app's schema with no

@@ -59,7 +59,7 @@ export async function reserveFiles(
     files: readonly PluginFile[];
     metadataJson: string | undefined;
     exp: number;
-    /** The request's idempotency key: a retry with it supersedes the rows of the attempt whose answer was lost. */
+    /** The request's idempotency key: a retry supersedes the owner's rows of an attempt whose answer was lost. */
     requestKey: string | null;
   },
 ): Promise<ReadonlyMap<string, CloudropError>> {
@@ -80,8 +80,11 @@ export async function reserveFiles(
     metadata,
   }));
   const expiresAt = new Date(input.exp * 1000);
+  // Only owned rows are superseded (M5-T105): owner-less rows hold no quota, and on a route without owner a reused key
+  // would otherwise end other users' uploads.
+  const requestKey = owner === null ? null : input.requestKey;
   const reserved = await storeCall(config.logger, `reserve the files of an upload on route "${route.name}"`, () =>
-    store.reserve({ owner, limit: limit.data, expiresAt, requestKey: input.requestKey, files: rows }, new Date()),
+    store.reserve({ owner, limit: limit.data, expiresAt, requestKey, files: rows }, new Date()),
   );
   if (reserved.error) return everyFile(reserved.error);
   const refused = files.filter((_, index) => reserved.data[index] !== "reserved");

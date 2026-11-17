@@ -106,7 +106,9 @@ export interface CloudropStore<TTx = never> {
    * the route of the call's files and the same owner (null matches null), releasing their reserved bytes, so the quota
    * check of the new files counts without them: a retry supersedes an attempt whose answer was lost. Rows in any other
    * status are left alone. The rows are superseded whatever the new files' outcomes, even when every one is over the
-   * quota, and not at all when the call throws. A call with no files writes nothing.
+   * quota, and not at all when the call throws. A call with no files writes nothing. The server passes a key only with
+   * an owner (M5-T105): owner-less rows hold no quota, so superseding them would free nothing. A store that ignores
+   * `requestKey` keeps the old cost: lost answers hold their bytes until the sweep.
    */
   reserve(
     input: {

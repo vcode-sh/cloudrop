@@ -184,6 +184,8 @@ client                     server (cloudrop.handler)                  bucket
 `idempotencyKey` (added after M5, `M5-T100`) is optional: 16 to 128 characters of `[A-Za-z0-9_-]`, anything else
 `INVALID_INPUT`. The client makes one per ask of `/upload` and sends it on every retry of that ask. A server without a
 store ignores it; with one, a retry supersedes the pending rows of the attempt whose answer was lost (M5 spec §5.7).
+Never reuse a key for a new ask: a request with a key ends the pending uploads of earlier requests with the same key,
+route and owner. On a route without `owner`, or when it answers null, the key does nothing (`M5-T105`).
 
 ### 5.1 Plan
 

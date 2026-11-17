@@ -26,7 +26,9 @@ export interface UploadRequest {
   metadata?: unknown;
   /**
    * 16 to 128 characters of `[A-Za-z0-9_-]`, new for each ask and the same on every retry of it. With a store, a
-   * retry supersedes the rows its earlier attempt reserved, whose answer the client never had.
+   * retry supersedes the rows its earlier attempt reserved, whose answer the client never had. Never reuse a key for a
+   * new ask: a request with a key ends the pending uploads of earlier requests with the same key, route and owner. On
+   * a route without `owner`, or when it answers null, the key does nothing.
    */
   idempotencyKey?: string;
 }

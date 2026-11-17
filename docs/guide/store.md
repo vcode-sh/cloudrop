@@ -514,7 +514,8 @@ short. For work that must happen, write an outbox row through `tx` in `onComplet
   dropped connection) and asks again, the retry ends the earlier attempt's rows as `aborted`, releasing their bytes
   before the quota is checked, so a user near their limit is not refused for files they never got tickets for. The
   sweep's cleanup pass aborts any multipart upload those rows had started. Only `pending` rows with the same key,
-  route and owner are ended; plugins hear no `onAbort` for them, as with the sweep and `revokeUploads`.
+  route and owner are ended; plugins hear no `onAbort` for them, as with the sweep and `revokeUploads`. Rows without
+  an owner (a route without `owner`, or one that answered null) hold no quota, so there the key does nothing.
 - **A second `/complete` of a file being completed** is answered busy: `SERVER_ERROR`, retryable, "Another request is
   completing this upload. Try again in a moment.", with `Retry-After: 2`. The client waits and asks again, and gets
   the stored answer. Busy is not logged as an error.
@@ -623,13 +624,14 @@ as required.
 
 ## Known costs
 
-- **A lost `/upload` answer from an old client holds its reservation.** A client that sends no `idempotencyKey`
-  (one older than this release, or your own code calling `/upload`) cannot be told apart from a new request: its first
-  attempt's rows reserve their bytes until the sweep expires them (deadline plus `graceMs`) or `revokeUploads`
-  releases them. A retry whose `beforeUpload` refuses the request reaches no store call, so it supersedes nothing
-  either. Nor does a retry that reaches the store before its first attempt does (a first request still being worked
-  on, its `authorize` slow, when the client gives up on it): that attempt's rows are written after the retry's and keep
-  their bytes until the sweep. Plugin reservations of a superseded attempt need their own expiry.
+- **Some lost `/upload` answers still hold their reservation.** A client that sends no `idempotencyKey` (your own
+  code calling `/upload`) cannot be told apart from a new request: its first attempt's rows reserve their bytes until
+  the sweep expires them (deadline plus `graceMs`) or `revokeUploads` releases them. A retry whose `beforeUpload`
+  refuses the request reaches no store call, so it supersedes nothing either. Nor does a retry that reaches the store
+  before its first attempt does (a first request still being worked on, its `authorize` slow, when the client gives up
+  on it): that attempt's rows are written after the retry's and keep their bytes until the sweep. An ask whose every
+  attempt lost its answer: its last attempt's rows hold their bytes until the sweep, since `retry()` and `resume()` ask
+  again with a new key. Plugin reservations of a superseded attempt need their own expiry.
 - **A `PUT` that lands after cleanup stays.** The sweep cleans a row once. A `PUT` already under way that lands after
   that is left in the bucket; with the default hour of grace this is unlikely.
 - **A completion's record that fails after `onComplete` ran, in lease mode**, keeps the file busy until the lease ends
@@ -638,7 +640,7 @@ as required.
   `onComplete` again: one more reason to keep it idempotent in this mode.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.
-- **Bundle size.** The store paths add about 4.8 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
+- **Bundle size.** The store paths add about 4.9 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.
 
 ## Turning it on, or off, in a running app

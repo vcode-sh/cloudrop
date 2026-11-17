@@ -186,13 +186,13 @@ Every rule here applies only when `store` is configured; the stateless path is u
 ### 5.2 `/upload` (`M5-T4`)
 After `authorize`, metadata, the per-file policy and `beforeUpload`, with `exp` computed first: resolve `owner` and the
 quota limit, then `store.reserve` for the accepted files, with the request's `idempotencyKey` as `requestKey` (null when
-the client sent none; added after M5, M5-T101). `over-quota` files get the new per-file `QUOTA_EXCEEDED`
-(below) and plugins that accepted them get `onAbort("rejected")`; a throw refuses every file of the call with a
-retryable `SERVER_ERROR` and nothing is signed. Then signing as today. After `createMultipart`, `store.attach`: false or
-a throw → `abortMultipart`, `end(id, "pending", "failed")` (best effort), and a rejected ticket (`UPLOAD_EXPIRED` when
-the row was revoked, retryable `SERVER_ERROR` otherwise). A crash between `createMultipart` and `attach` issues no
-ticket; the bucket's abort-incomplete lifecycle rule is the stated backstop, and `checkBucket` reports that rule as
-required when a store is configured. A file that fails to start: `end(id, "pending", "failed")`.
+the client sent none or the owner is null; added after M5, M5-T101, M5-T105). `over-quota` files get the new per-file
+`QUOTA_EXCEEDED` (below) and plugins that accepted them get `onAbort("rejected")`; a throw refuses every file of the
+call with a retryable `SERVER_ERROR` and nothing is signed. Then signing as today. After `createMultipart`,
+`store.attach`: false or a throw → `abortMultipart`, `end(id, "pending", "failed")` (best effort), and a rejected ticket
+(`UPLOAD_EXPIRED` when the row was revoked, retryable `SERVER_ERROR` otherwise). A crash between `createMultipart` and
+`attach` issues no ticket; the bucket's abort-incomplete lifecycle rule is the stated backstop, and `checkBucket`
+reports that rule as required when a store is configured. A file that fails to start: `end(id, "pending", "failed")`.
 
 ### 5.3 `QUOTA_EXCEEDED` (`M5-T5`)
 New error code, HTTP 403, not retryable, per file, message: the storage limit is reached; delete files or ask for more
@@ -244,11 +244,13 @@ Usage counts rows with an owner. Quota rule: `reserved_bytes + active_bytes + si
 with or without `quota`. A lost `/upload` answer (the client's 30 s deadline, a dropped connection, then a retry) no
 longer holds its reservation (amended after M5, M5-T100 to M5-T104): each ask carries an `idempotencyKey`, and the
 retry's `reserve` ends the lost attempt's `pending` rows as `aborted` and releases their bytes before its own quota
-check. The lost attempt's multipart upload is aborted by the sweep's cleanup pass (M5-T64). What remains: a retry
-without a key (an older client, or an app's own client) holds the old reservation until the sweep expires it
-(`expires_at` + grace) or `revokeUploads` releases it; a retry refused by `beforeUpload` reaches no `reserve` and
-supersedes nothing; an attempt whose `reserve` commits after its retry's (a first request still running when the client
-gave up on it) is not superseded either. The sweep, `revoke` and superseding run no `onAbort` (rows carry no auth JSON),
+check, for rows with an owner only (owner-less rows hold no quota; M5-T105). The lost attempt's multipart upload is
+aborted by the sweep's cleanup pass (M5-T64). What remains: a retry without a key (an app's own client) holds the old
+reservation until the sweep expires it (`expires_at` + grace) or `revokeUploads` releases it; a retry refused by
+`beforeUpload` reaches no `reserve` and supersedes nothing; an attempt whose `reserve` commits after its retry's (a
+first request still running when the client gave up on it) is not superseded either; an ask whose every attempt lost its
+answer leaves its last attempt's rows holding their bytes until the sweep, since `retry()` and `resume()` ask again with
+a new key. The sweep, `revoke` and superseding run no `onAbort` (rows carry no auth JSON),
 so plugin reservations still need their own expiry (base spec §8).
 
 ## 6. File API with a store (`M5-T10`)

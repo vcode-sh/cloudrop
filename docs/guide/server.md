@@ -313,7 +313,9 @@ What happens in `/upload`:
    normalized to NFC before they are counted (1 to 255 Unicode code points) and stored. `idempotencyKey` is optional:
    16 to 128 letters, digits, `-` or `_` (`INVALID_INPUT` otherwise). The client sends a new one for each ask and the
    same one on every retry of it; without a store it is checked and ignored, with one a retry
-   [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client).
+   [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client). Never reuse a key for a new
+   ask: a request with a key ends the pending uploads of earlier requests with the same key, route and owner. On a
+   route without `owner`, or when it answers null, the key does nothing.
 3. The route's metadata schema validates the metadata (`INVALID_METADATA`).
 4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
