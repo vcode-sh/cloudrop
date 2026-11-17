@@ -164,10 +164,9 @@ rule it already has):
   for its missing parts, and injected faults, and a bar on a shared timeline. A request the client stopped shows
   `cancelled` when you paused or cancelled, or the browser went offline, and `stalled` when the client gave up on it
   by itself after 30 s without progress; the client's own retry of a stalled PUT is a `retry`, of a cancelled one
-  `resumed`. The log keeps only the request's kind,
-  the bucket host, the part number, status, times and body size: never a URL, header or token, so no presigned URL
-  reaches the page. Requests are recorded only while a run or a retry is going: an `/abort` the client has to send again
-  after that is not in the table.
+  `resumed`. The log keeps only the request's kind, the bucket host, the part number, status, times and body size: never
+  a URL, header or token, so no presigned URL reaches the page. Requests are recorded only while a run or a retry is
+  going: an `/abort` the client has to send again after that is not in the table.
 - **Summary:** total time, the files' size, the bytes of the PUTs the bucket answered, end-to-end throughput in MiB/s
   (not shown under 1 MiB, where round trips dominate, after a retry, or for a resume, which sends only the missing
   parts), PUT requests started and answered, retries, renewals, peak PUTs in flight, the job's `{ data, error }` with an

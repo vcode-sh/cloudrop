@@ -41,8 +41,9 @@ proxy's port and sent through it is accepted; sent past it, `SignatureDoesNotMat
   `CompleteMultipartUpload`, `ListParts`, `HeadObject`), the fault applied, the outcome (status, `reset`, `closed`,
   `held`), request bytes received, start and end time, and PUTs in flight when it started. Never a query string, header
   or body: they carry signatures (AGENTS.md).
-- **Control:** in process (`set(rules)`, `clear()`, `log()`, `stop()`), and for the browser lane through a small
-  control endpoint on a separate loopback port, so Playwright tests set rules for the Next server's proxy.
+- **Control:** in process (`set(rules)`, `random(options)`, `release()`, `log()`, `clearLog()`, `stop()`), and for the
+  browser lane through a small control endpoint on a separate loopback port, so Playwright tests set rules for the
+  Next server's proxy.
 - It has its own unit tests against a local `node:http` target, no Docker.
 
 ## 3. Lanes

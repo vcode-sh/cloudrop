@@ -95,10 +95,9 @@ jobs:
       - run: bun run test:chaos
 
   # Nightly and manual only: jobs of files under seeded random faults (M3-K7) and the real-time stall and throttle
-  # rows (M3-K10). The seed is in each test's title;
-  # --silent=false also logs it, and each job's failure counts, when the run passes. CLOUDROP_CHAOS_SEED=<seed> bun run
-  # test:chaos:soak reruns the same files and fault stream, but requests draw in arrival order, so the faults can land
-  # on other requests: a red run prints the requests and faults it saw.
+  # rows (M3-K10). The seed is in each test's title; --silent=false also logs it, and each job's counts, when the run
+  # passes. CLOUDROP_CHAOS_SEED=<seed> bun run test:chaos:soak reruns the same files and fault stream, but requests
+  # draw in arrival order, so the faults can land on other requests: a red run prints the requests and faults it saw.
   chaos-soak:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: check

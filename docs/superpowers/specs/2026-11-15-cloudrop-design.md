@@ -428,8 +428,11 @@ Audits of two private production codebases informed these rules (findings kept o
    `src/testing/` between the server's `s3()` storage and RustFS, and faults single requests, presigned or the
    server's own (`M3-K1`, `M3-K4`). What runs where (`M3-K2`): the Node lane `bun run test:chaos` (real server, real
    client on the fetch transport) on every pull request and push to `main`; rows that need real XHR (opaque refusals,
-   stalls, offline, pause, the progress bar) in the browser lane `bun run test:browser`; a seeded random soak over
-   many files on the nightly schedule, its seed printed for replay (`M3-K7`). Live R2 stays out: it routes by its own
+   stalls, offline, pause, the progress bar) in the browser lane `bun run test:browser`, where the stall rows run under
+   Playwright's clock (`M3-K9`); and on the nightly schedule `bun run test:chaos:soak`: a seeded random soak over many
+   files, and the Node lane's real-time stall and throttle rows (`M3-K10`). The soak prints its seed: a replay gets the
+   same files and the same fault stream, but requests draw from it in the order they arrive, so not always the same
+   fault on the same request (`M3-K7`). Live R2 stays out: it routes by its own
    host name, which a URL signed for the proxy does not carry. Design:
    `docs/superpowers/specs/2026-11-17-chaos-design.md`.
 4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB (an OPFS copy is deferred to a later

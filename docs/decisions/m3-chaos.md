@@ -31,7 +31,11 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   Toxiproxy stays the candidate for a link-quality soak if the proxy's random mode proves too synthetic.
 - **Status:** decided (plan Task 1).
 - **Source:** chaos design §1, §2; research §3.1 to §3.5, §5 Q1.
-- **Visible in:** `packages/cloudrop/src/testing/chaos-proxy.ts`, `chaos-proxy.test.ts`.
+- **Visible in:** `packages/cloudrop/src/testing/`: `chaos-proxy.ts` (the server, its rules and log),
+  `chaos-proxy-request.ts` (what a request is and which fault it gets), `chaos-proxy-faults.ts` (the faults),
+  `chaos-proxy-target.ts` (forwarding to the target), `chaos-proxy-control.ts` (the browser lane's control endpoint),
+  `chaos-bodies.ts` (the S3 error bodies it answers with), and the tests `chaos-proxy.test.ts` and
+  `chaos-proxy-faults.test.ts`.
 
 ### M3-K2: a Node lane on every pull request, browser rows, a nightly soak
 
@@ -53,20 +57,25 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 ### M3-K3: time in the chaos lanes
 
 - **Decision:** the Node lane stubs `Math.random` to 0, as the unit lane does: zero jitter, while a `Retry-After` is
-  still honoured. Stall rows use Playwright's clock in the browser if a spike shows it coexists with real XHR;
-  otherwise one stall row runs in real time in the nightly job only. The client gets no timing seam.
+  still honoured. The nightly upload soak restores it and waits real jitter. Stall rows use Playwright's clock in the
+  browser if a spike shows it coexists with real XHR; otherwise one stall row runs in real time in the nightly job
+  only. The client gets no timing seam.
 - **Why:** the backoff (full jitter, ceilings 0.5 to 8 s over 6 attempts, up to 15.5 s of waits) and the 30 s stall
   are constants; in real time a few rows would cost minutes on every pull request. A timing seam would cost client
   bytes and add a contract surface for tests alone.
-- **If wrong:** zero jitter hides a bug that only shows with a real wait between attempts; the soak and any real-time
-  stall row keep real timing in reach. If the clock does not drive real XHR, the browser's stall is proven only
-  nightly.
+- **If wrong:** zero jitter hides a bug that only shows with a real wait between attempts. Two places wait real
+  jitter: the nightly upload soak (`uploads.soak.integration.test.ts`), and the browser chaos rows, whose page keeps
+  its own `Math.random` except where a row pins it (`bucket-faults.chaos.browser.test.ts` sets 0.99). The Node lane's
+  real-time stall and throttle rows (`stalls.soak.integration.test.ts`) keep the stub: their timing windows need it.
+  If the clock does not drive real XHR, the browser's stall is proven only nightly.
 - **Status:** decided (plan Tasks 5 and 6). The spike passed: the browser's stall row runs on every pull request under
-  Playwright's clock, and the nightly fallback is not needed for the browser (`M3-K9`).
+  Playwright's clock, and the nightly fallback is not needed for the browser (`M3-K9`). The upload soak's real jitter
+  is the final review's M1: the sentence above had named a mitigation no lane had.
 - **Source:** chaos design §3.1; research §5 Q3.
-- **Visible in:** the `*.chaos.integration.test.ts` files, `examples/next/app/stalls.chaos.browser.test.ts`; the Node
-  lane's real-time stall and throttle rows run nightly in `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`
-  (`M3-K10`).
+- **Visible in:** `packages/cloudrop/src/testing/chaos-fixture.ts` (`useChaosFixture`), the
+  `*.chaos.integration.test.ts` files, `examples/next/app/stalls.chaos.browser.test.ts`; the Node lane's real-time
+  stall and throttle rows run nightly in `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts` (`M3-K10`); the
+  upload soak's `beforeEach` in `packages/cloudrop/src/chaos/uploads.soak.integration.test.ts` restores `Math.random`.
 
 ### M3-K4: the server's storage faults are in scope
 
@@ -90,7 +99,8 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   `docs/research/r2-spike-findings.md` hold the measured shape.
 - **Status:** decided (design §4 rows 8 and 9).
 - **Source:** chaos design §1, §4; research §3.2, §5 Q6.
-- **Visible in:** `packages/cloudrop/src/chaos/bucket-faults.chaos.integration.test.ts`,
+- **Visible in:** `packages/cloudrop/src/testing/chaos-bodies.ts` (one measured copy of each body, with its source),
+  `packages/cloudrop/src/chaos/bucket-faults.chaos.integration.test.ts`,
   `examples/next/app/bucket-faults.chaos.browser.test.ts`.
 
 ### M3-K6: the proxy lives in `src/testing/`
@@ -118,7 +128,10 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   the same mix of faults, not always the same fault on the same request. A red run therefore prints its own trace (each
   request's label, fault, outcome and bytes), so a flake is a bug to fix from that trace rather than a row to drop.
   Exact replay (a fault drawn per request, whatever the arrival order) is a proxy follow-up.
-- **Status:** decided (plan Task 7).
+- **Status:** decided (plan Task 7). Since the final review's I2, one job is aborted while its first run still sends,
+  after one file was refused for good and kept its upload, so the abort has files to free whatever the seed. A single
+  PUT the abort cut after its bytes reached the bucket may land after its `/abort`'s HEAD (`M3-S14`), so that test
+  allows at most one object outside the done files per PUT the proxy logged `aborted`.
 - **Source:** chaos design §3, §4 row 18; research §4 row 18, §5 Q8.
 - **Visible in:** `packages/cloudrop/src/chaos/uploads.soak.integration.test.ts` (its own Vitest project `soak`, so
   the `chaos` project never collects it; plan audit I3), `bun run test:chaos:soak` (`scripts/test-chaos.sh soak`),
