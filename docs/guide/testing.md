@@ -1,0 +1,190 @@
+# Testing
+
+This page is for contributors. It covers every test lane: what it runs, what it needs (Docker, Playwright's headless
+shell, live R2 credentials), which ports it uses and how to change them, the CORS rule the live browser lane needs, and
+the rules for writing tests in this repository. The binding rules for coding agents are in [AGENTS.md](../../AGENTS.md)
+and the `testing-patterns` skill in `.claude/skills/testing-patterns/`.
+
+## The lanes at a glance
+
+| Command | What it runs | Needs |
+| --- | --- | --- |
+| `bun run verify` | Every gate: check (Biome, file size, complexity), typecheck, unit tests, build, the example's typecheck and package checks | Nothing beyond `bun install` |
+| `bun run test` | The unit lane, on the in-process fake R2 | Nothing |
+| `bun run test:rustfs` | The storage contract on RustFS | Docker |
+| `bun run test:wrangler` | The storage contract on Wrangler's local R2 | Nothing (Wrangler is a dev dependency) |
+| `bun run test:live` | The storage contract and the upload protocol on real R2 | R2 credentials |
+| `bun run test:chaos` | The upload protocol on RustFS behind a fault-injecting proxy | Docker |
+| `bun run test:chaos:soak` | The nightly seeded soak on the same setup | Docker |
+| `bun run test:browser` | The example in Chromium's headless shell, uploading to RustFS | Docker, Playwright's headless shell |
+| `bun run test:browser:live` | The same browser tests on real R2 | R2 credentials, Playwright's headless shell, the bucket's CORS rule |
+
+Which lanes a change needs:
+
+- **Every change:** `bun run verify`.
+- **Storage-layer changes:** `test:rustfs`, `test:wrangler` and `test:live`.
+- **Server changes:** `test:live`, which also runs the upload protocol against real R2.
+- **Client and server changes:** `test:chaos`.
+- **Client and example changes:** `test:browser`.
+
+A lane whose service or credentials are missing **fails** with a message that names what to set. It never skips.
+
+## Unit lane
+
+```bash
+bun run test
+bun run --cwd packages/cloudrop test src/storage/xml.test.ts   # one file
+```
+
+Every `*.test.ts` file except `*.integration.test.ts`, run by Vitest on Node. It needs no network, Docker or
+credentials. Driver and server behaviour runs against the in-process fake R2 (`src/testing/fake-r2.ts`), which verifies
+real SigV4 signatures and applies R2's rules.
+
+## Storage contract lanes
+
+The storage contract suite (`src/testing/storage-contract.ts`) runs the same cases against every backend: the fake (in
+the unit lane), RustFS, Wrangler and live R2.
+
+### RustFS
+
+```bash
+bun run test:rustfs
+```
+
+Starts a RustFS container (`rustfs/rustfs:1.0.5`) on port **19000**, runs the contract, and removes the container on
+success, failure and interrupt. Set `CLOUDROP_RUSTFS_PORT` to use another port; the lane stops if the port is in use.
+
+### Wrangler
+
+```bash
+bun run test:wrangler
+```
+
+Starts `wrangler dev` with its local R2 on port **18787**, runs the contract, then stops Wrangler and deletes its state.
+Set `CLOUDROP_WRANGLER_PORT` to use another port. Wrangler's local R2 lacks some features, such as `ListParts` and
+checksum checks, so the cases that need them are skipped there with a reason naming the gap. That is the only kind of
+skip allowed.
+
+## Live R2 lane
+
+```bash
+CLOUDROP_R2_ENV_FILE=/path/to/r2.env bun run test:live
+bun run test:live --reporter=verbose   # extra arguments reach Vitest
+```
+
+Runs the storage contract and the upload protocol (`src/server/handler.r2.integration.test.ts`) against a real bucket.
+
+- **Credentials:** the file named by `CLOUDROP_R2_ENV_FILE`, or the environment, must define
+  `CLOUDROP_R2_ACCOUNT_ID`, `CLOUDROP_R2_BUCKET`, `CLOUDROP_R2_ACCESS_KEY_ID` and `CLOUDROP_R2_SECRET_ACCESS_KEY`. The
+  file holds literal `NAME=value` lines, never run as shell: no `export`, no spaces around `=`, no inline comments.
+  `BB_R2_*` names are accepted too. Values in the file win over the environment.
+- **Output:** everything the tests print passes through a redactor, so no credential, account ID, bucket name or
+  presigned URL reaches the terminal. The last line says how many occurrences were redacted.
+- **Cleanup:** everything goes under a random `live-test/cloudrop-<hex>/` prefix, which the lane deletes. If the lane is
+  stopped before its teardown, it names the prefixes left behind.
+
+## Chaos lanes
+
+```bash
+bun run test:chaos
+bun run test:chaos:soak
+```
+
+The real server and client run on RustFS, port **19300**, behind a fault-injecting proxy that each test file starts. The
+proxy injects resets, black holes, throttling, `429`/`503`/`500` answers, readable and opaque `403`s and cut answers.
+Each row checks that the upload ends with the file's exact bytes and nothing left open, or with a documented code.
+
+- `test:chaos` runs the `*.chaos.integration.test.ts` files (Vitest project `chaos`).
+- `test:chaos:soak` runs the nightly `*.soak.integration.test.ts` files (Vitest project `soak`): seeded random faults, a
+  mid-run abort, and the real-time stall and throttle rows. To replay a run, set `CLOUDROP_CHAOS_SEED` to the seed in a
+  test's title.
+- Set `CLOUDROP_RUSTFS_PORT` to use another port. Extra arguments reach `vitest run`.
+- The lane fails when Docker is not running.
+
+## Browser lanes
+
+Install Playwright's Chromium headless shell once:
+
+```bash
+cd examples/next && bunx playwright install --only-shell chromium
+```
+
+Run the lanes from the repository root:
+
+```bash
+bun run test:browser
+bun run test:browser lab.browser.test.ts   # extra arguments reach Playwright
+bun run test:browser:live
+```
+
+### On RustFS
+
+`test:browser` starts its own RustFS container on port **19100**, starts the chaos proxy in front of it on port
+**19110**, builds cloudrop, and has Playwright build and serve [`examples/next`](../../examples/next/README.md) on port
+**5173**. It removes the container and stops the proxy afterwards. It needs Docker, no credentials, and leaves any
+`.env.local` alone.
+
+| Port | What | Override |
+| --- | --- | --- |
+| 19100 | RustFS | `CLOUDROP_RUSTFS_PORT` |
+| 19110 | The chaos proxy, which the example's presigned URLs name | `CLOUDROP_CHAOS_PROXY_PORT` |
+| 5173 | The example | None: the bucket's CORS rule names this origin |
+
+What the browser tests cover is described in [the example's README](../../examples/next/README.md#the-browser-tests).
+
+### On live R2
+
+`test:browser:live` runs the same tests on a real bucket, with the credentials `test:live` reads. It builds cloudrop,
+serves the example on port 5173, uploads under a random `live-test/cloudrop-<hex>/` prefix and deletes that prefix at
+the end. The chaos rows are left out: R2 routes by its own host, so the proxy cannot stand in front of it.
+
+The test bucket's CORS rule, `cloudrop-browser-tests`, must allow:
+
+- **Origins:** `http://localhost:5173` and `http://127.0.0.1:5173`
+- **Method:** `PUT`
+- **Headers:** `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`
+- **Exposed headers:** `ETag`, `Retry-After`, `x-amz-checksum-crc32c` and `x-amz-checksum-crc64nvme`
+
+Agents never change bucket settings; the owner does.
+
+## Ports for parallel runs
+
+Each lane picks its own default port, so the lanes can run at the same time:
+
+| Lane | Default port | Variable |
+| --- | --- | --- |
+| `test:rustfs` | 19000 | `CLOUDROP_RUSTFS_PORT` |
+| `test:wrangler` | 18787 | `CLOUDROP_WRANGLER_PORT` |
+| `test:browser` | 19100 (RustFS), 19110 (proxy), 5173 (example) | `CLOUDROP_RUSTFS_PORT`, `CLOUDROP_CHAOS_PROXY_PORT` |
+| `test:chaos`, `test:chaos:soak` | 19300 | `CLOUDROP_RUSTFS_PORT` |
+
+`test:browser` and `test:browser:live` both need port 5173, so only one of them can run at a time.
+
+Containers started by tests carry the label `cloudrop.test` and are removed at the end of the run. After a hard kill one
+can survive: find it with `docker ps -a --filter label=cloudrop.test` and remove it with `docker rm -f`.
+
+## Writing tests
+
+The full rules are in `.claude/skills/testing-patterns/SKILL.md`. In brief:
+
+- **Every test earns its place.** It checks the code's contract, the output the code was written for, never only that
+  code runs or exists. "No new test" is a valid outcome.
+- **Colocated.** `src/foo.ts` sits beside `src/foo.test.ts`. There is no `test/` folder and no file snapshots.
+- **The lane is chosen by filename.** `*.test.ts` is the unit lane. `*.integration.test.ts` runs only through its lane
+  script. `*.browser.test.ts` lives in `examples/next/app/` and runs under Playwright.
+- **Call the real unit** through the entry point its users call. Endpoint tests run the real handler on the fake R2
+  through `src/testing/server-fixture.ts`.
+- **Independent expected values.** Write them as literals from an oracle (AWS SigV4 test vectors, CRC check values, R2's
+  documentation, the [measured R2 behaviour](../research/r2-spike-findings.md)), never recomputed with the code's own
+  logic.
+- **Discriminating inputs.** Boundaries, adversarial strings, and the failing case beside the happy path.
+- **Exact assertions.** `toBe`, `toEqual`, the exact `CloudropError` `code` and `retryable`. A bare `toThrow()` or
+  `toBeDefined()` is a smell.
+- **Doubles only at true boundaries.** Inject `fetch` and `now`, and use the fake R2. Never `vi.mock` cloudrop's own
+  modules.
+- **Fast.** The whole unit lane takes at most 5 s cold; one test typically at most 50 ms. A test over 250 ms says why
+  in a comment.
+- **No green by force.** No `retry`, no skip to pass, no loosened assertions.
+- **Register teardown at startup.** A test that starts a container, process or live object registers its cleanup when
+  it acquires the resource.
+- **Live R2 tests** write only under `live-test/cloudrop-<random>/` and delete what they create.

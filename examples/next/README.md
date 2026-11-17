@@ -215,13 +215,11 @@ directory with `bunx playwright install --only-shell chromium`.
 
 ## What any bucket needs
 
-- A CORS rule like the one above: your page's origin, `PUT`, and the four headers cloudrop's signed uploads carry.
-- `ETag` in `ExposeHeaders`: `checkBucket` asks for it, and resumable uploads will read it.
-- `Retry-After` in `ExposeHeaders` (recommended): a browser hides answer headers the rule does not expose, so without
-  it a retry after a `429` or `503` waits only the client's own backoff (up to 0.5 s, then 1 s, 2 s…) instead of
-  what the bucket asked for (honoured up to 20 s). R2 asks for 5 s on a `429` (measured 2026-11-16). `checkBucket`
-  does not ask for it, and uploads work without it.
+- A CORS rule like the one above: your page's origin, `PUT`, and the four headers cloudrop's signed uploads carry,
+  exposing `ETag` and `Retry-After`.
 - A lifecycle rule that aborts incomplete multipart uploads, so parts of an upload that never finished do not stay
   in the bucket.
 
-In development the server checks the bucket once and logs a warning for each of these that is missing.
+In development the server checks the bucket once and logs a warning for each of these that is missing. The exact rules
+for R2 (in Wrangler's format too) and S3, the commands that set them and the token permissions:
+[Bucket setup](../../docs/guide/bucket-setup.md).
