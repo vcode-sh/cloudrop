@@ -30,15 +30,16 @@ async function runEntry(
   whole: boolean,
   attempt: number,
 ): Promise<void> {
-  // readTickets answers one ticket per file; a missing one would otherwise leave the file queued for good.
-  const ticket = answer.error ?? answer.data[index] ?? unreadableAnswer(200);
   // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else.
   if (entry.status === "aborted") {
-    if (!(ticket instanceof CloudropError)) void job.context.endpoints.abort(ticket.token);
+    const late = answer.error ? undefined : answer.data[index];
+    if (late && !(late instanceof CloudropError)) void job.context.endpoints.abort(late.token);
     return;
   }
   // The error is the job's when /upload asked for every file, and the file's own when a retry asked for some (M3-U3).
   if (answer.error) return settle(entry, "failed", whole ? answer.error : withFile(answer.error, entry));
+  // readTickets answers one ticket per file; a missing one would otherwise leave the file queued for good.
+  const ticket = answer.data[index] ?? unreadableAnswer(200);
   if (ticket instanceof CloudropError) return refused(job, entry, ticket, attempt);
   entry.upload = uploadOf(job, entry, ticket);
   await job.runUpload(entry.upload);

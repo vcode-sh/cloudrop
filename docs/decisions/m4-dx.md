@@ -67,9 +67,9 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Status:** in force. Amends `M3-U10`, `M3-U11` and `M3-S15` (dated lines, fix round 1, review M2).
 - **Source:** design §3 F2; code audit of `main` at `907cc77` (probe: statuses `['queued','queued']` 20 ms after the
   cancel, then `POST /upload, POST /abort, PUT object, POST /complete`).
-- **Visible in:** `client/file-run.ts` (`abortFile`), `client/launch.ts` (`runEntry`), `client/resume.ts`
-  (`resumeRun`), `client/job.test.ts` ("cancels one file while /upload is in flight"), `client/persist.test.ts` ("takes
-  no lock and saves nothing").
+- **Visible in:** `client/file-run.ts` (`abortFile`), `client/entry.ts` (`settle`), `client/launch.ts` (`runEntry`),
+  `client/resume.ts` (`resumeRun`), `client/job.test.ts` ("cancels one file while /upload is in flight"),
+  `client/persist.test.ts` ("takes no lock and saves nothing").
 
 ### M4-F3: endpoint calls time out
 
@@ -90,20 +90,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Status:** in force. Amends `M3-S14` (its known cost of a `/complete` that never answers).
 - **Source:** design §3 F3; code audit of `main` at `907cc77`.
 - **Visible in:** `client/endpoints.ts` (`post`, `ASK_TIMEOUT_MS`, `COMPLETE_TIMEOUT_MS`), `client/endpoints.test.ts`
-  ("a server that never answers").
-
-### M4-F6: `/abort` relies on the browser floor's timers, without a guard
-
-- **Decision:** `abort()` no longer wraps its request in a `try/catch`. Its deadline is the same timer as every other
-  call's (`M4-F3`) instead of `AbortSignal.timeout`, and `post` never rejects, so nothing is left to catch.
-- **Why:** design §3 F6. The `try/catch` could only catch a missing `AbortSignal.timeout`, and then it silently skipped
-  every `/abort`. The browser floor (ES2023: Chrome 103, Safari 16, Firefox 100) has that API, and with one timer for
-  all calls it is no longer used at all.
-- **If wrong:** nothing known: `post` maps every failure, a synchronous throw of `fetch` included, to a result.
-- **Status:** in force.
-- **Source:** design §3 F6; code audit of `main` at `907cc77`.
-- **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts` (the `abort` rows; the row for a missing
-  `AbortSignal.timeout` is gone).
+  ("a server that never answers", including a body that never ends).
 
 ### M4-F4: a cancel during `/complete` starts no repair
 
@@ -117,23 +104,6 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §3 F4; code audit of `main` at `907cc77`.
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/upload-failures.test.ts` ("ends aborted, never
   uploading again").
-
-### M4-F8: an upload keeps the URLs signed for it across passes
-
-- **Decision:** the URLs of an upload, the ticket's and every one `/sign` answers (a lazy batch or a renewal), live on
-  the upload (`Upload.urls`) for as long as it keeps its ticket: passes after a pause, repair rounds and same-ticket
-  retries reuse them, renewing only one that expires within a minute (`S11`). A single `PUT`'s URL is part 1 of the
-  same map. `newUpload` builds an upload for `/upload`'s ticket and for `resume()`'s record alike.
-- **Why:** design §3 F8. The map was rebuilt from the ticket on every pass: after a pause, or in each repair round,
-  parts signed in an earlier pass were signed again (up to 20 per `/sign`, one call per pass), and a renewed URL fell
-  back to the ticket's expired one, costing a refused `PUT` and another renewal. A resumed upload, whose ticket carries
-  no URLs, paid one `/sign` per repair round.
-- **If wrong:** a URL is reused until a minute before its expiry, as within one pass already; nothing new is trusted.
-- **Status:** in force.
-- **Source:** design §3 F8; code audit of `main` at `907cc77`.
-- **Visible in:** `client/upload.ts` (`Upload.urls`, `newUpload`, `senderFor`), `client/parts.ts` (`PartSender.urls`),
-  `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumeRun`), `client/resume-job.test.ts` ("pauses and
-  resumes", "fails keeping its record and lock"), `client/resume.test.ts` ("takes no repair round").
 
 ### M4-F5: a resumed file's run is assigned once
 
@@ -151,6 +121,19 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §3 F5; code audit of `main` at `907cc77`.
 - **Visible in:** `client/resume.ts` (`resumeJob`, `resumeRun`).
 
+### M4-F6: `/abort` relies on the browser floor's timers, without a guard
+
+- **Decision:** `abort()` no longer wraps its request in a `try/catch`. Its deadline is the same timer as every other
+  call's (`M4-F3`) instead of `AbortSignal.timeout`, and `post` never rejects, so nothing is left to catch.
+- **Why:** design §3 F6. The `try/catch` could only catch a missing `AbortSignal.timeout`, and then it silently skipped
+  every `/abort`. The browser floor (ES2023: Chrome 103, Safari 16, Firefox 100) has that API, and with one timer for
+  all calls it is no longer used at all.
+- **If wrong:** nothing known: `post` maps every failure, a synchronous throw of `fetch` included, to a result.
+- **Status:** in force.
+- **Source:** design §3 F6; code audit of `main` at `907cc77`.
+- **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts` (the `abort` rows; the row for a missing
+  `AbortSignal.timeout` is gone).
+
 ### M4-F7: a resumed upload's probe looks missing parts up in a `Set`
 
 - **Decision:** the first answer of a resumed upload's probe counts the landed parts against a `Set` of the parts
@@ -161,6 +144,24 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Status:** in force.
 - **Source:** design §3 F7; code audit of `main` at `907cc77`.
 - **Visible in:** `client/upload.ts` (`probed`).
+
+### M4-F8: an upload keeps the URLs signed for it across passes
+
+- **Decision:** the URLs of an upload, the ticket's and every one `/sign` answers (a lazy batch or a renewal), live on
+  the upload (`Upload.urls`) for as long as it keeps its ticket: passes after a pause, repair rounds and same-ticket
+  retries reuse them, renewing only one that expires within a minute (`S11`). A single `PUT`'s URL is part 1 of the
+  same map. `newUpload` builds an upload for `/upload`'s ticket and for `resume()`'s record alike.
+- **Why:** design §3 F8. The map was rebuilt from the ticket on every pass: after a pause, or in each repair round,
+  parts signed in an earlier pass were signed again (up to 20 per `/sign`, one call per pass), and a renewed URL fell
+  back to the ticket's expired one, costing a refused `PUT` and another renewal. A resumed upload, whose ticket carries
+  no URLs, paid one `/sign` per repair round.
+- **If wrong:** a URL is reused until a minute before its expiry, as within one pass already; nothing new is trusted.
+- **Status:** in force.
+- **Source:** design §3 F8; code audit of `main` at `907cc77`.
+- **Visible in:** `client/upload.ts` (`Upload.urls`, `newUpload`, `senderFor`), `client/parts.ts` (`PartSender.urls`),
+  `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumeRun`), `client/resume-job.test.ts` ("pauses and
+  resumes", "fails keeping its record and lock"), `client/resume.test.ts` ("takes no repair round"),
+  `client/pause.test.ts` ("a URL renewed before the pause is not renewed again").
 
 ### M4-F9: the client's simplifications S1 to S9
 
@@ -185,8 +186,10 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Source:** design §3 F9; code audit of `main` at `907cc77`.
 - **Visible in:** `client/job.ts`, `client/launch.ts` (`refused`, `askAlone`, `launch`), `client/retry-file.ts`,
   `client/job-run.ts` (`startOver`), `client/bucket.ts`, `client/transport.ts`, `client/locks.ts`, `client/parts.ts`,
-  `client/progress.ts`, `client/upload-refusals-wait.test.ts` (the offline rows), `docs/guide/client.md` ("When /upload
-  refuses one file", "Offline").
+  `client/progress.ts`, `client/upload-refusals-wait.test.ts` (the offline rows, and "a one-file /upload on its way"),
+  `docs/guide/client.md` ("When /upload refuses one file", "Offline"). Fix round 1 moved `Entry`, `createEntry`,
+  `outcomeOf`, `settle`, `held`, `pauseFile` and `resumeFile` from `client/file-run.ts` to `client/entry.ts`, which
+  takes `file-run.ts` from 242 lines to 125; M3 entries that name those symbols in `file-run.ts` now find them there.
 
 <!-- Task A appends its entries above this line. -->
 
