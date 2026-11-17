@@ -303,7 +303,9 @@ await client.forget();
   When a check fails, its `done` resolves `{ data: null, error }` before any request, with `INVALID_INPUT` for wrong
   arguments or a different file, `NOT_FOUND` when there is no unexpired record of that upload in the client's
   namespace (it finished, was cancelled or expired, or persistence is off), `STORAGE_ERROR` when the browser's storage
-  cannot be read, or `UPLOAD_IN_USE` (below); a cancel meanwhile resolves `ABORTED` the same way.
+  cannot be read, or `UPLOAD_IN_USE` (below); a cancel meanwhile resolves `ABORTED` the same way. `retry()` of a
+  refused job runs the checks again: it resolves the same refusal while they fail, sending nothing, and resumes once
+  they pass, as after `UPLOAD_IN_USE` once the other tab let go, or `STORAGE_ERROR` once the storage reads again.
 - **The server is asked first.** Once the checks pass, the file is `completing`, and its first request is `/complete`
   with the saved token, which lists the bucket's parts: one `ListParts`, a Class A operation, per resumed file.
   - All there, or a `/complete` that finished before the reload: the file ends done without a `PUT`. The route's

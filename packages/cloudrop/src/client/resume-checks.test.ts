@@ -215,6 +215,8 @@ describe("resume() refuses before any request, leaving the record as it was", ()
 
 const TYPE = "application/octet-stream";
 type Setup = Awaited<ReturnType<typeof reloaded>>;
+/** A resumed upload whose parts 1 and 2 landed before the reload: the probe, then parts 3 and 4. */
+const RESUMED = ["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"];
 
 describe("while resume() checks (audit I7)", () => {
   it("its one file is queued under the client's next id; a cancel then ends it ABORTED, sending nothing", async () => {
@@ -260,7 +262,7 @@ describe("while resume() checks (audit I7)", () => {
     expect({ retried: retried.data?.files[0]?.status, done: done.data?.files[0]?.status, sent: setup.sent() }).toEqual({
       retried: "done",
       done: "done",
-      sent: ["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
+      sent: RESUMED,
     });
   });
 
@@ -275,5 +277,66 @@ describe("while resume() checks (audit I7)", () => {
       stored: before,
       locks: [],
     });
+  });
+});
+
+// Before the fix a retry asked /upload with the job's placeholder route "resume" (final review I1).
+describe("retry() of a resume() that a check refused checks again (M3-U90)", () => {
+  it.each([
+    { name: "NOT_FOUND", upload: (setup: Setup) => ({ ...setup.upload, id: "01NOSUCHUPLOAD" }), error: NOT_FOUND },
+    { name: "a different file", upload: (setup: Setup) => setup.upload, error: NOT_SAME_FILE, lastModified: 1 },
+  ])("refuses again after $name, sending nothing", async ({ upload, error, lastModified = 0 }) => {
+    const setup = await reloaded(gate(partThree));
+    const file = new File([offsetBytes(FOUR_PARTS)], "b.bin", {
+      lastModified: LAST_MODIFIED + lastModified,
+      type: TYPE,
+    });
+    const job = setup.client.resume(upload(setup), file);
+    await job.done;
+    const retried = await job.retry();
+    await setup.drained();
+
+    expect({
+      data: retried.data,
+      error: brief(retried.error),
+      status: job.getSnapshot().files[0]?.status,
+      sent: setup.sent(),
+    }).toEqual({ data: null, error, status: "failed", sent: [] });
+  });
+
+  it("resumes after STORAGE_ERROR once the browser's storage reads again", async () => {
+    const setup = await reloaded(gate(partThree));
+    setup.db.failNext("UnknownError");
+    const job = setup.client.resume(setup.upload, fourParts());
+    const first = brief((await job.done).error);
+    const { data, error } = await job.retry();
+    await setup.drained();
+
+    expect({ first, retried: data?.files[0]?.status, error, sent: setup.sent(), stored: setup.db.stored() }).toEqual({
+      first: STORAGE_ERROR,
+      retried: "done",
+      error: null,
+      sent: RESUMED,
+      stored: {},
+    });
+  });
+
+  it("is UPLOAD_IN_USE again while another tab holds the upload, and the file's retry() resumes once it lets go", async () => {
+    const setup = await reloaded(gate(partThree));
+    const letGo = setup.locks.holdElsewhere(`cloudrop:upload:${setup.upload.id}`);
+    const job = setup.client.resume(setup.upload, fourParts());
+    await job.done;
+    const [file] = job.files;
+    const held = await file?.retry();
+    letGo();
+    const resumed = await file?.retry();
+    await setup.drained();
+
+    expect({
+      held: held?.status === "failed" && held.error.code,
+      resumed: resumed?.status,
+      sent: setup.sent(),
+      locks: setup.locks.held(),
+    }).toEqual({ held: "UPLOAD_IN_USE", resumed: "done", sent: RESUMED, locks: [] });
   });
 });

@@ -10,11 +10,11 @@ import { aborted, notResumable, notSameFile, uploadInUse } from "./failures.ts";
 import { type Entry, settle } from "./file-run.ts";
 import { isSameFile } from "./fingerprint.ts";
 import { createUploadJob } from "./job.ts";
-import type { Job } from "./job-run.ts";
-import { resultOf } from "./job-run.ts";
+import { allSettled, type Job, resultOf } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";
 import type { UploadRecord } from "./records.ts";
-import type { FileOutcome, ResumableUpload, UploadJob, UploadResult } from "./types.ts";
+import { type Retried, retryFiles } from "./retry-file.ts";
+import type { FileOutcome, ResumableUpload, UploadJob } from "./types.ts";
 import type { UploadContext } from "./upload.ts";
 
 /** The namespace's unfinished uploads, newest first, for `route` or every route, without a token, key or metadata. */
@@ -72,22 +72,23 @@ async function check(
 
 /**
  * Checks the record, the file and the lock, then runs the upload rebuilt from the record, which starts at /complete
- * with every part counted as landed (resume spec §3.4). A failed check, or a cancel meanwhile, ends the file before
- * any request, with `{ data: null, error }` (audit I7).
+ * with every part counted as landed (resume spec §3.4); `passed` hears that the checks passed. A failed check, or a
+ * cancel meanwhile, ends the file before any request (audit I7). Resolves once the file has settled, with that
+ * refusal, or null once the upload ran.
  */
-async function resumeRun(job: Job, id: string): Promise<UploadResult<unknown>> {
+async function resumeRun(job: Job, id: string, passed: () => void): Promise<CloudropError | null> {
   const { context, args } = job;
   const [entry] = job.entries as [Entry];
   job.listen();
   // A run from the start: a retry() meanwhile waits for the checks, and this function's own continuation runs first,
-  // settling the file or giving it its upload's run before retry() looks again (final review I2).
+  // settling the file or giving it its upload's run before retry() looks again (M3-U90).
   const checking = check(context, id, entry.file);
   entry.run = checking.then(() => {});
   const checked = await checking;
   const refuse = (status: "failed" | "aborted", error: CloudropError) => {
     settle(entry, status, error);
     job.idle();
-    return fail(error);
+    return error;
   };
   // Cancelled while checking: nothing was sent, and the record stays for a later resume.
   if (entry.cancel.signal.aborted) {
@@ -96,6 +97,7 @@ async function resumeRun(job: Job, id: string): Promise<UploadResult<unknown>> {
   }
   if (checked instanceof CloudropError) return refuse("failed", checked);
   const { record, unlock } = checked;
+  passed();
   // From the record: a start over asks /upload with the route and metadata the upload began with (M3-U74).
   args.route = record.route;
   args.metadata = record.metadata;
@@ -107,9 +109,20 @@ async function resumeRun(job: Job, id: string): Promise<UploadResult<unknown>> {
   entry.upload = upload;
   const run = job.runUpload(upload).finally(job.idle);
   entry.run = run;
-  // Settled once this run ends, a start over included: its outcome is the first (M3-U35).
+  // Settled once this run ends, a start over included.
   await run;
-  return resultOf([entry.firstOutcome as FileOutcome<unknown>]);
+  return null;
+}
+
+/** retry() of a file whose checks refused: queued again, it is checked again, then runs when they pass (M3-U90). */
+async function checkAgain(job: Job, run: (job: Job) => Promise<CloudropError | null>): Promise<Retried> {
+  const [entry] = job.entries as [Entry];
+  entry.error = null;
+  entry.status = "queued";
+  // The checks are the file's run before the page hears of it: a listener that retries waits for them.
+  const refused = run(job);
+  entry.changed(true);
+  return { refused: await refused, outcomes: await allSettled(job.entries) };
 }
 
 /** resume(upload, file, options?): a job of one file, its route and metadata from the record (M3-U76). */
@@ -125,6 +138,23 @@ export function resumeJob(
     typeof id === "string" && file instanceof File
       ? readArguments("resume", file, options)
       : fail(invalidInput("Pass resume() an upload from resumable() and the File the user picked again."));
+  // Until a check passes the job has no route or metadata to ask /upload with, so a retry of the refused file checks
+  // again; once one passed, a retry is any job's (M3-U90).
+  let checksPassed = false;
+  const run = (job: Job) =>
+    resumeRun(job, id as string, () => {
+      checksPassed = true;
+    });
   // The run starts only when the arguments passed, the id included.
-  return createUploadJob(context, args, (job) => resumeRun(job, id as string));
+  return createUploadJob(
+    context,
+    args,
+    async (job) => {
+      const refused = await run(job);
+      // Its first outcome, whatever a retry did since (M3-U35).
+      return refused ? fail(refused) : resultOf([(job.entries[0] as Entry).firstOutcome as FileOutcome<unknown>]);
+    },
+    (job, entries) =>
+      checksPassed || job.entries[0]?.status !== "failed" ? retryFiles(job, entries) : checkAgain(job, run),
+  );
 }

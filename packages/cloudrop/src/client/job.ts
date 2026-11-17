@@ -7,12 +7,15 @@ import { type Arguments, readArguments } from "./arguments.ts";
 import { abortFile, createEntry, type Entry, pauseFile, resumeFile } from "./file-run.ts";
 import { createJob, firstRun, type Job, resultOf } from "./job-run.ts";
 import { snapshotOf } from "./job-snapshot.ts";
-import { retryFiles } from "./retry-file.ts";
+import { type Retried, retryFiles } from "./retry-file.ts";
 import { createStore } from "./store.ts";
 import type { FileHandle, FileOutcome, UploadJob, UploadResult } from "./types.ts";
 import type { UploadContext } from "./upload.ts";
 
-function handleOf(job: Job, entry: Entry): FileHandle {
+/** Retries the failed files among `entries` (retryFiles, unless the job retries its own way). */
+type Retry = (job: Job, entries: readonly Entry[]) => Promise<Retried>;
+
+function handleOf(job: Job, entry: Entry, retry: Retry): FileHandle {
   return {
     id: entry.id,
     name: entry.file.name,
@@ -22,13 +25,13 @@ function handleOf(job: Job, entry: Entry): FileHandle {
       abortFile(job.context, entry);
       job.idle();
     },
-    retry: async () => (await retryFiles(job, [entry])).outcomes[0] as FileOutcome<unknown>,
+    retry: async () => (await retry(job, [entry])).outcomes[0] as FileOutcome<unknown>,
   };
 }
 
 /** Retries every failed file of the job and resolves with every file's current outcome once all have settled. */
-async function retryJob(job: Job): Promise<UploadResult<unknown>> {
-  const { outcomes, refused } = await retryFiles(job, job.entries);
+async function retryJob(job: Job, retry: Retry): Promise<UploadResult<unknown>> {
+  const { outcomes, refused } = await retry(job, job.entries);
   return refused ? fail(refused) : resultOf(outcomes);
 }
 
@@ -38,13 +41,15 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
 }
 
 /**
- * A job over the files of `args` that `run` starts, as start() and resume() return it. A job refused for its arguments
- * has no files, and a snapshot that says so; its `done` and `retry()` answer with the refusal (ruling M3-U37).
+ * A job over the files of `args` that `run` starts and `retry` retries, as start() and resume() return it. A job
+ * refused for its arguments has no files, and a snapshot that says so; its `done` and `retry()` answer with the refusal
+ * (ruling M3-U37).
  */
 export function createUploadJob(
   context: UploadContext,
   args: Result<Arguments>,
   run: (job: Job) => Promise<UploadResult<unknown>>,
+  retry: Retry = retryFiles,
 ): UploadJob<unknown> {
   // `changed` is only called once the job runs, after the store below exists.
   const entries = (args.error ? [] : args.data.files).map((file) =>
@@ -57,14 +62,14 @@ export function createUploadJob(
   const job = args.error ? null : createJob(context, args.data, entries);
   const done = args.error ? Promise.resolve(args) : run(job as Job);
   return {
-    files: job ? entries.map((entry) => handleOf(job, entry)) : [],
+    files: job ? entries.map((entry) => handleOf(job, entry, retry)) : [],
     done,
     abort: () => job?.abort(),
     pause: () => {
       for (const entry of entries) pauseFile(entry);
     },
     resume: () => entries.forEach(resumeFile),
-    retry: () => (job ? retryJob(job) : done),
+    retry: () => (job ? retryJob(job, retry) : done),
     // Taken from the store as they are: neither needs `this`.
     subscribe: store.subscribe,
     getSnapshot: store.get,

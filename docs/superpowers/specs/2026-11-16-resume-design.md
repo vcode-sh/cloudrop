@@ -64,7 +64,9 @@ const forgotten = await client.forget();                                // Resul
 | `file` does not match the record (§3.3) | `INVALID_INPUT` | pick the same file the upload started with |
 | another tab, or this page, holds the upload (§3.5) | `UPLOAD_IN_USE` | it is being sent in this browser; finish or cancel it there |
 
-Every other outcome is the job's normal `UploadResult`.
+Every other outcome is the job's normal `UploadResult`. A `retry()` of a job refused this way runs the checks again,
+sending nothing while they refuse, and resumes the upload once they pass (`M3-U90`); a `retry()` while they run waits
+for them.
 
 ## 3. Behaviour
 
@@ -204,7 +206,8 @@ lazily). The client still imports only `errors.ts`, `input.ts`, `plan.ts` and `p
 
 - `cloudrop/client` ceiling raised to 10 kB gzip (owner decision 2026-11-16; resume on by default adds an estimated
   0.8–1.1 kB to 8.35 kB). Spec §1's "client plus React" target becomes about 12 kB. Built, it measured 2.1 kB more
-  (10.45 kB), and the owner raised the ceiling to 10.5 kB (`M3-U86`).
+  (10.45 kB), and the owner raised the ceiling to 10.5 kB (`M3-U86`). The final review's fixes took it above that,
+  and the ceiling is 11 kB (`M3-U91`).
 - Decision entries from `M3-U60`: each choice of §1–§4 and every execution ruling that changes behaviour or a
   contract.
 - README: a "Resume after reload" section (the three calls, `persist`, `namespace`, sign-out with `forget()`, what is

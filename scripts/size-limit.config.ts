@@ -28,13 +28,13 @@ export default [
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
   // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decisions 2026-11-16: resume
   // after reload is on by default with a raised ceiling, and ceilings get headroom instead of step-by-step raises; the
-  // resume plan measured 9.57 kB before its last feature task, so the ceiling is 10.5 kB and its last task sets the
-  // budget from measurement.
+  // resume plan measured 9.57 kB before its last feature task, so the ceiling was 10.5 kB. The final review's fixes
+  // (M3-U88 to M3-U90) took the client to 10.57 kB, so by that headroom decision the ceiling is 11 kB (M3-U91).
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "10.5 kB",
+    limit: "11 kB",
   },
 ];

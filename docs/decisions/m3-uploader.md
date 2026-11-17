@@ -670,7 +670,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   would have cut scope late. Measured: 6.74 kB after plan A, 7.38 kB with tasks 2, 3, 4 and 6 merged.
 - **If wrong:** M4's React bindings have about 2 kB of the 11 kB.
 - **Status:** in force (`fbc5c15`); the budget after plan B is `M3-U58`. Amends `M3-U13`. Amended by `M3-U60`
-  (in force): the ceiling is 10 kB and the "client plus React" target about 12 kB; then by `M3-U86`: 10.5 kB.
+  (in force): the ceiling is 10 kB and the "client plus React" target about 12 kB; then by `M3-U86`: 10.5 kB; then by
+  `M3-U91`: 11 kB.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M3-U44: a window weighs only time the pool was busy
@@ -1209,7 +1210,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `resume()` is called; a failed check settles it `failed` with the bare error; `abort()`, the file's `abort()` or the
   signal during the checks ends it `aborted`, `{ data: null, error: ABORTED }`, with no request, the record left as it
   was and a lock already taken let go. A store that cannot be read is `STORAGE_ERROR` (`M3-U71`), not `NOT_FOUND`: the
-  upload may still be resumable. The job then stops hearing its signal.
+  upload may still be resumable. The job then stops hearing its signal. A `retry()` of a job a check refused runs the
+  checks again (`M3-U90`).
 - **Why:** the cheap checks first, the file is hashed only once a record exists, and the lock last, so a refused call
   never takes a lock it has to release.
 - **If wrong:** a page sees one refusal at a time: a wrong file for an expired record reads as "can no longer be
@@ -1370,7 +1372,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   (10,447 B, 0.87 kB for `resumable()`, `resume()`, `forget()` and the probe).
 - **If wrong:** spec §1's "client plus React" target of about 12 kB leaves M4's bindings about 1.5 kB, not 2 kB, when
   the client reaches its ceiling; M4 decides whether that target moves.
-- **Status:** in force (`1841130`). Amends `M3-U60`'s 10 kB; spec §1 says 10.5 kB.
+- **Status:** superseded by `M3-U91` (11 kB) after the final review's fixes (`1841130`). Amends `M3-U60`'s 10 kB.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.
 
 ### M3-U87: the client takes the part arithmetic from a module without the storage rules
@@ -1425,3 +1427,37 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** an app that loads a polyfill late creates its client after it, or creates a second one.
 - **Status:** in force (`7f2a7b1` for `indexedDB`; Web Locks since `M3-U88`).
 - **Visible in:** `client/records.ts` (`createRecords`), `client/forget.test.ts`.
+
+### M3-U90: a retry of a refused `resume()` runs the checks again
+
+- **Decision:** the final review's I1 and I2, fixed as the review proposed. A `retry()` (`job.retry()` or the file's
+  `retry()`) of a `resume()` job whose checks refused runs them again (`M3-U76`), with the file `queued` meanwhile: it
+  resolves the same refusal, `{ data: null, error }` from `job.retry()` and the failed outcome from the file's, and
+  sends nothing while they refuse; once they pass, it resumes the upload as `resume()` does. Once a check has passed,
+  the job retries as any job does (`M3-U30`), the start over's route and metadata being the record's (`M3-U74`). A
+  `retry()` while the checks run waits for them: the checks are the file's run from the start.
+- **Why:** a refused job never read a record, so its route was the placeholder `"resume"`: a retry asked `/upload`
+  with it, which ended `UNKNOWN_ROUTE`, or uploaded the file with no metadata to an app's own route named `resume`,
+  against spec §2.1's "without any request". Checking again suits the refusals that pass later: `UPLOAD_IN_USE` once
+  the other tab lets go, `STORAGE_ERROR` once the storage reads. Before the fix a `retry()` during the checks waited on
+  the file's settled placeholder run in a loop of microtasks that starved IndexedDB, WebCrypto and the lock grant, and
+  froze the tab.
+- **If wrong:** a retry of `NOT_FOUND` or of a different file repeats the checks and the refusal, at the cost of a
+  store read and a hash.
+- **Status:** in force. Amends `M3-U76`; replaces the alternative the review offered, a retry that only repeats the
+  refusal as `M3-U37` does for a job refused for its arguments.
+- **Visible in:** `client/resume.ts` (`resumeRun`, `checkAgain`, `resumeJob`), `client/job.ts` (`createUploadJob`'s
+  `retry`), `client/resume-checks.test.ts`.
+
+### M3-U91: the client's ceiling is 11 kB
+
+- **Decision:** controller ruling on the final review, under the owner's headroom decision of 2026-11-16 (ceilings
+  get headroom instead of raises step by step; `M3-U86`). The ceiling for the bundled `cloudrop/client` rises from
+  10.5 kB to 11 kB gzip. The ruling put correctness first: raise it only if the fixes still ended above 10.5 kB after
+  removing the dead fingerprint fallback and any real simplification, never by golfing.
+- **Why:** the client measured 10.45 kB before the fixes. `M3-U88` (records only under a lock, without the
+  `crypto.subtle` fallback) and the I2 fix ended at 10.48 kB; `M3-U90`'s re-checking retry took it to 10.57 kB.
+- **If wrong:** spec §1's "client plus React" target of about 12 kB leaves M4's bindings about 1 kB when the client
+  reaches its ceiling; M4 decides whether that target moves.
+- **Status:** in force. Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
+- **Visible in:** `scripts/size-limit.config.ts`, spec §1.
