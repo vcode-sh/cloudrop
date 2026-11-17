@@ -22,6 +22,11 @@ export interface UploadTokenPayload {
   metadata: unknown;
   /** Unix seconds; the token is expired from this second on. */
   exp: number;
+  /**
+   * Set when a database store wrote the file's row: its row decides /sign, /complete and /abort. A token without it
+   * (from before the store was enabled, or from an instance without one) takes the stateless path until it expires.
+   */
+  stored?: true;
 }
 
 export type MultipartToken = UploadTokenPayload & { uploadId: string; partSize: number };

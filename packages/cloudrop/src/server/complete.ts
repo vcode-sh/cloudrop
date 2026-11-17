@@ -1,179 +1,43 @@
 // POST /complete (spec §5.4, §7.6): verify what the bucket holds against the token, finish a multipart upload with
-// the server's own part list, run afterVerify and onComplete. The client's word is never taken for anything.
+// the server's own part list, run afterVerify and onComplete. With a store and a stored token, the file's row decides
+// instead (store-complete.ts).
 
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
-import { countParts, sizeOfPart } from "../plan.ts";
-import type { CompleteResponse, UploadedFile } from "../protocol/types.ts";
-import { encodeKeyPath } from "../storage/sigv4.ts";
-import type { EndpointInput, ServerConfig } from "./config.ts";
-import { storageFailure } from "./http.ts";
-import { runAfterVerify, runOnAbort } from "./plugins.ts";
-import { isMultipart, type MultipartToken, type UploadTokenPayload } from "./token.ts";
-import { readTokenRequest, tokenAbortContexts } from "./token-request.ts";
+import { fail, ok, type Result } from "../errors.ts";
+import type { CompleteResponse } from "../protocol/types.ts";
+import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFile } from "./complete-steps.ts";
+import { cleanUpRefused, verifyUpload } from "./complete-verify.ts";
+import type { EndpointInput } from "./config.ts";
+import { nowSeconds } from "./presign.ts";
+import { completeStored } from "./store-complete.ts";
+import { uploadExpired } from "./token.ts";
+import { readTokenRequest } from "./token-request.ts";
 
-const DISCARDED = "The uploaded file does not match what was declared, so it was discarded. Upload it again.";
-
-/** The object is verified and kept; a retried /complete verifies it again and reruns the hooks (spec §5.4). */
-const unfinished = (): CloudropError =>
-  new CloudropError(
-    "SERVER_ERROR",
-    "The file was uploaded, but the server could not finish processing it. Try again in a moment.",
-    { retryable: true },
-  );
-
-const partChanged = (): CloudropError =>
-  new CloudropError(
-    "STORAGE_ERROR",
-    "A part of the file changed while the upload was being completed. Complete the upload again.",
-    { retryable: true },
-  );
-
-/** This upload is over: plugins release what they reserved for it. */
-const release = (config: ServerConfig, token: UploadTokenPayload): Promise<void> =>
-  runOnAbort(config.plugins, tokenAbortContexts(token, "rejected"), config.logger);
-
-/**
- * Deletes a rejected object, then releases its reservation. When the delete fails, the object is kept with its
- * reservation and the client retries: the retry checks the object again and discards it then.
- */
-async function discard(config: ServerConfig, token: UploadTokenPayload, error: CloudropError): Promise<Result<never>> {
-  const removed = await config.storage.delete(token.key);
-  if (removed.error) return fail(storageFailure(removed.error, config.logger));
-  await release(config, token);
-  return fail(error);
-}
-
-/** Single PUT: the object must exist with this upload's id, size and type (spec §7.6). */
-async function verifyObject(config: ServerConfig, token: UploadTokenPayload): Promise<Result<void>> {
-  const head = await config.storage.head(token.key);
-  if (head.error) return fail(storageFailure(head.error, config.logger));
-  const object = head.data;
-  if (object === null) {
-    return fail(
-      new CloudropError("NOT_UPLOADED", "The file has not been uploaded yet. Upload it, then complete the upload."),
-    );
-  }
-  // Another writer's object: never delete it.
-  if (object.metadata["cloudrop-id"] !== token.id) {
-    await release(config, token);
-    return fail(
-      new CloudropError("VERIFICATION_FAILED", "Another file is stored under this upload's key. Start a new upload."),
-    );
-  }
-  if (object.size !== token.size || object.type !== token.type) {
-    return discard(config, token, new CloudropError("VERIFICATION_FAILED", DISCARDED));
-  }
-  return ok(undefined);
-}
-
-/** A multipart upload that no longer exists counts as complete only when HEAD shows its own object (spec §5.4). */
-async function completedBefore(config: ServerConfig, token: MultipartToken): Promise<Result<void>> {
-  const head = await config.storage.head(token.key);
-  if (head.error) return fail(storageFailure(head.error, config.logger));
-  if (head.data?.metadata["cloudrop-id"] === token.id && head.data.size === token.size) return ok(undefined);
-  return fail(new CloudropError("NO_SUCH_UPLOAD", "This upload was aborted or has expired. Start it again."));
-}
-
-/** Multipart: ListParts against the plan, then completion with the server's part list and ETags (spec §7.6, §12). */
-async function completeParts(config: ServerConfig, token: MultipartToken): Promise<Result<void>> {
-  const { storage, logger } = config;
-  const listed = await storage.listParts(token.key, token.uploadId);
-  if (listed.error) {
-    return listed.error.code === "NO_SUCH_UPLOAD"
-      ? completedBefore(config, token)
-      : fail(storageFailure(listed.error, logger));
-  }
-  const byNumber = new Map(listed.data.map((part) => [part.partNumber, part]));
-  const numbers = Array.from({ length: countParts(token.size, token.partSize) }, (_, index) => index + 1);
-  // A wrong-sized part is re-sent like a missing one: R2 accepts it at UploadPart and rejects it only at completion.
-  const missing = numbers.filter(
-    (partNumber) => byNumber.get(partNumber)?.size !== sizeOfPart(token.size, token.partSize, partNumber),
-  );
-  if (missing.length > 0) {
-    return fail(
-      new CloudropError(
-        "PARTS_MISSING",
-        `${missing.length} of ${numbers.length} parts are missing or have the wrong size. Upload them again, then complete the upload.`,
-        { parts: missing },
-      ),
-    );
-  }
-  const parts = numbers.map((partNumber) => ({ partNumber, etag: byNumber.get(partNumber)?.etag ?? "" }));
-  // Keys are unique, so a 412 here is another writer's object at this key. R2 answers an overlapping completion of
-  // this upload with 200 or NoSuchUpload, never 412 (M4-F12).
-  const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
-  if (!completed.error) return ok(undefined);
-  if (completed.error.code === "NO_SUCH_UPLOAD") return completedBefore(config, token);
-  if (completed.error.code === "INVALID_PART") {
-    // The parts and ETags were listed a moment ago, so a stale one is a part uploaded again in between. The upload
-    // stays open: a retry lists the parts again.
-    logger.error(
-      `cloudrop: a part of file ${token.id} on route "${token.route}" changed while its upload was being completed.`,
-      completed.error,
-    );
-    return fail(partChanged());
-  }
-  if (completed.error.code === "ALREADY_EXISTS") {
-    // A concurrent /complete of this same upload may have won the race: its object carries this upload's id. Only an
-    // object shown not to be this upload's is a collision; an unanswered HEAD keeps the reservation for a retry.
-    const own = await completedBefore(config, token);
-    if (own.error?.code !== "NO_SUCH_UPLOAD") return own;
-    const aborted = await storage.abortMultipart(token.key, token.uploadId);
-    if (aborted.error) {
-      logger.error(
-        `cloudrop: could not abort the collided upload of file ${token.id} on route "${token.route}".`,
-        aborted.error,
-      );
-    }
-    await release(config, token);
-    return fail(new CloudropError("ALREADY_EXISTS", "Another file already has this upload's key. Start a new upload."));
-  }
-  return fail(storageFailure(completed.error, logger));
-}
-
-export async function handleComplete({ request, body, config }: EndpointInput): Promise<Result<CompleteResponse>> {
-  const verified = await readTokenRequest(body, config);
+export async function handleComplete(input: EndpointInput): Promise<Result<CompleteResponse>> {
+  const { request, body, config } = input;
+  // A store may answer an expired token's retry with the stored result, so the row decides about expiry there.
+  const verified = await readTokenRequest(body, config, { allowExpired: config.store !== undefined });
   if (verified.error) return verified;
   const { token, route } = verified.data;
-  const { storage, logger } = config;
-  const stored = isMultipart(token) ? await completeParts(config, token) : await verifyObject(config, token);
-  if (stored.error) return stored;
-  const file: UploadedFile = {
-    id: token.id,
-    key: token.key,
-    name: token.name,
-    size: token.size,
-    type: token.type,
-    url: route.visibility === "public" ? `${storage.publicUrl}/${encodeKeyPath(token.key)}` : null,
-  };
-  const context = { request, route: route.name, file, metadata: token.metadata, auth: token.owner, storage };
-  let refused: CloudropError | undefined;
-  try {
-    refused = await runAfterVerify(config.plugins, context);
-  } catch (error) {
-    logger.error(`cloudrop: a plugin's afterVerify failed for route "${route.name}".`, error);
-    return fail(unfinished());
-  }
-  if (refused) return discard(config, token, refused);
+  if (config.store && token.stored) return completeStored(input, config.store, token, route);
+  if (nowSeconds() >= token.exp) return fail(uploadExpired());
+  const { logger } = config;
+  const stored = await verifyUpload(config, token);
+  if (stored.kind === "failed") return fail(stored.error);
+  if (stored.kind === "refused") return cleanUpRefused(config, token, stored);
+  const file = uploadedFile(config, token, route);
+  const checked = await checkAfterVerify(request, config, token, file);
+  if (checked.kind === "failed") return fail(checked.error);
+  if (checked.kind === "refused") return cleanUpRefused(config, token, checked);
   const { onComplete } = route.definition;
   if (!onComplete) return ok({ file, data: null });
   let data: unknown;
   try {
-    // /upload checked that authorize returned a plain object; the token carries its JSON snapshot.
-    data = await onComplete({ ...(token.owner as object), request, file, metadata: token.metadata });
+    data = await onComplete(completeContext(request, token, file));
   } catch (error) {
     logger.error(`cloudrop: onComplete failed for route "${route.name}".`, error);
     return fail(unfinished());
   }
-  try {
-    // Encoded here, not when the answer is sent, so the failure is reported as onComplete's.
-    JSON.stringify(data);
-  } catch (error) {
-    logger.error(
-      `cloudrop: onComplete for route "${route.name}" returned a value JSON cannot encode (a BigInt or a cycle).`,
-      error,
-    );
-    return fail(unfinished());
-  }
+  const encoded = encodeResult(logger, route.name, data);
+  if (encoded.error) return encoded;
   return ok({ file, data: data === undefined ? null : data });
 }

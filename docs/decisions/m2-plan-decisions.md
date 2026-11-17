@@ -213,7 +213,8 @@ later.
 - **If wrong:** a live token is a 24-hour delete capability for its own file (owner-accepted, M2-X1); the 1.1 database
   adapters close it.
 - **Status:** amended by audit T10-1 (the plan let an expired token delete) and owner ruling M2-X1. `/abort` works even
-  when a deploy removed the token's route (reviews-m2.md, final I3). M2-X27 says `/abort` is not revocation.
+  when a deploy removed the token's route (reviews-m2.md, final I3). M2-X27 says `/abort` is not revocation. Amended
+  2026-11-17 (M5-T8): with a database store the file's row decides, so a completed file is never deleted (M2-X1).
 - **Visible in:** spec §5.5, `src/server/abort.ts`, `src/server/token-request.ts`.
 
 ### M2-D21: plugins

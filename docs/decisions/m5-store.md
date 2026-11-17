@@ -150,6 +150,165 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ## Server integration (task B)
 
+### M5-T24: store configuration checks
+
+- **Decision:** `createCloudrop` reads `store`, `quota` and `completionLeaseMs` (`src/server/store-config.ts`). A store
+  must have the 13 methods of `CloudropStore` (and `transaction`, if present, must be a function); the error names the
+  first missing one. `quota` and `completionLeaseMs` without a store, and a route's `owner` or `afterComplete` without a
+  store, throw `INVALID_CONFIG` naming the option and the fix. `completionLeaseMs` is a whole number of at least
+  1,000 ms (default 300,000). `quota` with routes that define no `owner` logs one warning naming them, after every
+  check has passed.
+- **Why:** spec §5.1 names `quota`, `owner` and `afterComplete`; `completionLeaseMs` means nothing without a store either,
+  so it is refused the same way rather than ignored. A lease under a second could not outlast any `onComplete`.
+- **If wrong:** relaxing a refusal is compatible; tightening one later would not be.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/store-config.ts`, `src/server/config.ts`, `src/server/store-config.test.ts`.
+
+### M5-T25: `owner` sees no file and runs before `beforeUpload`; the quota fails closed on a bad answer
+
+- **Decision:** `owner(context)` gets `OwnerContext` (the authorize result, `request`, `metadata`), not a file: one
+  `/upload` has one owner (spec §4 `reserve`). It runs right after the per-file policy and before plugins'
+  `beforeUpload`, and only with a store and at least one accepted file. It must return null or a string of 1 to 255
+  characters; anything else (`undefined` included) is the route's bug, a `TypeError` the handler answers with a 500,
+  like `prefix`. `quota(owner)` is asked only when it is set and the owner is not null; an answer that is not null or a
+  non-negative safe integer counts as a failed lookup.
+- **Why:** spec §5.2 lists owner resolution after `beforeUpload`. Resolving it first changes no outcome the spec
+  describes but means a broken `owner` throws before any plugin has reserved anything, so no `onAbort` is owed; the
+  quota stays after `beforeUpload`, as written. A quota that answers garbage must not let an upload through.
+- **If wrong:** moving `owner` after `beforeUpload` needs `onAbort("failed")` for the plugins on its throw.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/store-upload.ts` (`readOwner`, `readLimit`), `src/server/route.ts` (`OwnerContext`).
+
+### M5-T26: what `/upload` answers for each store failure
+
+- **Decision:** a failed quota lookup or a failed `reserve` refuses every accepted file of the call with a per-file
+  retryable `SERVER_ERROR` ("The server could not check your storage limit…" and "The server could not save the
+  upload…"); nothing is signed or created, and plugins that accepted the files get `onAbort("failed")`. A file over
+  the quota gets `QUOTA_EXCEEDED` and its plugins `onAbort("rejected")`. `attach` answering false gives the file
+  `UPLOAD_EXPIRED` with "This upload was cancelled or has expired. Start it again."; a throw gives the retryable store
+  error; both abort the multipart upload first. Every reserved file that does not start ends `pending → failed`, best
+  effort and logged.
+- **Why:** spec §5.2, with per-file answers so the other files' answers and the response shape stay as they are.
+- **If wrong:** a whole-request failure would be one branch in `handleUpload`; clients already handle both.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/store-upload.ts`, `src/server/upload.ts`, `src/server/store-upload.test.ts`.
+
+### M5-T27: `/complete` with a store, the points spec §5.5 left open
+
+- **Decision:**
+  - A `deleted` row replays its stored answer, as a `completed` one does: it completed, and answering
+    `UPLOAD_EXPIRED` would make a resumed client upload again a file the app deleted on purpose (review I3).
+  - Past `exp` and not completed: the standard expiry message. Ended or missing rows: the "cancelled or has expired"
+    message.
+  - A `completing` row is busy while `claimed_at + completionLeaseMs >= now` (the M5-T19 boundary), checked from the
+    row before any storage call.
+  - No `onComplete`, or a result of `undefined` or `null`, stores `result` null. The cap is 16,384 bytes of UTF-8 JSON,
+    inclusive; over it is handled like a throw.
+  - The answer's `data` and `afterComplete`'s `data` are the JSON form read back from the stored text, so a fresh
+    answer and a replay are the same value.
+  - `afterComplete` is awaited before the answer is sent, so a serverless runtime does not stop it halfway.
+  - The busy answer is recognised by identity (`busy()` in `http.ts`), which adds `Retry-After: 2` and, for a
+    cross-origin caller, `Access-Control-Expose-Headers: Retry-After`; no wire field or public type changes.
+  - The claim token is `crypto.randomUUID()`. In transaction mode, a hook failure or a lost claim throws to roll back;
+    a flag set before that throw tells it from a store failure even if an adapter wraps the error.
+  - A failed `release` is only logged; the lease then frees the row.
+- **Why:** each is the reading of §5.5 that keeps its promises (one `onComplete`, no storage call on replay) without a
+  new column or wire change.
+- **If wrong:** the `deleted` replay is the one visible choice; reverting it is one condition in `settled`.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/store-complete.ts`, `src/server/complete-steps.ts`, `src/server/http.ts`.
+
+### M5-T28: `/abort` leaves a row the sweep has settled
+
+- **Decision:** with a store, `/abort` runs the abort-and-delete when its `end(pending → aborted)` changed the row, or
+  when the row is `aborted`, `rejected`, `failed` or `expired` **and its `cleaned_at` is null**. A `deleted`,
+  `completed` or `completing` row, a cleaned one, and a missing one answer `ok` with nothing deleted and no `onAbort`.
+- **Why:** spec §5.6 runs the delete for every `failed` row, but the sweep ends a stuck completion as `failed` with
+  `cleaned_at` set and keeps its object because its `onComplete` may have recorded it (§6). Without the `cleaned_at`
+  condition, the client's own `/abort` after its retries ran out would delete that object. An expired row is always
+  cleaned already, so nothing else changes.
+- **If wrong:** a cleaned row whose late object appeared after the cleanup is left to nobody; the URL lifetime (15 min)
+  is shorter than the cleanup's minimum age, so none can.
+- **Status:** decided; refines spec §5.6.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/abort.ts`, `src/server/sweep.test.ts` (stuck completion).
+
+### M5-T29: the file API's store operations
+
+- **Decision:** `file(id)` answers `FileRecord | null`; `usage(owner)` `OwnerUsage`; `revokeUploads({ owner })`
+  `{ revoked }`; `deleteFile(id)` `{ id }`, `NOT_FOUND` for an id without a completed (or deleted) row, idempotent: an
+  already deleted and cleaned row answers at once, a deleted row not yet cleaned is finished. `deleteFile` and the sweep
+  delete an object only after a HEAD shows its `cloudrop-id` is the row's id, since a key may hold a later upload.
+  `reconcile({ owner? })` answers `{ checked, repaired }`, paging owners 100 at a time. Without a store each answers
+  `INVALID_CONFIG`: "api.<name> needs a database store. Pass store to createCloudrop." Ids and owners are 1 to 255
+  characters, else `INVALID_INPUT`. A store throw is logged and answered with the retryable store error.
+- **Why:** spec §6 gives the operations; the shapes follow `api.head` (null for absent) and the `{ data, error }` rule.
+- **If wrong:** each shape is a public type (`StoreFileApi`): a change is a semver decision.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/store-api.ts`, `src/server/store-api.test.ts`.
+
+### M5-T30: the sweep's options, cursor and failures
+
+- **Decision:** `sweep({ limit = 100, cursor?, graceMs = 3_600_000 })`: `graceMs` carries its unit (the spec wrote
+  `grace`), `limit` is 1 to 1,000 rows per call, shared by both passes. One opaque cursor (`expire:<…>` or
+  `cleanup:<…>`) continues the pass it stopped in; the expire pass runs first and the cleanup pass gets what is left of
+  the limit. A storage or store failure stops the call and answers that error; rows already handled stay handled.
+  `reported` holds the `FileRecord`s of stuck completions ended as `failed`. `cleaned` counts the rows this call
+  cleaned, so two concurrent cleanup sweeps may both count one row (the work is idempotent).
+- **Why:** spec §6; a unit in the name follows the human-friendly rules; one cursor lets a cron call `sweep` in a loop
+  without knowing about passes.
+- **If wrong:** renaming `graceMs` later is breaking; decide before 1.0.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
+
+### M5-T31: `RouteCallbacks<…, TExtra>`, `routeFor` and the new public types
+
+- **Decision:** `RouteCallbacks<TAuth, TMetadata, TResult, TExtra extends object = Record<never, never>>`;
+  `onComplete`'s context is `Omit<CompleteContext, keyof TExtra> & TExtra`, so a store's `tx` replaces an authorize
+  field of the same name (the handler spreads `tx` last); with no extra the context type is exactly as before.
+  `routeFor<TExtra>(store)` (internal, for adapters) returns a `RouteFunction<TExtra>` whose routes carry the store
+  object itself under `Symbol.for("cloudrop.store")`; `createCloudrop` refuses such a route when the configured store
+  is another one or none, or has no `transaction`. `afterComplete` gets `AfterCompleteContext` (the completion context
+  plus `data`). Newly exported types: `OwnerContext`, `AfterCompleteContext`, `RouteFunction`, `StoreFileApi`,
+  `StoreOptions`, `Quota`, `SweepOptions`, `SweepReport`; `FileApi` now extends `StoreFileApi`.
+- **Why:** spec §5.5 and review I6. The store object as its own brand needs no second id to keep in sync; `Symbol.for`
+  lets an adapter from another copy of cloudrop be recognised.
+- **If wrong:** an adapter must pass the very object it returns as the store; documented on `routeFor`.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/route.ts`, `src/server/store-config.ts`, `src/index.ts`, `src/server/store-types.test.ts`.
+
+### M5-T32: the abort-incomplete rule is reported as required with a store
+
+- **Decision:** `checkBucket` already reports a missing rule as a `problem`; with a store its message adds "With a store
+  it is required: an upload created just before a crash has no row to clean it up."
+- **Why:** spec §5.2 names the rule as the backstop for a crash between `createMultipart` and `attach`.
+- **If wrong:** wording only.
+- **Status:** decided.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `src/server/bucket-check.ts`, `src/server/store-config.test.ts`.
+
+### M5-T33: the store integration grows `cloudrop` by about a fifth (M4-F24)
+
+- **Decision:** accepted. Measured 2026-11-17 with `bun run package:check`: `cloudrop` summed 36.72 kB → 44.5 kB
+  (+21%), bundled 22.38 kB → 26.97 kB (+20.5%); `cloudrop/next` 1.01 → 1.16 kB and `cloudrop/node` 3.1 → 3.24 kB
+  through shared chunks; `cloudrop/client` and `cloudrop/react` unchanged. All stay under their ceilings (50, 30, 1.5,
+  4.5 kB).
+- **Why:** the server now carries the row-before-signing, claim, refusal, abort, file API and sweep paths (§5, §6) and
+  their messages. They are server code: a browser bundle (`cloudrop/client`) does not grow. The stateless path pays for
+  them only through the shared entry.
+- **If wrong:** the store paths could move behind a separate entry (`cloudrop/store`) so apps without a store do not
+  ship them; that is a public API change.
+- **Status:** decided; over the 5% line, so stated here and in the commit.
+- **Source:** task B, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
+
 <!-- Task B appends its entries above this line. -->
 
 ## SQL core and the sql adapter (task C)

@@ -9,8 +9,9 @@ import { type BucketReport, checkBucket } from "./bucket-check.ts";
 import { isExactOrigin, type ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";
 import { nowSeconds } from "./presign.ts";
+import { type StoreFileApi, storeApi } from "./store-api.ts";
 
-export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy"> {
+export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy">, StoreFileApi {
   /**
    * A URL to read the object. With the storage's publicUrl and no options: the plain public URL. Otherwise a presigned
    * GET signed at the start of an `expiresIn` window (default 3600 s) and valid for two windows, so every viewer in a
@@ -150,6 +151,7 @@ export function createFileApi(config: ServerConfig): FileApi {
   };
   // Arrow wrappers, not storage.head and friends: an unbound driver method would lose a `this` it relies on.
   return {
+    ...storeApi(config, whenReady),
     getUrl: (key, options) => whenReady(() => getUrl(storage, key, options)),
     head: (key) => whenReady(() => storage.head(key)),
     put: (key, body, options) => whenReady(() => storage.put(key, body, options)),

@@ -9,9 +9,10 @@ import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { isFunction, readRoute } from "./route-config.ts";
 import { parseSize, type Size } from "./size.ts";
+import { readStoreConfig, type StoreConfig, type StoreOptions, unownedRoutes } from "./store-config.ts";
 import type { TokenKeys } from "./token.ts";
 
-export interface CloudropOptions<TRoutes extends Record<string, Route>> {
+export interface CloudropOptions<TRoutes extends Record<string, Route>> extends StoreOptions {
   /** `r2({ bucket })` or `s3({ ... })`. */
   storage: StorageDriver;
   routes: TRoutes;
@@ -44,7 +45,7 @@ export interface RouteConfig {
   visibility: "public" | "private";
 }
 
-export interface ServerConfig {
+export interface ServerConfig extends StoreConfig {
   storage: StorageDriver;
   routes: ReadonlyMap<string, RouteConfig>;
   /**
@@ -166,6 +167,12 @@ function extendRoute(plugin: CloudropPlugin, route: RouteConfig): void {
 /** Plugins and the logger hear about a configuration only once every check has passed. */
 function announce(config: ServerConfig): void {
   const { routes, plugins, storage, logger } = config;
+  const unowned = unownedRoutes(config);
+  if (unowned.length > 0) {
+    logger.warn(
+      `cloudrop: quota is set, but routes ${unowned.join(", ")} define no owner, so their uploads count against no limit. Add owner to those routes.`,
+    );
+  }
   for (const route of routes.values()) {
     for (const plugin of plugins) extendRoute(plugin, route);
     if (route.visibility === "private" && storage.publicUrl) {
@@ -188,7 +195,8 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   const ready = environmentReader(options.secret, storage);
   const trustedOrigins = readOrigins(options.trustedOrigins);
   const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
-  const config = { storage, routes, ready, basePath, trustedOrigins, multipartThreshold, plugins, logger };
+  const store = readStoreConfig(options, [...routes.values()]);
+  const config = { storage, routes, ready, basePath, trustedOrigins, multipartThreshold, plugins, logger, ...store };
   announce(config);
   return config;
 }

@@ -22,8 +22,9 @@ export async function readToken(
 export async function readTokenRequest(
   body: unknown,
   config: EndpointConfig,
+  options: { allowExpired?: boolean } = {},
 ): Promise<Result<{ token: UploadTokenPayload; route: RouteConfig }>> {
-  const verified = await readToken(body, config);
+  const verified = await readToken(body, config, options);
   if (verified.error) return verified;
   const route = config.routes.get(verified.data.route);
   if (!route) {

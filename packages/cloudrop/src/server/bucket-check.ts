@@ -55,7 +55,7 @@ function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[])
   };
 }
 
-function lifecycleCheck(rules: readonly BucketLifecycleRule[]): BucketCheck {
+function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean): BucketCheck {
   const rule = rules.find(
     (candidate) =>
       candidate.enabled && candidate.prefix === "" && candidate.abortIncompleteMultipartUploadDays !== undefined,
@@ -67,10 +67,13 @@ function lifecycleCheck(rules: readonly BucketLifecycleRule[]): BucketCheck {
       message: `Incomplete multipart uploads are aborted after ${days} day${days === 1 ? "" : "s"}.`,
     };
   }
+  // With a store the rule is the only cleanup for an upload created just before a crash, before its row recorded it.
+  const required = hasStore
+    ? " With a store it is required: an upload created just before a crash has no row to clean it up."
+    : "";
   return {
     status: "problem",
-    message:
-      "No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored. Add one (R2 creates a 7-day rule by default).",
+    message: `No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored.${required} Add one (R2 creates a 7-day rule by default).`,
   };
 }
 
@@ -99,7 +102,9 @@ export async function checkBucket(config: ServerConfig, origins: readonly string
   const [corsRules, lifecycleRules] = await Promise.all([storage.getBucketCors(), storage.getBucketLifecycle()]);
   const cors = settingCheck(corsRules, "CORS rules", (rules) => corsCheck(rules, origins));
   if (cors.error) return cors;
-  const lifecycle = settingCheck(lifecycleRules, "lifecycle rules", lifecycleCheck);
+  const lifecycle = settingCheck(lifecycleRules, "lifecycle rules", (rules) =>
+    lifecycleCheck(rules, config.store !== undefined),
+  );
   if (lifecycle.error) return lifecycle;
   const privateRoutes = [...config.routes.values()].filter((route) => route.visibility === "private");
   const publicAccess: BucketCheck =
