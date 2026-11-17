@@ -310,11 +310,17 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
      `cloudrop: every request answers 500 until this is fixed. <message>` with the `INVALID_CONFIG` as the error; it
      logs again only when the message changes (a partial fix). Preflight, 404 and 405 answers need no environment.
   2. `cloudrop.api.*` resolve `{ data: null, error }` with that `INVALID_CONFIG`.
-  3. Recovery, ruled: each request reads the environment again until it is complete, then the result is kept for the
-     life of the server (per setting: token keys and the storage driver are memoized separately). A fixed environment
-     recovers without a restart; a later change to the environment is not picked up.
+  3. Recovery, ruled: each request reads the environment again until it is complete, then `ready()` returns the cached
+     result for the life of the server (a setting that is already complete, token keys or storage driver, is kept
+     meanwhile). A fixed environment recovers without a restart; a later change to the environment is not picked up.
   4. The message is the one construction used to throw, and when the storage and the secret are both missing the two
-     messages are joined into one `INVALID_CONFIG`, so a first setup sees everything at once.
+     messages are joined into one `INVALID_CONFIG`, so a first setup sees everything at once. In development the
+     environment is read at construction, where `r2()` or `s3()` throws its storage message at its own call before
+     `createCloudrop` reads the secret: a first development setup missing both sees two messages, one after the other.
+     Joining them there too would cost more code than one extra round is worth.
+  5. An invalid value read from a variable names the variable, since no stack points at the app's code: "CLOUDROP_SECRET
+     must be text of at least 32 characters", and for a preset the message ends "Environment variables with an invalid
+     value: CLOUDROP_R2_ACCOUNT_ID." (fix round 1, M4-F17).
 - **Why:** `next build` evaluates the route module while collecting page data, so a construction-time read made every
   build need production secrets (M3-H14's predicted cost). Workers bind the environment per request; reading at the
   first request, never at import, works there. Re-reading until success costs one failed lookup per request on a
@@ -344,7 +350,10 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   from the environment, the preset returns a lazy driver (`storage/lazy-driver.ts`) that builds the real driver on
   first use under M4-F16's rules: every method answers that `INVALID_CONFIG` until the settings are complete, and the
   server reads its state through a module-private `WeakMap`, so `StorageDriver` gains no public member. When every
-  setting is passed, the preset returns the real driver, as before.
+  setting is passed, the preset returns the real driver, as before. When a build from the environment fails a check,
+  each variable read is tried alone, with stand-ins for the rest, and the variables at fault are appended: "…
+  Environment variables with an invalid value: CLOUDROP_S3_REGION." (fix round 1; the checks stay in one place, and
+  the extra builds run only on that failure path).
 - **Why:** design §5.3: a cold-developer test found `s3()` read nothing. Explicit values are checked at construction by
   building the driver once with valid stand-ins for the settings the environment will supply: every check stays in
   `createS3Driver` and the presets, in one place, instead of a second per-setting copy that could drift. `rules` and
@@ -358,7 +367,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 ### M4-F18: `forbidden(message?)` answers `403 FORBIDDEN`
 
-- **Decision:** `forbidden(message = "You are not allowed to upload files here.")` is exported beside
+- **Decision:** `forbidden(message = "You are not allowed to upload files here. Ask the site owner for access if you
+  think this is wrong.")` is exported beside
   `unauthorized()` and returned from `authorize`; `/upload` answers `403` with code `FORBIDDEN`, not retryable.
   Both return the public type `Refusal`, which replaces `Unauthorized`: the same `Symbol.for("cloudrop.unauthorized")`
   brand plus `code: "UNAUTHORIZED" | "FORBIDDEN"`. A branded refusal without a code (another copy of cloudrop, plain

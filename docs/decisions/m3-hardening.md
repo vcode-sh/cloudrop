@@ -195,7 +195,8 @@ reviews accepted.
   the first request).
 - **Status:** in force (`15d4caa`); carried out by the M3 slice (M3-S21). M3-H15 adds the README line for builds
   without secrets. Amended by M4-F16 (2026-11-17): the example still creates its server when the module loads, but
-  settings from the environment are read on the first request, so `next build` needs none.
+  settings from the environment are read on the first request, so `next build` needs none. The example README section
+  named under "Visible in" is superseded with it; M4-F20 rewrites that README.
 - **Visible in:** `examples/next/lib/cloudrop.ts`, `examples/next/README.md` ("The build needs the settings").
 
 ### M3-H15: the M3 plan audit's five decisions
