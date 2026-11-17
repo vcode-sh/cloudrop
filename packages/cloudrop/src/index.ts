@@ -37,6 +37,16 @@ export {
 export type { StandardSchema } from "./server/schema.ts";
 export type { Size } from "./server/size.ts";
 export type {
+  ClaimOutcome,
+  CloudropStore,
+  EndedStatus,
+  FileRecord,
+  FileStatus,
+  NewFile,
+  OwnerUsage,
+  Transition,
+} from "./server/store.ts";
+export type {
   BucketCorsRule,
   BucketLifecycleRule,
   CompletedPart,
