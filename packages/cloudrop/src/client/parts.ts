@@ -9,7 +9,7 @@ import { aborted, unreadableAnswer } from "./failures.ts";
 import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay } from "./retry.ts";
 
 /** At most this many parts of one file in flight (spec §6.1). */
-export const PARTS_IN_FLIGHT: number = 4;
+const PARTS_IN_FLIGHT = 4;
 
 export interface PartSender {
   signal: AbortSignal;
@@ -24,7 +24,7 @@ export interface PartSender {
   put(target: SignedRequest, partNumber: number, stop: AbortSignal): Promise<BucketOutcome>;
 }
 
-export type Step =
+type Step =
   | { kind: "done" }
   | { kind: "fail"; error: CloudropError }
   | { kind: "again"; renew: boolean; waitMs: number };

@@ -121,6 +121,30 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumeRun`), `client/resume-job.test.ts` ("pauses and
   resumes", "fails keeping its record and lock"), `client/resume.test.ts` ("takes no repair round").
 
+### M4-F5: a resumed file's run is assigned once
+
+- **Decision:** `resume()`'s file gets one `entry.run`, the whole resume run from its checks to its settling (a start
+  over included), assigned where the run starts (`resumeJob`), instead of one for the checks and another for the upload.
+- **Why:** design §3 F5. With two assignments, a `retry()` during the checks waited correctly only because of the order
+  of microtasks, and `allSettled` could spin on a file that had not settled while its `run` already had, which is how
+  `M3-U90` once froze a tab.
+- **If wrong:** nothing known; `client/resume-checks.test.ts` and the resume tests cover it (a fault probe that drops
+  the assignment freezes them, as `M3-U90` froze the tab).
+- **Status:** in force.
+- **Source:** design §3 F5; code audit of `main` at `907cc77`.
+- **Visible in:** `client/resume.ts` (`resumeJob`, `resumeRun`).
+
+### M4-F7: a resumed upload's probe looks missing parts up in a `Set`
+
+- **Decision:** the first answer of a resumed upload's probe counts the landed parts against a `Set` of the parts
+  `PARTS_MISSING` named, not an array.
+- **Why:** design §3 F7. `missing.includes(part)` for every landed part is O(L×M): 20.3 ms against 0.59 ms with a `Set`
+  at 10,000 parts with 9,000 missing (audit measurement).
+- **If wrong:** nothing known.
+- **Status:** in force.
+- **Source:** design §3 F7; code audit of `main` at `907cc77`.
+- **Visible in:** `client/upload.ts` (`probed`).
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)

@@ -57,7 +57,7 @@ export function createEntry(file: File, rank: number, changed: (urgent: boolean)
     result: null,
     error: null,
     progress: createProgress(),
-    meter: createMeter(Date.now()),
+    meter: createMeter(),
     cancel: new AbortController(),
     pass: null,
     wake: null,

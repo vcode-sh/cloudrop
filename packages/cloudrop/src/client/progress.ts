@@ -38,9 +38,10 @@ export interface Meter {
   restart(now: number): void;
 }
 
-export function createMeter(now: number): Meter {
+/** A meter at rest: restart() starts it when the file starts sending. */
+export function createMeter(): Meter {
   let rate = 0;
-  let last = now;
+  let last = 0;
   // Bytes reported in the same millisecond as `last`: no time has passed to divide them by.
   let pending = 0;
   return {

@@ -29,87 +29,90 @@ const target: SignedRequest = {
 };
 const body = new Blob(["hello"]);
 
+/** An S3 error body as R2, RustFS and Wrangler send it. */
+const s3Error = (code: string) => `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code></Error>`;
+
 describe("classifyAnswer", () => {
   it.each([
     {
       name: "never retries a signature mismatch",
       status: 403,
-      code: "SignatureDoesNotMatch",
-      retryAfterMs: 0,
+      text: s3Error("SignatureDoesNotMatch"),
+      retryAfter: null,
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", SIGNATURE_MISMATCH, false) },
     },
     {
       name: "renews an expired URL",
       status: 403,
-      code: "ExpiredRequest",
-      retryAfterMs: 0,
+      text: s3Error("ExpiredRequest"),
+      retryAfter: null,
       expected: { kind: "expired", error: error("UPLOAD_REJECTED", LINK_REFUSED, false), retryAfterMs: 0 },
     },
     {
       name: "renews a RustFS expiry",
       status: 403,
-      code: "AccessDenied",
-      retryAfterMs: 0,
+      text: s3Error("AccessDenied"),
+      retryAfter: null,
       expected: { kind: "expired", error: error("UPLOAD_REJECTED", LINK_REFUSED, false), retryAfterMs: 0 },
     },
     {
       name: "renews a 403 without a readable code",
       status: 403,
-      code: undefined,
-      retryAfterMs: 0,
+      text: "",
+      retryAfter: null,
       expected: { kind: "expired", error: error("UPLOAD_REJECTED", LINK_REFUSED, false), retryAfterMs: 0 },
     },
     {
       name: "retries throttling by status, whatever the S3 code says",
       status: 429,
-      code: "ServiceUnavailable",
-      retryAfterMs: 2000,
+      text: s3Error("ServiceUnavailable"),
+      retryAfter: "2",
       expected: { kind: "retry", error: error("RATE_LIMITED", BUSY, true), retryAfterMs: 2000 },
     },
     {
       name: "retries 503",
       status: 503,
-      code: undefined,
-      retryAfterMs: 0,
+      text: "",
+      retryAfter: null,
       expected: { kind: "retry", error: error("RATE_LIMITED", BUSY, true), retryAfterMs: 0 },
     },
     {
       name: "fails a request the storage does not implement",
       status: 501,
-      code: "NotImplemented",
-      retryAfterMs: 0,
+      text: s3Error("NotImplemented"),
+      retryAfter: null,
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", refused(501), false) },
     },
     {
       name: "retries a server error",
       status: 500,
-      code: undefined,
-      retryAfterMs: 0,
+      text: "",
+      retryAfter: null,
       expected: { kind: "retry", error: error("STORAGE_ERROR", FAILED, true), retryAfterMs: 0 },
     },
     {
       name: "retries a timeout",
       status: 408,
-      code: undefined,
-      retryAfterMs: 0,
+      text: "",
+      retryAfter: null,
       expected: { kind: "retry", error: error("STORAGE_ERROR", FAILED, true), retryAfterMs: 0 },
     },
     {
       name: "fails a corrupted body",
       status: 400,
-      code: "BadDigest",
-      retryAfterMs: 0,
+      text: s3Error("BadDigest"),
+      retryAfter: null,
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", refused(400), false) },
     },
     {
       name: "fails a part of an aborted upload",
       status: 404,
-      code: "NoSuchUpload",
-      retryAfterMs: 0,
+      text: s3Error("NoSuchUpload"),
+      retryAfter: null,
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", refused(404), false) },
     },
-  ])("$name", ({ status, code, retryAfterMs, expected }) => {
-    expect(classifyAnswer(status, code, retryAfterMs)).toEqual(expected);
+  ])("$name", ({ status, text, retryAfter, expected }) => {
+    expect(classifyAnswer(status, text, retryAfter)).toEqual(expected);
   });
 });
 

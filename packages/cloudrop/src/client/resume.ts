@@ -80,11 +80,7 @@ async function resumeRun(job: Job, id: string, passed: () => void): Promise<Clou
   const { context, args } = job;
   const [entry] = job.entries as [Entry];
   job.listen();
-  // A run from the start: a retry() meanwhile waits for the checks, and this function's own continuation runs first,
-  // settling the file or giving it its upload's run before retry() looks again (M3-U90).
-  const checking = check(context, id, entry.file);
-  entry.run = checking.then(() => {});
-  const checked = await checking;
+  const checked = await check(context, id, entry.file);
   // Cancelled while checking, it ended then (M4-F2): nothing was sent, and the record stays for a later resume.
   if (entry.cancel.signal.aborted) {
     if (!(checked instanceof CloudropError)) checked.unlock();
@@ -107,10 +103,8 @@ async function resumeRun(job: Job, id: string, passed: () => void): Promise<Clou
   for (let part = 1; part <= record.partCount; part++) entry.landed.add(part);
   const upload = newUpload(ticket, entry, unlock, true);
   entry.upload = upload;
-  const run = job.runUpload(upload).finally(job.idle);
-  entry.run = run;
   // Settled once this run ends, a start over included.
-  await run;
+  await job.runUpload(upload).finally(job.idle);
   return null;
 }
 
@@ -141,10 +135,14 @@ export function resumeJob(
   // Until a check passes the job has no route or metadata to ask /upload with, so a retry of the refused file checks
   // again; once one passed, a retry is any job's (M3-U90).
   let checksPassed = false;
-  const run = (job: Job) =>
-    resumeRun(job, id as string, () => {
+  const run = (job: Job) => {
+    const resumed = resumeRun(job, id as string, () => {
       checksPassed = true;
     });
+    // The file's run is the whole of it, checks to settling: a retry() meanwhile waits for all of it (M3-U90, M4-F5).
+    (job.entries[0] as Entry).run = resumed.then(() => {});
+    return resumed;
+  };
   // The run starts only when the arguments passed, the id included.
   return createUploadJob(
     context,

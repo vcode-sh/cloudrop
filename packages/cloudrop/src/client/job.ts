@@ -29,15 +29,8 @@ function handleOf(job: Job, entry: Entry, retry: Retry): FileHandle {
   };
 }
 
-/** Retries every failed file of the job and resolves with every file's current outcome once all have settled. */
-async function retryJob(job: Job, retry: Retry): Promise<UploadResult<unknown>> {
-  const { outcomes, refused } = await retry(job, job.entries);
-  return refused ? fail(refused) : resultOf(outcomes);
-}
-
 export function startJob(context: UploadContext, route: unknown, files: unknown, options: unknown): UploadJob<unknown> {
-  const args = readArguments(route, files, options);
-  return createUploadJob(context, args, firstRun);
+  return createUploadJob(context, readArguments(route, files, options), firstRun);
 }
 
 /**
@@ -69,7 +62,12 @@ export function createUploadJob(
       for (const entry of entries) pauseFile(entry);
     },
     resume: () => entries.forEach(resumeFile),
-    retry: () => (job ? retryJob(job, retry) : done),
+    // Every failed file, resolving with every file's current outcome once all have settled.
+    retry: async () => {
+      if (!job) return done;
+      const { outcomes, refused } = await retry(job, job.entries);
+      return refused ? fail(refused) : resultOf(outcomes);
+    },
     // Taken from the store as they are: neither needs `this`.
     subscribe: store.subscribe,
     getSnapshot: store.get,

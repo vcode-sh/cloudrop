@@ -141,9 +141,11 @@ function probed(upload: Upload, done: Result<unknown>, missing: readonly number[
   upload.probe = false;
   // Only a multipart ticket is probed: each size comes from the plan, without slicing the file (final review M2).
   const { partSize } = ticket as MultipartTicket;
+  // A Set: 0.6 ms instead of 20 ms for an array at 10,000 parts with 9,000 missing (M4-F7).
+  const lacking = new Set(missing);
   for (const part of entry.landed) {
     const size = sizeOfPart(entry.file.size, partSize, part);
-    if (!missing?.includes(part)) entry.progress.sent(part, size, size);
+    if (!lacking.has(part)) entry.progress.sent(part, size, size);
   }
   // The caller counts a repair round for this answer next: given back here.
   if (missing) upload.repairs--;
