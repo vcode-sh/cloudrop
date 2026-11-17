@@ -111,6 +111,8 @@ export function DocumentUploader({ folderId }: { folderId: string }) {
   when the route's schema requires it, and TypeScript says so.
 - `clear()` removes the uploads whose every file ended done or cancelled, for every component on the route. An upload
   with a running or failed file stays: a failed file can still be retried, and the client keeps what it needs for that.
+  Until `clear()` or a reload, the hooks keep every upload with its `File`, so call `clear()` after a page that pastes
+  or drops many large files is done with them.
 - `pause()`, `resume()`, `abort()` and `retry()` act on every file in `files`, so on the route's uploads that another
   component started too.
 
@@ -228,8 +230,9 @@ is `[]` on the server, before the first read and when the read failed. An upload
 not through the hooks, is not followed: call `refresh()` after it.
 
 `resume(upload, file)` continues a record with the file the user picked again, as one more upload in the hook's
-`files`, which every component on the hook's route shows. A browser never gives a page a file back after a reload, so the user has to pick it. What counts as
-the same file, and what the server is asked first: [Resume after reload](resume.md).
+`files`, which every component on the hook's route shows. A browser never gives a page a file back after a reload, so
+the user has to pick it. What counts as the same file, and what the server is asked first:
+[Resume after reload](resume.md).
 
 ## What the hooks return
 

@@ -505,8 +505,10 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
   started inside the publish would list the deleted upload (re-review 2, N5; fix round 2 had dropped the microtask).
   Changes in one burst share that microtask, and a job whose every file has settled holds the read back until its `done`
   settles, which reads anyway: one `abort()` of a 20-file job, or one `/upload` that refuses 20 files, costs one read,
-  not 20 (final review M1, measured 21 before). While a cancelled resume's checks run, that hold also delays the reads
-  other jobs ask for until the checks end; `refresh()` is not held. `[]` on the server, before the first read and when
+  not 20 (final review M1, measured 21 before). The hold covers every job of the factory, not one route: while a
+  settled job waits for its `done` (a cancelled resume's checks, or a cancelled file's `/abort` answer, up to its 10 s
+  deadline), reads other jobs ask for wait too, then run once (final-fix re-review N1, probed); `refresh()` is not
+  held. `[]` on the server, before the first read and when
   the read failed. `refresh()` reads again and resolves with the client's `Result`, so a failure is not lost. A read
   that answers after a newer read started does not replace the newer list.
 - **Why:** design §6.1. The first version read only when `job.done` settled and listed this page's own uploads (review
