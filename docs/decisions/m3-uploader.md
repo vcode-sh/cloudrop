@@ -972,7 +972,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** a page that never calls `resume()` gets no resume, though records are kept until they expire. The
   same file picked into an ordinary `start()` is uploaded again under a new key, and the old upload's parts wait for
   the bucket's lifecycle rule.
-- **Status:** decided (resume plan, tasks 2 and 5).
+- **Status:** in force (resume plan, tasks 2 and 5).
 - **Visible in:** `client.ts`, `client/resume.ts`, `client/types.ts` (`ResumableUpload`), `errors.ts`.
 
 ### M3-U64: only multipart uploads are persisted
@@ -1026,8 +1026,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   1.1 at the earliest. The new-ticket branch exists and is tested.
 - **If wrong (known cost):** a resume between 24 hours and 7 days sends every byte again, and the old parts wait for
   the lifecycle rule (`M3-U55`).
-- **Status:** decided (resume plan, task 5).
-- **Visible in:** `client/resume.ts`, `client/retry-file.ts`.
+- **Status:** in force (resume plan, task 5; how, `M3-U74`).
+- **Visible in:** `client/job-run.ts` (`startOver`), `client/retry-file.ts`.
 
 ### M3-U68: the fingerprint is an edge hash, with a fallback without `crypto.subtle`
 
@@ -1060,8 +1060,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   sent again during the call makes a listed ETag stale and answers a retryable `STORAGE_ERROR` (spec §5.4).
 - **If wrong:** Web Locks exist only in secure contexts. Without them two tabs may send the same parts: harmless to
   the result, since the server verifies, but wasted bytes.
-- **Status:** decided (resume plan, tasks 2, 4 and 5); the lock of a ticket from `/upload` is in force (resume plan
-  task 4), `resume()`'s comes with task 5.
+- **Status:** in force (resume plan, tasks 2, 4 and 5). Task 5 shortened `UPLOAD_IN_USE`'s message to "This upload is
+  being sent in this browser, in this tab or another. Finish or cancel it there, then try again." for size.
 - **Visible in:** `client/locks.ts`, `client/persist.ts`, `errors.ts` (`ClientErrorCode`), `client/failures.ts`
   (`uploadInUse`).
 
@@ -1129,39 +1129,49 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   the finished object. The record is deleted at once. The prefix keeps the name apart from an app's own locks.
 - **If wrong:** a failed file left on a page keeps another tab from resuming it until that page cancels it, retries
   it or closes; `UPLOAD_IN_USE` says so (`M3-U69`).
-- **Status:** in force for tickets from `/upload` (resume plan task 4; how the lock is taken, `M3-U81`); `resume()`'s
-  comes with task 5. Supersedes the draft ruling that a retry refused the lock fails with `UPLOAD_IN_USE`: a retry
+- **Status:** in force (resume plan tasks 4 and 5; how a ticket's lock is taken, `M3-U81`). `resume()` takes the lock
+  as its last check and hands it to the rebuilt upload, which keeps it as a ticket from `/upload` does; a cancel while
+  it checks lets it go. Supersedes the draft ruling that a retry refused the lock fails with `UPLOAD_IN_USE`: a retry
   never asks again.
 - **Visible in:** `client/locks.ts`, `client/persist.ts`.
 
 ### M3-U74: a resumed upload that is gone starts over in the same run
 
-- **Decision:** R5 (resume design §3.4). In a resumed file's first run, `UPLOAD_EXPIRED`, `INVALID_TOKEN` and
-  `NO_SUCH_UPLOAD` from the probe mean "start over": the file does not settle, asks `/upload` for a new ticket, which
-  replaces the record, and sends the whole file, its bytes from 0 (`M3-U36`). Its first outcome (`M3-U35`) is that
-  run's. `retry()`'s new-ticket list (`M3-U31`) gains `NO_SUCH_UPLOAD`.
+- **Decision:** R5 (resume design §3.4), as audit I1 and M9 shape it. `UPLOAD_EXPIRED`, `INVALID_TOKEN` and
+  `NO_SUCH_UPLOAD` from a resumed file's probe mean "start over": the file does not settle, is queued again with no
+  parts and no bytes (`M3-U36`), asks `/upload` for a new ticket with the record's route and metadata, which replaces
+  the record and the lock, and sends the whole file, within the same run. Its first outcome (`M3-U35`) is that run's.
+  This holds for every probe, so a `retry()` of a resumed file whose probe got no answer starts over too when its own
+  probe finds the upload gone, as spec §3.4's "start again from the probe" reads (audit M9). A file cancelled while
+  its probe was in flight ends aborted instead. A refused new `/upload` ends the file failed with that refusal as
+  `M3-U3` gives it to a job of one file, and `done` is `{ data: { files: [failed] }, error }`: the job had started.
+  No `/abort` is sent for the old ticket, as for a retry's new ticket (`M3-U55`; audit M7's suggestion declined,
+  which also saves bytes). `retry()`'s new-ticket list (`M3-U31`) gains `NO_SUCH_UPLOAD`.
 - **Why:** `/complete` answers `NO_SUCH_UPLOAD` only when the multipart upload is gone and no object of this upload's
   `cloudrop-id` and size is stored, so the old ticket can never finish; the user who picked the file wants it stored,
   and ending it failed would only make the page call `retry()`. A probe that `NETWORK_ERROR` or `SERVER_ERROR` answers
   sets `mayBeComplete` as any `/complete` does (`M3-S14`), so a file that may be stored never takes this branch.
 - **If wrong:** the old upload's parts wait for the bucket's lifecycle rule (`M3-U55`). The page sees one outcome per
   run and no failure in between.
-- **Status:** the retry list in force (resume plan task 4, with `M3-U83`); the probe decided (task 5). Amends
-  `M3-U31`.
-- **Visible in:** `client/resume.ts`, `client/retry-file.ts` (`NEEDS_NEW_TICKET`).
+- **Status:** in force (resume plan tasks 4 and 5, with `M3-U83`). Amends `M3-U31`.
+- **Visible in:** `client/file-run.ts` (`runFile`, `GONE`), `client/job-run.ts` (`runUpload`, `startOver`),
+  `client/retry-file.ts` (`NEEDS_NEW_TICKET`), `client/resume.test.ts`, `client/resume-job.test.ts`.
 
 ### M3-U75: the probe's first `PARTS_MISSING` is free
 
-- **Decision:** R6 (resume design §3.4). The probe's first `PARTS_MISSING` consumes none of the `PARTS_MISSING` repair
-  rounds (`M3-S13`); a later one counts as usual. From that answer the snapshot's `bytes` are the sizes of the parts
-  it did not name; before it they are 0.
+- **Decision:** R6 (resume design §3.4), as audit I3 completes it. The probe's first `PARTS_MISSING` consumes none of
+  the `PARTS_MISSING` repair rounds (`M3-S13`); a later one counts as usual. The probe's first answer that lists what
+  landed, success or `PARTS_MISSING`, credits the sizes of the parts it did not name to the snapshot's `bytes`, so a
+  file the probe completes shows its whole size; before it they are 0. Those bytes never reach the pool or the speed:
+  nothing was sent. Any other answer leaves the probe pending, so a `retry()` asks `/complete` again with the free
+  round still unused.
 - **Why:** that answer is the list of what is left, not a repair: counting it would leave a resumed file one repair
   round where every other file has two. Before the answer the client does not know what landed (`M3-U61`), so it
   counts nothing, and progress then only rises (spec §6.4).
 - **If wrong:** progress jumps from 0 to the landed share when the probe answers. A resumed file can meet
   `PARTS_MISSING` three times before it fails.
-- **Status:** decided (resume plan, task 5). Refines `M3-S13` for a resumed file.
-- **Visible in:** `client/upload.ts`.
+- **Status:** in force (resume plan, task 5). Refines `M3-S13` for a resumed file.
+- **Visible in:** `client/upload.ts` (`Upload.probe`, `probed`).
 
 ### M3-U76: `resume()` checks in a fixed order and sends nothing when a check fails
 
@@ -1170,13 +1180,19 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   namespace and has not expired), then the file (`INVALID_INPUT`, `M3-U68`), then the lock (`UPLOAD_IN_USE`,
   `M3-U73`). The first failure ends the job with `{ data: null, error }` before any request. The only option is
   `signal`; the route and metadata come from the record, and the file's id is the client's next sequence number
-  (`M3-U2`).
+  (`M3-U2`). As audit I7 asks: wrong arguments are refused at once with a job of no file, as `start()` refuses them,
+  the options in `start()`'s words; otherwise the job has one file, `queued` while the checks run, its id taken when
+  `resume()` is called; a failed check settles it `failed` with the bare error; `abort()`, the file's `abort()` or the
+  signal during the checks ends it `aborted`, `{ data: null, error: ABORTED }`, with no request, the record left as it
+  was and a lock already taken let go. A store that cannot be read is `STORAGE_ERROR` (`M3-U71`), not `NOT_FOUND`: the
+  upload may still be resumable. The job then stops hearing its signal.
 - **Why:** the cheap checks first, the file is hashed only once a record exists, and the lock last, so a refused call
   never takes a lock it has to release.
 - **If wrong:** a page sees one refusal at a time: a wrong file for an expired record reads as "can no longer be
   resumed", the more useful of the two.
-- **Status:** decided (resume plan, task 5; the messages task 2).
-- **Visible in:** `client/resume.ts`, `client/failures.ts` (`notResumable`, `notSameFile`, `uploadInUse`).
+- **Status:** in force (resume plan, task 5; the messages task 2).
+- **Visible in:** `client/resume.ts`, `client/failures.ts` (`notResumable`, `notSameFile`, `uploadInUse`),
+  `client/resume-checks.test.ts`.
 
 ### M3-U77: what `resumable()` shows of a record
 
@@ -1189,13 +1205,16 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   is the server's until the upload completes, and the metadata may hold what the app does not show (`M3-U62`).
 - **If wrong:** an app that wants to show metadata keeps its own copy. Adding a field later is compatible; removing
   one is not.
-- **Status:** decided (resume plan, task 5).
-- **Visible in:** `client/types.ts` (`ResumableUpload`), `client/resume.ts`.
+- **Status:** in force (resume plan, task 5). `ResumableUpload<TName extends string = string>`; `resumable()` without a
+  route resolves `ResumableUpload<RouteName>[]` (audit M10).
+- **Visible in:** `client/types.ts` (`ResumableUpload`), `client/resume.ts`, `client/forget.test.ts`.
 
 ### M3-U78: `forget()` and its one option
 
 - **Decision:** R9 (resume design §2). `forget()` deletes the records of the client's namespace and
-  `forget({ all: true })` every record of the origin; any other argument is `INVALID_INPUT`. It resolves
+  `forget({ all: true })` every record of the origin; any other argument is `INVALID_INPUT`, `forget({})`,
+  `forget({ all: false })` and an object with another key beside `all` included (audit M10): they are typed out
+  (`forget(options?: { all: true })`) and read as a mistake. It resolves
   `ok({ forgotten: n })`, `ok({ forgotten: 0 })` with persistence off or no `indexedDB`, and `STORAGE_ERROR`
   (`M3-U71`) when the store fails. Uploads already running keep going; one saves a record again only when it gets a
   new ticket.
@@ -1204,8 +1223,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `forget(userId)`, which would otherwise look as if it forgot that user.
 - **If wrong:** an upload running at sign-out finishes under the signed-out user and, with its record gone, cannot be
   resumed after a reload; an app that must stop it aborts the job.
-- **Status:** decided (resume plan, task 5).
-- **Visible in:** `client/resume.ts`, `client.ts`.
+- **Status:** in force (resume plan, task 5).
+- **Visible in:** `client/resume.ts`, `client.ts`, `client/forget.test.ts`.
 
 ### M3-U79: the `persist` and `namespace` options
 
@@ -1228,7 +1247,9 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   that call, so a delete issued when the file ends at once runs after it. The record's `metadata` is the JSON round
   trip of what was passed, which is what `/upload` received. A file the browser can no longer read rejects the
   fingerprint and the record is dropped. A record read back with a field of the wrong type (another library version,
-  another script on the origin) is never returned and is deleted, as an expired one is.
+  another script on the origin), or with a part count its size and part size do not give (audit M2, as
+  `client/answers.ts` checks a live ticket; resume plan task 5), is never returned and is deleted, as an expired one
+  is.
 - **Why:** hashing before queueing let a file cancelled during `/upload` delete its record before the record was
   written, leaving a live token on disk for a cancelled upload (spec §4). A structured clone keeps what JSON drops and
   throws on a function (`DataCloneError`), which `readArguments`' JSON check lets through. A record of another shape
@@ -1281,3 +1302,32 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   second time under a new key.
 - **Status:** in force (resume plan, task 4).
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/persist-failures.test.ts`.
+
+### M3-U84: a resumed upload is rebuilt from its record, and a probe of a finished upload runs `onComplete` again
+
+- **Decision:** audit M8 and M14. `resume()` rebuilds the upload from the record: its ticket is the record's id, key,
+  token, part size, part count and `expiresAt`, verbatim, with no presigned URLs, so every part it sends is signed
+  through `/sign`; every part counts as landed until the probe answers (`M3-U75`). The record is found through the
+  namespace's list, which applies the same checks as `resumable()` (`M3-U72`, `M3-U80`); the store keeps no separate
+  read by id. A probe of an upload whose `/complete` finished before the reload is answered success by the server's
+  `completedBefore` path, which runs the route's `afterVerify` and `onComplete` again; the README says to make them
+  idempotent by `file.id`.
+- **Why:** the record holds every field of a multipart ticket but its URLs, which spec §3.1 never stores. A ticket
+  whose expiry differed from the record's would let `retry()` reuse a dead token (`retry-file.ts`, `needsTicket`). The
+  server cannot tell a probe from a retried `/complete`, and a `/complete` answered but lost is exactly the case the
+  probe settles. One read path for `resumable()` and `resume()` saved 21 B.
+- **If wrong:** an `onComplete` with side effects that are not idempotent runs them twice for that upload, as it
+  would for any `/complete` retried after a lost answer.
+- **Status:** in force (resume plan, task 5).
+- **Visible in:** `client/resume.ts` (`check`, `resumeRun`), `client/records.ts`, `client/resume.test.ts`
+  (`completed`), `README.md`.
+
+### M3-U85: a resumed file the route no longer accepts keeps its record
+
+- **Decision:** audit M7's first suggestion is declined. A probe answered `UNKNOWN_ROUTE` (a deploy removed the
+  route) ends the file `failed` and keeps its record, as any failure other than `M3-U74`'s does (spec §3.4).
+- **Why:** removing it cost 27 B of the 10.5 kB ceiling for a case a deploy creates and a rollback can undo within the
+  record's 24 hours; the record expires, and `forget()` deletes it.
+- **If wrong:** `resumable()` lists that upload until it expires, and each `resume()` of it fails `UNKNOWN_ROUTE`.
+- **Status:** in force (resume plan, task 5).
+- **Visible in:** `client/file-run.ts` (`end`, unchanged).

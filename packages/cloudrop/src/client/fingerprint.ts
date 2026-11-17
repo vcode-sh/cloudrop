@@ -20,14 +20,14 @@ export async function isSameFile(
   record: { name: string; size: number; type: string; lastModified: number; fingerprint: string },
   file: File,
 ): Promise<boolean> {
-  const sameFacts =
-    file.name === record.name &&
-    file.size === record.size &&
-    file.type === record.type &&
-    file.lastModified === record.lastModified;
-  if (!sameFacts) return false;
   try {
-    return (await fingerprintOf(file)) === record.fingerprint;
+    return (
+      file.name === record.name &&
+      file.size === record.size &&
+      file.type === record.type &&
+      file.lastModified === record.lastModified &&
+      (await fingerprintOf(file)) === record.fingerprint
+    );
   } catch {
     // A browser refuses to read a picked file that changed on disk since: it is no longer the upload's file.
     return false;

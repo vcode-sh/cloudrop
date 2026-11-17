@@ -1,7 +1,7 @@
 // Contract: client/records.ts, the store of unfinished multipart uploads (resume spec §3.1, §3.2, §3.6, §3.7; plan
 // rulings R1–R3). One record per upload, kept per namespace; expired ones (less than 60 s left) are never returned and
 // are deleted when seen; operations apply in the order they were made; uploads never hear of a store failure, while
-// list, get and clear report it as STORAGE_ERROR; off or without IndexedDB nothing is read or written.
+// list and clear report it as STORAGE_ERROR; off or without IndexedDB nothing is read or written.
 // Oracle: what the fake IndexedDB holds (`stored()`: structured clones keyed as the browser keys them), literal
 // records and literal timestamps. The fake is the platform boundary; the store under test is the real module.
 
@@ -55,8 +55,11 @@ afterEach(() => {
 
 const storeAt = (): Records => createRecords(true, () => clock);
 
-/** Resolves once every operation queued before it has run (R2): a get of an id no record has. */
-const afterQueued = (records: Records) => records.get("no-such-upload", "nobody");
+/**
+ * Resolves once every operation queued before it has run (R2): a clear of a namespace no record has, which, unlike a
+ * list, deletes no expired record itself.
+ */
+const afterQueued = (records: Records) => records.clear("nobody");
 
 describe("saving and reading", () => {
   it("keeps every field of a saved record, keyed by its id, and lists a copy of it", async () => {
@@ -72,16 +75,7 @@ describe("saving and reading", () => {
     const before = storeAt();
     before.save(SAVED);
     await afterQueued(before);
-    expect(await storeAt().get("u-1", "user-1")).toEqual({ data: SAVED, error: null });
-  });
-
-  it("gets a record only in its own namespace, and null for an unknown id", async () => {
-    const records = storeAt();
-    records.save(SAVED);
-    expect(await records.get("u-1", "user-1")).toEqual({ data: SAVED, error: null });
-    expect(await records.get("u-1", "user-12")).toEqual({ data: null, error: null });
-    expect(await records.get("u-2", "user-1")).toEqual({ data: null, error: null });
-    expect(Object.keys(fake.stored())).toEqual(["u-1"]);
+    expect(await storeAt().list("user-1")).toEqual({ data: [SAVED], error: null });
   });
 });
 
@@ -124,14 +118,6 @@ describe("expiry (R3: less than 60 000 ms left counts as expired)", () => {
     const records = storeAt();
     await saveBoth(records);
     expect((await records.list("user-1")).data?.map((record) => record.id)).toEqual(["u-2"]);
-    expect(Object.keys(fake.stored())).toEqual(["u-2"]);
-  });
-
-  it("get of the record with 59 999 ms left resolves null and deletes it", async () => {
-    const records = storeAt();
-    await saveBoth(records);
-    expect(await records.get("u-1", "user-1")).toEqual({ data: null, error: null });
-    expect(await records.get("u-2", "user-1")).toMatchObject({ data: { id: "u-2" }, error: null });
     expect(Object.keys(fake.stored())).toEqual(["u-2"]);
   });
 
@@ -226,14 +212,12 @@ describe("records of another shape (audit M2: another library version or script 
   it.each([
     { name: "a size that is a string", value: { ...SAVED, id: "u-2", size: "52428800" } },
     { name: "no token", value: { ...SAVED, id: "u-2", token: undefined } },
-  ])("are never listed or got and are deleted when seen: $name", async ({ value }) => {
+    // 50 MiB in 10 MiB parts is 5 parts, as answers.ts checks a live ticket.
+    { name: "a part count its size and part size do not give", value: { ...SAVED, id: "u-2", partCount: 4 } },
+  ])("are never listed and are deleted when seen: $name", async ({ value }) => {
     await putRaw(SAVED);
     await putRaw(value);
-    const records = storeAt();
-    expect(await records.get("u-2", "user-1")).toEqual({ data: null, error: null });
-    expect(Object.keys(fake.stored())).toEqual(["u-1"]);
-    await putRaw(value);
-    expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
+    expect(await storeAt().list("user-1")).toEqual({ data: [SAVED], error: null });
     expect(Object.keys(fake.stored())).toEqual(["u-1"]);
   });
 });
@@ -267,10 +251,10 @@ describe("store failures", () => {
     expect(await records.list("user-1")).toEqual({ data: [], error: null });
     expect(fake.stored()).toEqual({});
     fake.failNext("UnknownError");
-    expect(await records.get("u-1", "user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
+    expect(await records.list("user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
     records.save(SAVED);
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
-    // The save's open failed and the list's worked; the get's failed request kept that connection, not a new one.
+    // The save's open failed and the first list's worked; the failed list's request kept that connection.
     expect(opens).toHaveBeenCalledTimes(2);
   });
 
@@ -300,12 +284,11 @@ describe.each([
     },
   },
 ])("when $name", ({ make }) => {
-  it("lists [], gets null, clears 0 and never opens a database", async () => {
+  it("lists [], clears 0 and never opens a database", async () => {
     const records = make();
     records.save(SAVED);
     records.remove("u-1");
     expect(await records.list("user-1")).toEqual({ data: [], error: null });
-    expect(await records.get("u-1", "user-1")).toEqual({ data: null, error: null });
     expect(await records.clear(null)).toEqual({ data: 0, error: null });
     expect(opens).not.toHaveBeenCalled();
   });
@@ -317,7 +300,6 @@ it("opens R1's database once, lazily, for every operation of a client", async ()
   records.save(SAVED);
   records.remove("u-2");
   await records.list("user-1");
-  await records.get("u-1", "user-1");
   await records.clear("user-12");
   expect(opens.mock.calls).toEqual([["cloudrop", 1]]);
 });

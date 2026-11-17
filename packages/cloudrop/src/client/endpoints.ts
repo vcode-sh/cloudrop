@@ -56,8 +56,8 @@ function parseJson(text: string): unknown {
 /** A non-2xx answer without cloudrop's error body. A 429 page says the cause is load, not a wrong basePath (S-7). */
 const refusal = (status: number): CloudropError => (status === 429 ? serverBusy() : unreadableAnswer(status));
 
-const toError = (body: ErrorBody): CloudropError =>
-  new CloudropError(body.code, body.message, { retryable: body.retryable, parts: body.parts });
+// The body's retryable and parts are the error's options.
+const toError = (body: ErrorBody): CloudropError => new CloudropError(body.code, body.message, body);
 
 export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints {
   /** POSTs `body` as JSON and reads a 2xx answer with `read`. Never rejects. */

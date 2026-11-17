@@ -8,7 +8,8 @@ import type { Ticket } from "./endpoints.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
 import { abortFile, type Entry, outcomeOf, pauseFile, resumeFile, runFile, settle } from "./file-run.ts";
 import { watchConnectivity } from "./lifecycle.ts";
-import { uploadOf } from "./persist.ts";
+import { letGo, uploadOf } from "./persist.ts";
+import { createProgress } from "./progress.ts";
 import { withRetry } from "./retry.ts";
 import type { FileOutcome, UploadResult } from "./types.ts";
 import type { Upload, UploadContext } from "./upload.ts";
@@ -22,7 +23,10 @@ export interface Job {
   readonly signal: AbortSignal;
   /** Ends every file (ruling M3-U38). */
   abort(): void;
-  /** Runs `upload` until its file settles, with the page's connectivity watched meanwhile. */
+  /**
+   * Runs `upload` until its file settles, with the page's connectivity watched meanwhile. A resumed upload that turns
+   * out gone starts over within the run (M3-U74).
+   */
   runUpload(upload: Upload): Promise<void>;
   /** Hears the caller's signal from now on (a run starts), or stops once no file runs or holds its ticket (M3-U38). */
   listen(): void;
@@ -59,7 +63,7 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
   const online = () => {
     for (const entry of entries) if (entry.networkPaused) resumeFile(entry);
   };
-  return {
+  const job: Job = {
     context,
     args,
     entries,
@@ -68,10 +72,12 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
     runUpload(upload) {
       running += 1;
       if (running === 1) unwatch = watchConnectivity(offline, online);
-      return runFile(context, upload).finally(() => {
-        running -= 1;
-        if (running === 0) unwatch();
-      });
+      return runFile(context, upload)
+        .then((gone) => gone && startOver(job, upload.entry))
+        .finally(() => {
+          running -= 1;
+          if (running === 0) unwatch();
+        });
     },
     listen() {
       args.signal.addEventListener("abort", abort);
@@ -79,6 +85,29 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
     },
     idle,
   };
+  return job;
+}
+
+/** `entry` gives its ticket up and waits for a new one, which starts from no parts and no bytes (M3-U36). */
+export function dropTicket(context: UploadContext, entry: Entry): void {
+  // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
+  if (entry.upload) letGo(context, entry.upload);
+  entry.upload = null;
+  entry.landed.clear();
+  entry.progress = createProgress();
+}
+
+/**
+ * A resumed upload whose probe found it gone asks /upload for a new ticket with the record's route and metadata and
+ * sends the whole file, without settling in between (M3-U74). Resolves once the file has settled.
+ */
+async function startOver(job: Job, entry: Entry): Promise<void> {
+  // No /abort for the old ticket, as for a retry's new ticket (M3-U55): the bucket's lifecycle rule frees its parts.
+  dropTicket(job.context, entry);
+  entry.status = "queued";
+  entry.changed(true);
+  await launch(job, [entry]);
+  await entry.run;
 }
 
 /** One file's share of an /upload answer. `whole`: the /upload asked for every file of the job. */

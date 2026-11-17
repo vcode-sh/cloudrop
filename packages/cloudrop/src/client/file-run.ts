@@ -177,12 +177,16 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
   if (!failed) await cleanup;
 }
 
+/** What a resumed upload's probe answers when the upload is gone and was not completed (M3-U74). */
+const GONE = new Set(["UPLOAD_EXPIRED", "INVALID_TOKEN", "NO_SUCH_UPLOAD"]);
+
 /**
  * Sends the file and completes it, one pass at a time: a pause ends the pass, a resume starts the next. `upload` is
  * kept across passes and same-ticket retries, so neither forgets a /complete that may have finished nor the parts that
- * landed. A file cancelled before this starts sends nothing but the /abort that tells the server.
+ * landed. A file cancelled before this starts sends nothing but the /abort that tells the server. Resolves with the
+ * probe's error, the file not settled, when a resumed upload turns out gone: the caller starts it over (M3-U74).
  */
-export async function runFile(context: UploadContext, upload: Upload): Promise<void> {
+export async function runFile(context: UploadContext, upload: Upload): Promise<CloudropError | undefined> {
   const { entry } = upload;
   const { cancel } = entry;
   while (!cancel.signal.aborted) {
@@ -201,11 +205,17 @@ export async function runFile(context: UploadContext, upload: Upload): Promise<v
       letGo(context, upload);
       entry.result = result.data;
       entry.status = "done";
-      return settled(entry);
+      settled(entry);
+      return;
     }
+    const { code } = result.error;
+    if (upload.probe && GONE.has(code) && !cancel.signal.aborted) return result.error;
     // Paused: the next pass starts after resume(). A failure that won the race with the pause ends the file.
-    const paused = result.error.code === "ABORTED" && pass.signal.aborted && !cancel.signal.aborted;
-    if (!paused) return end(context, upload, result.error);
+    const paused = code === "ABORTED" && pass.signal.aborted && !cancel.signal.aborted;
+    if (!paused) {
+      await end(context, upload, result.error);
+      return;
+    }
   }
-  return end(context, upload, aborted());
+  await end(context, upload, aborted());
 }

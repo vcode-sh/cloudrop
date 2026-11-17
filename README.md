@@ -300,18 +300,21 @@ await client.forget();
   with the same timestamp, passes.
 - **`resume(upload, file, options?)`** returns an `UploadJob` of one file with everything a job of `start()` has:
   `subscribe`, `getSnapshot`, `pause`, `resume`, `abort`, `retry` and `done`. The route and the metadata come from the
-  record; `signal` is the only option. Before any request, its `done` resolves `{ data: null, error }` with
-  `INVALID_INPUT` for wrong arguments or a different file, `NOT_FOUND` when there is no unexpired record of that upload
-  in the client's namespace (it finished, was cancelled or expired, or persistence is off), or `UPLOAD_IN_USE` (below).
-- **The server is asked first.** A resumed file starts as `completing`, and its first request is `/complete` with the
-  saved token, which lists the bucket's parts: one `ListParts`, a Class A operation, per resumed file.
+  record; `signal` is the only option. Its one file is `queued` while the record, the file and the lock are checked.
+  When a check fails, its `done` resolves `{ data: null, error }` before any request, with `INVALID_INPUT` for wrong
+  arguments or a different file, `NOT_FOUND` when there is no unexpired record of that upload in the client's
+  namespace (it finished, was cancelled or expired, or persistence is off), `STORAGE_ERROR` when the browser's storage
+  cannot be read, or `UPLOAD_IN_USE` (below); a cancel meanwhile resolves `ABORTED` the same way.
+- **The server is asked first.** Once the checks pass, the file is `completing`, and its first request is `/complete`
+  with the saved token, which lists the bucket's parts: one `ListParts`, a Class A operation, per resumed file.
   - All there, or a `/complete` that finished before the reload: the file ends done without a `PUT`. The route's
     `afterVerify` and `onComplete` run again then, so make them idempotent by `file.id`, as for any retried request.
   - Parts missing: exactly those are sent, then `/complete` again. The parts that landed count in `bytes` from that
     answer; before it, `bytes` is 0.
-  - The upload is gone (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`): the file asks `/upload` once for a new
-    ticket with the record's route and metadata and sends the whole file under a new key, its `bytes` from 0, with no
-    failure in between.
+  - The upload is gone (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`): the file is `queued` again, asks
+    `/upload` once for a new ticket with the record's route and metadata and sends the whole file under a new key, its
+    `bytes` from 0, with no failure in between. The old parts wait for the bucket's lifecycle rule. When that `/upload`
+    is refused, the file ends `failed` with its error.
   - Any other failure ends the file `failed` and keeps its record; `retry()`, or a later `resume()`, asks `/complete`
     again.
 - **What is stored**, one record per upload, in the IndexedDB database `cloudrop`: the upload's id, route and the
@@ -336,7 +339,8 @@ await client.forget();
 - **Namespace and sign-out.** Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by
   default): a client sees only its namespace's records, and the namespace is fixed when the client is created, so
   create a new client when the user changes. Call `forget()` at sign-out: it deletes the namespace's records and
-  resolves `{ data: { forgotten }, error }`; `forget({ all: true })` deletes every record of this origin. Uploads that
+  resolves `{ data: { forgotten }, error }`; `forget({ all: true })` deletes every record of this origin, and any other
+  argument is `INVALID_INPUT`. Uploads that
   are running keep going; abort their jobs to stop them. Without `forget()`, a signed-out user's unfinished uploads,
   tokens included, stay on the browser profile for up to 24 hours, and another user signed in on the same profile and
   namespace could finish them. They stay the first user's files, since `authorize` runs only in `/upload`: re-check the

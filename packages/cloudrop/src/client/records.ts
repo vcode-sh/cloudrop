@@ -3,6 +3,7 @@
 // failure as STORAGE_ERROR, never with the browser's own text.
 
 import { fail, ok, type Result } from "../errors.ts";
+import { countParts } from "../part-size.ts";
 import { storageUnavailable } from "./failures.ts";
 
 /** One multipart upload as IndexedDB keeps it: never a presigned URL, an ETag or a part list (spec §3.1). */
@@ -36,8 +37,6 @@ export interface Records {
    */
   save(record: UploadRecord | Promise<UploadRecord>): void;
   remove(id: string): void;
-  /** The namespace's record with this id, or null (also when it expired: then it is removed). */
-  get(id: string, namespace: string): Promise<Result<UploadRecord | null>>;
   /** The namespace's unexpired records, newest first (`savedAt` descending); expired ones are removed. */
   list(namespace: string): Promise<Result<UploadRecord[]>>;
   /** Deletes the namespace's records, or every record when `namespace` is null; resolves the count. */
@@ -53,7 +52,6 @@ const noRecords: Records = {
   enabled: false,
   save: () => undefined,
   remove: () => undefined,
-  get: async () => ok(null),
   list: async () => ok([]),
   clear: async () => ok(0),
 };
@@ -160,11 +158,18 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
   };
 
   /**
-   * Whether `value`, stored under `id`, is a record this client can use. One that expired, or has another shape, is
-   * deleted. NaN, from an expiresAt that is not a date, compares false: such a record counts as expired.
+   * Whether `value`, stored under `id`, is a record this client can use. One that expired, has another shape, or a
+   * part count its size and part size do not give (as answers.ts checks a live ticket, audit M2), is deleted. NaN, from
+   * an expiresAt that is not a date, compares false: such a record counts as expired.
    */
   const usable = (store: IDBObjectStore, id: IDBValidKey, value: unknown): value is UploadRecord => {
-    if (isRecord(value) && Date.parse(value.expiresAt) - now() >= EXPIRY_MARGIN_MS) return true;
+    if (
+      isRecord(value) &&
+      value.partCount === countParts(value.size, value.partSize) &&
+      Date.parse(value.expiresAt) - now() >= EXPIRY_MARGIN_MS
+    ) {
+      return true;
+    }
     if (value !== undefined) store.delete(id);
     return false;
   };
@@ -186,12 +191,6 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
     remove(id) {
       void enqueue((store) => store.delete(id));
     },
-    get: (id, namespace) =>
-      enqueue((store, settle) =>
-        onResult(store.get(id), (record: unknown) => {
-          settle(usable(store, id, record) && record.namespace === namespace ? record : null);
-        }),
-      ),
     list: (namespace) =>
       enqueue((store, settle) =>
         onResult(store.getAll(), (all: UploadRecord[]) => {

@@ -121,3 +121,19 @@ export interface UploadJob<R> {
   /** The current snapshot: the same object until something changes. */
   getSnapshot(): JobSnapshot<R>;
 }
+
+/**
+ * An unfinished upload this browser keeps, as `resumable()` lists it: enough to ask the user for the file again. A
+ * plain, JSON-safe object; never the upload's token, key or metadata (resume spec §2).
+ */
+export interface ResumableUpload<TName extends string = string> {
+  /** The upload's id, stable across page loads: the ticket's `id`. */
+  id: string;
+  route: TName;
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  /** ISO 8601: when its token expires. A minute before that it is no longer listed. */
+  expiresAt: string;
+}

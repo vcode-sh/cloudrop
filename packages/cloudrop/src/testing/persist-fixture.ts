@@ -16,7 +16,6 @@ import { offsetBytes } from "./storage-contract.ts";
 
 /** Takes any JSON metadata as it is. */
 const anyMetadata: StandardSchema = { "~standard": { version: 1, vendor: "test", validate: (value) => ({ value }) } };
-const files = route({ accept: "*/*", maxSize: "100MB", metadata: anyMetadata, authorize: allowAnyone });
 
 /** Every ticket /upload answered, in order. */
 export interface Issued {
@@ -35,6 +34,13 @@ export const LAST_MODIFIED = 1_763_200_000_000;
 export const threeParts = (): File =>
   new File([offsetBytes(16 * MiB + 5)], "a.bin", { type: "application/octet-stream", lastModified: LAST_MODIFIED });
 export const smallFile = (name: string): File => new File([offsetBytes(1000)], name, { type: "text/plain" });
+/** 24 MiB and 5 bytes: four parts of the 8 MiB plan, the last one 5 bytes. */
+export const FOUR_PARTS = 24 * MiB + 5;
+export const fourParts = (): File =>
+  new File([offsetBytes(FOUR_PARTS)], "b.bin", { type: "application/octet-stream", lastModified: LAST_MODIFIED });
+
+/** Hex SHA-256 of offsetBytes(size), the bytes of every file above, hashed by node:crypto. */
+export const bytesHash = (size: number): string => createHash("sha256").update(offsetBytes(size)).digest("hex");
 
 /** The fingerprint spec §3.3 defines for a file of offsetBytes(size), hashed by node:crypto, not WebCrypto. */
 export function edgeHash(size: number): string {
@@ -57,6 +63,31 @@ export const noSuchUpload = (): Response =>
     },
     { status: 410 },
   );
+
+/** The server's error answer, as server/http.ts writes it. */
+export const serverError = (status: number, code: string, message: string): Response =>
+  Response.json({ error: { code, message, retryable: false } }, { status });
+
+/** The first answer of `faults`, tried in order. */
+export const firstOf =
+  (...faults: Fault[]): Fault =>
+  async (call) => {
+    for (const fault of faults) {
+      const answer = await fault(call);
+      if (answer) return answer;
+    }
+    return undefined;
+  };
+
+/** A fault that answers nothing and keeps the JSON body of every call labelled `label`, for the test to read. */
+export function bodiesOf(label: string) {
+  const bodies: unknown[] = [];
+  const fault: Fault = (call) => {
+    if (call.label === label) bodies.push(JSON.parse(String(call.init.body)));
+    return undefined;
+  };
+  return { fault, bodies };
+}
 
 /** A request that never reached the server: NETWORK_ERROR, which for /complete leaves the doubt that it finished. */
 export const unreachable = (): Promise<never> => Promise.reject(new TypeError("Failed to fetch"));
@@ -113,6 +144,18 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
     return answer;
   });
   const issued: Issued[] = [];
+  // The ids of the files whose onComplete ran, in order: a probe of a finished upload runs it again (audit M8).
+  const completed: string[] = [];
+  const files = route({
+    accept: "*/*",
+    maxSize: "100MB",
+    metadata: anyMetadata,
+    authorize: allowAnyone,
+    onComplete: ({ file }) => {
+      completed.push(file.id);
+      return null;
+    },
+  });
   const fixture = clientFixture(
     { files },
     {
@@ -132,13 +175,30 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
   // Each multipart ticket of a persisting client hashes its file exactly once (audit C1, M3-U80).
   const persisting = options?.persist !== false && !noIndexedDb;
   const expectedHashes = () => (persisting ? issued.filter((ticket) => ticket.kind === "multipart").length : 0);
-  const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options });
   return {
     db,
     locks,
     issued,
+    completed,
     fixture,
-    client,
+    client: createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options }),
+    /**
+     * The page reloads: the browser lets go of its locks, and a new client with the same options starts on the same
+     * IndexedDB, server and bucket. The old client is left as it is: nothing it holds reaches the bucket any more.
+     */
+    reload(changed?: ClientOptions) {
+      locks.releaseAll();
+      return createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options, ...changed });
+    },
+    /** Hex SHA-256 of the object the bucket stores at `key`, or null when there is none. */
+    async storedHash(key: string): Promise<string | null> {
+      const signed = await fixture.server.storage.presignGet(key, { expiresIn: 60 });
+      const response = await fixture.server.fake.fetch(signed.data?.url ?? "", { method: "GET" });
+      if (!response.ok) return null;
+      return createHash("sha256")
+        .update(new Uint8Array(await response.arrayBuffer()))
+        .digest("hex");
+    },
     /** How many files were hashed for a fingerprint. */
     hashedFiles: () => hashedFiles,
     /** The requests sent from now on. */
@@ -160,4 +220,24 @@ export function persistFixture({ hash, fault = () => undefined, options, noIndex
       }
     },
   };
+}
+
+export const METADATA = { album: "Trip" };
+export const nth = (label: string, n: number) => (call: FaultCall) => call.label === label && call.nth === n;
+/** The page before the reload sends one PUT at a time: holding its PUT part 3 leaves parts 1 and 2 in the bucket. */
+export const partThree: (call: FaultCall) => boolean = nth("PUT part 3", 1);
+
+/**
+ * One PUT at a time, so the order of requests is fixed. The page before the reload starts a four-part file with
+ * METADATA and is interrupted once `held` holds a call; the new client lists that upload.
+ */
+export async function reloaded(held: ReturnType<typeof gate>, ...faults: Fault[]) {
+  const setup = persistFixture({ fault: firstOf(held.fault, ...faults), options: { concurrency: 1 } });
+  setup.client.start("files", fourParts(), { metadata: METADATA });
+  await held.reached;
+  await setup.drained();
+  const client = setup.reload();
+  const [upload] = (await client.resumable()).data ?? [];
+  if (!upload) throw new Error("The page before the reload left no record.");
+  return { ...setup, client, upload, sent: setup.from() };
 }

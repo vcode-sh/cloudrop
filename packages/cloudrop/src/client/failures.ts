@@ -5,14 +5,8 @@ import { CloudropError } from "../errors.ts";
 
 /** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
 export const withFile = (error: CloudropError, { id, file }: { id: string; file: File }): CloudropError =>
-  new CloudropError(error.code, error.message, {
-    retryable: error.retryable,
-    status: error.status,
-    storageCode: error.storageCode,
-    parts: error.parts,
-    file: { id, name: file.name },
-    cause: error,
-  });
+  // The spread copies the error's own fields (retryable, status, storageCode, parts), never its message or cause.
+  new CloudropError(error.code, error.message, { ...error, file: { id, name: file.name }, cause: error });
 
 export const aborted = (): CloudropError =>
   new CloudropError("ABORTED", "The upload was cancelled. Start it again to upload the file.");
@@ -22,7 +16,7 @@ export const aborted = (): CloudropError =>
 export const uploadInUse = (): CloudropError =>
   new CloudropError(
     "UPLOAD_IN_USE",
-    "This upload is already being sent in this browser, in this tab or another. Let that upload finish or cancel it, then try again.",
+    "This upload is being sent in this browser, in this tab or another. Finish or cancel it there, then try again.",
   );
 
 export const notResumable = (): CloudropError =>

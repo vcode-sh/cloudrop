@@ -1,6 +1,6 @@
-// Type tests for cloudrop/client (decisions S2 and S3; M3-O2 for the wire name `id`). `bun run typecheck` compiles this
-// file: every expectTypeOf and every expect-error directive is an assertion. Oracle: the route definitions below. At
-// run time the one test only keeps Vitest from reporting an empty file.
+// Type tests for cloudrop/client (decisions S2 and S3; M3-O2 for the wire name `id`; M3-U77 and M3-U78 for resume).
+// `bun run typecheck` compiles this file: every expectTypeOf and every expect-error directive is an assertion. Oracle:
+// the route definitions below. At run time the tests only keep Vitest from reporting an empty file.
 
 import { describe, expectTypeOf, it } from "vitest";
 import {
@@ -9,6 +9,7 @@ import {
   createCloudropClient,
   type MultipartTicket,
   type Result,
+  type ResumableUpload,
   type RouteMetadata,
   type RouteName,
   type RouteResult,
@@ -98,5 +99,27 @@ describe("cloudrop/client types", () => {
     expectTypeOf<RouteName<typeof cloudrop>>().toEqualTypeOf<"avatar" | "notes" | "optional">();
     expectTypeOf<RouteMetadata<typeof cloudrop, "avatar">>().toEqualTypeOf<{ albumId: string }>();
     expectTypeOf<RouteResult<typeof cloudrop, "notes">>().toEqualTypeOf<null>();
+  });
+
+  it("types resume after a reload by the record's route (audit M10)", () => {
+    expectTypeOf(client.resumable()).toEqualTypeOf<
+      Promise<Result<ResumableUpload<"avatar" | "notes" | "optional">[]>>
+    >();
+    expectTypeOf(client.resumable("avatar")).toEqualTypeOf<Promise<Result<ResumableUpload<"avatar">[]>>>();
+    // @ts-expect-error: there is no route named "banner".
+    client.resumable("banner");
+    expectTypeOf<ResumableUpload>().toEqualTypeOf<ResumableUpload<string>>();
+    // Refused at once at run time: an upload with no id sends nothing.
+    const avatar = {} as ResumableUpload<"avatar">;
+    expectTypeOf(client.resume(avatar, file)).toEqualTypeOf<UploadJob<{ url: string | null; at: string }>>();
+    expectTypeOf(
+      client.resume({} as ResumableUpload<"notes">, file, { signal: new AbortController().signal }),
+    ).toEqualTypeOf<UploadJob<null>>();
+    // @ts-expect-error: the metadata is the record's.
+    client.resume(avatar, file, { metadata: { albumId: "a" } });
+    expectTypeOf(client.forget()).toEqualTypeOf<Promise<Result<{ forgotten: number }>>>();
+    client.forget({ all: true });
+    // @ts-expect-error: forget() takes nothing or { all: true } (ruling M3-U78).
+    client.forget({ all: false });
   });
 });

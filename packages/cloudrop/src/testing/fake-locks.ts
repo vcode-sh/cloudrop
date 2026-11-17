@@ -8,12 +8,15 @@ export interface FakeLocks {
   held(): string[];
   /** Holds `name` as another tab would, until the returned function is called. */
   holdElsewhere(name: string): () => void;
+  /** Lets go of every lock this page holds, as the browser does when the page unloads. */
+  releaseAll(): void;
 }
 
 type Callback = (lock: { name: string; mode: "exclusive" } | null) => unknown;
 
 export function fakeLocks(): FakeLocks {
-  const mine = new Set<string>();
+  // Each hold is its own token: a hold let go by releaseAll() never ends a later one of the same name.
+  const mine = new Map<string, symbol>();
   const elsewhere = new Set<string>();
   const locks = {
     // As LockManager.request: the callback runs after request() returns, gets null when the lock is taken, and the
@@ -23,20 +26,22 @@ export function fakeLocks(): FakeLocks {
       if (options.ifAvailable !== true) throw new TypeError("fakeLocks only grants requests made with ifAvailable.");
       await Promise.resolve();
       if (mine.has(name) || elsewhere.has(name)) return callback(null);
-      mine.add(name);
+      const hold = Symbol(name);
+      mine.set(name, hold);
       try {
         return await callback({ name, mode: "exclusive" });
       } finally {
-        mine.delete(name);
+        if (mine.get(name) === hold) mine.delete(name);
       }
     },
   };
   return {
     locks,
-    held: () => [...mine].sort(),
+    held: () => [...mine.keys()].sort(),
     holdElsewhere(name) {
       elsewhere.add(name);
       return () => elsewhere.delete(name);
     },
+    releaseAll: () => mine.clear(),
   };
 }

@@ -49,7 +49,7 @@ export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): 
   }
   // Without waiting for the answer: no other holder can know an id /upload just made (ruling M3-U81).
   const unlock = persisted ? lockUpload(ticket.id).release : () => {};
-  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock };
+  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe: false };
 }
 
 /**

@@ -4,9 +4,7 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
-import { allSettled, type Job, launch } from "./job-run.ts";
-import { letGo } from "./persist.ts";
-import { createProgress } from "./progress.ts";
+import { allSettled, dropTicket, type Job, launch } from "./job-run.ts";
 import type { FileOutcome } from "./types.ts";
 
 /** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
@@ -34,13 +32,8 @@ function needsTicket({ upload, error }: Entry): boolean {
  * speed starts from 0 when the file sends again, as on every start. */
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
   job.context.leftovers.release(entry);
-  if (fresh) {
-    // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
-    if (entry.upload) letGo(job.context, entry.upload);
-    entry.upload = null;
-    entry.landed.clear();
-    entry.progress = createProgress();
-  } else if (entry.upload) {
+  if (fresh) dropTicket(job.context, entry);
+  else if (entry.upload) {
     // The same ticket repairs from round 0 again (M3-U50), and sends again the parts its last /complete found missing.
     entry.upload.repairs = 0;
     if (entry.error?.code === "PARTS_MISSING") for (const part of entry.error.parts ?? []) entry.landed.delete(part);

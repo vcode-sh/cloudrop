@@ -7,8 +7,9 @@ import { startJob } from "./client/job.ts";
 import { createLeftovers } from "./client/lifecycle.ts";
 import { createPool } from "./client/pool.ts";
 import { createRecords } from "./client/records.ts";
+import { forget, resumable, resumeJob } from "./client/resume.ts";
 import { createPut } from "./client/transport.ts";
-import type { FileOutcome, UploadJob, UploadResult } from "./client/types.ts";
+import type { FileOutcome, ResumableUpload, UploadJob, UploadResult } from "./client/types.ts";
 import type { UploadContext } from "./client/upload.ts";
 import { configError, fail, ok, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
@@ -19,6 +20,7 @@ export type {
   FileSnapshot,
   FileStatus,
   JobSnapshot,
+  ResumableUpload,
   UploadJob,
   UploadResult,
 } from "./client/types.ts";
@@ -107,6 +109,21 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
     file: File,
     ...options: UploadArguments<RouteMetadata<TCloudrop, TName>>
   ): Promise<Result<CompleteResponse<RouteResult<TCloudrop, TName>>>>;
+  /** The unfinished uploads this browser keeps for the client's namespace, newest first: of `route`, or of all. */
+  resumable<TName extends RouteName<TCloudrop> = RouteName<TCloudrop>>(
+    route?: TName,
+  ): Promise<Result<ResumableUpload<TName>[]>>;
+  /**
+   * Continues an unfinished upload with the file the user picked again: the server is asked first which parts the
+   * bucket lacks, and only those are sent. The route and the metadata are the upload's own.
+   */
+  resume<TName extends RouteName<TCloudrop>>(
+    upload: ResumableUpload<TName>,
+    file: File,
+    options?: { signal?: AbortSignal },
+  ): UploadJob<RouteResult<TCloudrop, TName>>;
+  /** Deletes the namespace's unfinished uploads, which sign-out should do, or every one in this browser with `all`. */
+  forget(options?: { all: true }): Promise<Result<{ forgotten: number }>>;
 }
 
 /** A one-file job's result as that file's Result (ruling M3-U5). */
@@ -194,5 +211,9 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     start: (route, files, ...rest) =>
       startJob(context, route, files, rest[0]) as UploadJob<RouteResult<TCloudrop, typeof route>>,
     upload: upload as CloudropClient<TCloudrop>["upload"],
+    resumable: (route) => resumable(context, route) as Promise<Result<ResumableUpload<typeof route & string>[]>>,
+    resume: (upload, file, options) =>
+      resumeJob(context, upload, file, options) as UploadJob<RouteResult<TCloudrop, typeof upload.route>>,
+    forget: (options) => forget(context, options),
   };
 }

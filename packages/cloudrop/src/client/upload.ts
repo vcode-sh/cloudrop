@@ -62,6 +62,11 @@ export interface Upload {
   dropped: boolean;
   /** Lets go of the upload's Web Lock, held while the page keeps the ticket (M3-U73); a no-op when none was taken. */
   unlock(): void;
+  /**
+   * Rebuilt from a record by resume() and still waiting for its probe's first answer that lists what landed: success
+   * or PARTS_MISSING (resume spec §3.4). Until then every part counts as landed and no byte as sent.
+   */
+  probe: boolean;
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -120,6 +125,24 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
   return { signal, first: [{ partNumber: 1, ...ticket.put }], put, sign };
 }
 
+/**
+ * A resumed upload's probe got `done`. Its first answer that lists what landed, success or PARTS_MISSING naming
+ * `missing`, ends the probe: the parts it did not name count their whole size from now; no byte flowed, so neither the
+ * pool nor the speed hears of them (M3-U75, audit I3). That PARTS_MISSING is the list of what is left, not a repair:
+ * it takes no repair round. Any other answer leaves the probe for a retry to send again.
+ */
+function probed(upload: Upload, done: Result<unknown>, missing: readonly number[] | undefined): void {
+  if (done.error && !missing) return;
+  const { entry, ticket } = upload;
+  upload.probe = false;
+  for (const part of entry.landed) {
+    const size = bodyOf(ticket, entry.file, part).size;
+    if (!missing?.includes(part)) entry.progress.sent(part, size, size);
+  }
+  // The caller counts a repair round for this answer next: given back here.
+  if (missing) upload.repairs--;
+}
+
 /** Sends the parts that have not landed and completes the file. ABORTED when `signal` (the pass's) fired first. */
 export async function sendAndComplete(
   context: UploadContext,
@@ -150,6 +173,7 @@ export async function sendAndComplete(
     moveTo(entry, "completing");
     const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
+    if (upload.probe) probed(upload, done, missing);
     if (!missing?.length || upload.repairs === REPAIR_ROUNDS) return done;
     upload.repairs++;
     for (const partNumber of missing) entry.landed.delete(partNumber);
