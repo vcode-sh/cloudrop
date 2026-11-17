@@ -1503,8 +1503,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   final by its `retryable`. The wait after a refusal counts as running (`M3-U49` as amended), so the page's `offline`
   ends it and holds the file until `online` asks at once (`M3-U39`). The backoff after an `/upload` that failed as a
   whole is not watched, like that `/upload` and the job's own (`M3-U49`), except a start over's, which runs inside its
-  run's bracket (`M3-U74`): `offline` reaches it only while another file of the job runs and the page fires it;
-  otherwise the re-ask goes through its budget as the job's own `/upload` does. A pause does not stop an `/upload`
+  run's bracket (`M3-U74`). Otherwise `offline` reaches that backoff only while another file of the job runs and the
+  page fires it, and the re-ask goes through its budget as the job's own `/upload` does. A pause does not stop an `/upload`
   already sent: a ticket it brings waits paused, as the job's own `/upload` does. The file's `abort()`, `job.abort()`
   and the caller's signal end the file `aborted` at once and send nothing more: they end the wait and abort an `/upload`
   in flight (`M3-U51`). For a job of one file, a cancel during its `job.retry()`'s new-ticket `/upload` therefore
