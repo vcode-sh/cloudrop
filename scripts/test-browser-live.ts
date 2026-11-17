@@ -77,10 +77,15 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   });
 }
 
+/** Files or filters from the command line; they go to both passes. */
+const selected = process.argv.slice(2);
+// A selection may name a file of the other pass only; without one, a pass that finds no tests fails the lane.
+const passWithNoTests = selected.length > 0 ? ["--pass-with-no-tests"] : [];
+
 /** Runs Playwright once with `extra` in its environment and answers its exit code. */
 async function runPlaywright(extra: Record<string, string>): Promise<number> {
   closed = false;
-  const running = spawn("bunx", ["playwright", "test", "--pass-with-no-tests", ...process.argv.slice(2)], {
+  const running = spawn("bunx", ["playwright", "test", ...passWithNoTests, ...selected], {
     cwd: `${root}examples/next`,
     env: {
       ...process.env,

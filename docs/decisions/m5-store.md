@@ -1280,3 +1280,18 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/store.ts` TSDoc, `src/server/sweep.test.ts`.
+
+### M5-T96: a browser pass that selects no tests fails the lane, unless arguments chose the files
+
+- **Decision:** `scripts/test-browser.sh` and `scripts/test-browser-live.ts` pass `--pass-with-no-tests` to Playwright
+  only when the command line selects files or filters (bash `${1:+--pass-with-no-tests}`, TS
+  `selected.length > 0`). A run without arguments whose stateless or store pass finds no tests now fails.
+- **Why:** final review M8. A store row renamed out of `testMatch` (for example `lab.store.browser.spec.ts`) left the
+  store pass empty, and the lane stayed green. The flag is needed only when an argument names a file of the other
+  pass. Measured in `examples/next`: `playwright test does-not-exist.browser.test.ts` exits 1 ("No tests found")
+  without the flag and 0 with it.
+- **If wrong:** a developer who passes a Playwright option that is not a file (`--headed`) also gets the flag; the
+  default run, which CI uses, is the one guarded.
+- **Status:** decided.
+- **Source:** final fix round, 2026-11-17.
+- **Visible in:** `scripts/test-browser.sh`, `scripts/test-browser-live.ts`.

@@ -76,7 +76,8 @@ export CLOUDROP_EXAMPLE_PREFIX=browser
 export CLOUDROP_SETUP_ENV_FILE=0
 cd examples/next
 bun run setup:rustfs
-# Arguments go to both passes, for example one file: bun run test:browser lab.browser.test.ts
-bunx playwright test --pass-with-no-tests "$@"
+# Arguments go to both passes, for example one file: bun run test:browser lab.browser.test.ts. Only then may a pass
+# select nothing (the file belongs to the other pass); without arguments an empty pass fails the lane.
+bunx playwright test ${1:+--pass-with-no-tests} "$@"
 # A quota of 50 MB: the store rows' refusal sends a 51 MiB file.
-CLOUDROP_EXAMPLE_STORE="$STORE_DB" CLOUDROP_EXAMPLE_QUOTA_MB=50 bunx playwright test --pass-with-no-tests "$@"
+CLOUDROP_EXAMPLE_STORE="$STORE_DB" CLOUDROP_EXAMPLE_QUOTA_MB=50 bunx playwright test ${1:+--pass-with-no-tests} "$@"
