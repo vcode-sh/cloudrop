@@ -192,15 +192,18 @@ Abandoned uploads keep their reservation in the quota and may leave parts in the
 ([The sweep](store.md#the-sweep)). Run it from the worker as a scheduled job, not in the API:
 
 ```ts
-// packages/queue/src/queues/upload-sweep.ts
-export const uploadSweep = defineQueue({
-  name: "upload-sweep",
-  key: () => "sweep",
-  payload: z.object({}),
-  schedules: { hourly: { cron: "41 * * * *", payload: {}, timeZone: "UTC" } },
-});
+// The worker process, with BullMQ: a job scheduler adds the sweep job every hour. Any queue with cron schedules
+// works the same way.
+import { Queue, Worker } from "bullmq";
 
-// apps/worker: the handler
+const connection = { host: "127.0.0.1", port: 6379 };
+await new Queue("upload-sweep", { connection }).upsertJobScheduler(
+  "hourly",
+  { pattern: "41 * * * *", tz: "UTC" },
+  { name: "sweep" },
+);
+new Worker("upload-sweep", () => sweepAll(uploads.api), { connection });
+
 async function sweepAll(api: Uploads["api"]) {
   let cursor: string | undefined;
   do {

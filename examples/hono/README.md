@@ -43,6 +43,9 @@ bun run worker                                # optional, in another terminal: t
 
 Then start the web app ([`examples/vite-react`](../vite-react/README.md)) and open <http://localhost:5173>.
 
+The example runs the package's built output, so after changing `packages/cloudrop` run `bun run build` in the
+repository root and restart `bun run dev`.
+
 `bun run setup:rustfs` creates the bucket `cloudrop-example-hono`, sets a CORS rule for `http://localhost:5173` (the
 web app's origin: the browser sends the bytes from there, so the rule never names the API's), checks that a browser
 preflight from it is allowed, adds a lifecycle rule that aborts incomplete multipart uploads after a day, and writes

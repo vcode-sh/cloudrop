@@ -41,7 +41,7 @@ export function createUploads(deps: UploadsDeps) {
           prefix: ({ userId }) => `users/${userId}/avatar`,
           owner: ({ userId }) => userId,
           onComplete: async ({ tx, userId, file }) => {
-            // FOR UPDATE: two replacements of one avatar take turns, so each deletes the file the other replaced. Two
+            // FOR UPDATE: two replacements of one avatar take turns, so each deletes the file it replaced. Two
             // first avatars at once still race (no row to lock): the loser's file stays in the list for a delete.
             const [previous] = await tx
               .select({ fileId: avatar.fileId })
