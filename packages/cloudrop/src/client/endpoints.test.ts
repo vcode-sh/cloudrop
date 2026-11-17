@@ -317,6 +317,28 @@ describe("a server that never answers (M4-F3)", () => {
     });
   });
 
+  it("gives /complete up after 120 s when its headers came but its body never ends", async () => {
+    vi.useFakeTimers();
+    // Headers at once, then a body that only errors when the request is aborted, as a browser's does.
+    const stalledBody: ClientFetch = async (_, init) =>
+      new Response(
+        new ReadableStream({
+          start(stream) {
+            init.signal?.addEventListener("abort", () => stream.error(new DOMException("Aborted.", "AbortError")));
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    const error = createEndpoints("/api/cloudrop", stalledBody).complete("token").then(errorOf);
+    await vi.advanceTimersByTimeAsync(119_999);
+    const beforeTimeout = await settledNow(error);
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ beforeTimeout, afterTimeout: await settledNow(error) }).toEqual({
+      beforeTimeout: "pending",
+      afterTimeout: unreachable,
+    });
+  });
+
   it("answers ABORTED, not NETWORK_ERROR, when the caller cancels before the timeout", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();

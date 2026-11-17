@@ -286,3 +286,40 @@ describe("an /upload answer that carries the code ABORTED", () => {
     },
   );
 });
+
+describe("a one-file /upload on its way", () => {
+  it("pauses its file on offline; a ticket it brings waits paused until online (M4-F9 S9)", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let arrived = () => {};
+    const reached = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const { fixture, client, page } = setup(async ({ nth }) => {
+      if (nth === 1) return refusedAnswer(storageDownRefusal);
+      arrived();
+      await held;
+      return undefined;
+    });
+    const job = client.start("files", [fileOf("a.bin")]);
+    await reached;
+    // As a browser does: navigator.onLine follows the events, and a run that starts reads it.
+    vi.stubGlobal("navigator", { onLine: false });
+    page.fire("offline");
+    const whileAsking = statuses(job);
+    release();
+    await answered();
+    const ticketOffline = { statuses: statuses(job), requests: [...fixture.requests] };
+    vi.stubGlobal("navigator", { onLine: true });
+    page.fire("online");
+    const { data } = await job.done;
+    expect({ whileAsking, ticketOffline, outcomes: data?.files.map(outcomeOf), requests: fixture.requests }).toEqual({
+      whileAsking: ["paused"],
+      ticketOffline: { statuses: ["paused"], requests: ["POST /upload", "POST /upload"] },
+      outcomes: [{ status: "done" }],
+      requests: ["POST /upload", "POST /upload", "PUT object", "POST /complete"],
+    });
+  });
+});

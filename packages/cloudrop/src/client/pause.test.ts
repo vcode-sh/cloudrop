@@ -11,6 +11,7 @@ import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault, lostPart } from "../testing/client-fixture.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
+import { firstOf, gate as heldCalls, threeParts } from "../testing/persist-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone });
@@ -327,6 +328,49 @@ describe("abort of a paused file", () => {
       beforeAnswer: { settled: false, status: "aborted" },
       code: "ABORTED",
       last: "POST /abort",
+    });
+  });
+});
+
+describe("the URLs a paused file signed", () => {
+  it("serve its next pass: a URL renewed before the pause is not renewed again (M4-F8)", async () => {
+    const T0 = Date.parse("2026-11-17T12:00:00.000Z");
+    vi.setSystemTime(T0);
+    const upload = heldCalls((call) => call.label === "POST /upload");
+    const part2 = heldCalls((call) => call.label === "PUT part 2" && call.nth === 1);
+    const fixture = clientFixture(
+      { files },
+      {
+        multipartThreshold: "8MB",
+        // The ticket is signed at T0; it reaches the page 850 s later, when its 900 s URLs expire within the minute.
+        fault: firstOf(async (call) => {
+          if (call.label !== "POST /upload") return undefined;
+          const answer = await call.forward(call.init);
+          await upload.fault(call);
+          return answer;
+        }, part2.fault),
+      },
+    );
+    // fetch PUTs, one at a time, so the requests come in a fixed order.
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, concurrency: 1 });
+    const job = client.start("files", threeParts());
+    await upload.reached;
+    vi.setSystemTime(T0 + 850_000);
+    upload.open();
+    await part2.reached;
+    job.pause();
+    await everyMicrotask();
+    job.resume();
+    const { error } = await job.done;
+
+    expect({ error, requests: fixture.requests }).toEqual({
+      error: null,
+      requests: [
+        // Each part's worker renews its URL before it waits for the one connection.
+        ...["POST /upload", "POST /sign", "POST /sign", "POST /sign", "PUT part 1", "PUT part 2"],
+        // The next pass sends parts 2 and 3 on the URLs renewed above, renewing neither again.
+        ...["PUT part 2", "PUT part 3", "POST /complete"],
+      ],
     });
   });
 });
