@@ -94,8 +94,10 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:chaos
 
-  # Nightly and manual only: a job of files under seeded random faults (M3-K7). --silent=false prints the seed even
-  # when the run passes; replay a red night locally with CLOUDROP_CHAOS_SEED=<seed> bun run test:chaos:soak.
+  # Nightly and manual only: jobs of files under seeded random faults (M3-K7). The seed is in each test's title;
+  # --silent=false also logs it, and each job's failure counts, when the run passes. CLOUDROP_CHAOS_SEED=<seed> bun run
+  # test:chaos:soak reruns the same files and fault stream, but requests draw in arrival order, so the faults can land
+  # on other requests: a red run prints the requests and faults it saw.
   chaos-soak:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: check
