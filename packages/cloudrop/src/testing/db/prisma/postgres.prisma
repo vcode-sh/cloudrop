@@ -1,0 +1,50 @@
+// The test models of the store's tables on Postgres (spec §3), mapped to the shipped column names. scripts/test-db.sh
+// generates the client into packages/cloudrop/.prisma-client/postgres (git-ignored); cloudrop's store uses only raw SQL.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../../../.prisma-client/postgres"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model CloudropFile {
+  id          String    @id
+  route       String
+  key         String
+  owner       String?
+  status      String
+  name        String
+  type        String
+  size        BigInt
+  uploadId    String?   @map("upload_id")
+  metadata    String?
+  result      String?
+  claim       String?
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz(6)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime  @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @map("updated_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+  cleanedAt   DateTime? @map("cleaned_at") @db.Timestamptz(6)
+
+  @@index([status, expiresAt])
+  @@index([status, claimedAt])
+  @@index([status, cleanedAt, endedAt])
+  @@index([owner, status])
+  @@index([key])
+  @@map("cloudrop_files")
+}
+
+model CloudropUsage {
+  owner         String   @id
+  reservedBytes BigInt   @map("reserved_bytes")
+  activeBytes   BigInt   @map("active_bytes")
+  files         Int
+  updatedAt     DateTime @map("updated_at") @db.Timestamptz(6)
+
+  @@map("cloudrop_usage")
+}

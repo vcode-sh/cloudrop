@@ -15,6 +15,7 @@
     "test:live": "bun scripts/test-live-r2.ts",
     "test:rustfs": "scripts/test-rustfs.sh",
     "test:wrangler": "scripts/test-wrangler.sh",
+    "test:db": "scripts/test-db.sh",
     "test:chaos": "scripts/test-chaos.sh",
     "test:chaos:soak": "scripts/test-chaos.sh soak",
     "test:browser": "scripts/test-browser.sh",

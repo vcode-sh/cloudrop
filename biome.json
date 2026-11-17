@@ -8,6 +8,7 @@
       "!spikes",
       "!**/.wrangler",
       "!**/.state",
+      "!**/.prisma-client",
       "!**/.next",
       "!**/next-env.d.ts",
       "!**/test-results",

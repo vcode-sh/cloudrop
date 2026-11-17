@@ -18,6 +18,7 @@
   "exclude": [
     "**/*.test.ts",
     "src/testing/chaos-*.ts",
+    "src/testing/db/**",
     "src/testing/page-events.ts",
     "src/testing/persist-fixture.ts",
     "src/testing/react-fixture.ts",
