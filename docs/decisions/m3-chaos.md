@@ -61,9 +61,10 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 - **If wrong:** zero jitter hides a bug that only shows with a real wait between attempts; the soak and any real-time
   stall row keep real timing in reach. If the clock does not drive real XHR, the browser's stall is proven only
   nightly.
-- **Status:** decided (plan Tasks 5 and 6; the spike's result gets its own entry).
+- **Status:** decided (plan Tasks 5 and 6). The spike passed: the browser's stall row runs on every pull request under
+  Playwright's clock, and the nightly fallback is not needed for the browser (`M3-K9`).
 - **Source:** chaos design §3.1; research §5 Q3.
-- **Visible in:** the `*.chaos.integration.test.ts` files, `examples/next/app/chaos.browser.test.ts`; the Node
+- **Visible in:** the `*.chaos.integration.test.ts` files, `examples/next/app/stalls.chaos.browser.test.ts`; the Node
   lane's real-time stall and throttle rows run nightly in `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`
   (`M3-K10`).
 
@@ -90,7 +91,7 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 - **Status:** decided (design §4 rows 8 and 9).
 - **Source:** chaos design §1, §4; research §3.2, §5 Q6.
 - **Visible in:** `packages/cloudrop/src/chaos/bucket-faults.chaos.integration.test.ts`,
-  `examples/next/app/chaos.browser.test.ts`.
+  `examples/next/app/bucket-faults.chaos.browser.test.ts`.
 
 ### M3-K6: the proxy lives in `src/testing/`
 
@@ -139,7 +140,29 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 
 ## Execution rulings
 
-`M3-K9` is reserved for the result of the `page.clock` spike (`M3-K3`).
+### M3-K9: the browser's stall row runs on every pull request, under Playwright's clock
+
+- **Decision:** design §4 row 10 runs in the browser lane (`bun run test:browser`) on every pull request.
+  `page.clock.install()` comes before the page loads, and `page.clock.fastForward()` fires the client's 30 s stall
+  watchdog while the black-holed XHR stays real. The clock jumps only after the client's last progress event: the row
+  waits until the file's bar shows every byte sent, because the proxy logs a black-holed request `held` before it has
+  read the body, and progress after a jump re-arms the watchdog at the new time. Row 11, a part that keeps sending,
+  runs under the same clock: eight jumps of 5 s while it sends. The lab names an abort that nobody asked for
+  (no Pause, Cancel or offline) `stalled`, and the next attempt a `retry`.
+- **Why:** the spike answered `M3-K3`'s question. Measured 2026-11-17 on Chromium's headless shell with RustFS 1.0.5:
+  - The row passes in 1 to 3 s of real time.
+  - Without the jump it fails: the status line still says "Uploading…" after 10 s.
+  - Jumping 25 s leaves part 1 `held`; 5 s more stalls it. That pins the constant between 25 and 30 s.
+  - With the progress watchdog's re-arm removed from the client, row 11 fails.
+
+  The plan audit's fallback home for the stall row (M11: a nightly real-time browser row or a Node soak row) is
+  therefore not needed for the browser.
+- **If wrong:** a Playwright release whose clock stops driving the page's timers turns rows 10 and 11 red; they never
+  pass silently. The fallback is then a real-time browser row in the nightly job.
+- **Status:** decided (Task 6 spike; review fix round 1).
+- **Source:** `M3-K3`; plan audit M11; Task 6 review I1 and M3.
+- **Visible in:** `examples/next/app/stalls.chaos.browser.test.ts`; `examples/next/app/lab/lab-fetch.ts`
+  (`abortedAs`), `examples/next/README.md` (Requests).
 
 ### M3-K10: the Node lane's real-time stall and throttle rows run nightly
 
@@ -160,3 +183,32 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 - **Source:** chaos design §3.1, §4 rows 10 and 11; plan audit C2 ("or it moves to the soak project"); Task 5b review
   I1 and M1.
 - **Visible in:** `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`, `bun run test:chaos:soak`.
+
+### M3-K11: what the browser lane's transport does to the chaos rows
+
+- **Decision:** the browser rows are written around four facts about Chromium and loopback, measured 2026-11-17
+  (Chromium's headless shell, RustFS 1.0.5, the proxy in Node 24):
+  1. Rows 1 and 12 fault the first two arrivals. When a reused keep-alive connection is reset before any answer byte,
+     Chromium sends the PUT again by itself, and the page hears nothing. With one `reset` rule, the proxy saw
+     `reset, 200` and the page saw one PUT. With `truncate beforeHeaders`, the page saw only `412 already stored`. A
+     PUT reuses its CORS preflight's connection, so faulting two arrivals leaves the client exactly one network error,
+     whichever connection Chromium used. Row 3 bounds the arrivals to 6 to 12 for six attempts.
+  2. Row 11 throttles inside Chromium (1 MiB/s, a 9 MiB file of 8 and 1 MiB parts), not at the proxy as design row 11
+     says; the proxy stays its oracle. On loopback the kernel takes about 6 MiB of a part at once. A part slowed at the
+     proxy therefore reports its progress in a few jumps, seconds apart (samples at 512 KiB/s: 17.8, 19.3, 19.3, 19.3,
+     20 MiB of 20 MiB). Clock jumps between them would stop proving the watchdog's re-arm.
+  3. Rows 15 and 16 throttle part 1's first attempt at 2 MiB/s and wait for its `aborted` entry. The proxy hears a
+     client close only after reading the bytes already buffered, because the close follows them on the connection. At
+     256 KiB/s the cut attempt ended about 24 s later and leaked into the next row's log. Row 15 is therefore offline
+     about 3 s, not the design's 2 s.
+  4. The lane script takes the proxy's control URL from the one line `scripts/chaos-proxy.ts` prints, not from a fixed
+     control port (plan audit I5). The line is printed only once both ports listen, so it is the readiness signal
+     too. The control port is free-chosen, so it cannot collide.
+- **Why:** each fact turned a row red, or made it pass for the wrong reason, until the row accounted for it.
+- **If wrong:** if a Chromium release stops resending, rows 1 and 12 show a second network error and fail, which says to
+  drop their second rule; row 3's count falls to 6, still inside its bound. A host with smaller socket buffers would
+  let a proxy throttle show in XHR progress again.
+- **Status:** decided (Task 6; review fix round 1).
+- **Source:** Task 6 report and review (I1, M2); plan audit C2, I5.
+- **Visible in:** `examples/next/app/bucket-faults.chaos.browser.test.ts`,
+  `examples/next/app/stalls.chaos.browser.test.ts`, `scripts/test-browser.sh`, `scripts/chaos-proxy.ts`.
