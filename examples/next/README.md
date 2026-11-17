@@ -151,8 +151,8 @@ The home page is what an app's upload UI looks like when it is built on the head
 - **`components/upload/unfinished-uploads.tsx`:** after a reload, the multipart uploads this browser can continue, each
   with **Pick again**: the same file resumes and sends only the parts the bucket lacks, another file is refused and
   shows as a failed row. **Discard** on a row, and **Discard all**, call `useResumable`'s `discard()`: the server aborts
-  the upload (with a store, its row ends and its reserved bytes are free again) but keeps a file that already landed,
-  and the browser's record is deleted, without the file. A discard that fails shows its message, and the upload stays
+  the upload (with a store, its row ends and its reserved bytes are free again) but keeps a file whose `/complete`
+  finished (without a store, any file that landed), and the browser's record is deleted, without the file. A discard that fails shows its message, and the upload stays
   listed. Focus moves to the next row's Discard, or to the drop zone when the panel empties.
 
 ## Lab page

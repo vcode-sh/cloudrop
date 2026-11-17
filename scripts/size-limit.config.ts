@@ -30,7 +30,7 @@ export default [
   // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17 after
   // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB; after the /upload idempotency key (M5-T104):
   // cloudrop 46.27 kB. Since the build drops JSDoc from the .js (M4-F25): cloudrop 37.01 kB, next 0.78 kB, node
-  // 2.26 kB. After /abort's `keep` (M3-U94): cloudrop 37.08 kB.
+  // 2.26 kB. After /abort's `keep` (M3-U94): cloudrop 37.09 kB.
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
@@ -58,7 +58,7 @@ export default [
   },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
-  // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.36 kB after /abort's
+  // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.37 kB after /abort's
   // `keep` (M3-U94).
   {
     name: "cloudrop (bundled)",

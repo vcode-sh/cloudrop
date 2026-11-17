@@ -247,10 +247,13 @@ deletes the upload's own object (matched by `cloudrop-id`), even after `/complet
 never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed, so that upload
 can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with `UNKNOWN_ROUTE`.
 Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle rule; `api.checkBucket()` verifies it
-exists. `/abort { token, keep: true }` never deletes an object that landed, whatever the token's age or the row's
-status: it aborts an unfinished multipart upload and ends a store's pending row, and runs `onAbort` only when no object
-of this upload exists. `keep` can only narrow what the token allows; anything but a boolean is `INVALID_INPUT`. The
-client sends it only from `discard()`, for an upload a `/complete` may have finished (amended 2026-11-17, M3-U94).
+exists. `/abort { token, keep: true }` without a store's row never deletes an object that landed, whatever the token's
+age: it aborts an unfinished multipart upload, and runs `onAbort` only when no object of this upload exists, since
+nothing tells the server whether `onComplete` ran. With a row, `keep` changes nothing: a pending row proves no
+completion committed, so the object is deleted, the row ended and the reservation freed as for a plain `/abort`, and a
+completed row is kept as always. `keep` can only narrow what the token allows; anything but a boolean is
+`INVALID_INPUT`. The client sends it only from `discard()`, for an upload a `/complete` may have finished (amended
+2026-11-17, M3-U94).
 
 `/abort` is cleanup, not revocation. The server keeps no state, so until the token expires 24 hours after `/upload`:
 a single-PUT URL signed before the abort stays usable for its 15 minutes, a single-PUT token can still get a new URL
