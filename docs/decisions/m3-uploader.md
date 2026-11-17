@@ -1622,3 +1622,17 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   row's landed object deleted, a completed file kept),
   `protocol/types.ts` (`AbortRequest`), `client/endpoints.ts` (`abort`), `client/discard.ts`,
   `client/discard.test.ts` (the finished-unheard row), spec §5.5, `docs/guide/server.md`, `docs/guide/resume.md`.
+
+### M3-U95: `discard()` sends its `/abort` without keepalive
+
+- **Decision:** `Endpoints.abort(token, { keep: true })`, which only `discard()` sends, goes without `keepalive`. Every
+  other `/abort` (a cancel, `drop()`, `pagehide`, the `/upload` cleanup) keeps `keepalive: true`.
+- **Why:** the Fetch standard caps the bodies of all keepalive requests a document has in flight at 64 KiB together,
+  not per request, and a token may be about 12 KiB (`server/token.ts`). A **Discard all** that runs `discard()` for
+  every listed upload at once, as both examples' panels do, could exceed it, and the browser fails the extra fetches as
+  network errors although the server is fine. `discard()` is awaited on a live page, so keepalive buys nothing; a record
+  that outlives a closed tab is listed again and discarded again harmlessly.
+- **If wrong:** the examples' Discard all would run its discards one after another instead, slower for many uploads.
+- **Status:** in force (M4b final fix round). Not measured in a browser; the cap is the standard's.
+- **Source:** M4b final review M3, controller brief 2026-11-18.
+- **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts`.

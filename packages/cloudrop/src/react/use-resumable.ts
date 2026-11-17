@@ -25,11 +25,15 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     void refresh();
     return source.onChange(() => void refresh());
   }, [source, refresh]);
-  /** Runs `change` on the client, then reads the list again, whatever it answered: a failed discard keeps its record. */
+  /**
+   * Runs `change` on the client, then reads the list again, whatever it answered: a failed discard keeps its record.
+   * Every other useResumable of the factory reads again too, since one route's discard shows in a list of every route.
+   */
   const changeThenRead = useCallback(
     async <T>(change: (client: CloudropClient) => Promise<Result<T>>): Promise<Result<T>> => {
       const client = source.client();
       const answer = client.error ? client : await change(client.data);
+      source.changed();
       await refresh();
       return answer;
     },

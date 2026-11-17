@@ -8,12 +8,8 @@ import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
 import { lockRefused, NEEDS_NEW_TICKET, notListed, uploadInUse } from "./failures.ts";
 import { lockUpload } from "./locks.ts";
-import { EXPIRY_MARGIN_MS } from "./records.ts";
+import { expiresSoon } from "./records.ts";
 import { claim, type UploadContext } from "./upload.ts";
-
-/** True when `expiresAt` is within the margin that makes resumable() delete a record as expired (M3-U72). */
-const expired = (expiresAt: unknown): boolean =>
-  typeof expiresAt === "string" && Date.parse(expiresAt) - EXPIRY_MARGIN_MS <= Date.now();
 
 export async function discard(context: UploadContext, upload: unknown): Promise<Result<{ aborted: boolean }>> {
   const { id, expiresAt } = (upload ?? {}) as { id?: unknown; expiresAt?: unknown };
@@ -25,7 +21,10 @@ export async function discard(context: UploadContext, upload: unknown): Promise<
     if (error) return fail(error);
     const record = data.find((saved) => saved.id === id);
     // An expired record was deleted by that read, its token with it: there is nothing to send /abort with.
-    if (!record) return expired(expiresAt) ? ok({ aborted: false }) : fail(notListed());
+    if (!record) {
+      const expired = typeof expiresAt === "string" && expiresSoon(expiresAt, Date.now());
+      return expired ? ok({ aborted: false }) : fail(notListed());
+    }
     const lock = lockUpload(id);
     const taken = await lock.taken;
     // Another holder may complete it, and an /abort would then delete the finished object (M3-U73). Where the browser

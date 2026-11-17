@@ -21,10 +21,10 @@ import {
   unreachable,
 } from "../testing/persist-fixture.ts";
 
+import { createRecords, type UploadRecord } from "./records.ts";
+
 /** threeParts()'s size: 16 MiB and 5 bytes. */
 const THREE_PARTS = 16 * MiB + 5;
-
-import { createRecords, type UploadRecord } from "./records.ts";
 
 const brief = (error: { code: string; message: string } | null) =>
   error && { code: error.code, message: error.message };

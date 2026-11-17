@@ -125,7 +125,8 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
   ): UploadJob<RouteResult<TCloudrop, TName>>;
   /**
    * Drops one unfinished upload from resumable() without its file: the server is told to abort it, and its record is
-   * deleted. `aborted` is false when its token could no longer abort anything; the bucket's lifecycle rule cleans up.
+   * deleted. `aborted` is true once the server accepted the /abort, which keeps a file whose /complete finished; false
+   * when the token could no longer abort anything (the bucket's lifecycle rule cleans up).
    */
   discard(upload: ResumableUpload<RouteName<TCloudrop>>): Promise<Result<{ aborted: boolean }>>;
   /** Deletes the namespace's unfinished uploads, which sign-out should do, or every one in this browser with `all`. */

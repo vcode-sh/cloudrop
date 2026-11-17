@@ -40,7 +40,8 @@ export interface Endpoints {
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
   /**
    * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects. Only discard() reads
-   * the result (M3-U93), and only discard() sends `keep` (M3-U94); the answer's id is ignored.
+   * the result (M3-U93), and only discard() sends `keep` (M3-U94), without keepalive (M3-U95); the answer's id is
+   * ignored.
    */
   abort(token: string, options?: { keep: true }): Promise<Result<true>>;
 }
@@ -140,9 +141,15 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     signParts: (token, parts, signal) =>
       post("sign", { token, parts }, { signal }, (json) => readSignedParts(json, parts)),
     complete: (token) => post("complete", { token }, { timeoutMs: COMPLETE_TIMEOUT_MS }, readCompleted),
-    // The body is a token, far under the 64 KiB a browser allows keepalive requests. A failed /abort changes nothing
-    // for a cancelled upload; the lifecycle rule cleans up.
+    // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up. A browser allows a document
+    // 64 KiB of keepalive bodies in flight together, and a token may be 12 KiB, so discard(), which a live page awaits and
+    // may run for many uploads at once, sends without keepalive (M3-U95).
     abort: (token, options) =>
-      post("abort", { token, ...options }, { keepalive: true, timeoutMs: ABORT_TIMEOUT_MS }, () => true),
+      post(
+        "abort",
+        { token, ...options },
+        { keepalive: options?.keep !== true, timeoutMs: ABORT_TIMEOUT_MS },
+        () => true,
+      ),
   };
 }

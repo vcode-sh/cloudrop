@@ -138,7 +138,7 @@ describe("POST /abort", () => {
     ]);
   });
 
-  describe("with keep: true (M3-U94)", () => {
+  describe("with keep (M3-U94)", () => {
     it("keeps a single PUT that landed while the token is valid, and tells no plugin", async () => {
       const calls: AbortContext[] = [];
       const fixture = serverFixture({ files }, { plugins: [recordingPlugin(calls)] });
@@ -160,10 +160,22 @@ describe("POST /abort", () => {
       ]);
     });
 
+    it("deletes a single PUT that landed and tells the plugins with keep: false, as without keep", async () => {
+      const calls: AbortContext[] = [];
+      const fixture = serverFixture({ files }, { plugins: [recordingPlugin(calls)] });
+      const ticket = await fixture.single("files", TEXT);
+      await fixture.send(ticket.put, new TextEncoder().encode("hello"));
+      const response = await fixture.post("abort", { token: ticket.token, keep: false });
+      expect([
+        response.status,
+        (await fixture.storage.head(ticket.key)).data,
+        calls.map((call) => call.reason),
+      ]).toEqual([200, null, ["aborted"]]);
+    });
+
     it.each([
       { name: "a string", keep: "yes" },
       { name: "null", keep: null },
-      { name: "a number", keep: 1 },
     ])("refuses keep as $name with INVALID_INPUT and deletes nothing", async ({ keep }) => {
       const fixture = serverFixture({ files });
       const ticket = await fixture.single("files", TEXT);

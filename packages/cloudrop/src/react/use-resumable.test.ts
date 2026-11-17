@@ -284,19 +284,21 @@ describe("useResumable", () => {
 });
 
 describe("useResumable's discard() and forget()", () => {
-  it("discard() aborts one listed upload without its file, and the list reads again without it", async () => {
+  it("discard() aborts one listed upload without its file, and every hook's list reads again without it", async () => {
     const setup = await reloaded(gate(partThree));
     const { useResumable } = createUploadHooks({ client: setup.client });
-    const { result } = renderHook(() => useResumable("files"));
-    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+    // A route's panel and a header badge over every route: the badge did not call discard() and still drops the upload.
+    const { result } = renderHook(() => ({ panel: useResumable("files"), badge: useResumable() }));
+    await waitFor(() => expect(ids(result.current.badge.uploads)).toEqual([setup.upload.id]), fast);
     // The waitFor above proved the list holds exactly this upload.
-    const record = result.current.uploads[0] as ResumableUpload<"files">;
+    const record = result.current.panel.uploads[0] as ResumableUpload<"files">;
 
-    const answer = await act(() => result.current.discard(record));
+    const answer = await act(() => result.current.panel.discard(record));
+    await waitFor(() => expect(result.current.badge.uploads).toEqual([]), fast);
 
     expect({
       answer,
-      listed: result.current.uploads,
+      listed: result.current.panel.uploads,
       requests: setup.sent(),
       pending: setup.fixture.server.fake.pendingUploads(),
     }).toEqual({ answer: { data: { aborted: true }, error: null }, listed: [], requests: ["POST /abort"], pending: 0 });

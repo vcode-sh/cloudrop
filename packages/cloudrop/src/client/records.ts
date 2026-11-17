@@ -50,7 +50,14 @@ export interface Records {
 const STORE = "uploads";
 
 /** A record with less time left than this counts as expired, so a listed upload has time to start (M3-U72, §3.6). */
-export const EXPIRY_MARGIN_MS = 60_000;
+const EXPIRY_MARGIN_MS = 60_000;
+
+/**
+ * True when a record that expires at `expiresAt` counts as expired at `now`: less than the margin is left. NaN, from an
+ * expiresAt that is not a date, compares false, so such a record counts as expired.
+ */
+export const expiresSoon = (expiresAt: string, now: number): boolean =>
+  !(Date.parse(expiresAt) - now >= EXPIRY_MARGIN_MS);
 
 const noRecords: Records = {
   enabled: false,
@@ -168,15 +175,14 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
   /**
    * Whether `value`, stored under `id`, is a record this client can use. One that expired, has another shape, or a
    * part count its size and part size do not give (as answers.ts checks a live ticket, audit M2) or above the 10,000
-   * parts S3 and R2 allow (Infinity from a part size of 0 included: final review M1), is deleted. NaN, from an
-   * expiresAt that is not a date, compares false: such a record counts as expired.
+   * parts S3 and R2 allow (Infinity from a part size of 0 included: final review M1), is deleted.
    */
   const usable = (store: IDBObjectStore, id: IDBValidKey, value: unknown): value is UploadRecord => {
     if (
       isRecord(value) &&
       value.partCount <= 10_000 &&
       value.partCount === countParts(value.size, value.partSize) &&
-      Date.parse(value.expiresAt) - now() >= EXPIRY_MARGIN_MS
+      !expiresSoon(value.expiresAt, now())
     ) {
       return true;
     }

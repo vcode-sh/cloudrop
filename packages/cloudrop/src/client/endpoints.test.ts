@@ -251,15 +251,18 @@ describe("abort", () => {
     });
   });
 
-  it("sends /abort with keepalive, so a tab closed after a cancel or a failure still delivers it", async () => {
+  it("sends /abort with keepalive after a cancel or a failure, and discard's /abort with keep without it", async () => {
     const sent: RequestInit[] = [];
     const endpoints = createEndpoints("/api/cloudrop", (_, init) => {
       sent.push(init);
       return Promise.resolve(Response.json({ id: "x" }));
     });
     await endpoints.abort("token");
+    // Keepalive bodies share 64 KiB per document, which a Discard all of many uploads would exceed (M3-U95).
+    await endpoints.abort("token", { keep: true });
     expect(sent.map((init) => ({ method: init.method, keepalive: init.keepalive }))).toEqual([
       { method: "POST", keepalive: true },
+      { method: "POST", keepalive: false },
     ]);
   });
 });

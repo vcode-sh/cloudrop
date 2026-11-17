@@ -109,7 +109,11 @@ export interface UseResumableResult<TName extends string> {
   uploads: readonly ResumableOf<TName>[];
   /** Reads the list again; resolves with the client's answer, whose error says why the list is empty. */
   refresh(): Promise<Result<ResumableOf<TName>[]>>;
-  /** The client's discard(): drops one listed upload without its file, then reads the list again. */
+  /**
+   * The client's discard(): drops one listed upload without its file, then reads the list again. `aborted` is true once
+   * the server accepted the /abort, which keeps a file whose /complete finished; false when the token could no longer
+   * abort anything (the bucket's lifecycle rule cleans up).
+   */
   discard(upload: ResumableOf<TName>): Promise<Result<{ aborted: boolean }>>;
   /**
    * The client's forget(): deletes the unfinished uploads of the client's namespace, of every route, not only this

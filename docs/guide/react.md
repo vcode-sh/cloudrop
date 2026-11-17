@@ -240,14 +240,15 @@ the user has to pick it. What counts as the same file, and what the server is as
 [`discard()`](resume.md#discard-one-upload) tells the server to abort it and deletes its record, and the list is read
 again. It resolves `{ data: { aborted }, error }`; on an error, such as no connection, the upload stays listed.
 `forget()` is the client's `forget()`: it deletes every record of the client's namespace, of every route, sending no
-`/abort`, and reads the list again; call it at sign-out. Neither needs the client itself.
+`/abort`, and reads the list again; call it at sign-out. Either one also makes every other `useResumable` of the
+factory read its list again, such as a badge that counts every route's uploads. Neither needs the client itself.
 
 ## Build your upload UI
 
 cloudrop ships no components. A ready-made upload widget would bring its own look and icon set into your app, and the
 hooks already hold everything a UI needs: build it from your own components, in your own style. The home page of
 [`examples/next`](../../examples/next) is a full upload UI built this way, with shadcn on Base UI, Tailwind and Tabler
-icons, in four components of 25 to 110 lines under `components/upload/`. Three of them call `useUpload("files")`
+icons, in four components of 30 to 125 lines under `components/upload/`. Three of them call `useUpload("files")`
 themselves and show one list, because every hook of the factory shares the route's files; the row takes one file.
 
 **Drop zone.** A `<label>` with `getDropProps()` around a visually hidden input with `getInputProps()`: a click

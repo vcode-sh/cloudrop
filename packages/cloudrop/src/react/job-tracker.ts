@@ -11,6 +11,8 @@ export interface JobTracker {
    * returns the unsubscribe.
    */
   onChange(listener: () => void): () => void;
+  /** Tells every listener that the list may have changed: a discard() or forget() through one hook. */
+  changed(): void;
 }
 
 /** done + failed + aborted: it changes when a file ends, and when retry() sends a failed one again. */
@@ -65,5 +67,6 @@ export function createJobTracker(): JobTracker {
         listeners.delete(listener);
       };
     },
+    changed,
   };
 }

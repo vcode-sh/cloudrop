@@ -34,7 +34,7 @@ The first release. Version `0.0.0` on npm only reserved the name.
   aborts nothing, for sign-out.
 - **React hooks** (`cloudrop/react`): `createUploadHooks` gives `useUpload` for inputs, drop zones and progress lists
   and `useResumable` for uploads that continue after a reload, with `discard(upload)` and `forget()`, each followed by
-  a fresh read of the list. `react` 18 or 19 is an optional peer dependency.
+  a fresh read of every `useResumable`'s list. `react` 18 or 19 is an optional peer dependency.
 - **An optional database store:** one row per upload before anything is signed, `onComplete` once per file (exactly
   once for writes through its transaction on Postgres), a quota per owner that concurrent uploads cannot overshoot
   (refused with `QUOTA_EXCEEDED`), revocation of an owner's uploads, and a sweep that cleans up abandoned uploads.
