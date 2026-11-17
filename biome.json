@@ -17,31 +17,19 @@
       "!**/*.md"
     ]
   },
-  "formatter": {
-    "indentStyle": "space",
-    "lineWidth": 120
-  },
+  "formatter": { "indentStyle": "space", "lineWidth": 120 },
   "linter": {
     "rules": {
       "preset": "recommended",
       "complexity": {
-        "noExcessiveCognitiveComplexity": {
-          "level": "error",
-          "options": {
-            "maxAllowedComplexity": 15
-          }
-        }
+        "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
       }
     }
   },
   "overrides": [
     {
       "includes": ["packages/cloudrop/**", "!packages/cloudrop/src/react.ts", "!packages/cloudrop/src/react/**"],
-      "linter": {
-        "domains": {
-          "react": "none"
-        }
-      }
+      "linter": { "domains": { "react": "none" } }
     },
     {
       "includes": ["packages/cloudrop/src/client.ts", "packages/cloudrop/src/client/**", "!**/*.test.ts"],
@@ -134,6 +122,8 @@
                       "**/server/**",
                       "!**/server/store",
                       "!**/server/store.ts",
+                      "!**/server/route",
+                      "!**/server/route.ts",
                       "**/client/**",
                       "**/storage/**",
                       "**/testing/**",
@@ -151,7 +141,7 @@
                       "cloudrop",
                       "cloudrop/*"
                     ],
-                    "message": "An adapter imports only the SQL core (store/sql), the store types (server/store) and errors, so it pulls no server, client or storage code into an app."
+                    "message": "An adapter imports only the SQL core (store/sql), the store types (server/store), routeFor (server/route) and errors, so it pulls no other server, client or storage code into an app."
                   }
                 ]
               }
