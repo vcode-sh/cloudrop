@@ -156,7 +156,7 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
 - **If wrong:** a regression that only real sockets show, such as a request timeout below 32 s elsewhere in the path,
   surfaces a day late, in the nightly job. Row 11 runs at 32 KiB/s rather than the design's 64 KiB/s: 16 s would pass
   even if the allowance lost its size share.
-- **Status:** in force (Task 5b fix round 1).
+- **Status:** decided (Task 5b fix round 1).
 - **Source:** chaos design §3.1, §4 rows 10 and 11; plan audit C2 ("or it moves to the soak project"); Task 5b review
   I1 and M1.
 - **Visible in:** `packages/cloudrop/src/chaos/stalls.soak.integration.test.ts`, `bun run test:chaos:soak`.

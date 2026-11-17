@@ -34,7 +34,8 @@ export default defineConfig({
         },
       },
       {
-        // The nightly seeded soak (`scripts/test-chaos.sh soak`): many files under random faults (M3-K7, audit I3).
+        // The nightly lane (`scripts/test-chaos.sh soak`): jobs under seeded random faults (M3-K7, audit I3) and the
+        // real-time stall and throttle rows (M3-K10).
         test: {
           name: "soak",
           include: ["src/**/*.soak.integration.test.ts"],
