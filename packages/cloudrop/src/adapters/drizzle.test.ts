@@ -1,6 +1,6 @@
 // drizzleStore's construction-time checks, the statement translation, and the public types (`bun run typecheck`
 // compiles this file: every expectTypeOf and expect-error directive is an assertion). It names only what drizzle-orm
-// 0.45 and 1.0 both export, so scripts/check-drizzle-versions.sh compiles it against 1.0 too. What the store does on a
+// 0.45 and 1.0 both export, so scripts/check-drizzle-versions.sh compiles it against 0.45 too. What the store does on a
 // real database is proven by the store contract in drizzle.db.integration.test.ts.
 
 import Database from "better-sqlite3";

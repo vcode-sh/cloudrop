@@ -4,7 +4,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { sql } from "drizzle-orm";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
-import { drizzle as drizzleProxy } from "drizzle-orm/sqlite-proxy";
+import { drizzle as drizzleNodeSqlite } from "drizzle-orm/node-sqlite";
 import postgres from "postgres";
 import { beforeEach, describe, expect, onTestFinished, test } from "vitest";
 import { createPostgresDatabase, type PostgresTestDatabase, usePostgresDatabase } from "./postgres.ts";
@@ -280,13 +280,14 @@ describe("postgres only", () => {
 
     const drizzleDb = drizzlePostgres(db.url);
     onTestFinished(() => drizzleDb.$client.end());
-    const fromDrizzle = await drizzleDb.execute(sql`SELECT current_schema() AS schema`);
+    // drizzle-orm 1.0 types execute's answer as one result or, for several statements, a list of them.
+    const [fromDrizzle] = [await drizzleDb.execute(sql`SELECT current_schema() AS schema`)].flat();
 
     const prisma = await openPrismaClient(db);
     onTestFinished(() => prisma.$disconnect());
     const fromPrisma = await prisma.$queryRawUnsafe("SELECT current_schema() AS schema");
 
-    expect([fromPostgresJs, fromDrizzle.rows[0], ...(fromPrisma as unknown[])]).toEqual([
+    expect([fromPostgresJs, fromDrizzle?.rows[0], ...(fromPrisma as unknown[])]).toEqual([
       { schema: db.schema },
       { schema: db.schema },
       { schema: db.schema },
@@ -340,17 +341,12 @@ describe("sqlite only", () => {
     onTestFinished(() => prisma.$disconnect());
     const fromPrisma = await prisma.$queryRawUnsafe("SELECT id FROM cloudrop_files");
 
-    // Drizzle 0.45 has no node:sqlite driver; its proxy driver runs the statements on a second connection to the file.
+    // Drizzle's node:sqlite driver on a second connection to the file.
     if (!db.path) throw new Error("This describe opens its database with { file: true }.");
     const second = new DatabaseSync(db.path);
     onTestFinished(() => second.close());
-    const drizzleDb = drizzleProxy(async (query, params) => {
-      const statement = second.prepare(query);
-      statement.setReturnArrays(true);
-      return { rows: statement.all(...params) };
-    });
-    const fromDrizzle = await drizzleDb.all(sql`SELECT id FROM cloudrop_files`);
+    const fromDrizzle = await drizzleNodeSqlite({ client: second }).all(sql`SELECT id FROM cloudrop_files`);
 
-    expect([fromPrisma, fromDrizzle]).toEqual([[{ id: "shared" }], [["shared"]]]);
+    expect([fromPrisma, fromDrizzle]).toEqual([[{ id: "shared" }], [{ id: "shared" }]]);
   });
 });

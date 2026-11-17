@@ -81,7 +81,7 @@
     "@types/react-dom": "^19.3.0",
     "aws4fetch": "^1.0.20",
     "better-sqlite3": "^12.11.1",
-    "drizzle-orm": "^0.45.4",
+    "drizzle-orm": "1.0.0-rc.5",
     "fast-check": "^4.10.2",
     "happy-dom": "^21.0.4",
     "pg": "^8.23.1",

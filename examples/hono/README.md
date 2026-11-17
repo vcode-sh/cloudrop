@@ -78,14 +78,3 @@ origin ([Bucket setup](../../docs/guide/bucket-setup.md)).
 bun run db:generate --name <what-changed>   # writes a migration to drizzle/
 bun run db:migrate
 ```
-
-## Why the scripts copy cloudrop into node_modules
-
-`dev`, `start`, `worker`, `db:generate` and `typecheck` first run `scripts/install-cloudrop.ts`, which replaces the
-workspace link `node_modules/cloudrop` with a copy of the built package (`package.json` and `dist`). This example runs
-`drizzle-orm` 1.0.0-rc.5, while the cloudrop package's own tests install 0.45. A linked package resolves its imports
-from its own folder, so through the link cloudrop's Drizzle adapter would load 0.45, and drizzle-kit 1.0 fails on the
-tables 0.45 builds ("Cannot read properties of undefined (reading 'getColumnCasing')"). The copy resolves `drizzle-orm`
-from this example, as an installed package resolves its peer dependency from the app. An app that installs cloudrop
-from npm needs none of this. Run `bun run build` at the root after changing the package; the next script copies it
-again.

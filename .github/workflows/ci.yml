@@ -114,9 +114,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:db
 
-  # The Drizzle adapter and its tests type-checked against drizzle-orm 1.0 (M5-T51), which the workspace does not
-  # install: the script installs it into a temporary copy of the package, never into the checkout.
-  drizzle-1:
+  # The Drizzle adapter and its tests type-checked against drizzle-orm 0.45 (M5-T51, M4-E20); the workspace installs
+  # 1.0.0-rc.5. The script installs 0.45 into a temporary copy of the package, never into the checkout.
+  drizzle-0-45:
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -131,7 +131,7 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
-      - run: scripts/check-drizzle-versions.sh 1.0.0-rc.5
+      - run: scripts/check-drizzle-versions.sh 0.45.4
         env:
           CLOUDROP_DRIZZLE_CHECK_DIR: ${{ runner.temp }}/drizzle-check
 

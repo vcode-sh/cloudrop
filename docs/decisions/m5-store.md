@@ -932,6 +932,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   - beside 0.45.4: the new range installs;
   - beside 1.0.0-rc.4, which nothing here checks: the new range refuses it.
   `1.0.0-rc.5` is also the version the CI job `drizzle-1` type-checks.
+- **Amended 2026-11-17 (M4b):** the workspace now installs 1.0.0-rc.5 and the CI job `drizzle-0-45` type-checks the
+  adapter against 0.45.4 instead (M4-E20).
 
 <!-- Task D appends its entries above this line. -->
 

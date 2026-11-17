@@ -758,27 +758,29 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
 Rulings of M4b task A: `examples/hono` and `examples/vite-react`, shaped like the owner's app app-a, the reference for
 its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Paths are from the repository root.
 
-### M4-E20: the Hono example installs the built package as a copy, not the workspace link
+### M4-E20: the workspace installs drizzle-orm 1.0.0-rc.5; the 0.45 line is type-checked on the side
 
-- **Decision:** `examples/hono/scripts/install-cloudrop.ts` replaces `examples/hono/node_modules/cloudrop`, bun's link
-  to `packages/cloudrop`, with a copy of what the package publishes (`package.json` and `dist`). The example's `dev`,
-  `start`, `worker`, `db:generate` and `typecheck` scripts run it first, and so does `examples/vite-react`'s
-  `typecheck`, whose types come from the Hono example. It refuses to run before `bun run build`.
-- **Why:** the example runs `drizzle-orm` 1.0.0-rc.5, as app-a does, beside the package's 0.45.4 dev dependency. bun
-  installs both, but a linked package resolves its imports from its own folder, so through the link
-  `cloudrop/adapters/drizzle` loaded 0.45 while the app loaded 1.0. Measured: `drizzle-kit generate` (1.0) failed with
-  "Cannot read properties of undefined (reading 'getColumnCasing')" with `cloudropPgTables()` in the schema, and passed
-  with the rest of the schema alone. A `file:` dependency still linked the package's dev 0.45, and a Bun runtime
-  plugin's `onResolve` never fired for the package's imports. With the copy, `drizzle-orm` resolves from the example
-  as an installed package's peer resolves from the app; drizzle-kit 1.0 generated the migration in
-  `examples/hono/drizzle` (cloudrop's tables as the lane's DDL declares them) and the store ran on 1.0 in every browser
-  row. The brief's stop rule (do not downgrade) did not trigger: 1.0 installs and runs.
-- **If wrong:** a forced `bun install` may restore the link; the next script copies again. If bun gains injected
-  workspace packages, the script can go.
+- **Decision:** `packages/cloudrop`'s dev dependency is `drizzle-orm` 1.0.0-rc.5, the version `examples/hono` and the
+  pilot app use, so the workspace has one copy. `scripts/check-drizzle-versions.sh` now defaults to 0.45.4 and the CI
+  job, renamed `drizzle-0-45`, type-checks the adapter and its tests against it; the peer range stays
+  `>=0.45.0 <1 || >=1.0.0-rc.5 <2`. Two test fixtures were adapted to 1.0 (`fixtures.db.integration.test.ts`: execute's
+  answer is one result or a list, read with `.flat()`; the SQLite file is opened with Drizzle's `node-sqlite` driver
+  instead of the proxy driver 0.45 needed), and the tables' equivalence test lost its 0.45 spelling fix
+  (`"timestamp (3)"`), which only that line needed. No source file changed.
+- **Why:** with 0.45 in the package and 1.0 in the example, bun's workspace link resolved `drizzle-orm` from the
+  package's folder, so `cloudrop/adapters/drizzle` loaded 0.45 while the app loaded 1.0. Measured: `drizzle-kit
+  generate` (1.0) failed with "Cannot read properties of undefined (reading 'getColumnCasing')" on `cloudropPgTables()`.
+  The first fix round copied the built package into the example's `node_modules`; the controller ruled for one copy
+  instead. With 1.0 installed: `test:db` 594 passed, 12 skipped; `test:wrangler` (Drizzle over D1) 104 passed, 23
+  skipped; `drizzle-kit generate` in the example reports no schema change through the link; the 0.45.4 check passes.
+- **If wrong:** the 0.45 line loses its runtime proof (the db and Wrangler lanes run 1.0 only); the side check catches
+  type drift, and `scripts/check-drizzle-versions.sh 0.45.4` can be paired with a runtime copy if 0.45 users report
+  behaviour differences.
 - **Status:** decided.
-- **Source:** M4b task A, 2026-11-17.
-- **Visible in:** `examples/hono/scripts/install-cloudrop.ts`, `examples/hono/package.json`,
-  `examples/vite-react/package.json`, `examples/hono/README.md`.
+- **Source:** M4b task A, fix round 1 (controller ruling), 2026-11-17.
+- **Visible in:** `packages/cloudrop/package.json`, `scripts/check-drizzle-versions.sh`, `.github/workflows/ci.yml`,
+  `packages/cloudrop/src/testing/db/fixtures.db.integration.test.ts`,
+  `packages/cloudrop/src/adapters/drizzle-tables.db.integration.test.ts`, `AGENTS.md`.
 
 ### M4-E21: cloudrop is mounted for POST and OPTIONS, outside the global hono/cors
 

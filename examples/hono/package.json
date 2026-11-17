@@ -6,13 +6,13 @@
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "dev": "bun scripts/install-cloudrop.ts && bun run --watch src/index.ts",
-    "start": "bun scripts/install-cloudrop.ts && bun src/index.ts",
-    "worker": "bun scripts/install-cloudrop.ts && bun src/worker.ts",
-    "db:generate": "bun scripts/install-cloudrop.ts && drizzle-kit generate",
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "worker": "bun src/worker.ts",
+    "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "setup:rustfs": "bun scripts/setup-rustfs.ts",
-    "typecheck": "bun scripts/install-cloudrop.ts && tsc --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.7.25",

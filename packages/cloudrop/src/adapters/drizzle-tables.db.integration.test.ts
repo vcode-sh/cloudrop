@@ -72,9 +72,7 @@ describe("Postgres", () => {
     return {
       columns: table.columns.map((column) => ({
         name: column.name,
-        // drizzle-orm 0.45 writes a Date-mode timestamp's precision as "timestamp (3)"; format_type, the catalogue's
-        // spelling with precision, and drizzle-orm 1.0 write "timestamp(3)".
-        type: column.getSQLType().replace(" (", "("),
+        type: column.getSQLType(),
         notNull: column.notNull,
         primaryKey: column.primary,
       })),
