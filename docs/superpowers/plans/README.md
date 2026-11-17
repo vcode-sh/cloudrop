@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `main` after the post-M5 follow-ups (the `/upload` idempotency key and `tables.schema`). This file
+Updated 2026-11-17 after M4b (the examples, `discard(upload)` and trusted publishing). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -13,7 +13,7 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M1 | `storage`: SigV4 signer, `r2` and `s3` drivers, fake R2, contract suite, Wrangler and RustFS lanes | **Done** 2026-11-15 (closed at `ca28497`; plan below) |
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*`, Next and Node adapters | **Done** 2026-11-16 (closed at `2483890`, then the hardening phase, `ca91b33`) |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
-| M4 | `cloudrop/react`, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (the Next home page as an upload UI, Hono and Vite React examples) in progress; no shadcn registry (`M4-E1`) |
+| M4 | `cloudrop/react`, examples | **Done** 2026-11-17. M4a: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b: the Next home page as an upload UI, `examples/hono`, `examples/vite-react`, `discard(upload)`, npm trusted publishing; no shadcn registry (`M4-E1`) |
 | M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | **Done** 2026-11-17 (tasks C0, A–F, a whole-branch review and its fix round), merged to `main` |
 | M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
 | M7 | Docs, 0.x beta, 1.0 | Not started |
@@ -34,12 +34,28 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M5 (no plan file: tasks A–F, C0 in the design's §9), design [`2026-11-17-m5-store-design.md`](../specs/2026-11-17-m5-store-design.md) | Done, merged to `main` 2026-11-17 | `createCloudrop({ store, quota, completionLeaseMs })`: a row before signing, `onComplete` once (exactly once for writes through `tx` on Postgres), hard quota, `QUOTA_EXCEEDED`, revocation, `/abort` that never deletes a completed file, `api.file/usage/revokeUploads/deleteFile/reconcile/sweep`; `cloudrop/adapters/sql` (node-postgres, postgres.js, `node:sqlite`, D1), `/drizzle` (drizzle-orm `>=0.45.0 <1 \|\| >=1.0.0-rc.5 <2`), `/prisma` (Prisma 7); `test:db`, D1 in `test:wrangler`, store rows in `test:chaos` and the browser lanes, the example's opt-in SQLite store, the [store guide](../../guide/store.md); decisions `M5-T16`..`M5-T98` |
 | M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
 | Post-M5 follow-ups (no plan file: tasks I and S, then M4-F25) | Done, merged to `main` 2026-11-17 | `POST /upload` takes an optional `idempotencyKey`. The client sends one per ask, and with a store a retry supersedes the lost attempt's pending rows of the same owner (owner-less rows are never superseded, `M5-T105`): `reserve` gains `requestKey`, and `cloudrop_files` gains `request_key` and an index on `(route, request_key)`. `tables.schema` puts both tables in a Postgres schema for every adapter (Drizzle tables in the schema, Prisma `@@schema`) and is refused on SQLite. The build drops JSDoc from the shipped `.js` and keeps it in the `.d.ts`. Decisions `M5-T100`..`M5-T105`, `M5-T120`..`M5-T124`, `M4-F25` |
+| M4b (no plan file: tasks A, B and C, then an integration round) | Done, `feat/m4b` | The Next example's home page as an upload UI on the headless hooks with shadcn on Base UI and Tabler icons, and the React guide's "Build your upload UI"; `examples/hono` (Bun, Hono, better-auth, a Drizzle store on Postgres, oRPC, a sweep worker) and `examples/vite-react` (the web app on another origin), with the [Hono guide](../../guide/hono.md) and a third browser pass; `client.discard(upload)` and `useResumable().discard/forget`, `/abort { token, keep: true }`; Postgres time columns at `timestamptz(3)`; the workspace on drizzle-orm 1.0.0-rc.5; a release workflow that publishes to npm through trusted publishing ([`docs/releasing.md`](../../releasing.md)) and the package's `CHANGELOG.md`. Decisions `M4-E1`..`M4-E14`, `M4-E20`..`M4-E28`, `M3-U93`, `M3-U94`, `M4-B16`, `M5-T130` |
+
+## State after M4b (2026-11-17)
+
+- **Gates:** measured on the merged tree: `bun run verify` 1655 passed / 3 skipped; `test:browser` 40, 3 (store pass) and
+  8 (the Vite and Hono pass); `test:db` 594 / 12 skipped; `test:chaos` 23/23; `scripts/check-drizzle-versions.sh`
+  type-checks the adapter against drizzle-orm 0.45.4 (the CI job `drizzle-0-45`) while the workspace runs
+  1.0.0-rc.5. From the tasks' last runs on their branches: `test:wrangler` 104 / 23 skipped, `test:rustfs` 24 / 3
+  skipped, `test:live` 32/32, `test:browser:live` 27 + 3. The skips are declared gaps.
+- **Summed gzip:** `cloudrop` 37.09 of 50 kB, `cloudrop/next` 0.78, `cloudrop/node` 2.26, `cloudrop/adapters/sql`
+  10.84, `/drizzle` 12.65, `/prisma` 10.41 kB.
+- **Bundled:** `cloudrop` 27.37 of 30 kB, `cloudrop/client` 11.32, `cloudrop/react` 2.02 kB.
+- **Since the post-M5 follow-ups:** an unfinished upload can be discarded one at a time (`client.discard(upload)`,
+  `useResumable().discard`), and `/abort` takes `keep`; three examples, of which two are a monorepo-shaped Hono API and
+  a Vite web app on another origin; Postgres time columns at millisecond precision; a release workflow, not yet run.
 
 ## State of `main` after the post-M5 follow-ups (2026-11-17)
 
 - **Gates:** `bun run verify` 1636 passed / 3 skipped; `test:db` 594 / 12 skipped; `test:wrangler` 104 / 23 skipped;
   `test:rustfs` 24 / 3 skipped; `test:live` 32/32; `test:chaos` 23/23; `test:browser` 35 + 2 (store pass);
-  `test:browser:live` 22 + 2; drizzle-1 passes on 1.0.0-rc.5. The skips are declared gaps.
+  `test:browser:live` 22 + 2; the CI job then named `drizzle-1` type-checked the adapter against 1.0.0-rc.5 (since M4b
+  the workspace runs 1.0.0-rc.5 and the job, `drizzle-0-45`, checks 0.45.4). The skips are declared gaps.
 - **Summed gzip:** `cloudrop` 37.01 of 50 kB, `cloudrop/next` 0.78, `cloudrop/node` 2.26, `cloudrop/adapters/sql`
   10.84, `/drizzle` 12.64, `/prisma` 10.41 kB.
 - **Bundled:** `cloudrop` 27.29 of 30 kB, `cloudrop/client` 11.09, `cloudrop/react` 1.95 kB.
@@ -74,14 +90,19 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### M4b: examples and UI guidance (spec §14), in progress
+### The first release, 0.1.0
 
-M4a is done (design §7 lists what it left out). M4b: the Next example's home page as a real upload UI built on the
-headless hooks with shadcn on Base UI and Tabler icons, the "Build your upload UI" section of the React guide, and
-`examples/hono` and `examples/vite-react` (the two cold-developer apps of 2026-11-17 are a starting point). There is no
-shadcn registry: generated components would impose a style and an icon set, and an app builds its own from the hooks in
-minutes (`M4-E1`). A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to
-a later opt-in (`M3-U65`).
+[`docs/releasing.md`](../../releasing.md) is the procedure. The owner's one-time setup comes first, in the order its
+"First release, in order" section gives: make the repository public (provenance and the package's links need it), the
+GitHub environment `npm`, npm two-factor authentication, the release commit (`version` 0.1.0 and the changelog's
+`## 0.1.0 - YYYY-MM-DD` heading) green on `main`, the trusted publisher on npmjs.com (it expires unless used within two
+days), then the tag `v0.1.0`; afterwards disallow tokens and revoke every token.
+
+### The pilot
+
+cloudrop in a real app on Bun, Hono, better-auth and Drizzle, following the [Hono guide](../../guide/hono.md) step by
+step; what it finds feeds a 0.x release. A copy of files into the origin-private file system, so a resume needs no new
+pick, stays deferred to a later opt-in (`M3-U65`).
 
 ### M6: the plugins
 
@@ -98,9 +119,15 @@ per-route `Cache-Control`, batches over 100 files.
 
 ### Owner steps
 
-- None open. The live bucket's rule `cloudrop-browser-tests` exposes `Retry-After` since 2026-11-17 (`M3-K8`).
+- The release's one-time setup above ([`docs/releasing.md`](../../releasing.md)).
+- The live bucket's rule `cloudrop-browser-tests` exposes `Retry-After` since 2026-11-17 (`M3-K8`).
 
 ### Open decisions for the owner
+
+- **Release approval while the repository is private:** GitHub's required reviewers work only in public repositories
+  on Free, Pro and Team, so a pushed `v*` tag publishes as soon as `build` passes. `npm stage publish`, approved on
+  npmjs.com with two-factor authentication, is the plan-independent gate (`docs/releasing.md`, "If the repository stays
+  private").
 
 - **Faster uploads to R2** (measured above, none decided):
   - bucket location: a bucket created with a location hint near its users (`EEUR` for Europe) cuts the round trip

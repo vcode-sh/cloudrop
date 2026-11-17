@@ -27,7 +27,7 @@ Three places import cloudrop, each a different entry:
 | --- | --- | --- |
 | `@app/uploads` | `cloudrop`, `cloudrop/adapters/drizzle` | the server, its routes and the store |
 | `@app/db` | `cloudrop/adapters/drizzle` | `cloudropPgTables()` in the schema (step 2) |
-| the web app | `cloudrop/react` (and `cloudrop/client` for its types) | the hooks; the server only as `import type` |
+| the web app | `cloudrop/react`, `cloudrop/client` | the hooks and their client; the server only as `import type` |
 
 If your repository checks which package may import which SDK, register those three. The web app must reach
 `@app/uploads` only through `import type`: a value import pulls the server, the database driver and the secret's
@@ -181,8 +181,12 @@ export const { useUpload, useResumable } = createUploadHooks<Uploads>({ client: 
 - The client sends cookies with every call to it; the oRPC link and the better-auth client need
   `credentials: "include"` of their own.
 - Call `uploadClient.forget()` before signing out, so the next user of the browser cannot finish the last one's
-  unfinished uploads ([Resume](resume.md#namespace-and-sign-out)). It forgets every unfinished upload of the client;
-  there is no call that forgets one.
+  unfinished uploads ([Resume](resume.md#namespace-and-sign-out)). It forgets every unfinished upload of the client,
+  on every route, and aborts none.
+- To drop one unfinished upload, call `useResumable().discard(upload)`: the server aborts it, which with the store
+  ends its row and frees the bytes it reserved, and the browser deletes its record
+  ([Discard one upload](resume.md#discard-one-upload)). The example's panel has Discard per row and Discard all, each
+  through `discard`.
 - The hooks: [React](react.md). The example's drop zone (`getDropProps`, `getInputProps`, `isDragOver`), upload list,
   unfinished-uploads panel and avatar picker are in `examples/vite-react/src/components`.
 

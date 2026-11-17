@@ -180,9 +180,9 @@ and [the Vite example's README](../../examples/vite-react/README.md#the-browser-
 
 ### On live R2
 
-`test:browser:live` runs the same tests on a real bucket, in the same two passes, with the credentials `test:live`
-reads. It builds cloudrop, serves the example on port 5173, uploads under a random `live-test/cloudrop-<hex>/` prefix
-and deletes that prefix and the store's database at the end. The chaos rows are left out: R2 routes by its own host,
+`test:browser:live` runs the Next example's two passes on a real bucket (the Vite pass stays on RustFS), with the
+credentials `test:live` reads. It builds cloudrop, serves the example on port 5173, uploads under a random
+`live-test/cloudrop-<hex>/` prefix and deletes that prefix and the store's database at the end. The chaos rows are left out: R2 routes by its own host,
 so the proxy cannot stand in front of it.
 
 The test bucket's CORS rule, `cloudrop-browser-tests`, must allow:

@@ -67,14 +67,15 @@ Pre-release: the API may change before 0.1.
 - **Done:** M0 (a spike against real R2), M1 (storage: SigV4 signer, `r2` and `s3` drivers, contract suite), M2 (the
   server: routes, upload tokens, the handler, completion checks, `cloudrop.api`, the Next.js and Node adapters), M3
   (the upload engine and the browser client), M4a (fixes from a code audit, `route(policy, callbacks)`, settings
-  read from the environment on the first request, `forbidden()`, and the `cloudrop/react` hooks) and M5 (the
-  database store and its SQL, Drizzle and Prisma adapters).
+  read from the environment on the first request, `forbidden()`, and the `cloudrop/react` hooks), M5 (the
+  database store and its SQL, Drizzle and Prisma adapters) and M4b (the Next example's upload UI, the Hono and Vite
+  React examples, `discard(upload)`, and a release workflow with npm trusted publishing).
 - **Tested on:** the upload protocol runs against an in-process fake R2, real R2, and RustFS behind a fault-injecting
   proxy, and from Chromium through the example on RustFS and on real R2. Wrangler's local R2 runs the storage contract
   and single uploads only: it does not implement `ListParts`, so a multipart upload cannot complete there. The store
   runs its contract on Postgres 18, SQLite and Wrangler's local D1, through every adapter.
-- **Next:** M4b (the Next example's upload UI, Hono and Vite React examples), then M6 (plugins: content checks, limits,
-  images, checksums).
+- **Next:** the first release (0.1.0), a pilot in an app on Bun, Hono, better-auth and Drizzle, then M6 (plugins:
+  content checks, limits, images, checksums).
 
 Where the project stands and what comes next: [docs/superpowers/plans/README.md](docs/superpowers/plans/README.md).
 
