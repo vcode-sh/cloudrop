@@ -468,6 +468,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/postgres.ts`.
+- **Amended 2026-11-17 (fix round 1):** the new-owner race no longer reaches the client. A unique violation (`23505`)
+  on the usage row re-runs the statement once, with an owner and a limit only: see M5-T74.
 
 ### M5-T36: SQLite batches put the usage write first, guarded on the files row as it was
 
@@ -570,6 +572,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/store/sql/store.ts`, `src/store/sql/executor.ts`.
+- **Amended 2026-11-17 (fix round 1):** the 2 s cap now covers the claim alone. It is set before each claim and reset
+  to the default after it, so the app's statements through `tx` are not capped: see M5-T76.
 
 ### M5-T42: packaging of the three adapter subpaths
 
@@ -587,6 +591,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `packages/cloudrop/package.json`, `tsdown.config.ts`, `scripts/size-limit.config.ts`, `biome.json`.
+- **Amended 2026-11-17 (fix round 1):** the adapters' fence also allows `server/route` (for `routeFor`, M5-T77). The
+  `biome.json` hunks that only re-wrapped existing objects were reverted, so the file's diff is the two fences.
 
 ### M5-T43: one contract target for every SQL store, with failure injection that survives rollback
 
@@ -604,6 +610,85 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task C, 2026-11-17.
 - **Visible in:** `src/testing/db/sql-target.ts`, `src/testing/db/raw-tables.ts`, `src/adapters/sql.db.integration.test.ts`.
+
+### M5-T74: a reserve that raced another first reserve of a new owner runs again, once
+
+- **Decision:** when Postgres `reserve` with an owner and a limit fails with a unique violation (`23505`, found by
+  `isUniqueViolation` in the `code`/`cause` chain), the store runs the same statement once more. The failed statement
+  ran alone and rolled back whole. The re-run takes a new snapshot, and its `FOR UPDATE` locks the usage row that the
+  other reserve created. A real duplicate file id fails again and is thrown. Without a limit the statement already adds
+  to that row (`ON CONFLICT … DO UPDATE`) and never retries.
+- **Why:** review I1. Measured before the fix: 8 racing first reserves for a new owner gave up to 7 `SERVER_ERROR`s, on
+  both drivers. A single-statement fix cannot work: every CTE shares one snapshot, so the statement cannot see, lock and
+  increment a row created after it began (the reviewer's P2). Ensuring the row in a batch would cost a round trip on
+  every reserve and leave zero rows behind (M5-T18).
+- **If wrong:** two retries would be needed only if a second new row could appear between the attempts. It cannot: the
+  usage row exists after the first failure.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/executor.ts`, `src/adapters/sql.db.integration.test.ts`
+  (concurrent first reserves of new owners, with and without a limit).
+
+### M5-T75: an unchanged Postgres transition answers the row as it is now
+
+- **Decision:** when `complete` or `end` changes nothing, and the row its statement returns still shows the status the
+  update required (`completing`, or `from`), the store reads the row again in a new statement and answers that row.
+- **Why:** review I2, a breach of spec §4's `Transition`. The guarded UPDATE waited for another transaction's row lock,
+  re-checked its guard on the new version and found it false. The statement's own `SELECT` still sees its snapshot,
+  the row as it was before. Measured: a refusal racing a transaction-mode completion answered `pending`, so B's handler
+  sent a non-retryable `UPLOAD_EXPIRED` for a completed upload. It now answers `completed`, on both drivers. The extra
+  read happens only in that race.
+- **If wrong:** a row still in the guarded status can only mean a stale snapshot, because the guard would otherwise
+  have matched. A lost claim (`completing` under another token) costs one extra read.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.
+
+### M5-T76: the 2 s lock timeout covers the claim alone
+
+- **Decision:** in transaction mode the store runs `SET LOCAL lock_timeout = '2s'` before each claim and `SET LOCAL
+  lock_timeout = DEFAULT` after it, rather than once when the transaction opens. `DEFAULT` returns to the session's own
+  value (the server's, or one set at connection start). After a claim that timed out, the transaction is aborted and
+  nothing more runs.
+- **Why:** review M1. `onComplete`'s statements through `tx` inherited the cap, so an app statement waiting more than
+  2 s for a lock it would get failed the completion. Measured: such a statement now waits 2.5 s and commits.
+- **If wrong:** it costs one round trip per transactional claim.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/store/sql/store.ts`, `src/adapters/sql-postgres.db.integration.test.ts`.
+
+### M5-T77: `sqlStore` over a transactional executor has `route`, typed with the executor's `tx`
+
+- **Decision:** `pgExecutor` and `postgresJsExecutor` return `TransactionalSqlExecutor<TTx>`, whose `transaction` is
+  required. For such an executor `sqlStore` returns `TransactionalSqlStore<TTx>`: a `CloudropStore<TTx>` with
+  `transaction` and `route = routeFor<{ tx: TTx }>(store)` (B's `routeFor`, branded with that very store object). For
+  any other executor it returns `CloudropStore<TTx>` with no `route`.
+  - node-postgres: `tx` is the transaction's client, typed `PgQueryable` (`query`).
+  - postgres.js: `tx` is postgres.js's own `TransactionSql`, so tagged templates type-check. To get that, `PostgresJsSql`
+    mirrors both `begin` overloads, because TypeScript infers from an overloaded method's last signature.
+  - The core's `sqlStore` stays the same. The public one in `cloudrop/adapters/sql` wraps it. Drizzle and Prisma attach
+    their own `route` the same way, with their own `tx`.
+- **Why:** the controller's ruling on review M8 (spec §5.5, "store.route" for transactional adapters).
+- **If wrong:** `adapters/sql` now carries B's route chunk: 12.33 kB summed, up from 9.62 kB, under its 14 kB budget.
+  The drizzle and prisma budgets (13 kB) must be re-measured in their tasks.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/adapters/sql.ts`, `src/adapters/sql/pg.ts`, `src/adapters/sql/postgres-js.ts`,
+  `src/store/sql/executor.ts`, `src/adapters/sql.test.ts`.
+
+### M5-T78: READ COMMITTED is required; node:sqlite files shared by writers need a busy timeout
+
+- **Decision:** the TSDoc of `sqlStore` (both the core's and the entry's), `pgExecutor` and `postgresJsExecutor` says
+  that Postgres must run at its default isolation, READ COMMITTED. `sqliteExecutor`'s TSDoc advises
+  `new DatabaseSync(path, { timeout: 5000 })` when another connection or process writes the same file.
+- **Why:** review M2 and M3. Measured by the reviewer: under REPEATABLE READ, concurrent reserves fail with `40001`.
+  With node:sqlite's default timeout of 0, a second writer fails at once with "database is locked". Neither corrupts
+  data; both turn normal traffic into errors.
+- **If wrong:** documentation only; task F carries it into the guide.
+- **Status:** decided.
+- **Source:** task C fix round 1, 2026-11-17.
+- **Visible in:** `src/adapters/sql.ts`, `src/store/sql/store.ts`, `src/adapters/sql/pg.ts`,
+  `src/adapters/sql/postgres-js.ts`, `src/adapters/sql/sqlite.ts`.
 
 <!-- Task C appends its entries above this line. -->
 
