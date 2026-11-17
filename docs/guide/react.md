@@ -20,10 +20,14 @@ import type { cloudrop } from "./cloudrop"; // a type import: no server code or 
 export const { useUpload, useResumable } = createUploadHooks<typeof cloudrop>();
 ```
 
+Import `lib/upload.ts` only from `"use client"` modules. A Server Component that imports it pulls `cloudrop/react` into
+the server's module graph, where React exports no `useState` or `useSyncExternalStore`, and the build fails.
+
 `createUploadHooks` takes the [client's options](client.md#create-a-client) (`basePath`, `concurrency`, `namespace`
-and the rest), or `{ client }` to share a client you already created. With options, the client is created at the first
-upload or the first `useResumable` read in the browser, never while a server renders the page; a wrong option throws
-its `INVALID_CONFIG` error there.
+and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
+client is created at the first upload or the first `useResumable` read in the browser, never while a server renders
+the page. A wrong option never throws: `upload()`, `resume()` and `refresh()` resolve `{ data: null, error }` with its
+`INVALID_CONFIG` error.
 
 The type argument gives the hooks your route names, each route's metadata and what each route's `onComplete` returns.
 `useUpload("avatar")` knows the rest from the route name.
@@ -98,7 +102,8 @@ export function DocumentUploader({ folderId }: { folderId: string }) {
   never hold the bar below 1.
 - `metadata` is read from the latest render: when `folderId` changes, the next upload sends the new one. It is required
   when the route's schema requires it, and TypeScript says so.
-- `clear()` removes the uploads whose every file has ended; the running ones stay.
+- `clear()` removes the uploads whose every file ended done or cancelled. An upload with a running or failed file
+  stays: a failed file can still be retried, and the client keeps what it needs for that.
 
 ## Drag and drop
 
@@ -122,12 +127,16 @@ export function DropZone() {
 
 `getDropProps()` works on any element. `isDragOver` stays true while the drag crosses the element's children and turns
 false when it leaves or drops. A hook without `multiple` uploads only the first dropped file, as its input takes one.
+Only drags that carry files count: dragged text or a link keeps the browser's own behaviour, such as dropping text
+into an input inside the zone.
 
 ## Start uploads yourself
 
-`upload(files, { metadata })` starts one upload and resolves with its [`UploadResult`](client.md#jobs-progress-pause-and-retry)
-once every file has first settled. It takes a `File`, an array or a `FileList`; `null` or an empty list resolves `null`
-and starts nothing. The call's metadata replaces the hook's.
+`upload(files, { metadata })` starts one upload and resolves with its
+[`UploadResult`](client.md#jobs-progress-pause-and-retry) once every file has first settled. It takes a `File`, an array
+or a `FileList`, checked as the client checks them: anything that is not a `File` of this page, such as one from
+another frame, resolves `INVALID_INPUT`. `null` or an empty list resolves `null` and starts nothing. The call's
+metadata replaces the hook's.
 
 ```tsx
 "use client";
@@ -175,10 +184,20 @@ export function Unfinished() {
 }
 ```
 
-`useResumable(route?)` returns `{ uploads, refresh }`: the client's `resumable()` list, of one route or of every route,
-newest first. It reads the list after mount and again after every upload started through these hooks settles; `refresh()`
-reads it again and resolves with the client's `Result`, whose `error` says why the list is empty. `uploads` is `[]` on
-the server, before the first read and when the read failed.
+`useResumable(route?)` returns `{ uploads, refresh }`: the unfinished uploads this browser keeps, of one route or of
+every route, newest first, without the ones this page holds through these hooks. A file of the hooks that is queued,
+uploading, paused, completing or being resumed is not listed, and neither is one that failed: the client keeps a failed
+file for `retry()`, so continue it with `files[n].retry()`, not `resume()`. A listed upload therefore disappears as soon
+as its resume starts, and appears again if that resume is cancelled before it sends anything.
+
+It reads the list after mount, when an upload of these hooks starts, and whenever one of its files ends or starts
+again, so a record the client deletes, for a file that ends done or is cancelled, leaves the list at once. `refresh()`
+reads it again and resolves with that list as a `Result`, whose `error` says why the list is empty. `uploads` is `[]` on
+the server, before the first read and when the read failed. An upload started on a shared client directly, not through
+the hooks, is not followed: call `refresh()` after it.
+
+A held upload is matched by its route, name, size, type and `lastModified`, so the same file uploaded anew through the
+hooks also hides an earlier, unfinished upload of it until the new one ends done or is cancelled.
 
 `resume(upload, file)` continues a record with the file the user picked again, as one more upload of the hook, so it
 appears in `files`. A browser never gives a page a file back after a reload, so the user has to pick it. What counts as
@@ -200,7 +219,7 @@ the same file, and what the server is asked first: [Resume after reload](resume.
 | `pause()`, `resume()`, `abort()` | Pause, resume or cancel every file of the hook, as each file's own control does. |
 | `retry()` | Sends every failed file again; resolves once they have settled. |
 | `resume(upload, file)` | Continues a record from `useResumable`; resolves with its `UploadResult`. |
-| `clear()` | Removes the uploads whose every file has ended. |
+| `clear()` | Removes the uploads whose every file ended done or cancelled; failed and running ones stay. |
 
 `useResumable(route?)`: `uploads` and `refresh()`, described above.
 
@@ -213,7 +232,8 @@ the same file, and what the server is asked first: [Resume after reload](resume.
   and `resume()`. StrictMode's second render and second effect start nothing; `useResumable` only reads once more.
 - **Unmounting.** A component that unmounts stops listening and cancels nothing. The client owns its uploads: they
   finish, and a multipart upload's resume record stays. Cancel on unmount yourself when that is what you want:
-  `useEffect(() => abort, [abort])`.
+  `useEffect(() => abort, [abort])`. Under React 19's `<Activity mode="hidden">` that effect's cleanup runs too, so
+  hiding counts as unmounting; without it, a hidden component shows what its uploads did once it is visible again.
 
 ## Types
 
@@ -222,5 +242,7 @@ The hooks infer everything from the route name: `useUpload("avatar")` has `files
 `useResumable("documents")` resumes only into a `documents` hook; records of every route narrow by `upload.route`.
 
 For a component that takes a file as a prop, `UploadFile<R>` is the type of one `files` entry, where `R` is the route's
-result type: `UploadFile<RouteResult<typeof cloudrop, "documents">>`, with `RouteResult` from `cloudrop/client`. The other types (`UploadHooks`, `UseUploadOptions`, `UseUploadResult`, `UseResumableResult`,
-`InputProps`, `DropProps`, `UploadHooksOptions`) are exported from `cloudrop/react` too.
+result type: `UploadFile<RouteResult<typeof cloudrop, "documents">>`, with `RouteResult` from `cloudrop/client`. The
+other types (`UploadHooks`, `UseUploadOptions`, `UseUploadResult`, `UseResumableResult`, `InputProps`, `DropProps`,
+`UploadHooksOptions`) are exported from `cloudrop/react` too. `{ client }` takes only a client created for a server with
+the same route names: `createCloudropClient<typeof cloudrop>()`.
