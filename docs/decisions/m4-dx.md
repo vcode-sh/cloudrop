@@ -56,7 +56,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   naming the file. A ticket `/upload` brings for it later gets one background `/abort` and nothing else: no lock, no
   record, no `PUT`. `job.abort()` and the caller's signal cancel such files the same way, so each ends with its own
   `ABORTED` error; `done` still answers `{ data: null, error }` with the job's `ABORTED` when the job's own `/upload`
-  was cancelled.
+  was cancelled. `done` does not wait for a late ticket's `/abort`: the file had settled before the ticket came.
 - **Why:** design §3 F2. A file cancelled while the job's `/upload` was in flight stayed `queued` until `/upload`
   answered, against `M3-U11` ("a page shows a cancel at once"), and then took a ticket, a Web Lock and an IndexedDB
   save only to delete them with its `/abort`. A file with no ticket has nothing to tell the server, so nothing needs to
@@ -64,7 +64,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **If wrong:** after `job.abort()` during `/upload`, a page that compared a file's snapshot error with `done`'s error
   by identity now finds two errors with the same code; `error.file` is now set on them, as `M3-U10` asks of every error
   that belongs to one file.
-- **Status:** in force.
+- **Status:** in force. Amends `M3-U10`, `M3-U11` and `M3-S15` (dated lines, fix round 1, review M2).
 - **Source:** design §3 F2; code audit of `main` at `907cc77` (probe: statuses `['queued','queued']` 20 ms after the
   cancel, then `POST /upload, POST /abort, PUT object, POST /complete`).
 - **Visible in:** `client/file-run.ts` (`abortFile`), `client/launch.ts` (`runEntry`), `client/resume.ts`
@@ -137,13 +137,16 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 ### M4-F5: a resumed file's run is assigned once
 
-- **Decision:** `resume()`'s file gets one `entry.run`, the whole resume run from its checks to its settling (a start
-  over included), assigned where the run starts (`resumeJob`), instead of one for the checks and another for the upload.
+- **Decision:** `resume()`'s file gets one `entry.run`, the whole resume run from its checks to its settling, assigned
+  where the run starts (`resumeJob`), instead of one for the checks and another for the upload. A start over hands it
+  to its `/upload`'s run (`launch` assigns `entry.run` again), which the resume run awaits, so nothing waits on a run
+  that settled before its file.
 - **Why:** design §3 F5. With two assignments, a `retry()` during the checks waited correctly only because of the order
   of microtasks, and `allSettled` could spin on a file that had not settled while its `run` already had, which is how
   `M3-U90` once froze a tab.
-- **If wrong:** nothing known; `client/resume-checks.test.ts` and the resume tests cover it (a fault probe that drops
-  the assignment freezes them, as `M3-U90` froze the tab).
+- **If wrong:** nothing known; `client/resume-checks.test.ts` and the resume tests cover it, but a fault probe that
+  drops the assignment hangs the lane rather than failing a test: `allSettled`'s spin is a microtask loop, which keeps
+  Vitest's timeout from firing. The CI job's timeout is the backstop.
 - **Status:** in force.
 - **Source:** design §3 F5; code audit of `main` at `907cc77`.
 - **Visible in:** `client/resume.ts` (`resumeJob`, `resumeRun`).

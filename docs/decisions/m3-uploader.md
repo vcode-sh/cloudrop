@@ -201,7 +201,10 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   doc comment and the README say so. `error.file` is a new public field (a minor semver change).
 - **Status:** in force (`21c96cf`, `07f235b`, `1850ba1`, `5cc63e5`). Supersedes `M3-S1`; spec §1 says so. A cancelled
   file that `/upload` refused ends `aborted` since `d399b90` (plan B early review M3): before, it ended `failed`, and
-  its `retry()` asked for a ticket only to `/abort` it at once.
+  its `retry()` asked for a ticket only to `/abort` it at once. Amended by `M4-F2` (2026-11-17): every cancel of a file
+  waiting for its ticket (its own, `job.abort()`, the caller's signal) ends it `aborted` at once with its own `ABORTED`
+  naming the file, before `/upload` answers; when the job's own `/upload` was cancelled, `done`'s error is still the
+  job's `ABORTED`.
 - **Visible in:** `client/job.ts`, `client/types.ts`, `errors.ts` (`CloudropError.file`), `client/failures.ts`
   (`withFile`), `client/job.test.ts`.
 
@@ -231,7 +234,9 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   change "at once" above to "in the same task". Revisit if `maxFiles` may ever exceed about 300, or the client splits
   a job over several `/upload`s: the cost crosses one frame at about 400 to 550 files.
 - **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`). Plan B made one exception (`M3-U36`, `4f1887a`): a retry under
-  a new ticket starts the file's bytes again from 0.
+  a new ticket starts the file's bytes again from 0. Amended by `M4-F2` (2026-11-17): a file cancelled while it waited
+  for its ticket shows `aborted` at once too; a ticket that arrives for it later gets its `/abort` in the background,
+  and `done` does not wait for that answer.
 - **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job-snapshot.ts` (`fileSnapshot`, `snapshotOf`),
   `client/types.ts` (`FileSnapshot`, `JobSnapshot`), `client/job-snapshot.test.ts`.
 

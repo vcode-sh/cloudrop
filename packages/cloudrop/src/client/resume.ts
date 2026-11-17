@@ -140,6 +140,7 @@ export function resumeJob(
       checksPassed = true;
     });
     // The file's run is the whole of it, checks to settling: a retry() meanwhile waits for all of it (M3-U90, M4-F5).
+    // A start over hands it to its /upload's run, which this one awaits.
     (job.entries[0] as Entry).run = resumed.then(() => {});
     return resumed;
   };

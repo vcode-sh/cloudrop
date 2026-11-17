@@ -215,7 +215,9 @@ otherwise.
   (`4f1887a`): a failed file of a `start()` job keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or
   the ticket's expiry; `upload()` keeps this rule (M3-U29). Amended by `M4-F1` (2026-11-17): a failed multipart file
   of a client that keeps records, whose failure the same ticket could fix (retryable, outside `M3-U31`'s set), sends no
-  `/abort` and keeps its record for a resume after a reload.
+  `/abort` and keeps its record for a resume after a reload. Amended by `M4-F2` (2026-11-17): a ticket that arrives for a
+  file already cancelled while it waited for it gets its `/abort` in the background, and `upload()` answers `ABORTED`
+  without waiting for it.
 - **Visible in:** `client/file-run.ts` (`end`, `giveUp`), `client/endpoints.ts` (`abort`), `client/upload-abort.test.ts`.
 
 ### M3-S16: every answer is checked
