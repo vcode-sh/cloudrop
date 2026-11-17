@@ -37,12 +37,12 @@ bun run dev
 Open <http://localhost:5173>. Choose a file before signing in to see the `UNAUTHORIZED` answer, then select
 "Sign in as the demo user" (the page reloads) and choose a file again.
 
-`bun run setup:rustfs` creates the bucket `cloudrop-example`, sets its CORS rule, checks that a browser preflight from
-`http://localhost:5173` is allowed, sets a lifecycle rule that aborts incomplete multipart uploads after a day, and
-writes `.env.local` with a fresh `CLOUDROP_SECRET` and the RustFS settings (it keeps an existing `.env.local`). It
-talks to `http://127.0.0.1:19000` unless `CLOUDROP_S3_ENDPOINT` says otherwise. If it stops with "RustFS did not accept
-the CORS rule", browsers cannot upload to that bucket: check that the container is the RustFS version
-`scripts/rustfs.sh` starts.
+`bun run setup:rustfs` creates the bucket `cloudrop-example`, sets its CORS rule (exposing `ETag` and `Retry-After`),
+checks that a browser preflight from `http://localhost:5173` is allowed, sets a lifecycle rule that aborts incomplete
+multipart uploads after a day, and writes `.env.local` with a fresh `CLOUDROP_SECRET` and the RustFS settings (it
+keeps an existing `.env.local`). It talks to `http://127.0.0.1:19000` unless `CLOUDROP_S3_ENDPOINT` says otherwise.
+If it stops with "RustFS did not accept the CORS rule", browsers cannot upload to that bucket: check that the
+container is the RustFS version `scripts/rustfs.sh` starts.
 
 When you are done:
 
@@ -95,7 +95,7 @@ rule it already has):
     "AllowedOrigins": ["http://localhost:5173", "http://127.0.0.1:5173"],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
     "AllowedHeaders": ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"],
-    "ExposeHeaders": ["ETag"],
+    "ExposeHeaders": ["ETag", "Retry-After"],
     "MaxAgeSeconds": 3600
   }
 ]
@@ -215,6 +215,10 @@ directory with `bunx playwright install --only-shell chromium`.
 
 - A CORS rule like the one above: your page's origin, `PUT`, and the four headers cloudrop's signed uploads carry.
 - `ETag` in `ExposeHeaders`: `checkBucket` asks for it, and resumable uploads will read it.
+- `Retry-After` in `ExposeHeaders` (recommended): a browser hides answer headers the rule does not expose, so without
+  it a retry after a `429` or `503` waits only the client's own backoff (up to 0.5 s, then 1 s, 2 s…) instead of
+  what the bucket asked for (honoured up to 20 s). R2 asks for 5 s on a `429` (measured 2026-11-16). `checkBucket`
+  does not ask for it, and uploads work without it.
 - A lifecycle rule that aborts incomplete multipart uploads, so parts of an upload that never finished do not stay
   in the bucket.
 

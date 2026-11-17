@@ -8,6 +8,9 @@ const PAGE_ORIGIN = "http://localhost:5173";
 const ORIGINS = [PAGE_ORIGIN, "http://127.0.0.1:5173"];
 // The headers cloudrop's signed PUTs carry; `checkBucket` reports a rule that omits one.
 const UPLOAD_HEADERS = ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"];
+// Browsers hide answer headers a rule does not expose: the client reads ETag, and Retry-After to wait as long as a busy
+// bucket asks (without it, a retry waits its own backoff only).
+const EXPOSED_HEADERS = ["ETag", "Retry-After"];
 
 const endpoint = process.env.CLOUDROP_S3_ENDPOINT || "http://127.0.0.1:19000";
 const bucket = "cloudrop-example";
@@ -40,7 +43,8 @@ const cors = await putBucketConfig(
     ORIGINS.map((origin) => `<AllowedOrigin>${origin}</AllowedOrigin>`).join("") +
     ["PUT", "GET", "HEAD"].map((method) => `<AllowedMethod>${method}</AllowedMethod>`).join("") +
     UPLOAD_HEADERS.map((header) => `<AllowedHeader>${header}</AllowedHeader>`).join("") +
-    "<ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>",
+    EXPOSED_HEADERS.map((header) => `<ExposeHeader>${header}</ExposeHeader>`).join("") +
+    "</CORSRule></CORSConfiguration>",
 );
 if (!cors.ok) stop(`RustFS refused the CORS rule (HTTP ${cors.status}).`);
 console.log("CORS rule set");

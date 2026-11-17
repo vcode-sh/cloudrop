@@ -195,7 +195,13 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
   `RouteMetadata`, `RouteResult`, `InferableCloudrop`) are imported from `cloudrop/client`, never from `cloudrop`.
 
 The bucket needs a CORS rule for your page's origin; [`examples/next`](examples/next/README.md#what-any-bucket-needs)
-lists what any bucket needs. Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md) and
+lists what any bucket needs. Add `Retry-After` to the rule's `ExposeHeaders` beside `ETag`. A browser hides every
+answer header the rule does not expose: with `Retry-After` exposed, a retry after a `429` or `503` waits at least as
+long as the bucket asks (at most 20 s); without it, the client cannot read the header and waits its own backoff alone
+(a random wait up to 0.5 s, then 1 s, 2 s…). R2 answers concurrent writes to one key with `429` and `Retry-After: 5`,
+which a page cannot read when the rule omits it (measured 2026-11-16,
+[findings](docs/research/r2-spike-findings.md#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16)).
+Why the client behaves as it does: [M3-S decisions](docs/decisions/m3-slice.md) and
 [M3-U decisions](docs/decisions/m3-uploader.md).
 
 Troubleshooting: when every upload ends in `NETWORK_ERROR` "The file could not reach the storage service, or the storage
