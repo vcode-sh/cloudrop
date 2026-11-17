@@ -171,8 +171,9 @@ describe("the probe's first PARTS_MISSING (M3-U75)", () => {
       error: null,
       sent: [
         ...["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
-        ...["POST /sign", "PUT part 3", "POST /complete"],
-        ...["POST /sign", "PUT part 3", "POST /complete"],
+        // Part 3's URL from the first /sign serves both repair rounds (M4-F8).
+        ...["PUT part 3", "POST /complete"],
+        ...["PUT part 3", "POST /complete"],
       ],
       bytes: FOUR_PARTS,
     });

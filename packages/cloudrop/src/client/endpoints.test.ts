@@ -9,7 +9,7 @@ import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { files } from "../testing/upload-fixture.ts";
-import { createEndpoints, type Endpoints } from "./endpoints.ts";
+import { type ClientFetch, createEndpoints, type Endpoints } from "./endpoints.ts";
 import { withRetry } from "./retry.ts";
 
 const unreadable = (status: number) =>
@@ -238,25 +238,11 @@ describe("signParts", () => {
 });
 
 describe("abort", () => {
-  // Task 6 awaits abort() bare on the cancel path, so a rejection here would make upload() reject.
-  it.each([
-    {
-      name: "the fetch throws synchronously",
-      fetch: () => {
-        throw new TypeError("Failed to fetch");
-      },
-      timeout: () => new AbortController().signal,
-    },
-    {
-      name: "the browser has no AbortSignal.timeout",
-      fetch: () => Promise.resolve(Response.json({ id: "x" })),
-      timeout: () => {
-        throw new TypeError("AbortSignal.timeout is not a function");
-      },
-    },
-  ])("resolves when $name", async ({ fetch, timeout }) => {
-    vi.spyOn(AbortSignal, "timeout").mockImplementation(timeout);
-    const endpoints = createEndpoints("/api/cloudrop", fetch);
+  // The cancel path awaits abort() bare, so a rejection here would make upload() reject.
+  it("resolves when the fetch throws synchronously", async () => {
+    const endpoints = createEndpoints("/api/cloudrop", () => {
+      throw new TypeError("Failed to fetch");
+    });
     await expect(endpoints.abort("token")).resolves.toBeUndefined();
   });
 
@@ -282,5 +268,83 @@ describe("complete", () => {
       message: "2 of 2 parts are missing or have the wrong size. Upload them again, then complete the upload.",
       parts: [1, 2],
     });
+  });
+});
+
+describe("a server that never answers (M4-F3)", () => {
+  /** Answers nothing until its signal aborts, then rejects as a browser's fetch does. */
+  const silent: ClientFetch = (_, init) =>
+    new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+    });
+  const unreachable = {
+    code: "NETWORK_ERROR",
+    message: "The upload server could not be reached. Check the connection, then try again.",
+    retryable: true,
+  };
+
+  /** What `promise` settled with by now, or "pending". */
+  const settledNow = <T>(promise: Promise<T>) => Promise.race([promise, Promise.resolve("pending" as const)]);
+
+  it.each([
+    { name: "/upload after 30 s", ms: 30_000, call: (e: Endpoints) => e.start("files", [png], undefined, live()) },
+    { name: "/sign after 30 s", ms: 30_000, call: (e: Endpoints) => e.signParts("token", [1], live()) },
+    // /complete may list 10,000 parts, which the server verifies before it answers.
+    { name: "/complete after 120 s", ms: 120_000, call: (e: Endpoints) => e.complete("token") },
+  ])("gives $name up as a retryable NETWORK_ERROR", async ({ ms, call }) => {
+    vi.useFakeTimers();
+    const error = call(createEndpoints("/api/cloudrop", silent)).then(errorOf);
+    await vi.advanceTimersByTimeAsync(ms - 1);
+    const beforeTimeout = await settledNow(error);
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ beforeTimeout, afterTimeout: await settledNow(error) }).toEqual({
+      beforeTimeout: "pending",
+      afterTimeout: unreachable,
+    });
+  });
+
+  it("gives /abort up after 10 s, so a cancel waiting for it ends", async () => {
+    vi.useFakeTimers();
+    const result = createEndpoints("/api/cloudrop", silent)
+      .abort("token")
+      .then(() => "resolved");
+    await vi.advanceTimersByTimeAsync(9_999);
+    const beforeTimeout = await settledNow(result);
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ beforeTimeout, afterTimeout: await settledNow(result) }).toEqual({
+      beforeTimeout: "pending",
+      afterTimeout: "resolved",
+    });
+  });
+
+  it("gives /complete up after 120 s when its headers came but its body never ends", async () => {
+    vi.useFakeTimers();
+    // Headers at once, then a body that only errors when the request is aborted, as a browser's does.
+    const stalledBody: ClientFetch = async (_, init) =>
+      new Response(
+        new ReadableStream({
+          start(stream) {
+            init.signal?.addEventListener("abort", () => stream.error(new DOMException("Aborted.", "AbortError")));
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    const error = createEndpoints("/api/cloudrop", stalledBody).complete("token").then(errorOf);
+    await vi.advanceTimersByTimeAsync(119_999);
+    const beforeTimeout = await settledNow(error);
+    await vi.advanceTimersByTimeAsync(1);
+    expect({ beforeTimeout, afterTimeout: await settledNow(error) }).toEqual({
+      beforeTimeout: "pending",
+      afterTimeout: unreachable,
+    });
+  });
+
+  it("answers ABORTED, not NETWORK_ERROR, when the caller cancels before the timeout", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const result = createEndpoints("/api/cloudrop", silent).start("files", [png], undefined, controller.signal);
+    await vi.advanceTimersByTimeAsync(1_000);
+    controller.abort();
+    expect((await result).error?.code).toBe("ABORTED");
   });
 });

@@ -338,6 +338,31 @@ describe("upload, when it is cancelled", () => {
     });
   });
 
+  it("ends aborted, never uploading again, after a cancel during a /complete that finds parts missing (M4-F4)", async () => {
+    const controller = new AbortController();
+    const { fixture, client } = setup(async ({ label, nth, init, forward }) => {
+      if (label === "PUT part 2" && nth === 1) return lostPart();
+      if (label !== "POST /complete") return undefined;
+      // The server's real answer, PARTS_MISSING [2], arrives after the cancel.
+      const answer = await forward(init);
+      controller.abort();
+      return answer;
+    });
+    const job = client.start("albums", video(), { metadata, signal: controller.signal });
+    // Each status the page was shown, once per change.
+    const shown: string[] = [];
+    job.subscribe(() => {
+      const status = job.getSnapshot().files[0]?.status ?? "";
+      if (shown.at(-1) !== status) shown.push(status);
+    });
+    await job.done;
+    expect({ shown, requests: fixture.requests, pending: fixture.server.fake.pendingUploads() }).toEqual({
+      shown: ["uploading", "completing", "aborted"],
+      requests: ["POST /upload", "PUT part 1", "PUT part 2", "POST /complete", "POST /abort"],
+      pending: 0,
+    });
+  });
+
   it("starts nothing for a signal that has already fired", async () => {
     const { fixture, client } = setup(() => undefined);
     const result = await client.upload("albums", pic(), { metadata, signal: AbortSignal.abort() });

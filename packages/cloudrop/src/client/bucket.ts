@@ -25,10 +25,15 @@ export type BucketOutcome =
   | { kind: "rejected" | "aborted"; error: CloudropError };
 
 /** The S3 error code in a storage answer's XML body. */
-export const STORAGE_CODE: RegExp = /<Code>([A-Za-z]{1,64})<\/Code>/;
+const STORAGE_CODE = /<Code>([A-Za-z]{1,64})<\/Code>/;
 
-/** By status, as the server's driver classifies; the storage code only tells a bad signature from an expired URL. */
-export function classifyAnswer(status: number, storageCode: string | undefined, retryAfterMs: number): BucketOutcome {
+/**
+ * A storage answer that is not a success, from its status, body and Retry-After header, as the server's driver
+ * classifies: by status; the body's S3 code only tells a bad signature from an expired URL.
+ */
+export function classifyAnswer(status: number, body: string, retryAfter: string | null): BucketOutcome {
+  const storageCode = STORAGE_CODE.exec(body)?.[1];
+  const retryAfterMs = parseRetryAfter(retryAfter);
   if (status === 403) {
     // R2 and Wrangler say ExpiredRequest, RustFS says AccessDenied: every other 403 is worth one renewal.
     return storageCode === "SignatureDoesNotMatch"
@@ -72,9 +77,5 @@ export async function putObject(
     return { kind: "stored" };
   }
   const text = await response.text().catch(() => "");
-  return classifyAnswer(
-    response.status,
-    STORAGE_CODE.exec(text)?.[1],
-    parseRetryAfter(response.headers.get("retry-after")),
-  );
+  return classifyAnswer(response.status, text, response.headers.get("retry-after"));
 }

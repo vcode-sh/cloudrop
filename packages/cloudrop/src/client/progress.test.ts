@@ -30,7 +30,7 @@ describe("createProgress", () => {
 
 describe("createMeter", () => {
   it("averages bytes per second and decays while nothing arrives", () => {
-    const meter = createMeter(0);
+    const meter = createMeter();
     meter.restart(0);
     meter.add(1000, 1000);
     expect(meter.speed(1000)).toBeCloseTo(283.4687, 3);
@@ -41,7 +41,7 @@ describe("createMeter", () => {
   });
 
   it("keeps bytes reported in the same millisecond for the next add", () => {
-    const meter = createMeter(0);
+    const meter = createMeter();
     meter.restart(0);
     meter.add(1000, 0);
     meter.add(2000, 500);
@@ -50,7 +50,7 @@ describe("createMeter", () => {
   });
 
   it("starts again from 0 on restart", () => {
-    const meter = createMeter(0);
+    const meter = createMeter();
     meter.add(1000, 1000);
     meter.restart(1000);
     expect(meter.speed(1000)).toBe(0);

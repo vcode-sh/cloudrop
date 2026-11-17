@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
 import type { FaultCall } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
-import { gate, noSuchUpload, persistFixture, threeParts, unreachable } from "../testing/persist-fixture.ts";
+import { gate, noSuchUpload, persistFixture, smallFile, threeParts, unreachable } from "../testing/persist-fixture.ts";
 
 const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 /** More store requests than any row here makes: every one of them fails. */
@@ -95,19 +95,36 @@ describe("a retry's new ticket", () => {
 describe("upload() persists too (audit I5)", () => {
   it.each([
     {
-      name: "a refused part sends /abort and deletes the record",
+      name: "a multipart file the network failed keeps the record for a reload, sending no /abort (M4-F1)",
+      file: threeParts,
+      fault: (call: FaultCall) => (call.label === "PUT part 2" ? unreachable() : undefined),
+      expected: { code: "NETWORK_ERROR", aborted: false, stored: 1 },
+    },
+    {
+      // M3-U31's failures: the same ticket can never finish the upload, so no resume could either (M4-F1).
+      name: "a refused multipart file still sends /abort and leaves no record",
+      file: threeParts,
       fault: (call: FaultCall) =>
         call.label === "PUT part 2" ? errorResponse(400, "InvalidArgument", "Invalid argument.") : undefined,
       expected: { code: "UPLOAD_REJECTED", aborted: true, stored: 0 },
     },
     {
       name: "a /complete that may have finished keeps the record for a resume, sending no /abort",
+      file: threeParts,
       fault: (call: FaultCall) => (call.label === "POST /complete" ? unreachable() : undefined),
       expected: { code: "NETWORK_ERROR", aborted: false, stored: 1 },
     },
-  ])("$name, and lets the lock go", async ({ fault, expected }) => {
+    {
+      // No record can resume a single PUT, and no lifecycle rule removes its object: /abort deletes it (M3-S15).
+      name: "a failed single PUT sends /abort",
+      file: () => smallFile("a.txt"),
+      fault: (call: FaultCall) =>
+        call.label === "PUT object" ? errorResponse(400, "InvalidArgument", "Invalid argument.") : undefined,
+      expected: { code: "UPLOAD_REJECTED", aborted: true, stored: 0 },
+    },
+  ])("$name, and lets the lock go", async ({ file, fault, expected }) => {
     const setup = persistFixture({ fault });
-    const { error } = await setup.client.upload("files", threeParts());
+    const { error } = await setup.client.upload("files", file());
     await setup.drained();
 
     expect({

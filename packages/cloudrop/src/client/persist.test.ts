@@ -14,6 +14,7 @@ import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import {
   edgeHash,
+  firstOf,
   gate,
   LAST_MODIFIED,
   persistFixture,
@@ -109,25 +110,33 @@ describe("a multipart file of start()", () => {
     await job.done;
   });
 
-  it("leaves nothing when the file was cancelled while /upload was in flight (audit C1)", async () => {
+  it("takes no lock and saves nothing when the file was cancelled while /upload was in flight (M4-F2)", async () => {
     const held = gate((call) => call.label === "POST /upload");
-    // The fingerprint's hash answers only after the cancel has deleted the record: the save must still come first.
-    const hash = Promise.withResolvers<ArrayBuffer>();
-    const setup = persistFixture({ fault: held.fault, hash: () => hash.promise });
+    const abort = gate((call) => call.label === "POST /abort");
+    // Not drained(): it waits for every multipart ticket's hash, which this ticket must never start.
+    const setup = persistFixture({ fault: firstOf(held.fault, abort.fault) });
     const job = setup.client.start("files", threeParts());
     await held.reached;
     job.files[0]?.abort();
     held.open();
+    await abort.reached;
+    // A ticket that was locked and saved would still hold its lock here, until /abort answers.
+    const whileAborting = { hashed: setup.hashedFiles(), locks: setup.locks.held() };
+    abort.open();
     const { data } = await job.done;
-    hash.resolve(new Uint8Array(32).buffer);
-    await setup.drained();
+    await setup.db.settled();
 
     expect({
       status: data?.files[0]?.status,
       sent: setup.fixture.requests,
+      whileAborting,
       stored: setup.db.stored(),
-      locks: setup.locks.held(),
-    }).toEqual({ status: "aborted", sent: ["POST /upload", "POST /abort"], stored: {}, locks: [] });
+    }).toEqual({
+      status: "aborted",
+      sent: ["POST /upload", "POST /abort"],
+      whileAborting: { hashed: 0, locks: [] },
+      stored: {},
+    });
   });
 });
 
@@ -152,9 +161,12 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     }).toEqual({ before: 1, status: "aborted", abort: "POST /abort", stored: {}, locks: [] });
   });
 
-  /** A start() job whose one file failed: its part 2 was refused, so it holds its ticket for retry(). */
-  async function failedFile(fault: Fault = () => undefined) {
-    const setup = persistFixture({ fault: (call) => (call.label === "PUT part 2" ? refused() : fault(call)) });
+  /**
+   * A start() job whose one file failed at part 2, answered by `part2` on every attempt (refused by default), so it
+   * holds its ticket for retry().
+   */
+  async function failedFile(fault: Fault = () => undefined, part2: () => Response | Promise<never> = refused) {
+    const setup = persistFixture({ fault: (call) => (call.label === "PUT part 2" ? part2() : fault(call)) });
     const job = setup.client.start("files", threeParts());
     const { error } = await job.done;
     await setup.drained();
@@ -222,7 +234,29 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     });
   });
 
-  it("pagehide sends a failed file's /abort and lets both go", async () => {
+  it("pagehide gives a file failed by the network up without an /abort: the record stays for a reload (M4-F1)", async () => {
+    const page = pageEvents();
+    const { job, id, kept, from, drained, db, locks, reload } = await failedFile(undefined, unreachable);
+    const sent = from();
+    page.fire("pagehide");
+    await drained();
+    const afterHide = { sent: sent(), stored: Object.keys(db.stored()), locks: locks.held() };
+    // A page restored from the back-forward cache: another tab may have resumed and completed the upload since, so
+    // this page's abort() must not delete it (M3-U88).
+    job.files[0]?.abort();
+    await drained();
+    const listed = (await reload().resumable()).data?.map((upload) => upload.id);
+
+    expect({ kept, afterHide, sent: sent(), status: job.getSnapshot().files[0]?.status, listed }).toEqual({
+      kept: { code: "NETWORK_ERROR", stored: [id], locks: [lockOf(id)] },
+      afterHide: { sent: [], stored: [id], locks: [] },
+      sent: [],
+      status: "aborted",
+      listed: [id],
+    });
+  });
+
+  it("pagehide still sends a refused file's /abort and leaves no record: no resume can fix it (M4-F1)", async () => {
     const page = pageEvents();
     const { id, kept, from, drained, db, locks } = await failedFile();
     const sent = from();
@@ -235,6 +269,28 @@ describe("the record and the lock go when the page gives the ticket up", () => {
       stored: {},
       locks: [],
     });
+  });
+
+  it("a retry after a back-forward cache restore leaves the given-up record, which another tab may hold", async () => {
+    const page = pageEvents();
+    let failing = true;
+    const setup = persistFixture({
+      fault: (call) => (failing && call.label === "PUT part 2" ? unreachable() : undefined),
+    });
+    const job = setup.client.start("files", threeParts());
+    await job.done;
+    page.fire("pagehide");
+    await setup.drained();
+    failing = false;
+    const { data } = await job.retry();
+    await setup.drained();
+    const [first, second] = setup.issued;
+
+    expect({
+      status: data?.files[0]?.status,
+      fresh: second?.id !== first?.id,
+      stored: Object.keys(setup.db.stored()),
+    }).toEqual({ status: "done", fresh: true, stored: [first?.id] });
   });
 
   it("abort() of a failed file that a /complete may have finished lets both go without an /abort", async () => {

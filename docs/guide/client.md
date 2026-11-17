@@ -162,8 +162,9 @@ after a reload starts `queued` while its record is checked, then goes to `comple
 ### Cancel
 
 `abort()` on a file, `job.abort()`, or the `signal` you passed cancels: requests stop, the file ends `aborted`, and the
-server is told to clean up with `/abort`. A failed file ends `aborted` too, and the server is told to drop what it kept
-for `retry()`.
+server is told to clean up with `/abort`. A file still waiting for its ticket ends `aborted` at once; a ticket that
+arrives for it later only gets its `/abort`. A failed file ends `aborted` too, and the server is told to drop what it
+kept for `retry()`.
 
 The one exception: a file after a `/complete` that may have succeeded is kept, never deleted.
 
@@ -208,9 +209,9 @@ server started it) asks `/upload` again for itself alone, with the backoff above
 
 - The file stays `queued` while it waits.
 - Pausing it stops the wait until it resumes. Cancelling it ends it `aborted` at once, without another request.
-- Going offline pauses it while it waits after a refusal, and going back online asks at once. In the backoff after a
-  later `/upload` that failed as a whole, going offline pauses it only while another file of the job is uploading;
-  otherwise that `/upload` goes through its attempts, as the job's own does.
+- Going offline pauses it while it waits, after a refusal or after a later `/upload` that failed as a whole, whatever
+  the job's other files do; going back online asks at once. An `/upload` already sent is not stopped: a ticket it
+  brings waits paused.
 - A refusal that is not retryable, such as a file over the size limit, fails the file at once.
 
 ## Concurrency and order
@@ -232,8 +233,9 @@ back online.
 
 - A file you paused stays paused. Your `pause()` or `resume()` of a file the network paused makes it yours.
 - Files that start while the page is offline pause before any `PUT`.
-- The `/upload` that starts a job is not held: with no network it fails every file with `NETWORK_ERROR` after its
-  attempts, and `retry()` sends it again.
+- The `/upload` that starts a job, or that a `job.retry()` sends for several files, is not held: with no network it
+  fails those files with `NETWORK_ERROR` after its attempts, and `retry()` sends it again. A one-file `/upload` (a
+  file asking again after a refusal, a `file.retry()` that needs a new ticket) pauses while it waits.
 
 ## Stalled requests
 
@@ -252,13 +254,18 @@ size at 100 KiB/s.
 ## What gets cleaned up
 
 - **Cancelling** returns `ABORTED` and tells the server to clean up with `/abort`.
-- **A file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so `upload()`
-  answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
+- **A single-`PUT` file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so
+  `upload()` answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
+- **A multipart file of `upload()` that fails** for a reason a later attempt can fix, such as the network, keeps its
+  parts and its resume record, so a reload can [resume](resume.md) it and send only the parts the bucket lacks; no
+  `/abort` is sent. One the bucket or the server refused, or whose ticket expired, is cleaned up as a single `PUT` is,
+  and so is every failed file with persistence off or unavailable.
 - **A failed file of `start()`** keeps its ticket and the parts already stored in the bucket, so `retry()` can reuse
-  them, until
-  `abort()` of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours). `abort()` and
-  `pagehide` tell the server with `/abort`; after expiry, the bucket's lifecycle rule removes unfinished parts. A failed
-  single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not retry.
+  them, until `abort()` of the file or the job (or `options.signal`), `pagehide`, or the ticket's expiry (24 hours).
+  `abort()` tells the server with `/abort`. `pagehide` does too, except for a multipart file `upload()` would keep,
+  which keeps its parts and its resume record for a reload. The bucket's lifecycle rule removes unfinished parts nobody
+  resumes. A failed single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not
+  retry.
 - **A file after a `/complete` that may have succeeded** is always kept, never deleted.
 
 ## Errors that only the client produces
