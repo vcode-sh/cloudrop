@@ -7,12 +7,12 @@ import { type PrismaClientLike, prismaStore } from "./prisma.ts";
 
 // The members of a generated client the types depend on, as Prisma 7.10.1 declares them
 // (.prisma-client/*/internal/class.ts): the array form first, the callback form last, and the callback's client
-// without the members Prisma denies inside a transaction.
+// without the members Prisma denies inside a transaction (`denylist` in @prisma/client/runtime/client.d.ts).
 interface PrismaPromise<T> extends Promise<T> {
   [Symbol.toStringTag]: "PrismaPromise";
 }
 type TransactionIsolationLevel = "ReadUncommitted" | "ReadCommitted" | "RepeatableRead" | "Serializable";
-type ITXClientDenyList = "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends";
+type ITXClientDenyList = "$connect" | "$disconnect" | "$on" | "$use" | "$extends";
 declare class PrismaClient {
   avatar: { create(args: { data: { userId: string; key: string } }): PrismaPromise<{ id: number }> };
   $connect(): Promise<void>;
@@ -48,8 +48,8 @@ describe("prismaStore types", () => {
         onComplete: async ({ tx, userId, file }) => {
           expectTypeOf(tx).toEqualTypeOf<Omit<PrismaClient, ITXClientDenyList>>();
           await tx.avatar.create({ data: { userId, key: file.key } });
-          // @ts-expect-error: Prisma denies $transaction inside an interactive transaction.
-          void tx.$transaction;
+          // @ts-expect-error: Prisma denies $disconnect inside an interactive transaction.
+          void tx.$disconnect;
           return null;
         },
       },

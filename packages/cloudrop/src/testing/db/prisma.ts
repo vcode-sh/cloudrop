@@ -17,7 +17,8 @@ export interface PrismaTestModel {
   update(args: { where: Row; data: Row }): Promise<Row>;
 }
 
-/** What an interactive transaction's callback receives: the client without `$transaction` and `$disconnect`. */
+/** The members the tests call on an interactive transaction's client (Prisma denies `$connect`, `$disconnect`, `$on`,
+ *  `$use` and `$extends` there). */
 export interface PrismaTestTransaction {
   $queryRawUnsafe<T = unknown>(sql: string, ...values: unknown[]): Promise<T>;
   $executeRawUnsafe(sql: string, ...values: unknown[]): Promise<number>;

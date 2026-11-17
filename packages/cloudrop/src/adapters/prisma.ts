@@ -27,8 +27,8 @@ export interface PrismaTransactionOptions {
 
 /** A Prisma 7 client, `new PrismaClient({ adapter })`, or one made with `$extends`. */
 export interface PrismaClientLike extends PrismaQueryable {
-  $transaction(queries: PromiseLike<unknown>[]): PromiseLike<unknown[]>;
-  $transaction<T>(run: (tx: PrismaQueryable) => Promise<T>, options?: PrismaTransactionOptions): PromiseLike<T>;
+  $transaction(queries: PromiseLike<unknown>[]): Promise<unknown[]>;
+  $transaction<T>(run: (tx: PrismaQueryable) => Promise<T>, options?: PrismaTransactionOptions): Promise<T>;
 }
 
 /** The client Prisma hands an interactive transaction's callback, as `TClient`'s own type declares it. */
@@ -115,14 +115,14 @@ function prismaExecutor(
   if (!options.transaction) return executor;
   return {
     ...executor,
-    transaction: async (run) =>
+    transaction: (run) =>
       prisma.$transaction(
         (tx) =>
           run(
             {
               dialect,
               query: (sql, params) => rowsOf(tx, { sql, params }),
-              // Already inside the transaction, whose client has no $transaction of its own.
+              // Already inside the transaction: run the statements in order on tx.
               batch: (statements) => inOrder(tx, statements),
             },
             tx,
@@ -140,8 +140,10 @@ function prismaExecutor(
  * of it (they belong in `afterComplete`).
  *
  * On Postgres the store's SQL finds its tables through the connection's search path, not PrismaPg's `schema` option,
- * which only model queries use. Tables outside `public` need both, for example `?options=-c%20search_path%3Dapp` in the
- * connection string beside `new PrismaPg({ connectionString }, { schema: "app" })`.
+ * which only model queries use. Tables outside `public` need both: `new PrismaPg({ connectionString }, { schema: "app" })`
+ * and the search path, set once for the role with `ALTER ROLE <user> SET search_path = app` (this also works behind a
+ * connection pooler) or per connection with `?options=-c%20search_path%3Dapp` in the connection string (some poolers
+ * drop or refuse that startup option).
  *
  * Usage
  * ```ts
