@@ -176,7 +176,8 @@ export async function sendAndComplete(
     const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
     if (upload.probe) probed(upload, done, missing);
-    if (!missing?.length || upload.repairs === REPAIR_ROUNDS) return done;
+    // A cancel during /complete ends the file with this answer rather than start a repair (M4-F4).
+    if (!missing?.length || upload.repairs === REPAIR_ROUNDS || entry.cancel.signal.aborted) return done;
     upload.repairs++;
     for (const partNumber of missing) entry.landed.delete(partNumber);
     // Uploading again at once, so a pause applies to the repair (ruling M3-U4).

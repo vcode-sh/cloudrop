@@ -91,6 +91,19 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts` (the `abort` rows; the row for a missing
   `AbortSignal.timeout` is gone).
 
+### M4-F4: a cancel during `/complete` starts no repair
+
+- **Decision:** when a `/complete` answers `PARTS_MISSING` after the file's cancel fired, the file ends there,
+  `aborted`, without moving to `uploading` for a repair round. Its `/abort` follows as for any cancel (`PARTS_MISSING`
+  clears the doubt, `M3-S31`).
+- **Why:** design §3 F4. The repair moved the file to `uploading` before its first `PUT` noticed the cancel, so a page
+  was shown `uploading, completing, uploading, aborted`: a cancelled file that looked as if it started again.
+- **If wrong:** nothing known; the repair's `PUT`s already stopped on the cancel, so no request changes.
+- **Status:** in force.
+- **Source:** design §3 F4; code audit of `main` at `907cc77`.
+- **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/upload-failures.test.ts` ("ends aborted, never
+  uploading again").
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)
