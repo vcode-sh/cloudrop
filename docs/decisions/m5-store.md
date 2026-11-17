@@ -818,8 +818,9 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   M5-T51.)
 - **Status:** decided.
 - **Source:** task D, 2026-11-17.
-- **Visible in:** `src/adapters/drizzle/tables.ts`, `src/adapters/drizzle/postgres-tables.ts`,
-  `src/adapters/drizzle/sqlite-tables.ts`, `src/adapters/drizzle-tables.db.integration.test.ts`.
+- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/drizzle/sqlite-tables.ts`,
+  `src/adapters/drizzle-tables.db.integration.test.ts` (`src/adapters/drizzle/tables.ts` until M5-T122 folded it into
+  `postgres-tables.ts`).
 - **Amended 2026-11-17 (fix round 1):** `cloudropTables` is replaced by `cloudropPgTables(options?)` and
   `cloudropSqliteTables(options?)`, with options `{ tables? }` (`CloudropTablesOptions`). Each lives in its own module
   and imports only its dialect's Drizzle core, so an app's schema file bundles one of them. The db-lane comparison
@@ -1398,8 +1399,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 - **Decision:** with `tables.schema`, `cloudropPgTables` builds both tables with
   `new PgSchema(schema, undefined).table`, so a drizzle-kit migration creates them in that schema and Drizzle's queries
-  name it; without it, `pgTable` as before. The constructor, not `pgSchema()`: `pgSchema()` throws a plain `Error` on `"public"` in 0.45 and in
-  1.0.0-rc.5, while the store accepts `"public"` and writes `"public"."cloudrop_files"`, so the Drizzle tables would
+  name it; without it, `pgTable` as before. The constructor, not `pgSchema()`: `pgSchema()` throws a plain `Error`
+  on `"public"` in 0.45 and in 1.0.0-rc.5, while the store accepts `"public"` and writes `"public"."cloudrop_files"`, so the Drizzle tables would
   crash at import for a value the store takes. For every other name `pgSchema()` is that constructor call (1.0 passes
   `casing`, undefined; 0.45 has no such parameter), so the constructor is used for every schema. 1.0 declares `casing`
   as required, so the constructor is held as `new (name: string, casing: undefined) => { table: PgTableFn<string> }`,
