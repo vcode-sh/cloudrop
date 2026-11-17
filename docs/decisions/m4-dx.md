@@ -221,7 +221,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Why:** the M4a client fixes ended at 10.95 kB; `M4-F22` took it to 11.03 kB. Moving the resume's claim into
   `check()`, which owns the refusals and the lock, kept `resumeRun` unchanged but saved nothing measurable, and no
   other change keeps the behaviour and cuts 30 B.
-- **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.87 kB, within it.
+- **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.96 kB, 12.99 kB after the final
+  review: about 1 kB over the round figure, for the owner to confirm with `M4-B10`.
 - **Status:** in force (`516bac5`). Supersedes `M3-U91`'s 11 kB.
 - **Source:** design §5.7; task D measurement (`bun run package:check`, 2026-11-17).
 - **Visible in:** `scripts/size-limit.config.ts`.
@@ -298,7 +299,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 ### M4-F14: a bundled-and-minified budget for `cloudrop`
 
 - **Decision:** `scripts/size-limit.config.ts` adds "cloudrop (bundled)": `dist/index.js` bundled and minified with
-  every export, gzip, limit 23.5 kB (21.33 kB measured plus about 10%), beside the summed 36 kB budget, which stays.
+  every export, gzip, limit 23.5 kB (21.33 kB measured plus about 10%), beside the summed 36 kB budget, which stays
+  (M4-F16 later raised the summed budget to 40 kB; the final review measured 36.7 kB summed and 22.36 kB bundled).
 - **Why:** audit F14. The summed budget counts the published files with their doc comments and messages (34.08 kB
   now); what a Workers app ships is the bundle, which the summed figure overstates by about 60%.
 - **If wrong:** an app that imports only part of the server ships less than this budget, so it bounds the worst case,
@@ -597,8 +599,9 @@ review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22
 ### M4-B10: the `cloudrop/react` ceiling is 2.05 kB, not 1.5 kB
 
 - **Decision:** the budget is 2.05 kB gzip: the 1.87 kB size-limit measured after fix round 2 (1.88 kB after round 3's
-  microtask), plus about 10%, the rule
-  `size-limit.config.ts` states. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
+  microtask), plus about 10%, the rule `size-limit.config.ts` states. The final review's fixes (per-route lists
+  `M4-B2`, stable prop getters, one read per burst `M4-B3`) took the entry to 1.96 kB, 90 B under the ceiling, which
+  stays. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
   app that uses the hooks ships both with the client.
 - **Why:** with every promise of §6.1 kept (the per-file identity cache, the latest-options handlers, drag counting,
   the stale-read guard), the hooks measured 1.66 kB. Fix round 1 added held-upload matching, configuration errors as
@@ -606,7 +609,7 @@ review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22
   into the client (`M4-F22`), for 1.87 kB.
 - **If wrong:** the owner may hold 1.5 kB; then a promise of §6.1 has to go, or the code be minified by hand.
 - **Status:** in force (`542ae74`, `99f795a`, `9cacad8`); accepted by the controller, for owner confirmation.
-- **Source:** task D measurement (`bun run package:check`, 2026-11-17).
+- **Source:** task D measurement (`bun run package:check`, 2026-11-17); final review measurement, same day.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M4-B11: a paused file is not uploading

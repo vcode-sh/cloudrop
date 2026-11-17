@@ -23,7 +23,7 @@ const summed = { disablePlugins: ["@size-limit/esbuild"] };
 
 export default [
   // Summed files, not a bundle: these budgets count the entry and its chunks as published. "cloudrop" was 36 kB until
-  // route(policy, callbacks), lazy environment settings and forbidden() took it from 34.09 to 36.33 kB (M4-F16).
+  // route(policy, callbacks), lazy environment settings and forbidden() took it from 34.09 to 36.66 kB (M4-F16).
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "40 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
@@ -54,7 +54,8 @@ export default [
   // Bundled and minified without react and without the client's chunks (the client and its errors), which an app that
   // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it. The design aimed at
   // 1.5 kB (M4-B5); the hooks measured 1.88 kB with every promise of the contract kept, once the client's resumable()
-  // left out the uploads this page holds (M4-F22), so the ceiling is that plus about 10% (M4-B10).
+  // left out the uploads this page holds (M4-F22), so the ceiling is that plus about 10% (M4-B10). The final review's
+  // per-route lists, stable prop getters and one read per burst took them to 1.96 kB, under the same ceiling.
   {
     name: "cloudrop/react",
     path: join(dist, "react.js"),
