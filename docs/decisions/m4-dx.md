@@ -418,6 +418,52 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `server/route.ts` (`forbidden`, `Refusal`, `refusalError`), `server/upload.ts`, `server/http.ts`,
   `errors.ts`, `index.ts`, `docs/guide/errors.md`, `docs/guide/server.md` (the quota plugin example).
 
+### M4-F19: the npm package ships a README and the LICENSE, and `package:check` requires both
+
+- **Decision:** `packages/cloudrop/README.md` is a short page for npm: what cloudrop is, the install line, a quickstart
+  (server with `route(policy, callbacks)`, the Next.js mount, `createUploadHooks` and `useUpload` with
+  `getInputProps`), bucket CORS in one paragraph, absolute links to the guides on GitHub and the license line.
+  `packages/cloudrop/LICENSE` is a committed copy of the repository's `LICENSE`. `files` stays `["dist"]`: the pack
+  adds a README and LICENSE next to `package.json` by itself (checked with `bun pm pack`). `scripts/check-package.sh`
+  lists the packed tarball and fails, naming the file, when `package/README.md` or `package/LICENSE` is missing, and
+  fails when the copy differs from the repository's `LICENSE`.
+- **Why:** design §5.5: a cold-developer test found a tarball with neither, so npm showed no page and the license did
+  not travel with the code. A committed copy is the least fragile way to ship it: no build step to forget, and the
+  `cmp` check catches drift. The check reads the tarball, which is what a publish uploads, rather than the source tree.
+  Links are absolute because npm resolves relative links against its own site.
+- **If wrong:** the check looks for the exact names `README.md` and `LICENSE`, so renaming either (to `readme.md` or
+  `LICENSE.md`) fails it until the check changes too. Changing the license means changing both files.
+- **Status:** in force.
+- **Source:** design §5.5.
+- **Visible in:** `packages/cloudrop/README.md`, `packages/cloudrop/LICENSE`, `scripts/check-package.sh`.
+
+### M4-F20: the guides describe the code as merged, with the recipes cold developers missed
+
+- **Decision:** design §5.6, against the code on `feat/m4a`: an install line and "pre-release; the API may change
+  before 0.1" in the README, which also says that the `0.0.0` on npm only reserves the name until 0.1 is published;
+  the README quickstart uploads through `cloudrop/react`, with one `cloudrop/client` call for apps without React; Hono
+  and Bun mounting recipes, better-auth and a raw `Cookie` header in `authorize`, `forbidden()` beside
+  `unauthorized()`, `accept: "*/*"`, the `maxFiles` default and `r2()`/`s3()` with no argument in `server.md`; a new
+  `deployment.md` (same-origin versus cross-origin, absolute `basePath`, `trustedOrigins`, cookies across sites, the
+  bucket's CORS rule lists the page's origin, a TLS proxy, building without secrets, Workers); AWS CLI commands with
+  `--endpoint-url` and the lifecycle JSON in `bucket-setup.md`; a bearer-token `fetch`, resetting a file input and
+  testing pause locally in `client.md`; a troubleshooting entry for cookies across sites. Stale text the merged code
+  made false is gone: `examples/next`'s "the build needs the settings" (`M4-F16`), and its Wrangler sentence, since
+  the home page now keeps a failed file for retry until `pagehide` (`M4-B6`).
+- **Why:** design §1 and §5.6 list the friction the cold-developer tests met. The bearer `fetch` sends the token only to
+  `basePath`: the option carries bucket `PUT`s too, the bucket's CORS rule allows no `Authorization` header, so the
+  browser would block those `PUT`s, and the token has no business reaching the storage service. The
+  Wrangler wording follows the code, not the notes' first draft: a missing `ListParts` answers `501`, which the
+  driver maps to a `STORAGE_ERROR` that is not retryable (`storage/storage-error.ts`), so `M4-F1` keeps no record and
+  `/abort` still runs, at once for `upload()` and at `pagehide` for `start()`. The AWS CLI commands and the lifecycle
+  JSON were run against RustFS 1.0.5, and `checkBucket` then reported CORS and lifecycle `ok`.
+- **If wrong:** a guide that disagrees with the code misleads; the code wins and the guide is fixed. The README's
+  `0.0.0` sentence goes when 0.1 is published.
+- **Status:** in force.
+- **Source:** design §5.6; task E notes collected during tasks A to D.
+- **Visible in:** `README.md`, `docs/guide/server.md`, `docs/guide/deployment.md`, `docs/guide/bucket-setup.md`,
+  `docs/guide/client.md`, `docs/guide/troubleshooting.md`, `examples/next/README.md`.
+
 <!-- Tasks C and E append their entries above this line. -->
 
 ## Bindings (`M4-B`)
