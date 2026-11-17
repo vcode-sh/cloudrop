@@ -24,7 +24,8 @@ Numbering:
   a public contract, each naming its source as above (`task 2 R1`, `task 4 ruling 1`, `audit M4`).
 - `M3-U60` to `M3-U69` are the resume design's decisions: the owner's of 2026-11-16 (`M3-U60` to `M3-U63`), then the
   research's defaults the design adopted (`M3-U64` to `M3-U69`). `M3-U70` to `M3-U79` are the resume plan's rulings
-  R1 to R10: `R<n>` is `M3-U<n + 69>`. The resume plan's execution rulings follow from `M3-U80`.
+  R1 to R10: `R<n>` is `M3-U<n + 69>`. The resume plan's execution rulings and owner decisions follow from `M3-U80`,
+  each naming its source (`audit C1`, the ledger, a controller ruling).
 
 The part-size outcome spec §7 asks for is `M3-U40`. The failed-file rule that amends `M3-S15` (spec §4.7: a failed file
 of a `start()` job keeps its parts for `retry()` instead of the background `/abort`) is ruled in `M3-U29` to `M3-U38`;
@@ -68,7 +69,8 @@ Plan B rulings without an entry, for the same reasons:
   order of weighing a window and granting slots) are in `M3-U23`.
 - The ledger's split of tasks 7 and 8 into halves that run beside task 5: how the plan was executed, not what it does.
 
-Commit ids below are on the branch `feat/m3-progress-a` up to `M3-U22` and on `feat/m3-progress-b` from `M3-U23`.
+Commit ids below are on the branch `feat/m3-progress-a` up to `M3-U22`, on `feat/m3-progress-b` from `M3-U23` and on
+`feat/m3-resume` from `M3-U60`.
 Paths are under `packages/cloudrop/src/` unless they say otherwise.
 
 ## Plan rulings
@@ -218,8 +220,15 @@ Paths are under `packages/cloudrop/src/` unless they say otherwise.
   status change keeps buttons and labels correct.
 - **If wrong:** a page that renders on every listener call still renders up to ten times a second per job.
 - **Known cost:** job-level `pause()`, `resume()` and a refused `/upload` publish once per file, each publish building
-  a snapshot of every file (a 500-file job: 500 publishes of 500 file snapshots, synchronously). Unmeasured; plan B
-  measures it and coalesces urgent publishes if it shows.
+  a snapshot of every file, so a click costs about N snapshot builds of N files and grows as N². Measured 2026-11-17
+  (Node 24.22.2 and Bun 1.4.4 on this machine, real jobs on the fake R2, one listener reading `getSnapshot()` per call):
+  `pause()` of a job with every file mid-upload takes 1.7 ms at 100 files, 24.7 ms at 500 and about 220 ms at 2,000
+  (271 ms in a second run); `resume()` and the refused `/upload` cost the same. Publishing once per click in a
+  microtask, measured on a scratch copy of `client/store.ts`, takes the 2,000-file pause from 220 to 10 ms, the rest
+  being the pool's O(N) removal of each waiter. Not coalesced: a route accepts at most 100 files per `/upload`
+  (`M2-D7`), so a click on ticketed files costs at most about 2 ms, far under one 16 ms frame, and coalescing would
+  change "at once" above to "in the same task". Revisit if `maxFiles` may ever exceed about 300, or the client splits
+  a job over several `/upload`s: the cost crosses one frame at about 400 to 550 files.
 - **Status:** in force (`d75c21a`, `07f235b`, `5cc63e5`). Plan B made one exception (`M3-U36`, `4f1887a`): a retry under
   a new ticket starts the file's bytes again from 0.
 - **Visible in:** `client/store.ts`, `client/progress.ts`, `client/job-snapshot.ts` (`fileSnapshot`, `snapshotOf`),
@@ -661,7 +670,7 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   would have cut scope late. Measured: 6.74 kB after plan A, 7.38 kB with tasks 2, 3, 4 and 6 merged.
 - **If wrong:** M4's React bindings have about 2 kB of the 11 kB.
 - **Status:** in force (`fbc5c15`); the budget after plan B is `M3-U58`. Amends `M3-U13`. Amended by `M3-U60`
-  (decided 2026-11-16): the ceiling is 10 kB and the "client plus React" target about 12 kB.
+  (in force): the ceiling is 10 kB and the "client plus React" target about 12 kB; then by `M3-U86`: 10.5 kB.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M3-U44: a window weighs only time the pool was busy
@@ -901,9 +910,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** every app ships the store, also one that never reloads during an upload or runs where there is no
   `indexedDB` (Node, Bun, Workers, where the store does nothing). M4's React bindings keep about 2 kB of the 12 kB. An
   app that wants no records on disk passes `persist: false`.
-- **Status:** decided (resume plan, tasks 4, 5 and 7). The 10 kB limit is in `scripts/size-limit.config.ts` since
-  `57144e0`. Amends `M3-U43` (9 kB and about 11 kB); `M3-U58`'s budget holds until the resume plan's last task
-  replaces it.
+- **Status:** in force (`2fe56b7`, `2075eac`; the 10 kB limit `57144e0`). Amends `M3-U43` (9 kB and about 11 kB).
+  Measured: 9.76 kB after task 4 against the 1.1 kB the plan allowed, so the owner raised the ceiling to 10.5 kB
+  (`M3-U86`); 10.45 kB after task 5. The budget the resume plan's last task sets from measurement replaces
+  `M3-U58`'s.
 - **Visible in:** spec §1, `scripts/size-limit.config.ts`, `client.ts` (`persist`).
 
 ### M3-U61: on resume, the server's part list decides
@@ -922,7 +932,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong (known cost):** one `ListParts` more per resumed file: a Class A operation, $4.50 per million requests
   on R2 with 1 million Class A requests a month free ([R2 pricing](https://developers.cloudflare.com/r2/pricing/);
   `docs/research/r2-spike-findings.md` Q10). A resumed file spends one round trip before its first PUT.
-- **Status:** decided (resume plan, task 5). Spec §6.3 says so.
+- **Status:** in force (`2075eac`). Spec §6.3 says so.
 - **Visible in:** spec §6.3, `client/resume.ts` (the probe start), `client/upload.ts`.
 
 ### M3-U62: the upload token is persisted, with limits
@@ -952,8 +962,11 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   §5.2), so a resumed upload runs with its original owner: a second user signed in on the same profile and namespace
   could finish the first user's upload. It stays the first user's file, and an `onComplete` that must re-check the
   session reads the request there. A record whose delete fails (store errors never fail an upload, `M3-U71`) stays
-  until it is found expired.
-- **Status:** decided (resume plan, tasks 1, 4, 5 and 7). Spec §7 says so.
+  until it is found expired. A delete issued in `pagehide` may not commit before the page unloads (audit M13): the
+  next page then lists that upload, and resuming it finds the upload gone when the `/abort` reached the server
+  (`NO_SUCH_UPLOAD`, so it starts over with a new ticket, `M3-U74`) or sends only the missing parts when it did not.
+- **Status:** in force (`7f2a7b1`, `2fe56b7`, `8770518`, `2075eac`; the README's section `d63579c`). Spec §7 says
+  so.
 - **Visible in:** spec §7, `client/records.ts`, `client/job-run.ts` (the save), `client/file-run.ts`,
   `client/lifecycle.ts`.
 
@@ -972,7 +985,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong:** a page that never calls `resume()` gets no resume, though records are kept until they expire. The
   same file picked into an ordinary `start()` is uploaded again under a new key, and the old upload's parts wait for
   the bucket's lifecycle rule.
-- **Status:** in force (resume plan, tasks 2 and 5).
+- **Status:** in force (`7535e86`, `2075eac`).
 - **Visible in:** `client.ts`, `client/resume.ts`, `client/types.ts` (`ResumableUpload`), `errors.ts`.
 
 ### M3-U64: only multipart uploads are persisted
@@ -983,8 +996,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   which a reload loses whole, so there is nothing to continue; a record would serve only cleanup.
 - **If wrong (known cost):** a single PUT that landed before a reload and was never completed stays in the bucket for
   good: no lifecycle rule removes a stored object, and no record is left to complete or abort it.
-- **Status:** decided (resume plan, task 4).
-- **Visible in:** `client/job-run.ts` (the save), `client/persist.test.ts`.
+- **Status:** in force (`2fe56b7`).
+- **Visible in:** `client/persist.ts` (`uploadOf`), `client/persist.test.ts`.
 
 ### M3-U65: no copy into the origin-private file system yet
 
@@ -998,7 +1011,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   handles are Chromium only and come only from the app's own picker, never from `<input>`.
 - **If wrong:** a reload during a large upload needs the user to pick the file again; `resumable()` gives the page the
   name and size to ask for.
-- **Status:** decided (resume design; nothing to build). Spec §6.3 says so.
+- **Status:** in force (nothing to build: the client copies no file). Spec §6.3 says so, and §3 item 5 and §11 item 4
+  since `d63579c`.
 - **Visible in:** spec §6.3.
 
 ### M3-U66: the library never calls `navigator.storage.persist()`
@@ -1010,7 +1024,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   for a record that lives 24 hours.
 - **If wrong:** under storage pressure a browser may evict the origin's data, records included; those uploads can no
   longer be resumed, and their parts wait for the bucket's lifecycle rule.
-- **Status:** decided (resume plan, tasks 1 and 7).
+- **Status:** in force (`7f2a7b1`; the README `d63579c`).
 - **Visible in:** `client/records.ts` (no such call), `README.md`.
 
 ### M3-U67: an expired upload starts over with a new ticket
@@ -1026,7 +1040,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   1.1 at the earliest. The new-ticket branch exists and is tested.
 - **If wrong (known cost):** a resume between 24 hours and 7 days sends every byte again, and the old parts wait for
   the lifecycle rule (`M3-U55`).
-- **Status:** in force (resume plan, task 5; how, `M3-U74`).
+- **Status:** in force (`2075eac`; how, `M3-U74`).
 - **Visible in:** `client/job-run.ts` (`startOver`), `client/retry-file.ts`.
 
 ### M3-U68: the fingerprint is an edge hash, with a fallback without `crypto.subtle`
@@ -1045,7 +1059,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   accepted, and the object stored mixes parts of the two files, which the server's size checks accept; without
   `crypto.subtle` the edges are not compared either. `checksums()` (M5) closes it. Where the platform does not know a
   file's `lastModified`, the File API returns the current time, so no file matches and every resume is refused.
-- **Status:** decided (resume plan, task 2).
+- **Status:** in force (`7535e86`; a runtime with no `crypto` global at all is treated as one without
+  `crypto.subtle` since `64b3333`).
 - **Visible in:** `client/fingerprint.ts`.
 
 ### M3-U69: a Web Lock keeps two tabs from sending one upload
@@ -1060,7 +1075,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   sent again during the call makes a listed ETag stale and answers a retryable `STORAGE_ERROR` (spec §5.4).
 - **If wrong:** Web Locks exist only in secure contexts. Without them two tabs may send the same parts: harmless to
   the result, since the server verifies, but wasted bytes.
-- **Status:** in force (resume plan, tasks 2, 4 and 5). Task 5 shortened `UPLOAD_IN_USE`'s message to "This upload is
+- **Status:** in force (`7535e86`, `2fe56b7`, `8770518`, `2075eac`). A lock is the origin's, not the tab's, so the
+  page that holds it is refused too; the message says so since `64b3333`. Task 5 shortened it to "This upload is
   being sent in this browser, in this tab or another. Finish or cancel it there, then try again." for size.
 - **Visible in:** `client/locks.ts`, `client/persist.ts`, `errors.ts` (`ClientErrorCode`), `client/failures.ts`
   (`uploadInUse`).
@@ -1080,7 +1096,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   origin in practice (MDN, "Storage quotas and eviction criteria"), which a few hundred records could fill.
 - **If wrong:** a profile holding thousands of records reads them all on every `resumable()`; an index needs a
   version 2 upgrade.
-- **Status:** decided (resume plan, task 1).
+- **Status:** in force (`7f2a7b1`).
 - **Visible in:** `client/records.ts`.
 
 ### M3-U71: one ordered queue per client, and the store never holds up an upload
@@ -1098,20 +1114,24 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   database. The records are a convenience: a quota error or a browser that refuses storage must not fail an upload the
   network can finish.
 - **If wrong:** a browser whose store keeps failing is asked again on every operation; each failure costs one open.
-- **Status:** in force (`7f2a7b1`, `22b270f`; the pending record, resume plan task 4).
+- **Status:** in force (`7f2a7b1`, `22b270f`; the pending record `2fe56b7`). The reopen is the controller's ruling
+  on task 1's concern that a connection the browser closed (site data cleared, a newer schema opened in another tab)
+  would end resuming for the page's life.
 - **Visible in:** `client/records.ts`, `client/failures.ts` (`storageUnavailable`).
 
 ### M3-U72: a record counts as expired 60 seconds early
 
 - **Decision:** R3 (resume design §3.6). A record whose `expiresAt` is less than 60,000 ms ahead counts as expired:
-  `resumable()` does not list it, `resume()` ends with `NOT_FOUND`, and whichever sees it deletes it.
+  `resumable()` does not list it, `resume()` ends with `NOT_FOUND`, and whichever sees it deletes it. Every save and
+  every read deletes the expired records of every namespace it reads, not only its own (accepted from tasks 1 and 4):
+  their tokens no longer work.
 - **Why:** a listed upload needs time to start: the page asks for the file, the client hashes it, and the probe
   reaches the server before the token expires. Without the margin an upload listed at the last moment would meet
   `UPLOAD_EXPIRED` and start over (`M3-U67`).
 - **If wrong:** an upload with less than a minute left is not offered. A client clock more than 60 s behind the
   server's can still list a record the server finds expired; the resume then starts over.
-- **Status:** decided (resume plan, task 1).
-- **Visible in:** `client/records.ts`.
+- **Status:** in force (`7f2a7b1`; reads sweep every namespace since `2fe56b7`).
+- **Visible in:** `client/records.ts` (`usable`).
 
 ### M3-U73: the lock's name and how long it is held
 
@@ -1129,10 +1149,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   the finished object. The record is deleted at once. The prefix keeps the name apart from an app's own locks.
 - **If wrong:** a failed file left on a page keeps another tab from resuming it until that page cancels it, retries
   it or closes; `UPLOAD_IN_USE` says so (`M3-U69`).
-- **Status:** in force (resume plan tasks 4 and 5; how a ticket's lock is taken, `M3-U81`). `resume()` takes the lock
-  as its last check and hands it to the rebuilt upload, which keeps it as a ticket from `/upload` does; a cancel while
-  it checks lets it go. Supersedes the draft ruling that a retry refused the lock fails with `UPLOAD_IN_USE`: a retry
-  never asks again.
+- **Status:** in force (`2fe56b7`, `8770518`, `2075eac`; how a ticket's lock is taken, `M3-U81`). `resume()` takes
+  the lock as its last check and hands it to the rebuilt upload, which keeps it as a ticket from `/upload` does; a
+  cancel while it checks lets it go. Supersedes the draft ruling that a retry refused the lock fails with
+  `UPLOAD_IN_USE`: a retry never asks again.
 - **Visible in:** `client/locks.ts`, `client/persist.ts`.
 
 ### M3-U74: a resumed upload that is gone starts over in the same run
@@ -1153,7 +1173,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   sets `mayBeComplete` as any `/complete` does (`M3-S14`), so a file that may be stored never takes this branch.
 - **If wrong:** the old upload's parts wait for the bucket's lifecycle rule (`M3-U55`). The page sees one outcome per
   run and no failure in between.
-- **Status:** in force (resume plan tasks 4 and 5, with `M3-U83`). Amends `M3-U31`.
+- **Status:** in force (`2fe56b7`, `2075eac`, with `M3-U83`). Amends `M3-U31`.
 - **Visible in:** `client/file-run.ts` (`runFile`, `GONE`), `client/job-run.ts` (`runUpload`, `startOver`),
   `client/retry-file.ts` (`NEEDS_NEW_TICKET`), `client/resume.test.ts`, `client/resume-job.test.ts`.
 
@@ -1170,7 +1190,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   counts nothing, and progress then only rises (spec §6.4).
 - **If wrong:** progress jumps from 0 to the landed share when the probe answers. A resumed file can meet
   `PARTS_MISSING` three times before it fails.
-- **Status:** in force (resume plan, task 5). Refines `M3-S13` for a resumed file.
+- **Status:** in force (`2075eac`). Refines `M3-S13` for a resumed file.
 - **Visible in:** `client/upload.ts` (`Upload.probe`, `probed`).
 
 ### M3-U76: `resume()` checks in a fixed order and sends nothing when a check fails
@@ -1190,7 +1210,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   never takes a lock it has to release.
 - **If wrong:** a page sees one refusal at a time: a wrong file for an expired record reads as "can no longer be
   resumed", the more useful of the two.
-- **Status:** in force (resume plan, task 5; the messages task 2).
+- **Status:** in force (`2075eac`; the messages `7535e86`).
 - **Visible in:** `client/resume.ts`, `client/failures.ts` (`notResumable`, `notSameFile`, `uploadInUse`),
   `client/resume-checks.test.ts`.
 
@@ -1205,7 +1225,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   is the server's until the upload completes, and the metadata may hold what the app does not show (`M3-U62`).
 - **If wrong:** an app that wants to show metadata keeps its own copy. Adding a field later is compatible; removing
   one is not.
-- **Status:** in force (resume plan, task 5). `ResumableUpload<TName extends string = string>`; `resumable()` without a
+- **Status:** in force (`2075eac`). `ResumableUpload<TName extends string = string>`; `resumable()` without a
   route resolves `ResumableUpload<RouteName>[]` (audit M10).
 - **Visible in:** `client/types.ts` (`ResumableUpload`), `client/resume.ts`, `client/forget.test.ts`.
 
@@ -1216,15 +1236,16 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `forget({ all: false })` and an object with another key beside `all` included (audit M10): they are typed out
   (`forget(options?: { all: true })`) and read as a mistake. It resolves
   `ok({ forgotten: n })`, `ok({ forgotten: 0 })` with persistence off or no `indexedDB`, and `STORAGE_ERROR`
-  (`M3-U71`) when the store fails. Uploads already running keep going; one saves a record again only when it gets a
-  new ticket.
+  (`M3-U71`) when the store fails. `forgotten` counts every record deleted, expired ones included, so it can exceed
+  what `resumable()` listed. Uploads already running keep going; one saves a record again only when it gets a new
+  ticket.
 - **Why:** signing one user out must not erase another user's records on a shared profile, while `all` serves a
   "clear this browser" action and a namespace scheme the app changed. Refusing other arguments catches
   `forget(userId)`, which would otherwise look as if it forgot that user.
 - **If wrong:** an upload running at sign-out finishes under the signed-out user and, with its record gone, cannot be
   resumed after a reload; an app that must stop it aborts the job.
-- **Status:** in force (resume plan, task 5).
-- **Visible in:** `client/resume.ts`, `client.ts`, `client/forget.test.ts`.
+- **Status:** in force (`2075eac`).
+- **Visible in:** `client/resume.ts`, `client.ts`, `client/records.ts` (`clear`), `client/forget.test.ts`.
 
 ### M3-U79: the `persist` and `namespace` options
 
@@ -1235,7 +1256,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   a record and the filter's comparison small.
 - **If wrong:** a longer user id must be shortened or hashed by the app. The namespace is fixed when the client is
   created, so a page that switches users creates a new client.
-- **Status:** in force (resume plan, task 4).
+- **Status:** in force (`2fe56b7`).
 - **Visible in:** `client.ts` (`ClientOptions`, `readOptions`), `client.test.ts`.
 
 ## Resume plan execution rulings
@@ -1256,8 +1277,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   would make `resume()` throw.
 - **If wrong:** a record of a newer shape written into version 1 of the database is deleted; a newer version uses a
   new database version.
-- **Status:** in force (resume plan, task 4).
-- **Visible in:** `client/persist.ts` (`uploadOf`), `client/records.ts` (`save`, `isRecord`).
+- **Status:** in force (`2fe56b7`; the part-count check `2075eac`).
+- **Visible in:** `client/persist.ts` (`uploadOf`), `client/records.ts` (`save`, `isRecord`, `usable`).
 
 ### M3-U81: a ticket's lock is asked for without waiting for the answer
 
@@ -1268,7 +1289,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   asked for, and the lock manager answers requests in order. Waiting would delay every multipart file for nothing.
 - **If wrong:** a forged record with a reused id could be resumed in another tab while this page sends it; the server
   still verifies every part at `/complete`.
-- **Status:** in force (resume plan, task 4).
+- **Status:** in force (`2fe56b7`).
 - **Visible in:** `client/persist.ts`, `client/locks.ts`.
 
 ### M3-U82: `upload()` persists too, and where a page gives a ticket up
@@ -1285,7 +1306,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `/abort` would list an upload that is gone (spec §3.2).
 - **If wrong:** a `resume()` of an `upload()` file left in doubt finds the record, and `/complete` answers success or
   `NO_SUCH_UPLOAD`; either settles it.
-- **Status:** in force (resume plan, task 4).
+- **Status:** in force (`2fe56b7`; the lock kept until the `/abort` is answered `8770518`).
 - **Visible in:** `client/persist.ts`, `client/file-run.ts` (`drop`, `abortFile`, `end`, `runFile`),
   `client/retry-file.ts` (`requeue`), `client/lifecycle.ts` (pagehide), `client/persist.test.ts`,
   `client/persist-failures.test.ts`.
@@ -1300,7 +1321,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   reuse the dead ticket and fail again.
 - **If wrong:** a server that answered `NO_SUCH_UPLOAD` for a finished upload would make a retry store the file a
   second time under a new key.
-- **Status:** in force (resume plan, task 4).
+- **Status:** in force (`2fe56b7`).
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/persist-failures.test.ts`.
 
 ### M3-U84: a resumed upload is rebuilt from its record, and a probe of a finished upload runs `onComplete` again
@@ -1318,7 +1339,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   probe settles. One read path for `resumable()` and `resume()` saved 21 B.
 - **If wrong:** an `onComplete` with side effects that are not idempotent runs them twice for that upload, as it
   would for any `/complete` retried after a lost answer.
-- **Status:** in force (resume plan, task 5).
+- **Status:** in force (`2075eac`).
 - **Visible in:** `client/resume.ts` (`check`, `resumeRun`), `client/records.ts`, `client/resume.test.ts`
   (`completed`), `README.md`.
 
@@ -1329,5 +1350,32 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Why:** removing it cost 27 B of the 10.5 kB ceiling for a case a deploy creates and a rollback can undo within the
   record's 24 hours; the record expires, and `forget()` deletes it.
 - **If wrong:** `resumable()` lists that upload until it expires, and each `resume()` of it fails `UNKNOWN_ROUTE`.
-- **Status:** in force (resume plan, task 5).
+- **Status:** in force (`2075eac`).
 - **Visible in:** `client/file-run.ts` (`end`, unchanged).
+
+### M3-U86: the client's ceiling is 10.5 kB
+
+- **Decision:** owner decision 2026-11-17 (resume plan ledger; the task 4 review's I-4). The ceiling for the bundled
+  `cloudrop/client` rises from 10 kB to 10.5 kB gzip. The owner chose to raise the ceiling over cutting resume, and
+  asked for headroom instead of another raise step by step. The resume plan's last step sets the budget by `M3-U43`'s
+  rule against it: the measured size plus about 10 %, rounded up to 0.1 kB, never above 10.5 kB.
+- **Why:** task 4 measured 9.76 kB against the audit's gate of 9.4 kB (I11), and task 5 was estimated at 0.45 to
+  0.55 kB more, which 10 kB could not hold. The size pass (`88a9f3b` to `bd40159`) took 62 B and moving the part
+  arithmetic out of the planner (`M3-U87`) 130 B, so 9.57 kB was left before task 5, which measured 10.45 kB
+  (10,447 B, 0.87 kB for `resumable()`, `resume()`, `forget()` and the probe).
+- **If wrong:** spec §1's "client plus React" target of about 12 kB leaves M4's bindings about 1.5 kB, not 2 kB, when
+  the client reaches its ceiling; M4 decides whether that target moves.
+- **Status:** in force (`1841130`). Amends `M3-U60`'s 10 kB; spec §1 says 10.5 kB.
+- **Visible in:** `scripts/size-limit.config.ts`, spec §1.
+
+### M3-U87: the client takes the part arithmetic from a module without the storage rules
+
+- **Decision:** controller ruling during the resume plan's size pass. `countParts` and `sizeOfPart` live in
+  `src/part-size.ts`, which `plan.ts` imports; `cloudrop/client` imports them from there, never from `plan.ts`. Biome's
+  import rule for `src/client` names `part-size` among the modules the client may use.
+- **Why:** imported from `plan.ts`, the client bundled `R2_RULES`, `S3_RULES` and the planner's size constants, which
+  the bundler kept because their initializers are arithmetic it does not treat as free of side effects: 130 B gzip
+  (9.70 to 9.57 kB) the client never used.
+- **If wrong:** none known; a client import of `plan.ts` brings the rules back, which the size budget shows.
+- **Status:** in force (`1ecd19f`).
+- **Visible in:** `src/part-size.ts`, `src/plan.ts`, `client/answers.ts`, `client/upload.ts`, `biome.json`.

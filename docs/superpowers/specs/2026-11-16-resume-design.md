@@ -1,7 +1,8 @@
 # Resume after reload: design
 
 Status: approved by the owner 2026-11-16 (design in conversation; the owner asked for the implementation without further
-questions, following the research's recommendations). Parent spec:
+questions, following the research's recommendations). Executed 2026-11-16 and 2026-11-17 by the resume plan on
+`feat/m3-resume`, from `57144e0`; what it decided while building is `M3-U60` to `M3-U87`. Parent spec:
 [`2026-11-15-cloudrop-design.md`](2026-11-15-cloudrop-design.md) §6.3, which this design amends (§8). Builds on
 `cloudrop/client` as merged at `35cb8a9` (plans A and B,
 [`2026-11-16-progress-scheduler-design.md`](2026-11-16-progress-scheduler-design.md)). Research:
@@ -195,7 +196,8 @@ lazily). The client still imports only `errors.ts`, `input.ts`, `plan.ts` and `p
 ## 7. Size and docs
 
 - `cloudrop/client` ceiling raised to 10 kB gzip (owner decision 2026-11-16; resume on by default adds an estimated
-  0.8–1.1 kB to 8.35 kB). Spec §1's "client plus React" target becomes about 12 kB.
+  0.8–1.1 kB to 8.35 kB). Spec §1's "client plus React" target becomes about 12 kB. Built, it measured 2.1 kB more
+  (10.45 kB), and the owner raised the ceiling to 10.5 kB (`M3-U86`).
 - Decision entries from `M3-U60`: each choice of §1–§4 and every execution ruling that changes behaviour or a
   contract.
 - README: a "Resume after reload" section (the three calls, `persist`, `namespace`, sign-out with `forget()`, what is
