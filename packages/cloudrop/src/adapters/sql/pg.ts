@@ -2,14 +2,14 @@
 // by the members used here, so the library needs neither pg nor its types; sql.db.integration.test.ts passes a real
 // pg.Pool.
 
-import type { SqlExecutor, SqlRow, SqlStatement } from "../../store/sql/executor.ts";
+import type { SqlRow, SqlStatement, TransactionalSqlExecutor } from "../../store/sql/executor.ts";
 
-/** What the executor calls on a node-postgres pool or client. */
+/** What the executor calls on a node-postgres pool or client; `onComplete` receives the transaction's client as `tx`. */
 export interface PgQueryable {
   query(text: string, values?: unknown[]): Promise<{ rows: SqlRow[] }>;
 }
 
-/** A client checked out of the pool; `onComplete` receives it as `tx` in transaction mode. */
+/** A client checked out of the pool. */
 export interface PgPoolClient extends PgQueryable {
   release(destroy?: boolean | Error): void;
 }
@@ -28,8 +28,12 @@ async function inOrder(client: PgQueryable, statements: readonly SqlStatement[])
   return results;
 }
 
-/** An executor over a node-postgres pool: `sqlStore(pgExecutor(new Pool({ connectionString })))`. */
-export function pgExecutor(pool: PgPool): SqlExecutor<PgPoolClient> {
+/**
+ * An executor over a node-postgres pool: `sqlStore(pgExecutor(new Pool({ connectionString })))`. Leave the connections at
+ * Postgres's default isolation, READ COMMITTED: the store's guarantees rely on it (set no
+ * `default_transaction_isolation`).
+ */
+export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> {
   /** Runs `work` between BEGIN and COMMIT on one client; a throw rolls back and is rethrown. */
   async function inTransaction<T>(work: (client: PgPoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();

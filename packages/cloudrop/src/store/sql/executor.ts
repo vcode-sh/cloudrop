@@ -30,6 +30,9 @@ export interface SqlExecutor<TTx = never> {
   transaction?<T>(run: (executor: Omit<SqlExecutor<TTx>, "transaction">, tx: TTx) => Promise<T>): Promise<T>;
 }
 
+/** An executor that can hold a transaction (node-postgres, postgres.js): its store gets `transaction` and `route`. */
+export type TransactionalSqlExecutor<TTx> = SqlExecutor<TTx> & Required<Pick<SqlExecutor<TTx>, "transaction">>;
+
 /** Runs one built statement. */
 export function runStatement(
   executor: Pick<SqlExecutor<unknown>, "query">,
