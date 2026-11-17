@@ -88,8 +88,11 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
   return job;
 }
 
-/** `entry` gives its ticket up and waits for a new one, which starts from no parts and no bytes (M3-U36). */
-export function dropTicket(context: UploadContext, entry: Entry): void {
+/**
+ * `entry` forgets its ticket, without the /abort that file-run.ts's drop sends, and waits for a new one, which starts
+ * from no parts and no bytes (M3-U36).
+ */
+export function forgetTicket(context: UploadContext, entry: Entry): void {
   // The new ticket's record replaces this one's, under the new id (resume spec §3.2).
   if (entry.upload) letGo(context, entry.upload);
   entry.upload = null;
@@ -103,7 +106,7 @@ export function dropTicket(context: UploadContext, entry: Entry): void {
  */
 async function startOver(job: Job, entry: Entry): Promise<void> {
   // No /abort for the old ticket, as for a retry's new ticket (M3-U55): the bucket's lifecycle rule frees its parts.
-  dropTicket(job.context, entry);
+  forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
   await launch(job, [entry]);

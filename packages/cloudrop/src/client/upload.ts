@@ -4,7 +4,7 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import { sizeOfPart } from "../part-size.ts";
-import type { CompleteResponse, SignedPart, SignedRequest } from "../protocol/types.ts";
+import type { CompleteResponse, MultipartTicket, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import { aborted } from "./failures.ts";
@@ -135,8 +135,10 @@ function probed(upload: Upload, done: Result<unknown>, missing: readonly number[
   if (done.error && !missing) return;
   const { entry, ticket } = upload;
   upload.probe = false;
+  // Only a multipart ticket is probed: each size comes from the plan, without slicing the file (final review M2).
+  const { partSize } = ticket as MultipartTicket;
   for (const part of entry.landed) {
-    const size = bodyOf(ticket, entry.file, part).size;
+    const size = sizeOfPart(entry.file.size, partSize, part);
     if (!missing?.includes(part)) entry.progress.sent(part, size, size);
   }
   // The caller counts a repair round for this answer next: given back here.

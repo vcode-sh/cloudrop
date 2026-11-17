@@ -4,7 +4,7 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./file-run.ts";
-import { allSettled, dropTicket, type Job, launch } from "./job-run.ts";
+import { allSettled, forgetTicket, type Job, launch } from "./job-run.ts";
 import type { FileOutcome } from "./types.ts";
 
 /** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31). */
@@ -32,7 +32,7 @@ function needsTicket({ upload, error }: Entry): boolean {
  * speed starts from 0 when the file sends again, as on every start. */
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
   job.context.leftovers.release(entry);
-  if (fresh) dropTicket(job.context, entry);
+  if (fresh) forgetTicket(job.context, entry);
   else if (entry.upload) {
     // The same ticket repairs from round 0 again (M3-U50), and sends again the parts its last /complete found missing.
     entry.upload.repairs = 0;
