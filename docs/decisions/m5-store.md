@@ -79,7 +79,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   any (offset paging would skip as many rows as it just ended); the look-ahead saves the sweep a last empty call.
 - **If wrong:** a SQL backend whose collation orders ids or owners differently from another still pages correctly
   within itself; the contract uses ASCII ids that sort alike under every collation, so it does not pin a collation.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (M5-T64): an `expired` row whose `cleaned_at` is null is now cleanup work.
 - **Source:** task A, 2026-11-17.
 - **Visible in:** `src/server/store.ts` (`stale`, `owners`), `src/testing/store-contract/stale.ts`, `usage.ts`.
 
@@ -192,7 +192,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   effort and logged.
 - **Why:** spec §5.2, with per-file answers so the other files' answers and the response shape stay as they are.
 - **If wrong:** a whole-request failure would be one branch in `handleUpload`; clients already handle both.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): the store error now reads "The server could not reach its
+  upload records. Try again in a moment.", since it also answers failed reads.
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/store-upload.ts`, `src/server/upload.ts`, `src/server/store-upload.test.ts`.
 
@@ -218,7 +219,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** each is the reading of §5.5 that keeps its promises (one `onComplete`, no storage call on replay) without a
   new column or wire change.
 - **If wrong:** the `deleted` replay is the one visible choice; reverting it is one condition in `settled`.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): `tx` reaches only routes from the store's own `route()`
+  (M5-T66); the 16 KiB cap and its encoding run only on the stored path (M5-T67).
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/store-complete.ts`, `src/server/complete-steps.ts`, `src/server/http.ts`.
 
@@ -263,7 +265,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** spec §6; a unit in the name follows the human-friendly rules; one cursor lets a cron call `sweep` in a loop
   without knowing about passes.
 - **If wrong:** renaming `graceMs` later is breaking; decide before 1.0.
-- **Status:** decided.
+- **Status:** decided; amended 2026-11-17 (fix round 1): the expire pass takes the row first (M5-T64), and a failing
+  row no longer stops the call (M5-T65). `graceMs` stays 0 or more.
 - **Source:** task B, 2026-11-17.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
 
@@ -307,6 +310,116 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   ship them; that is a public API change.
 - **Status:** decided; over the 5% line, so stated here and in the commit.
 - **Source:** task B, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
+
+### M5-T64: the sweep's expire pass takes the row before it deletes; cleanup includes uncleaned expired rows
+
+- **Decision:**
+  - For a `pending` row, the expire pass first runs `end(id, "pending", "expired")` without `cleaned`.
+  - Only when that changed the row does it abort the multipart upload, HEAD-check and delete the object, then call
+    `cleaned(id)`.
+  - `stale({ kind: "cleanup" })` now also returns `expired` rows whose `cleaned_at` is null, so a crash or a failure
+    between the `end` and the cleanup is finished by the cleanup pass.
+  - `graceMs` stays 0 or more. The cleanup pass keeps `max(graceMs, 15 min)`, which guards late PUTs.
+- **Why:**
+  - The review (I1) showed the first order could delete a completed file. A `/complete` that verified in time could
+    claim the row between the sweep's delete and its `end`.
+  - With the row taken first, a `/complete` that claims first keeps its object.
+  - A `/complete` that comes later is refused (`UPLOAD_EXPIRED`) with nothing recorded.
+- **If wrong:** a single PUT already in flight at `exp` can still land after an expire pass run with a small grace,
+  once that row is cleaned. The default 1 h grace makes that practically unreachable; a later pass could re-check
+  recently cleaned rows.
+- **Status:** decided by the controller (fix round 1); it amends M5-T20 ("`expired` rows are never cleanup work") and
+  spec §4 and §6.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:**
+  - `src/server/sweep.ts`;
+  - `src/testing/memory-store-methods.ts` (`CLEANUP`) and `src/store/sql/reads.ts` (`CLEANUP_STATUSES`, both
+    dialects);
+  - `src/server/store.ts` (`stale` TSDoc);
+  - `src/testing/store-contract/stale.ts` (the cleanup case);
+  - spec §4 and §6.
+
+### M5-T65: a sweep row that fails is logged and skipped; `SweepReport.failed`
+
+- **Decision:**
+  - When a row fails (a storage or database error), the sweep logs "the sweep could not finish file <id>. The next
+    sweep tries again." with the error.
+  - It counts the row in a new `failed: number` field of `SweepReport`, leaves the row as the failure left it, and goes
+    on with the rest of the page.
+  - `expired` counts only rows that were ended **and** cleaned.
+  - The sweep always answers `ok(report)`. When it cannot even list its work, it answers the report so far, with the
+    cursor it was given.
+- **Why:**
+  - The review (I2): a failure mid-page threw away the `reported` stuck completions the sweep had already ended, which
+    are reported only once.
+  - A row that failed every time blocked every later row for good.
+- **If wrong:** `failed` is public (`SweepReport`); removing it later is a breaking change.
+- **Status:** decided by the controller (fix round 1); it amends M5-T30.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/sweep.ts`, `src/server/sweep.test.ts`.
+
+### M5-T66: `tx` reaches only routes made by the store's own `route()`
+
+- **Decision:** in transaction mode, the handler adds `tx` to `onComplete`'s context only for a branded route. A plain
+  `route()` still runs inside the transaction, and its authorize result's own `tx` field stays as it was.
+- **Why:** the review (I3). The types and the `onComplete` TSDoc already promised this; the runtime overwrote the field.
+- **If wrong:** nothing else depends on it.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/store-complete.ts`, `src/server/store-transaction.test.ts`.
+
+### M5-T67: with a store configured, a token without the stored mark keeps every old answer
+
+- **Decision:**
+  - `readTokenRequest` lets an expired token through only when it is stored and a store is configured. Every other
+    expired token is refused with `UPLOAD_EXPIRED` before the route lookup, as without a store.
+  - The 16 KiB result cap and its `TextEncoder` measurement run only on the stored path. `encodeResult` only
+    stringifies.
+- **Why:** review Minor 8 and Minor 2. With a store configured, an expired, unstored token whose route had been removed
+  answered `UNKNOWN_ROUTE`. The stateless path also measured every result for nothing.
+- **If wrong:** nothing; this restores the stateless behaviour exactly.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:**
+  - `src/server/token-request.ts`, `src/server/complete-steps.ts`, `src/server/store-complete.ts`;
+  - `src/server/store-stateless.test.ts`.
+
+### M5-T68: write `afterComplete` after `onComplete`
+
+- **Decision:**
+  - Written before a context-sensitive `onComplete`, `afterComplete` makes TypeScript fix `TResult` to null, so
+    `onComplete`'s result becomes a type error. `NoInfer` does not help (measured by the review).
+  - There is no API change. The `afterComplete` TSDoc says to write it after `onComplete`, and that the client's answer
+    waits for it.
+  - A type test pins the reversed order's error, so the advice is re-checked if TypeScript changes.
+- **Why:** review Minor 1 and Minor 10.
+- **If wrong:** if a TypeScript release infers it, the `@ts-expect-error` fails and the note can go.
+- **Status:** decided.
+- **Source:** task B fix round 1, 2026-11-17.
+- **Visible in:** `src/server/route.ts`, `src/server/store-types.test.ts`.
+
+### M5-T69: the store paths stay statically imported; stateless server apps pay about 4.7 kB
+
+- **Decision:**
+  - The store modules stay statically imported by the endpoints and the file API. No lazy chunk.
+  - Measured 2026-11-17 with `bun run package:check` after this round:
+    - `cloudrop` bundled is 27.05 kB, against 22.38 kB before task B: +4.67 kB gzip, which every server app pays,
+      store or not;
+    - `cloudrop` summed is 44.88 kB.
+  - The review's simplifications are applied:
+    - `encodeResult` without `maxBytes`;
+    - the refusal reason derived from the error code;
+    - one `jsonResponse` in `errorResponse`;
+    - the ticket refusal folded;
+    - `unstarted` picked by index;
+    - no `as number` casts;
+    - the duplicate TSDoc removed.
+- **Why:** the controller's ruling. An `await import()` costs every store app a cold-start round trip and a packaging
+  surface, for 4.7 kB of server code that a browser never ships.
+- **If wrong:** a lazy chunk, or a `cloudrop/store` entry, can be added later without an API change in the first case.
+- **Status:** decided; it extends M5-T33.
+- **Source:** task B fix round 1, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts` (ceilings unchanged).
 
 <!-- Task B appends its entries above this line. -->
