@@ -48,11 +48,10 @@ Goals:
    SQLite) and Prisma 7, all over one SQL core, proven by one contract suite on real databases.
 
 Non-goals: MySQL (no `RETURNING`; later), Prisma 8 until stable (the executor seam allows it), MongoDB, a schema
-generator CLI (docs ship the schema), derivatives and domain links (the app's), bucket-driven orphan scans,
-cross-device resume, an idempotency key on `/upload` (a later protocol change, see §5.7; added after M5 by M5-T100),
-per-file refusal from plugin
-`beforeUpload` (moved to M6 with `limits()`), `bun:sqlite` as a tested target (the executor shape fits it; no lane runs
-it, so it is not claimed).
+generator CLI (docs ship the schema), derivatives and domain links (the app's), bucket-driven orphan scans, cross-device
+resume, an idempotency key on `/upload` (a later protocol change, see §5.7; added after M5 by M5-T100), per-file refusal
+from plugin `beforeUpload` (moved to M6 with `limits()`), `bun:sqlite` as a tested target (the executor shape fits it;
+no lane runs it, so it is not claimed).
 
 ## 3. Data model (`M5-T1`)
 
@@ -246,9 +245,9 @@ retry's `reserve` ends the lost attempt's `pending` rows as `aborted` and releas
 check. The lost attempt's multipart upload is aborted by the sweep's cleanup pass (M5-T64). What remains: a retry
 without a key (an older client, or an app's own client) holds the old reservation until the sweep expires it
 (`expires_at` + grace) or `revokeUploads` releases it; a retry refused by `beforeUpload` reaches no `reserve` and
-supersedes nothing; an attempt whose `reserve` commits after its retry's (a first request still running when the
-client gave up on it) is not superseded either. The sweep, `revoke` and superseding run no `onAbort` (rows carry no auth JSON), so plugin
-reservations still need their own expiry (base spec §8).
+supersedes nothing; an attempt whose `reserve` commits after its retry's (a first request still running when the client
+gave up on it) is not superseded either. The sweep, `revoke` and superseding run no `onAbort` (rows carry no auth JSON),
+so plugin reservations still need their own expiry (base spec §8).
 
 ## 6. File API with a store (`M5-T10`)
 

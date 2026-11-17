@@ -49,7 +49,8 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
   function supersede(key: string, owner: string | null, accepted: readonly NewFile[], now: Date): SqlStatement[] {
     const routes = [...new Set(accepted.map((file) => file.route))];
     const superseded = (b: Binder) =>
-      `request_key = ${b.text(key)} AND ${owner === null ? "owner IS NULL" : `owner = ${b.text(owner)}`}
+      // `IS` is SQLite's null-safe equality: a null owner matches only null.
+      `request_key = ${b.text(key)} AND owner IS ${b.text(owner)}
         AND route IN (${routes.map((route) => b.text(route)).join(", ")}) AND status = 'pending'`;
     const b = binder("sqlite");
     const end = b.statement(`UPDATE ${files} SET status = 'aborted', ended_at = ${b.time(now)},

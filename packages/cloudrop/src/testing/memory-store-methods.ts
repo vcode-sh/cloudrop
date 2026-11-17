@@ -89,14 +89,16 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         if (accepted.length === 0) return [];
         // A retry of a request whose answer was lost: its earlier attempt's pending rows end first, freeing their bytes.
         const routes = new Set(accepted.map((file) => file.route));
-        const superseded = [...files.values()].filter(
-          (row) =>
-            requestKey !== null &&
-            row.requestKey === requestKey &&
-            row.owner === owner &&
-            routes.has(row.route) &&
-            row.status === "pending",
-        );
+        const superseded =
+          requestKey === null
+            ? []
+            : [...files.values()].filter(
+                (row) =>
+                  row.requestKey === requestKey &&
+                  row.owner === owner &&
+                  routes.has(row.route) &&
+                  row.status === "pending",
+              );
         for (const row of superseded) {
           write.file({ ...row, status: "aborted", endedAt: now, updatedAt: now });
           adjust(write, owner, { reservedBytes: -row.size }, now);

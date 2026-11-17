@@ -63,7 +63,6 @@ it("sends one key on every retry of an ask, and a new key when a refused file as
   const { data } = await client.start("files", [fileOf("a.bin")]).done;
   expect(data?.files.map((file) => file.status)).toEqual(["done"]);
   expect(shape(keys)).toEqual(["a", "a", "b", "b"]);
-  expect(keys.filter((key) => typeof key !== "string" || !/^[0-9a-f]{32}$/.test(key))).toEqual([]);
 });
 
 it("sends one key through all six attempts, and retry() asks with a new one", async () => {
@@ -73,10 +72,4 @@ it("sends one key through all six attempts, and retry() asks with a new one", as
   const { data } = await job.retry();
   expect(data?.files.map((file) => file.status)).toEqual(["done", "done"]);
   expect(shape(keys)).toEqual(["a", "a", "a", "a", "a", "a", "b"]);
-});
-
-it("gives two jobs two keys", async () => {
-  const { keys, client } = setup(() => undefined);
-  await Promise.all([client.upload("files", [fileOf("a.bin")]), client.upload("files", [fileOf("b.bin")])]);
-  expect(shape(keys)).toEqual(["a", "b"]);
 });

@@ -304,9 +304,9 @@ size at 100 KiB/s.
 Calls to your server have a deadline for the whole answer: 30 s for `/upload` and `/sign`, 120 s for `/complete`. A
 missed deadline is a retryable `NETWORK_ERROR`, tried again within the same attempts. Each `/upload` ask carries a
 random `idempotencyKey`, the same on all of its attempts, so a server with a database store releases what an attempt
-whose answer never arrived reserved. A `/complete` that timed out
-counts as one that may have finished, so a cancel or a failure afterwards keeps the file. `/abort` gets 10 s and is
-sent once; if it is missed, the bucket's lifecycle rule cleans up.
+whose answer never arrived reserved. A `/complete` that timed out counts as one that may have finished, so a cancel or a
+failure afterwards keeps the file. `/abort` gets 10 s and is sent once; if it is missed, the bucket's lifecycle rule
+cleans up.
 
 ## Transports: XHR or fetch
 

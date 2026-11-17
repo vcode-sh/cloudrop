@@ -36,13 +36,14 @@ export function supersedeCases(suite: StoreSuite): void {
     await reserve("u-1", OTHER_KEY, [newFile("other-key", 8)], null);
     expect(await reserve("u-1", KEY, [newFile("retry-u-1", 16)], null, MINUTE)).toEqual(["reserved"]);
     expect(await reserve(null, KEY, [newFile("retry-no-owner", 32)], null, 2 * MINUTE)).toEqual(["reserved"]);
-    expect((await suite.raw.files()).map(({ id, status }) => [id, status])).toEqual([
-      ["no-owner", "aborted"],
-      ["other-key", "pending"],
-      ["other-owner", "pending"],
-      ["other-route", "pending"],
-      ["retry-no-owner", "pending"],
-      ["retry-u-1", "pending"],
+    // no-owner ended at minute 2, by the owner-less retry, not at minute 1 by u-1's.
+    expect((await suite.raw.files()).map(({ id, status, endedAt }) => [id, status, endedAt])).toEqual([
+      ["no-owner", "aborted", at(2 * MINUTE)],
+      ["other-key", "pending", null],
+      ["other-owner", "pending", null],
+      ["other-route", "pending", null],
+      ["retry-no-owner", "pending", null],
+      ["retry-u-1", "pending", null],
     ]);
     expect(await suite.raw.usage()).toEqual([
       usageRow("u-1", { reservedBytes: 1 + 8 + 16, updatedAt: at(MINUTE) }),
