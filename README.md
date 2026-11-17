@@ -290,8 +290,8 @@ bun run test:browser       # the example in Chromium's headless shell, uploading
 bun run test:browser:live  # the same on real R2 (credentials as test:live; CORS must allow localhost:5173)
 ```
 
-What each lane needs, its ports and how to write tests: [Testing](docs/guide/testing.md). Rules for coding agents:
-[AGENTS.md](AGENTS.md).
+What each lane needs, its ports and how to write tests: [Testing](docs/guide/testing.md). How a version is published
+to npm: [Releasing](docs/releasing.md). Rules for coding agents: [AGENTS.md](AGENTS.md).
 
 Not affiliated with Cloudflare.
 
