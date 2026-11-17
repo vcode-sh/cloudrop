@@ -1,7 +1,8 @@
 # Troubleshooting
 
-This page lists symptoms you may meet while setting up or running cloudrop, the usual cause of each, and how to fix
-it. Each section starts with what you see. For the meaning of every error code, see [Errors](errors.md).
+This page is for anyone whose uploads fail, in development or in production. It lists symptoms you may meet while
+setting up or running cloudrop, the usual cause of each, and how to fix it. Each section starts with what you see. For
+the meaning of every error code, see [Errors](errors.md).
 
 ## Every upload ends in NETWORK_ERROR
 

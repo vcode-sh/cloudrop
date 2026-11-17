@@ -1,8 +1,9 @@
 # Deployment
 
-This page covers where the page, the API and the bucket live, and what each setup needs: one origin for the page and
-the API, or an API on another origin, with cookies, `trustedOrigins` and the bucket's CORS rule. It also covers a TLS
-proxy in front of the server, building without secrets, and Cloudflare Workers.
+This page is for developers taking an app with cloudrop to production. It covers where the page, the API and the bucket
+live, and what each setup needs: one origin for the page and the API, or an API on another origin, with cookies,
+`trustedOrigins` and the bucket's CORS rule. It also covers a TLS proxy in front of the server, building without
+secrets, and Cloudflare Workers.
 
 ## Three places, two kinds of request
 

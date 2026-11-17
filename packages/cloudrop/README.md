@@ -4,7 +4,8 @@ Direct-to-bucket file uploads for Cloudflare R2 and S3-compatible storage. Your 
 short-lived links; the browser sends the bytes straight to the bucket, with progress, retries, pause and resume after a
 reload.
 
-Pre-release: the API may change before 0.1.
+Before 1.0, a minor version may change the API; every change is in the
+[changelog](https://github.com/vcode-sh/cloudrop/blob/main/packages/cloudrop/CHANGELOG.md).
 
 ```bash
 npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
@@ -69,6 +70,10 @@ export function AvatarPicker() {
 
 Without React, `createCloudropClient` from `cloudrop/client` gives you `upload()`, which resolves to `{ data, error }`.
 
+To keep a row per upload in your own database, with `onComplete` once per file, a quota per user, revocation and a
+sweep for abandoned uploads, pass a store from `cloudrop/adapters/sql`, `cloudrop/adapters/drizzle` or
+`cloudrop/adapters/prisma`: [Database store](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md).
+
 ## Bucket setup
 
 The browser uploads to the bucket directly, so the bucket needs a CORS rule that allows `PUT` from your page's origin
@@ -78,11 +83,14 @@ Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudr
 
 ## Documentation
 
+[All docs](https://github.com/vcode-sh/cloudrop/blob/main/docs/README.md) ·
 [Server](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/server.md) ·
 [Client](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/client.md) ·
 [React](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/react.md) ·
+[Database store](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md) ·
 [Deployment](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/deployment.md) ·
 [Resume after reload](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/resume.md) ·
+[Hono guide](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/hono.md) ·
 [Errors](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/errors.md) ·
 [Troubleshooting](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/troubleshooting.md)
 

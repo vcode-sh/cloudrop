@@ -1,8 +1,9 @@
 # React
 
-`cloudrop/react` turns the browser client into two hooks: `useUpload` for a file input, a drop zone and a list of files
-with progress and controls, and `useResumable` for continuing large uploads after a reload. They are a thin layer over
-[`cloudrop/client`](client.md): every upload is a client job, and the hooks only render it.
+This page is for React developers adding uploads to their components. `cloudrop/react` turns the browser client into two
+hooks: `useUpload` for a file input, a drop zone and a list of files with progress and controls, and `useResumable` for
+continuing large uploads after a reload. They are a thin layer over [`cloudrop/client`](client.md): every upload is a
+client job, and the hooks only render it.
 
 This page covers setup, a one-file input, a list of several files with progress and controls, drag and drop, resume
 after a reload, building a full upload UI on the hooks, what each hook returns, and how the hooks behave under server

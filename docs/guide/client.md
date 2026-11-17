@@ -1,9 +1,10 @@
 # Client
 
-This page covers the browser side, `cloudrop/client`: creating a client, uploading one file or several, following
-progress, pausing, cancelling and retrying, how the client shares connections between uploads, what happens when the
-page goes offline or a request stalls, and what it cleans up. Resuming after a reload, and `resumable()`, `resume()`,
-`discard()` and `forget()`, have their own page: [Resume after reload](resume.md). Error codes: [Errors](errors.md).
+This page is for developers writing the browser side without React, or wanting to know what the hooks run on. It covers
+`cloudrop/client`: creating a client, uploading one file or several, following progress, pausing, cancelling and
+retrying, how the client shares connections between uploads, what happens when the page goes offline or a request
+stalls, and what it cleans up. Resuming after a reload, and `resumable()`, `resume()`, `discard()` and `forget()`, have
+their own page: [Resume after reload](resume.md). Error codes: [Errors](errors.md).
 
 ## Create a client
 

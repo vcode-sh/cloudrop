@@ -1,9 +1,10 @@
 # Releasing cloudrop
 
-`cloudrop` is published to npm by [`.github/workflows/release.yml`](../.github/workflows/release.yml) when a tag
-`v<version>` is pushed. It authenticates with npm **trusted publishing**: npm trusts that workflow file, in this
-repository, running in the GitHub environment `npm`, and the npm CLI swaps the job's short-lived OIDC credential for a
-one-time publish credential. No npm token exists, in GitHub secrets or anywhere else.
+This page is for the maintainer who publishes a release. `cloudrop` is published to npm by
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) when a tag `v<version>` is pushed. It authenticates
+with npm **trusted publishing**: npm trusts that workflow file, in this repository, running in the GitHub environment
+`npm`, and the npm CLI swaps the job's short-lived OIDC credential for a one-time publish credential. No npm token
+exists, in GitHub secrets or anywhere else.
 
 The workflow has two jobs:
 

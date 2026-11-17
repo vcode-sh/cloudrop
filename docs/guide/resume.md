@@ -1,9 +1,9 @@
 # Resume after reload
 
-This page covers how a large upload survives a reload or a closed tab: what you write in your page, how the client
-recognises the same file, what it asks the server, what it keeps in the browser and when it deletes it, how two tabs
-share an upload, how to discard one upload without its file, and what is not supported. For uploads in general, see
-[Client](client.md).
+This page is for developers whose users upload large files. It covers how a large upload survives a reload or a closed
+tab: what you write in your page, how the client recognises the same file, what it asks the server, what it keeps in the
+browser and when it deletes it, how two tabs share an upload, how to discard one upload without its file, and what is
+not supported. For uploads in general, see [Client](client.md).
 
 ## What resumes
 

@@ -1,7 +1,8 @@
 # Database store
 
-cloudrop's server is stateless by default: the signed upload token carries everything, and nothing is written
-anywhere. Pass a database store and cloudrop keeps one row per upload in two tables of your database.
+This page is for developers who want a record of every upload in their own database. cloudrop's server is stateless by
+default: the signed upload token carries everything, and nothing is written anywhere. Pass a database store and cloudrop
+keeps one row per upload in two tables of your database.
 
 ## Quick start
 

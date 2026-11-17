@@ -1,10 +1,10 @@
 # Server
 
-This page covers everything that runs on your server: creating the server with `createCloudrop`, choosing a storage
-driver, defining routes and who may use them, what the upload token is and what it allows, mounting the handler in your
-framework, which origins may call it, and the `cloudrop.api` file operations. For the browser side, see
-[Client](client.md). To keep a row per upload in your database (`onComplete` once, quotas, revocation, cleanup), see
-[Database store](store.md).
+This page is for developers setting up cloudrop on their server. It covers everything that runs there: creating the
+server with `createCloudrop`, choosing a storage driver, defining routes and who may use them, what the upload token is
+and what it allows, mounting the handler in your framework, which origins may call it, and the `cloudrop.api` file
+operations. For the browser side, see [Client](client.md). To keep a row per upload in your database (`onComplete` once,
+quotas, revocation, cleanup), see [Database store](store.md).
 
 ## Create the server
 

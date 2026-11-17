@@ -1,8 +1,9 @@
 # Errors
 
-This page lists every error code cloudrop produces: where it comes from, whether trying again can help, what it means,
-and what your app or your user should do. It also explains the shape of an error and how errors move from the storage
-service through your server to the browser.
+This page is for developers handling cloudrop's errors in their app, and for anyone reading one in a log. It lists every
+error code cloudrop produces: where it comes from, whether trying again can help, what it means, and what your app or
+your user should do. It also explains the shape of an error and how errors move from the storage service through your
+server to the browser.
 
 ## The shape of an error
 

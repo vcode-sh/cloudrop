@@ -1,9 +1,9 @@
 # Bucket setup
 
-This page covers what your bucket needs before browsers can upload to it: the CORS rule, in R2's format and in the S3
-format, the lifecycle rule that cleans up abandoned uploads, the Wrangler commands that set both on R2 and the AWS CLI
-commands for any S3-compatible service, which credentials and permissions cloudrop needs, and what `checkBucket` can
-and cannot report about all of this.
+This page is for whoever sets up the bucket and its credentials. It covers what your bucket needs before browsers can
+upload to it: the CORS rule, in R2's format and in the S3 format, the lifecycle rule that cleans up abandoned uploads,
+the Wrangler commands that set both on R2 and the AWS CLI commands for any S3-compatible service, which credentials and
+permissions cloudrop needs, and what `checkBucket` can and cannot report about all of this.
 
 The rule lists the origin of the **page** that uploads, not the origin of your API: the browser sends the bytes from
 the page. With the page and the API on different origins, see [Deployment](deployment.md).
