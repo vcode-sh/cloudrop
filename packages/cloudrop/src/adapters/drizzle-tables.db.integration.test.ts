@@ -1,7 +1,8 @@
-// cloudropTables() against the plain DDL (testing/db/schema.ts, the schema every SQL lane runs on): the tables made
-// from that DDL, read back from the database's catalogue, must declare what the Drizzle tables declare: every column
-// with its type, nullability and primary key, every index with its columns in order, and Postgres's CHECKs. A migration
-// generated from cloudropTables() then builds the same tables the store was proven on.
+// cloudropPgTables() and cloudropSqliteTables() against the plain DDL (testing/db/schema.ts, the schema every SQL lane
+// runs on): the tables made from that DDL, read back from the database's catalogue, must declare what the Drizzle
+// tables declare: every column with its type, nullability and primary key, every index with its uniqueness and its
+// columns in order, and Postgres's CHECKs. A migration generated from them then builds the tables the store was proven
+// on.
 
 import { PgDialect, getTableConfig as pgConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteConfig } from "drizzle-orm/sqlite-core";
@@ -10,11 +11,11 @@ import { usePostgresDatabase } from "../testing/db/postgres.ts";
 import type { TableNames } from "../testing/db/schema.ts";
 import { RENAMED } from "../testing/db/sql-target.ts";
 import { useSqliteDatabase } from "../testing/db/sqlite.ts";
-import { cloudropTables } from "./drizzle.ts";
+import { cloudropPgTables, cloudropSqliteTables } from "./drizzle.ts";
 
 interface Shape {
   columns: { name: string; type: string; notNull: boolean; primaryKey: boolean }[];
-  indexes: { name: string; columns: string[] }[];
+  indexes: { name: string; unique: boolean; columns: string[] }[];
   checks: { name: string; expression: string }[];
 }
 
@@ -38,11 +39,11 @@ describe("Postgres", () => {
       [table],
     );
     const indexes = await db.query(
-      `SELECT i.relname AS name, array_agg(a.attname::text ORDER BY k.ord) AS columns
+      `SELECT i.relname AS name, ix.indisunique AS unique, array_agg(a.attname::text ORDER BY k.ord) AS columns
        FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid
        CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
        JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum
-       WHERE ix.indrelid = $1::text::regclass AND NOT ix.indisprimary GROUP BY i.relname`,
+       WHERE ix.indrelid = $1::text::regclass AND NOT ix.indisprimary GROUP BY i.relname, ix.indisunique`,
       [table],
     );
     const checks = await db.query(
@@ -72,6 +73,7 @@ describe("Postgres", () => {
       indexes: byName(
         table.indexes.map(({ config }) => ({
           name: config.name ?? "(unnamed)",
+          unique: config.unique,
           columns: config.columns.map((column) => ("name" in column && column.name ? column.name : "(expression)")),
         })),
       ),
@@ -88,10 +90,10 @@ describe("Postgres", () => {
     };
   }
 
-  test.for(namings)("cloudropTables matches the DDL's tables, $name", async ({ tables }) => {
+  test.for(namings)("cloudropPgTables matches the DDL's tables, $name", async ({ tables }) => {
     await db.reset();
     await db.createTables(tables);
-    const { files, usage } = cloudropTables({ dialect: "postgres", tables });
+    const { files, usage } = cloudropPgTables({ tables });
     const [filesConfig, usageConfig] = [pgConfig(files), pgConfig(usage)];
     expect(declared(filesConfig)).toEqual(await catalogue(filesConfig.name));
     expect(declared(usageConfig)).toEqual(await catalogue(usageConfig.name));
@@ -104,7 +106,7 @@ describe("SQLite", () => {
   async function catalogue(table: string): Promise<Shape> {
     const columns = await db.query(`SELECT name, type, "notnull", pk FROM pragma_table_info(?) ORDER BY cid`, [table]);
     const indexes = await db.query(
-      `SELECT il.name AS name, json_group_array(ii.name) AS columns
+      `SELECT il.name AS name, il."unique" AS "unique", json_group_array(ii.name) AS columns
        FROM pragma_index_list(?) il, pragma_index_info(il.name) ii WHERE il.origin = 'c'
        GROUP BY il.name`,
       [table],
@@ -117,7 +119,11 @@ describe("SQLite", () => {
         primaryKey: column.pk === 1,
       })),
       indexes: byName(
-        indexes.map((index) => ({ name: String(index.name), columns: JSON.parse(String(index.columns)) })),
+        indexes.map((index) => ({
+          name: String(index.name),
+          unique: index.unique === 1,
+          columns: JSON.parse(String(index.columns)),
+        })),
       ),
       checks: [],
     };
@@ -134,6 +140,7 @@ describe("SQLite", () => {
       indexes: byName(
         table.indexes.map(({ config }) => ({
           name: config.name,
+          unique: config.unique,
           columns: config.columns.map((column) => ("name" in column && column.name ? column.name : "(expression)")),
         })),
       ),
@@ -141,9 +148,9 @@ describe("SQLite", () => {
     };
   }
 
-  test.for(namings)("cloudropTables matches the DDL's tables, $name", async ({ tables }) => {
+  test.for(namings)("cloudropSqliteTables matches the DDL's tables, $name", async ({ tables }) => {
     await db.createTables(tables);
-    const { files, usage } = cloudropTables({ dialect: "sqlite", tables });
+    const { files, usage } = cloudropSqliteTables({ tables });
     const [filesConfig, usageConfig] = [sqliteConfig(files), sqliteConfig(usage)];
     expect(declared(filesConfig)).toEqual(await catalogue(filesConfig.name));
     expect(declared(usageConfig)).toEqual(await catalogue(usageConfig.name));

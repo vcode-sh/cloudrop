@@ -1,44 +1,21 @@
 // The store contract through drizzleStore on real databases: node-postgres and postgres.js on Postgres 18 (pools of 10,
 // so the concurrent cases race real connections, built with transaction: true so the transaction cases run), and
-// better-sqlite3 on a fresh database file per case. Below the contract, the row only a driver's encodings can break.
+// better-sqlite3 and libsql on a fresh database file per case. Below each contract, the shared driver rows.
 
+import { type Client, createClient } from "@libsql/client";
 import Database from "better-sqlite3";
 import { drizzle as betterSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as libsql } from "drizzle-orm/libsql";
 import { drizzle as nodePostgres } from "drizzle-orm/node-postgres";
 import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
-import type { CloudropStore } from "../server/store.ts";
+import { afterAll, afterEach, beforeAll, beforeEach, describe } from "vitest";
+import { driverRows } from "../testing/db/driver-rows.ts";
 import { usePostgresDatabase } from "../testing/db/postgres.ts";
 import { sqlStoreTarget } from "../testing/db/sql-target.ts";
 import { useSqliteDatabase } from "../testing/db/sqlite.ts";
 import { describeStoreContract, type SetupStore } from "../testing/store-contract.ts";
 import { drizzleStore } from "./drizzle.ts";
-
-const MAX_SAFE = 9007199254740991; // 2^53 - 1
-const NOW = new Date("2026-11-17T10:20:30.123Z");
-
-/**
- * Drizzle's drivers pass Postgres times through as text and SQLite integers as numbers, so a size at the edge of
- * exactness and a time with milliseconds must come back unchanged.
- */
-function encodingRow(storeOver: () => CloudropStore<unknown>) {
-  test("a size of 2^53 - 1 and millisecond times come back exactly, counted in usage", async () => {
-    const store = storeOver();
-    const file = { id: "f-1", route: "files", key: "users/ünïcode ../name.bin", name: "name.bin", metadata: null };
-    await store.reserve(
-      {
-        owner: "u-1",
-        limit: null,
-        expiresAt: NOW,
-        files: [{ ...file, type: "application/octet-stream", size: MAX_SAFE }],
-      },
-      NOW,
-    );
-    expect(await store.get("f-1")).toMatchObject({ ...file, size: MAX_SAFE, expiresAt: NOW, createdAt: NOW });
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: MAX_SAFE, activeBytes: 0, files: 0 });
-  });
-}
 
 describe("Postgres", () => {
   const db = usePostgresDatabase();
@@ -66,12 +43,12 @@ describe("Postgres", () => {
       sqlStoreTarget(db, (tables) => drizzleStore(driver.db(), { dialect: "postgres", tables, transaction: true })),
     );
 
-    describe("encodings", () => {
+    describe("driver", () => {
       beforeEach(async () => {
         await db.reset();
         await db.createTables();
       });
-      encodingRow(() => drizzleStore(driver.db(), { dialect: "postgres" }));
+      driverRows(() => drizzleStore(driver.db(), { dialect: "postgres" }));
     });
   });
 });
@@ -122,8 +99,37 @@ describe("SQLite", () => {
     ),
   );
 
-  describe("encodings", () => {
+  describe("driver", () => {
     beforeEach(() => db.createTables());
-    encodingRow(() => store());
+    driverRows(() => store());
+  });
+});
+
+describe("libsql", () => {
+  const db = useSqliteDatabase({ file: true });
+  // A local file database through @libsql/client, the client Turso apps use; its batch is atomic.
+  let client: Client | undefined;
+  const store = (tables?: { files: string; usage: string }) => {
+    client ??= createClient({ url: `file:${db.path}` });
+    return drizzleStore(libsql({ client }), { dialect: "sqlite", tables });
+  };
+  // Registered after the fixture's, so it runs before the fixture deletes the file.
+  afterEach(() => {
+    client?.close();
+    client = undefined;
+  });
+
+  describeStoreContract(
+    "drizzle, libsql",
+    sqlStoreTarget(db, store, {
+      transaction: "libsql's batch is not interactive; a transaction held across onComplete would block every writer.",
+      failureInjection:
+        "libsql cannot register a JS function (its Database.function throws 'not implemented'), and no SQLite state survives the rollback the failure causes; reserve's duplicate-id case proves the batch atomic.",
+    }),
+  );
+
+  describe("driver", () => {
+    beforeEach(() => db.createTables());
+    driverRows(() => store());
   });
 });
