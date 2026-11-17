@@ -1,0 +1,125 @@
+// The file API's store operations (M5 spec §6): rows, usage, revocation, deletion, repair and the sweep. Without a
+// store each one answers INVALID_CONFIG.
+
+import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
+import { invalidInput, isPlainObject } from "../input.ts";
+import type { ServerConfig } from "./config.ts";
+import type { CloudropStore, FileRecord, OwnerUsage } from "./store.ts";
+import { storeCall } from "./store-calls.ts";
+import { removeLeftovers, type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
+
+export interface StoreFileApi {
+  /** A file's row, or null when the store has none. */
+  file(id: string): Promise<Result<FileRecord | null>>;
+  /** An owner's counters, with or without a quota. */
+  usage(owner: string): Promise<Result<OwnerUsage>>;
+  /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
+  revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
+  /** Deletes a completed file: its row becomes `deleted`, its bytes are released and its object removed. Idempotent. */
+  deleteFile(id: string): Promise<Result<{ id: string }>>;
+  /** Recounts one owner's counters from their rows, or every owner's: for drift after manual database edits. */
+  reconcile(options?: { owner?: string }): Promise<Result<{ checked: number; repaired: number }>>;
+  /** One bounded round of cleanup; run it on a schedule, such as an hourly cron. */
+  sweep(options?: SweepOptions): Promise<Result<SweepReport>>;
+}
+
+const OWNERS_PAGE = 100;
+
+const isId = (value: unknown): value is string => typeof value === "string" && value !== "" && value.length <= 255;
+
+const badId = () => fail(invalidInput("Pass the file id, as returned with the uploaded file."));
+const badOwner = () => fail(invalidInput("Pass the owner, a string of 1 to 255 characters, as owner() returned it."));
+
+const notCompleted = (): CloudropError =>
+  new CloudropError(
+    "NOT_FOUND",
+    "No completed file has this id. deleteFile deletes only files whose upload completed.",
+  );
+
+async function deleteFile(
+  config: ServerConfig,
+  store: CloudropStore<unknown>,
+  id: string,
+): Promise<Result<{ id: string }>> {
+  const ended = await storeCall(config.logger, `delete file ${id}`, () =>
+    store.end(id, "completed", "deleted", new Date()),
+  );
+  if (ended.error) return ended;
+  const { changed, record } = ended.data;
+  if (record?.status !== "deleted") return fail(notCompleted());
+  // Deleted and cleaned before: nothing is left to do. Deleted but not cleaned: an earlier call stopped in between.
+  if (!changed && record.cleanedAt !== null) return ok({ id });
+  const removed = await removeLeftovers(config, record);
+  if (removed.error) return removed;
+  const marked = await storeCall(config.logger, `mark file ${id} cleaned`, () => store.cleaned(id, new Date()));
+  return marked.error ? marked : ok({ id });
+}
+
+async function reconcile(
+  config: ServerConfig,
+  store: CloudropStore<unknown>,
+  given: unknown,
+): Promise<Result<{ checked: number; repaired: number }>> {
+  const options = given ?? {};
+  if (!isPlainObject(options)) return fail(invalidInput("reconcile takes { owner } or nothing."));
+  const repair = (owner: string) => storeCall(config.logger, `reconcile owner ${owner}`, () => store.reconcile(owner));
+  if (options.owner !== undefined) {
+    if (!isId(options.owner)) return badOwner();
+    const repaired = await repair(options.owner);
+    return repaired.error ? repaired : ok({ checked: 1, repaired: Number(repaired.data) });
+  }
+  const totals = { checked: 0, repaired: 0 };
+  let cursor: string | null = null;
+  do {
+    const page: Result<{ owners: string[]; cursor: string | null }> = await storeCall(
+      config.logger,
+      "list owners",
+      () => store.owners(cursor, OWNERS_PAGE),
+    );
+    if (page.error) return page;
+    for (const owner of page.data.owners) {
+      const repaired = await repair(owner);
+      if (repaired.error) return repaired;
+      totals.checked += 1;
+      totals.repaired += Number(repaired.data);
+    }
+    cursor = page.data.cursor;
+  } while (cursor !== null);
+  return ok(totals);
+}
+
+/** The store operations, each waiting for the environment like every api call (`whenReady`). */
+export function storeApi(
+  config: ServerConfig,
+  whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>,
+): StoreFileApi {
+  const { logger } = config;
+  const withStore = <T>(name: keyof StoreFileApi, call: (store: CloudropStore<unknown>) => Promise<Result<T>>) =>
+    whenReady(() =>
+      config.store
+        ? call(config.store)
+        : Promise.resolve(fail(configError(`api.${name} needs a database store. Pass store to createCloudrop.`))),
+    );
+  return {
+    file: (id) =>
+      withStore("file", async (store) =>
+        isId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
+      ),
+    usage: (owner) =>
+      withStore("usage", async (store) =>
+        isId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
+      ),
+    revokeUploads: (options) =>
+      withStore("revokeUploads", async (store) => {
+        const owner = isPlainObject(options) ? options.owner : undefined;
+        if (!isId(owner)) return badOwner();
+        const revoked = await storeCall(logger, `revoke the uploads of ${owner}`, () =>
+          store.revoke(owner, new Date()),
+        );
+        return revoked.error ? revoked : ok({ revoked: revoked.data });
+      }),
+    deleteFile: (id) => withStore("deleteFile", async (store) => (isId(id) ? deleteFile(config, store, id) : badId())),
+    reconcile: (options) => withStore("reconcile", (store) => reconcile(config, store, options)),
+    sweep: (options) => withStore("sweep", (store) => sweep(config, store, options)),
+  };
+}

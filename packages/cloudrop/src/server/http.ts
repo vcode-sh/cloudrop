@@ -70,9 +70,35 @@ export const serverError = (): CloudropError =>
 export const hasKnownCode = (error: CloudropError): error is CloudropError & { code: ServerErrorCode } =>
   Object.hasOwn(STATUS, error.code);
 
+// The busy answers, recognised by identity: the wire format has no field for "another request holds this file".
+const BUSY = new WeakSet<CloudropError>();
+
+/**
+ * Another `/complete` is running this file's onComplete. Retryable SERVER_ERROR, the one retryable server answer
+ * after which the client never sends /abort for a file that may be complete (M3-H16), with `Retry-After: 2`.
+ */
+export function busy(): CloudropError {
+  const error = new CloudropError("SERVER_ERROR", "Another request is completing this upload. Try again in a moment.", {
+    retryable: true,
+  });
+  BUSY.add(error);
+  return error;
+}
+
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
   // An unknown code would otherwise answer 200.
   if (!hasKnownCode(error)) return errorResponse(serverError(), headers);
+  if (BUSY.has(error)) {
+    // A cross-origin page reads Retry-After only when CORS exposes it.
+    const exposed: ResponseHeaders = headers["access-control-allow-origin"]
+      ? { "access-control-expose-headers": "Retry-After" }
+      : {};
+    return jsonResponse({ error: errorBody(error) }, STATUS[error.code], {
+      ...headers,
+      ...exposed,
+      "retry-after": "2",
+    });
+  }
   return jsonResponse({ error: errorBody(error) }, STATUS[error.code], headers);
 }
 

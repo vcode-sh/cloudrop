@@ -7,10 +7,11 @@ import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
 import type { EndpointConfig, EndpointInput } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
-import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
+import { type PluginFile, runBeforeUpload } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
 import { isRefusal, refusalError } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
+import { attachUpload, readOwner, releaseUnstarted, reserveFiles } from "./store-upload.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 import { prepareFile, readRequest } from "./upload-request.ts";
 
@@ -37,6 +38,12 @@ async function startFile(
   const token: MultipartToken = { ...base, uploadId: created.data.uploadId, partSize: plan.partSize };
   const first = Array.from({ length: Math.min(PARTS_PER_SIGN, plan.partCount) }, (_, index) => index + 1);
   const abort = () => storage.abortMultipart(token.key, token.uploadId);
+  // A row that cannot record the upload could never abort it later: abort it now and start nothing.
+  const unattached = config.store && token.stored ? await attachUpload(config, config.store, token) : null;
+  if (unattached) {
+    await abort();
+    return { kind: "rejected", error: errorBody(unattached) };
+  }
   const [parts, signed] = await Promise.all([presignParts(storage, token, first), signToken(token, signing)]).catch(
     // A custom driver's presignPart may throw: the upload created above must not stay open in the bucket.
     async (error: unknown) => {
@@ -100,7 +107,9 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const signedMetadata: unknown = metadataJson === undefined ? undefined : JSON.parse(metadataJson);
   const prepared = files.map((file) => prepareFile(route, file, { request, metadata, auth }));
   const accepted = prepared.filter((file): file is PluginFile => !(file instanceof CloudropError));
-  const { plugins } = config;
+  const { plugins, store } = config;
+  // Like prefix, a bad owner is the route's bug, found before any plugin reserves anything.
+  const rowOwner = store && accepted.length > 0 ? await readOwner(route, { ...auth, request, metadata }) : null;
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,
@@ -110,8 +119,12 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     if (refused) return fail(refused);
   }
   const exp = nowSeconds() + TOKEN_LIFETIME_SECONDS;
+  const refusals = await reserveFiles(config, { route, owner: rowOwner, files: accepted, metadataJson, exp });
+  const decided = prepared.map((file) =>
+    file instanceof CloudropError ? file : (refusals.get(file.id)?.error ?? file),
+  );
   const tickets = await Promise.all(
-    prepared.map((file): FileTicket | Promise<FileTicket> =>
+    decided.map((file): FileTicket | Promise<FileTicket> =>
       file instanceof CloudropError
         ? { kind: "rejected", error: errorBody(file) }
         : startFileSafely(config, {
@@ -125,13 +138,12 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
             owner,
             metadata: signedMetadata,
             exp,
+            ...(store && { stored: true as const }),
           }),
     ),
   );
-  // Files that beforeUpload accepted but could not be started: release what plugins reserved for them.
-  const failed = prepared.filter(
-    (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
-  );
-  await runOnAbort(plugins, abortContexts({ route: route.name, metadata, auth }, failed, "failed"), config.logger);
+  // Files that beforeUpload accepted but could not be started: release what plugins and the store reserved for them.
+  const unstarted = accepted.filter((file) => tickets[prepared.indexOf(file)]?.kind === "rejected");
+  await releaseUnstarted(config, { route: route.name, metadata, auth }, unstarted, refusals);
   return ok({ files: tickets });
 }

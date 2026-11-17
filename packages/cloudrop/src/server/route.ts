@@ -9,6 +9,8 @@ export type Awaitable<T> = T | Promise<T>;
 // Symbol.for, not Symbol(): two copies of cloudrop in one app must recognise each other's refusals, or one would read
 // as a signed-in user.
 const DENIED: unique symbol = Symbol.for("cloudrop.unauthorized");
+// Symbol.for for the same reason: an adapter may come from another copy of cloudrop than the server.
+const STORE: unique symbol = Symbol.for("cloudrop.store");
 
 /**
  * Returned by `authorize` to refuse an upload: `unauthorized()` answers UNAUTHORIZED (401), `forbidden()` FORBIDDEN
@@ -61,10 +63,11 @@ export interface AuthorizeContext<TMetadata> {
   metadata: TMetadata;
 }
 
-/** `prefix` and `key` see the live authorize result; this runs inside `/upload`. */
-export type KeyContext<TAuth, TMetadata> = Omit<TAuth, ReservedName> & {
-  request: Request;
-  metadata: TMetadata;
+/** `owner` sees the live authorize result inside `/upload`, once for all of its files. */
+export type OwnerContext<TAuth, TMetadata> = Omit<TAuth, ReservedName> & { request: Request; metadata: TMetadata };
+
+/** `prefix` and `key` see the live authorize result; this runs inside `/upload`, once per file. */
+export type KeyContext<TAuth, TMetadata> = OwnerContext<TAuth, TMetadata> & {
   file: { id: string; name: string; size: number; type: string; ext: string };
 };
 
@@ -78,6 +81,16 @@ export type CompleteContext<TAuth, TMetadata> = Omit<Jsonified<TAuth>, ReservedN
 
 /** What `/complete` sends as `data`: the JSON form of the result, and null where `onComplete` gave undefined or nothing. */
 type CompleteData<TResult> = Jsonified<TResult> | (undefined extends TResult ? null : never);
+
+/** `afterComplete` sees what `onComplete` sees, plus the `data` the client was sent. */
+export type AfterCompleteContext<TAuth, TMetadata, TResult> = CompleteContext<TAuth, TMetadata> & {
+  data: CompleteData<Awaited<TResult>>;
+};
+
+/** A store's extra context (an adapter's `tx`) replaces an authorize field of the same name. */
+type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : Omit<TContext, keyof TExtra> & TExtra;
+
+type NoExtra = Record<never, never>;
 
 /** route()'s first argument: every option that is not typed from authorize's result. */
 export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchema | undefined> {
@@ -106,7 +119,7 @@ export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchem
  * route()'s second argument: the callbacks typed from authorize's result. A separate argument because TypeScript
  * infers from callbacks left to right within one object, so one written before authorize would see `object`.
  */
-export interface RouteCallbacks<TAuth extends object, TMetadata, TResult> {
+export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra extends object = NoExtra> {
   /** Folder for generated keys `<prefix>/<ulid><ext>`. Sanitized like every key. */
   prefix?: (context: KeyContext<TAuth, TMetadata>) => string;
   /**
@@ -121,10 +134,22 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult> {
    *
    * `authorize` is not called again here: `request` carries the caller's cookies and headers, so re-check a session
    * that may have been revoked since `/upload`. Until the token expires (24 hours after `/upload`), whoever holds it
-   * can also delete this file through `/abort`, even after `onComplete` has run. The 1.1 database adapters close that
-   * gap for completed files.
+   * can also delete this file through `/abort`, even after `onComplete` has run. A database store closes that gap and
+   * runs `onComplete` once per file: inside the store's transaction with `tx` when its route comes from the store's own
+   * `route()`, otherwise again only after a crash between claiming the file and recording its completion.
    */
-  onComplete?: (context: CompleteContext<TAuth, TMetadata>) => Awaitable<TResult>;
+  onComplete?: (context: WithExtra<CompleteContext<TAuth, TMetadata>, TExtra>) => Awaitable<TResult>;
+  /**
+   * With a store: who the file counts against for `quota` and `api.usage`, 1 to 255 characters, or null for no one.
+   * Runs once per `/upload`. Not the authorize result signed into the token; return an id, such as a user or team id.
+   */
+  owner?: (context: OwnerContext<TAuth, TMetadata>) => Awaitable<string | null>;
+  /**
+   * With a store: runs after the completion is recorded, at most once per file and best effort. A crash right after the
+   * recording skips it, and a throw is logged while the client still gets its answer. Call storage and other network
+   * services here, not in `onComplete`; for work that must happen, write an outbox row through `tx` in `onComplete`.
+   */
+  afterComplete?: (context: AfterCompleteContext<TAuth, TMetadata, TResult>) => Awaitable<void>;
 }
 
 /**
@@ -140,7 +165,11 @@ export interface RouteDefinition {
   authorize(context: AuthorizeContext<unknown>): Awaitable<unknown>;
   prefix?(context: KeyContext<object, unknown>): string;
   key?(context: KeyContext<object, unknown>): string;
+  owner?(context: OwnerContext<object, unknown>): Awaitable<string | null>;
   onComplete?(context: { request: Request; file: UploadedFile; metadata: unknown }): unknown;
+  afterComplete?(context: { request: Request; file: UploadedFile; metadata: unknown; data: unknown }): unknown;
+  /** The store whose `route()` made this route, whose `tx` its `onComplete` expects. */
+  readonly [STORE]?: object;
 }
 
 export interface Route<TMetadataInput = unknown, TResult = unknown> {
@@ -149,7 +178,7 @@ export interface Route<TMetadataInput = unknown, TResult = unknown> {
   readonly "~types"?: { readonly metadata: TMetadataInput; readonly result: TResult };
 }
 
-const CALLBACKS = ["prefix", "key", "onComplete"] as const;
+const CALLBACKS = ["prefix", "key", "owner", "onComplete", "afterComplete"] as const;
 const POLICY = ["accept", "maxSize", "maxFiles", "metadata", "visibility", "authorize"] as const;
 
 /** JavaScript callers get no type error for an option in the wrong argument, and there it would do nothing. */
@@ -157,13 +186,13 @@ function checkPlacement(policy: object, callbacks: object): void {
   const callback = CALLBACKS.find((name) => Object.hasOwn(policy, name));
   if (callback) {
     throw configError(
-      `route(): ${callback} belongs in the second argument, which holds prefix, key and onComplete: route({ accept, maxSize, authorize }, { ${callback} }).`,
+      `route(): ${callback} belongs in the second argument, which holds prefix, key, owner, onComplete and afterComplete: route({ accept, maxSize, authorize }, { ${callback} }).`,
     );
   }
   const option = POLICY.find((name) => Object.hasOwn(callbacks, name));
   if (option) {
     throw configError(
-      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key and onComplete.`,
+      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.`,
     );
   }
 }
@@ -185,3 +214,26 @@ export function route<TAuth extends object, TSchema extends StandardSchema | und
   // handler builds exactly the contexts typed above.
   return { definition: { ...given, ...callbacks } as RouteDefinition };
 }
+
+/** route(), typed with a store's extra `onComplete` context. */
+export type RouteFunction<TExtra extends object> = <
+  TAuth extends object,
+  TSchema extends StandardSchema | undefined = undefined,
+  TResult = null,
+>(
+  policy: RoutePolicy<TAuth, TSchema>,
+  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra>,
+) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>>;
+
+/**
+ * For store adapters: a route() whose routes belong to `store`, so their `onComplete` is typed with `TExtra` (the
+ * store's `tx`). createCloudrop refuses such a route unless `store` is its store and has a transaction.
+ */
+export function routeFor<TExtra extends object>(store: object): RouteFunction<TExtra> {
+  return (policy, callbacks) => ({
+    definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: store },
+  });
+}
+
+/** The store whose route() made the route, if any. */
+export const storeOfRoute = (definition: RouteDefinition): object | undefined => definition[STORE];
