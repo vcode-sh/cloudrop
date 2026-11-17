@@ -41,8 +41,9 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      # The tag must name the version in package.json and a commit on main, where every CI lane ran; a prerelease
-      # (1.0.0-beta.1) goes to `next`, so `npm i cloudrop` keeps installing the last stable release.
+      # The tag must name the version in package.json and a commit on main, whose CI must be green before it is tagged
+      # (docs/releasing.md); a prerelease (1.0.0-beta.1) goes to `next`, so `npm i cloudrop` keeps installing the last
+      # stable release.
       - name: Check the tag against package.json and main
         id: version
         env:

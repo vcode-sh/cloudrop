@@ -533,7 +533,7 @@ parallelism cap is tuned for Workers yet.
 - Changesets; npm trusted publishing (OIDC, provenance) from GitHub-hosted runners.
 - 0.x releases under the `next` tag until the API freezes. 1.0 ships when the contract suite passes on real R2 and
   chaos tests pass.
-- `SECURITY.md` with private vulnerability reporting, a threat-model page, `llms.txt`, docs opening with the
+- `SECURITY.md` with a private reporting channel (email), a threat-model page, `llms.txt`, docs opening with the
   five-line quickstart.
 
 ## 14. Milestones

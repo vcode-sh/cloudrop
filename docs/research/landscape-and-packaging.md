@@ -395,9 +395,8 @@ builds.
 
 ### 2.11 Security policy
 
-- `SECURITY.md` with a supported-versions table and a private channel. Enable GitHub **private vulnerability reporting**,
-  which owners of public repositories can turn on
-  ([GitHub docs](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/configuring-private-vulnerability-reporting-for-a-repository)).
+- `SECURITY.md` with a supported-versions table and a private channel. cloudrop takes reports by email (see
+  [SECURITY.md](../../SECURITY.md)).
 - Threat model in the docs covers: forged completion, key injection or path traversal, oversized uploads, MIME spoofing,
   presigned URL leakage (short expiry), open CORS, and orphaned multipart storage cost.
 
@@ -602,7 +601,7 @@ await handle.done;                              // resolves with onComplete's re
 3. publint and attw (`esm-only`) on the packed tarballs. size-limit budgets enforced. A JSR dry run.
 4. Changesets version PR. Publish from a GitHub-hosted runner via OIDC with provenance. Tokens disallowed on the npm
    package.
-5. `LICENSE`, `SECURITY.md`, private vulnerability reporting, a threat-model page, and an `llms.txt`.
+5. `LICENSE`, `SECURITY.md` with a private reporting channel, a threat-model page, and an `llms.txt`.
 
 ---
 
@@ -629,4 +628,4 @@ await handle.done;                              // resolves with onComplete's re
 - Publishing: https://docs.npmjs.com/trusted-publishers · https://jsr.io/docs/publishing-packages · https://github.com/changesets/action · https://github.com/googleapis/release-please · https://github.com/oven-sh/bun/issues/22423 · https://github.com/oven-sh/bun/issues/15601
 - Size / tree-shaking: https://github.com/ai/size-limit · https://webpack.js.org/guides/tree-shaking/
 - Testing: https://vitest.dev/guide/browser/ · https://github.com/minio/minio · https://github.com/localstack/localstack · SeaweedFS, versitygw, adobe/S3Mock, Garage GitHub repos
-- Legal / security: https://opensource.guide/legal/ · https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/configuring-private-vulnerability-reporting-for-a-repository
+- Legal / security: https://opensource.guide/legal/

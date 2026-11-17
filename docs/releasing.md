@@ -63,7 +63,8 @@ Trusted publishing works from a private repository, with these differences:
 
 1. On `main`, with CI green, set `version` in `packages/cloudrop/package.json` (for example `0.1.0`) and turn the
    `## Unreleased` heading of `packages/cloudrop/CHANGELOG.md` into `## 0.1.0 - YYYY-MM-DD`, with a new empty
-   `## Unreleased` above it. Commit both in one commit and push it:
+   `## Unreleased` above it. For 0.1.0 only, the same commit also deletes the root `README.md` paragraph that begins
+   "Until 0.1.0 is published", and stages `README.md` with the others. Commit them in one commit and push it:
 
    ```bash
    git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md
@@ -119,6 +120,18 @@ In the repository `vcode-sh/cloudrop`: **Settings → Environments → New envir
 
 In a private repository, GitHub limits these rules by plan: see
 [If the repository stays private](#if-the-repository-stays-private).
+
+### Branch protection on `main`
+
+**Settings → Branches → Add branch ruleset** (or a classic branch protection rule) for `main`. GitHub enforces either
+only in a public repository, or in a private one on GitHub Pro or above.
+
+- **Require status checks to pass:** `check`, `rustfs`, `wrangler`, `chaos`, `db`, `drizzle-0-45` and `browser`, the
+  CI job names. `chaos-soak` and `live-r2` run only on a schedule or by hand; never require them, or no pull request
+  can merge.
+- **Block force pushes** and **restrict deletions**.
+- **Let administrators bypass** the rule: the maintainer pushes to `main` directly, and CI runs on that push. A
+  release waits for it to be green ([Release a version](#release-a-version), step 1).
 
 ### npm account
 

@@ -15,11 +15,8 @@ Before 1.0, fixes land in the latest 0.x release only. Update to it first; the
 
 ## Reporting a vulnerability
 
-**Do not open a public issue, discussion or pull request.** Report it privately through GitHub's private vulnerability
-reporting: [open a draft advisory](https://github.com/vcode-sh/cloudrop/security/advisories/new) (the **Security**
-tab, then **Report a vulnerability**).
-
-Include:
+**Do not open a public issue, discussion or pull request.** Email **hello@vcode.sh** with "cloudrop security" in the
+subject. Include:
 
 - **What** the vulnerability is, and which entry point (`cloudrop`, `cloudrop/client`, an adapter...) it is in.
 - **How** to reproduce it: a minimal setup, the requests, the version, the runtime and the storage provider.
@@ -37,8 +34,8 @@ I maintain cloudrop alone, so these are times I can keep:
 - **7 days:** I confirm whether it is a vulnerability and how severe it is, or tell you why not.
 - **14 days:** a fix is released for a critical issue. Others get a fix or a documented workaround within 30 days.
 
-If I go quiet past those times, follow up on the advisory. Once a fix ships, the advisory is published with the
-details and credit to you, unless you prefer to stay anonymous.
+If I go quiet past those times, send a follow-up email. Once a fix ships, the changelog and the release notes say what
+was fixed, with credit to you, unless you prefer to stay anonymous.
 
 ## In scope
 

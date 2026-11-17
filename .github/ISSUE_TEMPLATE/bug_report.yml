@@ -10,8 +10,8 @@ body:
         `NETWORK_ERROR`s are a missing bucket CORS rule.
 
         **Never paste credentials, presigned URLs, upload tokens or cookies**, in the reproduction or the logs. Redact
-        them; the shape is enough. A security issue goes through
-        [private vulnerability reporting](https://github.com/vcode-sh/cloudrop/security/advisories/new), not here.
+        them; the shape is enough. A security issue goes by email to
+        hello@vcode.sh, as [SECURITY.md](https://github.com/vcode-sh/cloudrop/blob/main/SECURITY.md) says, not here.
 
   - type: input
     id: version
