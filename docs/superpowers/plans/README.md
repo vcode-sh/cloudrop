@@ -40,8 +40,8 @@ in [`docs/decisions/`](../../decisions/README.md).
   the plan changed client and example code and moved two functions, unchanged, from `src/plan.ts` to
   `src/part-size.ts`; no server or storage code.
 - **Bundle (gzip):** `cloudrop` 33.84 kB of 36 kB, `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of
-  3.2 kB, `cloudrop/client` 10.45 kB of the 10.5 kB ceiling (`M3-U86`; 8.35 kB before the plan). The resume plan's last
-  step sets the budget from measurement, after the lab and the review fixes.
+  3.2 kB, `cloudrop/client` 10.58 kB of the 11 kB ceiling after the final review's fixes (`M3-U91`; 10.45 kB before
+  them, 8.35 kB before the plan). The resume plan's last step sets the budget from measurement.
 - **What works end to end:** server (`createCloudrop`, `route`, the four endpoints, verification, `api.*`), Next and
   Node adapters, `cloudrop/client` (single PUT and multipart, four parts of a file in flight, URL renewal,
   `PARTS_MISSING` repair, bounded retry, cancel with keep-or-abort; since plan A: bytes, speed and time left through
@@ -76,8 +76,8 @@ resume plan's lab rows pending). Next:
     from other links;
   - `/complete` makes three storage calls (ListParts, CompleteMultipart, HEAD); whether one can go without weakening
     verification (spec §7) needs analysis.
-- **The "client plus React" target:** spec §1 keeps about 12 kB while the client's ceiling is now 10.5 kB, which
-  leaves M4's bindings about 1.5 kB at the ceiling (`M3-U86`); M4 decides whether the target moves.
+- **The "client plus React" target:** spec §1 keeps about 12 kB while the client's ceiling is now 11 kB, which
+  leaves M4's bindings about 1 kB at the ceiling (`M3-U91`); M4 decides whether the target moves.
 - **Unreadable R2 refusals:** a bad-signature `403` reaches the page as a network error, so the client retries for
   about 15 s and answers a retryable `NETWORK_ERROR`. Option: stop at the second unreadable answer on a fresh URL when
   `/sign` succeeded, with a non-retryable code (findings in `r2-spike-findings.md`, "Browser refusals and checksums,

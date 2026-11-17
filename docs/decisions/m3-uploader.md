@@ -1286,7 +1286,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Status:** in force (`2fe56b7`; the part-count check `2075eac`). The final review's M1 found that the part-count
   check let `{ partSize: 0, partCount: Infinity }` through (`Math.ceil(n / 0)` is `Infinity`, which structured clone
   keeps), and `resume()` of it never ended its loop; a record of more than 10,000 parts, the limit of S3 and R2, is now
-  refused and deleted too.
+  refused and deleted too (`6be65a2`).
 - **Visible in:** `client/persist.ts` (`uploadOf`), `client/records.ts` (`save`, `isRecord`, `usable`).
 
 ### M3-U81: a ticket's lock is asked for without waiting for the answer
@@ -1413,8 +1413,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **If wrong (known cost):** a page served over plain HTTP from a LAN address, as a self-hosted RustFS or MinIO setup
   often is, cannot resume after a reload; its uploads still work. A record is written a moment later, once the lock's
   answer has come; the upload never waits for it.
-- **Status:** in force. Amends `M3-U68` (no fallback), `M3-U69` and spec §3.5 (the "harmless" claim), `M3-U73`,
-  `M3-U76` and `M3-U81` (a refused request is no longer ignored).
+- **Status:** in force (`c4b33f5`). Amends `M3-U68` (no fallback), `M3-U69` and spec §3.5 (the "harmless" claim),
+  `M3-U73`, `M3-U76` and `M3-U81` (a refused request is no longer ignored).
 - **Visible in:** `client/records.ts` (`createRecords`), `client/locks.ts`, `client/persist.ts` (`uploadOf`),
   `client/resume.ts` (`check`), `client/fingerprint.ts`, `testing/fake-locks.ts` (`refuse`), `client/forget.test.ts`,
   `client/persist-failures.test.ts`, `client/resume-checks.test.ts`, `client/resume-job.test.ts`.
@@ -1428,7 +1428,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Why:** one check keeps every later call free of feature tests and gives a client one answer for its life: a store
   that appeared midway would list records that earlier uploads of the same client never saved.
 - **If wrong:** an app that loads a polyfill late creates its client after it, or creates a second one.
-- **Status:** in force (`7f2a7b1` for `indexedDB`; Web Locks since `M3-U88`).
+- **Status:** in force (`7f2a7b1` for `indexedDB`; Web Locks since `M3-U88`, `c4b33f5`).
 - **Visible in:** `client/records.ts` (`createRecords`), `client/forget.test.ts`.
 
 ### M3-U90: a retry of a refused `resume()` runs the checks again
@@ -1447,7 +1447,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   froze the tab.
 - **If wrong:** a retry of `NOT_FOUND` or of a different file repeats the checks and the refusal, at the cost of a
   store read and a hash.
-- **Status:** in force. Amends `M3-U76`; replaces the alternative the review offered, a retry that only repeats the
+- **Status:** in force (`39f26e6` for the retry during the checks, `260489c` for the retry after a refusal). Amends
+  `M3-U76`; replaces the alternative the review offered, a retry that only repeats the
   refusal as `M3-U37` does for a job refused for its arguments.
 - **Visible in:** `client/resume.ts` (`resumeRun`, `checkAgain`, `resumeJob`), `client/job.ts` (`createUploadJob`'s
   `retry`), `client/resume-checks.test.ts`.
@@ -1459,8 +1460,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   10.5 kB to 11 kB gzip. The ruling put correctness first: raise it only if the fixes still ended above 10.5 kB after
   removing the dead fingerprint fallback and any real simplification, never by golfing.
 - **Why:** the client measured 10.45 kB before the fixes. `M3-U88` (records only under a lock, without the
-  `crypto.subtle` fallback) and the I2 fix ended at 10.48 kB; `M3-U90`'s re-checking retry took it to 10.57 kB.
+  `crypto.subtle` fallback) and the I2 fix ended at 10.48 kB; `M3-U90`'s re-checking retry took it to 10.57 kB, and
+  the part-count bound (`M3-U80`) to 10.58 kB. Sizing probed parts from the plan (the review's M2) saved no measurable
+  byte.
 - **If wrong:** spec §1's "client plus React" target of about 12 kB leaves M4's bindings about 1 kB when the client
   reaches its ceiling; M4 decides whether that target moves.
-- **Status:** in force. Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
+- **Status:** in force (`260489c`). Supersedes `M3-U86`'s 10.5 kB; spec §1 says 11 kB.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.

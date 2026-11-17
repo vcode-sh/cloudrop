@@ -2,7 +2,7 @@
 
 Status: approved by the owner 2026-11-16 (design in conversation; the owner asked for the implementation without further
 questions, following the research's recommendations). Executed 2026-11-16 and 2026-11-17 by the resume plan on
-`feat/m3-resume`, from `57144e0`; what it decided while building is `M3-U60` to `M3-U87`. Parent spec:
+`feat/m3-resume`, from `57144e0`; what it decided while building is `M3-U60` to `M3-U87`, and its final review's rulings `M3-U88` to `M3-U91`. Parent spec:
 [`2026-11-15-cloudrop-design.md`](2026-11-15-cloudrop-design.md) §6.3, which this design amends (§8). Builds on
 `cloudrop/client` as merged at `35cb8a9` (plans A and B,
 [`2026-11-16-progress-scheduler-design.md`](2026-11-16-progress-scheduler-design.md)). Research:
@@ -92,7 +92,10 @@ Never a presigned URL, an ETag or a part list. A single-PUT ticket is never save
   a new ticket (which replaces the record under the new `id` and deletes the old one). No write per part.
 - **Deleted** when the file ends `done` or `aborted`; when `pagehide` sends the `/abort` of a failed file's ticket
   (`M3-U33`); when a record is found expired (by `resumable()`, `resume()` or the next save); and by `forget()`.
-- A failed file keeps its record (it may be retried, and after a reload resumed) until one of the above.
+- A failed file keeps its record, and its lock, for `retry()` until one of the above. `pagehide` sends the `/abort` of
+  every failed file it holds and deletes its record, and a reload fires `pagehide`, so after a reload a failed file can
+  be resumed only when a `/complete` may have finished it (no `/abort` is sent for it, `M3-U82`), when the page ended
+  without `pagehide` (a crash), or when the delete did not commit before the page unloaded.
 - Store operations of one client are applied in the order they were made (a delete issued after a save never runs
   before it). A store error never fails, pauses or slows an upload; `resumable()` and `forget()` report theirs as
   `{ data: null, error }` with code `STORAGE_ERROR` and a message that names the browser's storage, never its raw text.
@@ -118,8 +121,8 @@ the saved token (owner decision: the server's part list, not a saved one):
   that is gone and not completed) → one new
   `/upload` with the record's route and metadata (the `retry()` new-ticket branch, `M3-U31`), the old record deleted,
   a new one saved, and the whole file sent. Its bytes restart at 0 (`M3-U36`).
-- **any other failure** → the file ends `failed` with that error and keeps its record; `retry()` and a later
-  `resume()` start again from the probe.
+- **any other failure** → the file ends `failed` with that error and keeps its record and lock; `retry()` starts
+  again from the probe, and so does a `resume()` after a reload that left the record (§3.2).
 
 A probe answered with `NETWORK_ERROR` or `SERVER_ERROR` sets `mayBeComplete` as any `/complete` does (`M3-S14`).
 `retry()`'s new-ticket list (`M3-U31`) gains `NO_SUCH_UPLOAD` for the same reason.

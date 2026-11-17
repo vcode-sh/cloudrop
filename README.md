@@ -316,8 +316,8 @@ await client.forget();
     `/upload` once for a new ticket with the record's route and metadata and sends the whole file under a new key, its
     `bytes` from 0, with no failure in between. The old parts wait for the bucket's lifecycle rule. When that `/upload`
     is refused, the file ends `failed` with its error.
-  - Any other failure ends the file `failed` and keeps its record; `retry()`, or a later `resume()`, asks `/complete`
-    again.
+  - Any other failure ends the file `failed` and keeps its record; `retry()` asks `/complete` again, and so does a
+    `resume()` after a reload that left the record (see when a record is deleted, below).
 - **What is stored**, one record per upload, in the IndexedDB database `cloudrop`: the upload's id, route and the
   metadata sent to `/upload`; its upload token, key, part size, part count and expiry; the file's name, size, type,
   `lastModified` and fingerprint; and the namespace. Never a presigned URL, an ETag or a part list. The token is a
