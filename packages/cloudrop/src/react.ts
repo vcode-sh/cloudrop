@@ -16,9 +16,9 @@ import { type HookSource, useUploadWith } from "./react/use-upload.ts";
 export type {
   DropProps,
   InputProps,
-  UploadFile,
   UploadHooks,
   UploadHooksOptions,
+  UploadItem,
   UseResumableResult,
   UseUploadOptions,
   UseUploadResult,

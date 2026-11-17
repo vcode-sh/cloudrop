@@ -17,7 +17,7 @@ import type { StandardSchema } from "../server/schema.ts";
 import type { Fault } from "../testing/client-fixture.ts";
 import { firstOf, gate } from "../testing/persist-fixture.ts";
 import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
-import type { UploadFile } from "./types.ts";
+import type { UploadItem } from "./types.ts";
 
 const tagged: StandardSchema<{ tag: string }> = {
   "~standard": { version: 1, vendor: "test", validate: (value) => ({ value: value as { tag: string } }) },
@@ -143,7 +143,7 @@ describe("useUpload", () => {
     await waitFor(() => expect(statuses(result.current.files)).toEqual(["a.txt uploading", "b.txt failed"]), fast);
     const steps: string[][] = [];
     /** Runs `action` on the files of the latest render, then waits for `expected` and records it. */
-    const step = async (action: (files: readonly UploadFile<unknown>[]) => unknown, expected: string[]) => {
+    const step = async (action: (files: readonly UploadItem<unknown>[]) => unknown, expected: string[]) => {
       act(() => void action(result.current.files));
       await waitFor(() => expect(statuses(result.current.files)).toEqual(expected), fast);
       steps.push(statuses(result.current.files));

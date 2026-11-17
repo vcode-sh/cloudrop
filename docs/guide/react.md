@@ -259,8 +259,8 @@ The hooks infer everything from the route name: `useUpload("avatar")` has `files
 `onComplete`, and `metadata` typed by its schema, required when the schema requires it. A record from
 `useResumable("documents")` resumes only into a `documents` hook; records of every route narrow by `upload.route`.
 
-For a component that takes a file as a prop, `UploadFile<R>` is the type of one `files` entry, where `R` is the route's
-result type: `UploadFile<RouteResult<typeof cloudrop, "documents">>`, with `RouteResult` from `cloudrop/client`. The
+For a component that takes a file as a prop, `UploadItem<R>` is the type of one `files` entry, where `R` is the route's
+result type: `UploadItem<RouteResult<typeof cloudrop, "documents">>`, with `RouteResult` from `cloudrop/client`. The
 other types (`UploadHooks`, `UseUploadOptions`, `UseUploadResult`, `UseResumableResult`, `InputProps`, `DropProps`,
 `UploadHooksOptions`) are exported from `cloudrop/react` too. `{ client }` takes only a client created for a server with
 the same route names: `createCloudropClient<typeof cloudrop>()`.

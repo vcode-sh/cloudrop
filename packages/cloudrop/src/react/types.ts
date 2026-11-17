@@ -41,7 +41,7 @@ export type UseUploadArguments<TMetadata> = undefined extends TMetadata
   : [options: UseUploadOptions<TMetadata> & { metadata: TMetadata }];
 
 /** One file of useUpload's `files`: the client's snapshot of it, with that file's controls (FileHandle). */
-export interface UploadFile<R> extends FileSnapshot<R> {
+export interface UploadItem<R> extends FileSnapshot<R> {
   pause(): void;
   resume(): void;
   abort(): void;
@@ -67,7 +67,7 @@ export interface DropProps {
 
 export interface UseUploadResult<R, TName extends string, TMetadata> {
   /** Every file of the uploads this hook started, in start order. A file's object changes only when that file does. */
-  files: readonly UploadFile<R>[];
+  files: readonly UploadItem<R>[];
   /** As JobSnapshot's totals, across the hook's uploads: failed and aborted files are left out of the bytes. */
   totals: JobSnapshot<R>["totals"];
   /** True while a file is queued, uploading or completing; a paused file is not uploading. */

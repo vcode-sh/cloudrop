@@ -460,7 +460,9 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 - **Why:** design §6.1; stable functions keep an effect that lists `upload` in its dependencies from uploading again on
   every render.
 - **If wrong:** per-render functions would be a breaking change for code that relies on identity.
-- **Status:** in force (`542ae74`, `99f795a`).
+- **Status:** in force (`542ae74`, `99f795a`). The final review (M4) renamed the per-file type `UploadFile` to
+  `UploadItem` before the first publish: `UploadFile` sat one letter from `UploadedFile`, the stored file a done
+  file's `result.file` holds.
 - **Source:** design §6.1; task D review M2.
 - **Visible in:** `src/react/use-upload.ts`, `src/react/upload-store.ts`, `src/react/types.ts`.
 

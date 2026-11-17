@@ -3,12 +3,12 @@
 // listens to it, so an unmounted hook holds nothing, and it never cancels a job: the client owns them (M4-B4).
 
 import type { FileHandle, FileSnapshot, FileStatus, JobSnapshot, UploadJob } from "../client.ts";
-import type { UploadFile } from "./types.ts";
+import type { UploadItem } from "./types.ts";
 
 type Totals = JobSnapshot<unknown>["totals"];
 
 export interface UploadView<R> {
-  files: readonly UploadFile<R>[];
+  files: readonly UploadItem<R>[];
   totals: Totals;
   isUploading: boolean;
 }
@@ -65,8 +65,8 @@ export function createUploadStore<R>(): UploadStore<R> {
   };
 
   // Each file's last snapshot and the object made from it, by handle: the object stays while the fields do.
-  const made = new WeakMap<FileHandle<R>, { snapshot: FileSnapshot<R>; file: UploadFile<R> }>();
-  function fileOf(handle: FileHandle<R>, snapshot: FileSnapshot<R>): UploadFile<R> {
+  const made = new WeakMap<FileHandle<R>, { snapshot: FileSnapshot<R>; file: UploadItem<R> }>();
+  function fileOf(handle: FileHandle<R>, snapshot: FileSnapshot<R>): UploadItem<R> {
     const previous = made.get(handle);
     if (previous && isSameFile(previous.snapshot, snapshot)) return previous.file;
     const file = {
