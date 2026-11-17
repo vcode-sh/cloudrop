@@ -63,18 +63,25 @@ export interface ChaosFixture {
   client(options?: Omit<ClientOptions, "fetch" | "basePath">): CloudropClient<ChaosCloudrop>;
   /** What reached the bucket through the proxy, in start order: "PUT part 2 reset", "CompleteMultipartUpload 200". */
   bucketRequests(): string[];
+  /**
+   * The client's calls to the app in order, as "POST /sign 200". /sign presigns locally and never reaches the bucket,
+   * so a renewal or a new ticket shows here and not in `bucketRequests` (spec §4 rows 1, 3, 4, 7, 8).
+   */
+  appRequests(): string[];
   /** The first log entry `matches` accepts, waiting up to `timeoutMs` for it (a background /abort lands late, M1). */
   waitForEntry(matches: (entry: ChaosEntry) => boolean, timeoutMs?: number): Promise<ChaosEntry>;
   /** The object under `key` is exactly `file`: size and SHA-256, read from RustFS directly. */
   expectStored(key: string, file: Blob): Promise<void>;
   /** Multipart uploads open under the prefix, from RustFS directly. */
   uploadsLeft(): Promise<OpenUpload[]>;
+  /** Keys of the objects stored under the prefix, from RustFS directly: `[]` proves nothing was stored. */
+  objectsLeft(): Promise<string[]>;
   /**
    * No multipart upload is open under the prefix, except under the `allow`ed keys: those M3-U55 leaves to the
    * lifecycle rule, such as a retry's first ticket (audit C3).
    */
   expectNoUploadsLeft(options?: { allow?: readonly string[] }): Promise<void>;
-  /** Clears the rules, random mode, held requests, the prefix's uploads and objects, the log and the logger. */
+  /** Clears the rules, random mode, held requests, the prefix's uploads and objects, both logs and the logger. */
   reset(): Promise<void>;
   /** Clears the prefix and stops the proxy. */
   stop(): Promise<void>;
@@ -108,11 +115,14 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
   const logger = recordingLogger();
   const cloudrop = chaosCloudrop(chaosStorage(proxy.url), prefix, logger);
 
-  const fetch: ClientFetch = (url, init) => {
+  const appRequests: string[] = [];
+  const fetch: ClientFetch = async (url, init) => {
     if (!url.startsWith(BASE_PATH)) return globalThis.fetch(url, init);
     init.signal?.throwIfAborted();
     const headers = { ...Object.fromEntries(new Headers(init.headers)), origin: APP_ORIGIN };
-    return cloudrop.handler(new Request(url, { method: init.method, body: init.body, headers }));
+    const response = await cloudrop.handler(new Request(url, { method: init.method, body: init.body, headers }));
+    appRequests.push(`${init.method ?? "GET"} ${url.slice(BASE_PATH.length)} ${response.status}`);
+    return response;
   };
   const uploadsLeft = () => openUploads(endpoint, prefix);
 
@@ -124,6 +134,7 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
     client: (options) =>
       createCloudropClient<ChaosCloudrop>({ persist: false, ...options, fetch, basePath: BASE_PATH }),
     bucketRequests: () => proxy.log().map((entry) => `${entry.label} ${entry.outcome}`),
+    appRequests: () => [...appRequests],
     waitForEntry: (matches, timeoutMs = 5000) =>
       vi.waitFor(
         () => {
@@ -135,6 +146,11 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
       ),
     expectStored: (key, file) => expectStoredFile(direct, key, file),
     uploadsLeft,
+    async objectsLeft() {
+      const listed = await direct.list(prefix);
+      if (listed.error) throw listed.error;
+      return listed.data.items.map((item) => item.key);
+    },
     async expectNoUploadsLeft({ allow = [] } = {}) {
       const left = await uploadsLeft();
       expect(left.filter((upload) => !allow.includes(upload.key))).toEqual([]);
@@ -145,6 +161,7 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
       proxy.release();
       await clearPrefix(direct, endpoint, prefix);
       proxy.clearLog();
+      appRequests.length = 0;
       logger.errors.length = 0;
       logger.warnings.length = 0;
     },
@@ -162,7 +179,9 @@ export async function startChaosFixture(): Promise<ChaosFixture> {
 /**
  * Registers the lane's hooks in the calling file or describe block and returns its fixture, usable from the first
  * test: started once before all (teardown registered with it), `Math.random` stubbed to 0 for every test (M3-K3),
- * and reset after each, so every test starts with no rules, an empty log and an empty prefix.
+ * and reset after each, so every test starts with no rules, empty logs and an empty prefix. A request still in flight
+ * at the reset lands in the next test's logs: a row that triggers a background /abort waits for it with `waitForEntry`
+ * before it ends (audit M1).
  */
 export function useChaosFixture(): ChaosFixture {
   const fixture = {} as ChaosFixture;

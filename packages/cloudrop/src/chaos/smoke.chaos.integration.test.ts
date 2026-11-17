@@ -12,9 +12,10 @@ test("a multipart upload with no fault is stored whole, leaves no upload open, a
 
   expect(error).toBeNull();
   const key = data?.file.key ?? "";
-  expect(key.startsWith(chaos.prefix)).toBe(true);
+  expect(key.startsWith(chaos.prefix), `key ${key}`).toBe(true);
   await chaos.expectStored(key, file);
   await chaos.expectNoUploadsLeft();
+  expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /complete 200"]);
   // Read after the oracle ran: its reads go to RustFS directly, so the log holds the upload's requests only.
   const requests = chaos.bucketRequests();
   expect([requests[0], ...requests.slice(4)]).toEqual([

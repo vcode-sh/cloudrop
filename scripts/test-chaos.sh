@@ -12,7 +12,7 @@ if [[ "${1:-}" == "soak" ]]; then
   shift
 fi
 if ! docker info >/dev/null 2>&1; then
-  echo "Docker is not running, and the chaos lane needs it for RustFS. Start Docker, then run bun run test:chaos again." >&2
+  echo "Docker is not running, and the chaos lane needs it for RustFS. Start Docker, then run the lane again." >&2
   exit 1
 fi
 PORT="${CLOUDROP_RUSTFS_PORT:-19300}"

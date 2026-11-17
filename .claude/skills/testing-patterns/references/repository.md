@@ -34,9 +34,9 @@ live lane a verbose report (both checked 2026-11-15).
   `*.chaos.integration.test.ts`, so the contract lanes never run a chaos file) and `soak` (only
   `*.soak.integration.test.ts`, the nightly soak). `bun run test` runs `vitest run --project unit`, without
   `--passWithNoTests`, so an empty lane fails; backend lane scripts select `--project integration`, and
-  `scripts/test-chaos.sh` selects `--project chaos`, or `--project soak` when its first argument is `soak`. See vitest.md. `*.browser.test.ts` files are
-  not Vitest's: they live in `examples/next/app/` and run under Playwright (`examples/next/playwright.config.ts`)
-  through the browser lane scripts.
+  `scripts/test-chaos.sh` selects `--project chaos`, or `--project soak` when its first argument is `soak`. See
+  vitest.md. `*.browser.test.ts` files are not Vitest's: they live in `examples/next/app/` and run under Playwright
+  (`examples/next/playwright.config.ts`) through the browser lane scripts.
 - **A lane whose service or credentials are missing fails, never skips.** Check the prerequisite in `beforeAll` and
   throw a message that names what to set (`CLOUDROP_R2_ENV_FILE`, "start Docker", …). A throwing `beforeAll` fails the
   file and the run.
