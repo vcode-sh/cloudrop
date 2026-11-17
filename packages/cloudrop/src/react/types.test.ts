@@ -26,13 +26,10 @@ const cloudrop = createCloudrop({
   }),
   secret: "test-secret-0123456789abcdef0123456789",
   routes: {
-    avatar: route({
-      accept: "image/*",
-      maxSize: "5MB",
-      metadata: albumSchema,
-      authorize: allowAnyone,
-      onComplete: ({ file }) => ({ url: file.url }),
-    }),
+    avatar: route(
+      { accept: "image/*", maxSize: "5MB", metadata: albumSchema, authorize: allowAnyone },
+      { onComplete: ({ file }) => ({ url: file.url }) },
+    ),
     notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }),
     optional: route({ accept: "*/*", maxSize: 1, metadata: optionalSchema, authorize: allowAnyone }),
   },
@@ -55,7 +52,10 @@ const other = createCloudrop({
   }),
   secret: "test-secret-0123456789abcdef0123456789",
   routes: {
-    videos: route({ accept: "video/*", maxSize: "1GB", authorize: allowAnyone, onComplete: () => ({ seconds: 1 }) }),
+    videos: route(
+      { accept: "video/*", maxSize: "1GB", authorize: allowAnyone },
+      { onComplete: () => ({ seconds: 1 }) },
+    ),
   },
 });
 

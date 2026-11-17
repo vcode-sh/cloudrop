@@ -23,13 +23,10 @@ const tagged: StandardSchema<{ tag: string }> = {
 };
 const routes = {
   notes: route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone }),
-  tagged: route({
-    accept: "text/plain",
-    maxSize: 16,
-    metadata: tagged,
-    authorize: allowAnyone,
-    onComplete: ({ metadata }) => metadata,
-  }),
+  tagged: route(
+    { accept: "text/plain", maxSize: 16, metadata: tagged, authorize: allowAnyone },
+    { onComplete: ({ metadata }) => metadata },
+  ),
 };
 
 const setup = (fault?: Fault) => hooksFixture(routes, fault);
