@@ -282,3 +282,38 @@ describe("useResumable", () => {
     }).toEqual({ status: "failed", listed: [setup.upload.id], stored: 2 });
   });
 });
+
+describe("useResumable's discard() and forget()", () => {
+  it("discard() aborts one listed upload without its file, and the list reads again without it", async () => {
+    const setup = await reloaded(gate(partThree));
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable("files"));
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+    const [record] = result.current.uploads;
+    if (!record) throw new Error("useResumable listed no upload.");
+
+    const answer = await act(() => result.current.discard(record));
+
+    expect({
+      answer,
+      listed: result.current.uploads,
+      requests: setup.sent(),
+      pending: setup.fixture.server.fake.pendingUploads(),
+    }).toEqual({ answer: { data: { aborted: true }, error: null }, listed: [], requests: ["POST /abort"], pending: 0 });
+  });
+
+  it("forget() deletes the namespace's records, and the list reads again empty", async () => {
+    const setup = await reloaded(gate(partThree));
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable("files"));
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+
+    const answer = await act(() => result.current.forget());
+
+    expect({ answer, listed: result.current.uploads, stored: stored(setup) }).toEqual({
+      answer: { data: { forgotten: 1 }, error: null },
+      listed: [],
+      stored: [],
+    });
+  });
+});

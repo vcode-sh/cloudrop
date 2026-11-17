@@ -240,11 +240,15 @@ describe("signParts", () => {
 
 describe("abort", () => {
   // The cancel path awaits abort() bare, so a rejection here would make upload() reject.
-  it("resolves when the fetch throws synchronously", async () => {
+  it("resolves NETWORK_ERROR when the fetch throws synchronously", async () => {
     const endpoints = createEndpoints("/api/cloudrop", () => {
       throw new TypeError("Failed to fetch");
     });
-    await expect(endpoints.abort("token")).resolves.toBeUndefined();
+    expect(errorOf(await endpoints.abort("token"))).toEqual({
+      code: "NETWORK_ERROR",
+      message: "The upload server could not be reached. Check the connection, then try again.",
+      retryable: true,
+    });
   });
 
   it("sends /abort with keepalive, so a tab closed after a cancel or a failure still delivers it", async () => {

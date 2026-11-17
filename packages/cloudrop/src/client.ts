@@ -1,6 +1,7 @@
 // The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
 
 import { isList } from "./client/arguments.ts";
+import { type Discarded, discard } from "./client/discard.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
 import { giveUp } from "./client/file-run.ts";
 import { startJob } from "./client/job.ts";
@@ -14,6 +15,7 @@ import type { UploadContext } from "./client/upload.ts";
 import { configError, fail, ok, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
 
+export type { Discarded } from "./client/discard.ts";
 export type {
   FileHandle,
   FileOutcome,
@@ -122,6 +124,11 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
     file: File,
     options?: { signal?: AbortSignal },
   ): UploadJob<RouteResult<TCloudrop, TName>>;
+  /**
+   * Drops one unfinished upload from resumable() without its file: the server is told to abort it, and its record is
+   * deleted. `aborted` is false when its token could no longer abort anything; the bucket's lifecycle rule cleans up.
+   */
+  discard(upload: ResumableUpload<RouteName<TCloudrop>>): Promise<Result<Discarded>>;
   /** Deletes the namespace's unfinished uploads, which sign-out should do, or every one in this browser with `all`. */
   forget(options?: { all: true }): Promise<Result<{ forgotten: number }>>;
 }
@@ -215,6 +222,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     resumable: (route) => resumable(context, route) as Promise<Result<ResumableUpload<typeof route & string>[]>>,
     resume: (upload, file, options) =>
       resumeJob(context, upload, file, options) as UploadJob<RouteResult<TCloudrop, typeof upload.route>>,
+    discard: (upload) => discard(context, upload),
     forget: (options) => forget(context, options),
   };
 }

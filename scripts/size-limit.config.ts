@@ -2,8 +2,8 @@
 // The build moves code that entries share into hashed chunks, so each budget counts its entry together with every
 // chunk the entry imports, directly or through another chunk: what a consumer's bundler pulls in for that import.
 // Sizes are gzip, the unit the design spec states its size goals in. Since 2026-11-17 the ceilings carry wide headroom
-// for the work still to come (the store interface, plugins, the registry), by the owner's decision (M4-F24): a ceiling
-// is a guard against accidents, not a target. The size measured then is noted beside each; a change that grows an
+// for the work still to come (the plugins), by the owner's decision (M4-F24): a ceiling is a guard against accidents,
+// not a target. The size measured then is noted beside each; a change that grows an
 // entry by more than 5% says so in its commit and decision entry.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -69,7 +69,8 @@ export default [
     modifyEsbuildConfig: (config: object) => ({ ...config, logOverride: { "ignored-bare-import": "silent" } }),
   },
   // Bundled and minified, the size an app ships. History: 8.35 kB after progress plan B, 10.57 kB after resume
-  // (M3-U91), 11.03 kB after M4a (M4-F23), 11.09 kB after the /upload idempotency key (M5-T104).
+  // (M3-U91), 11.03 kB after M4a (M4-F23), 11.09 kB after the /upload idempotency key (M5-T104), 11.3 kB after
+  // discard() (M3-U93).
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
@@ -79,7 +80,7 @@ export default [
   },
   // Bundled and minified without react and without the client's chunks (the client and its errors), which an app that
   // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it (M4-B5, M4-B10).
-  // Measured 2026-11-17: 1.96 kB.
+  // Measured 2026-11-17: 1.96 kB; 2.02 kB after useResumable's discard() and forget() (M4-B16).
   {
     name: "cloudrop/react",
     path: join(dist, "react.js"),

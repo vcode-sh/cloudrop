@@ -49,7 +49,7 @@ export interface Records {
 const STORE = "uploads";
 
 /** A record with less time left than this counts as expired, so a listed upload has time to start (M3-U72, §3.6). */
-const EXPIRY_MARGIN_MS = 60_000;
+export const EXPIRY_MARGIN_MS = 60_000;
 
 const noRecords: Records = {
   enabled: false,

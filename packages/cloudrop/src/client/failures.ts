@@ -21,8 +21,8 @@ export const withFile = (error: CloudropError, { id, file }: { id: string; file:
 export const aborted = (): CloudropError =>
   new CloudropError("ABORTED", "The upload was cancelled. Start it again to upload the file.");
 
-// The next three end a resume() before any request (resume design §2.1); storageUnavailable answers resumable() and
-// forget() when the browser's storage fails, never an upload.
+// The next three end a resume() before any request (resume design §2.1); storageUnavailable, below, answers
+// resumable(), discard() and forget() when the browser's storage fails, never an upload.
 export const uploadInUse = (): CloudropError =>
   new CloudropError(
     "UPLOAD_IN_USE",
@@ -39,6 +39,19 @@ export const notSameFile = (): CloudropError =>
   new CloudropError(
     "INVALID_INPUT",
     "This is not the file the upload started with. Pick the same file again to resume it.",
+  );
+
+// The next two end a discard() before any request (M3-U93); uploadInUse above does too.
+export const notListed = (): CloudropError =>
+  new CloudropError(
+    "NOT_FOUND",
+    "This upload is no longer in this browser's list: it finished, or was cancelled or discarded. Read the list again.",
+  );
+
+export const lockRefused = (): CloudropError =>
+  new CloudropError(
+    "STORAGE_ERROR",
+    "The browser did not let this page lock the upload, so it was left as it was. Reload the page, then try again.",
   );
 
 export const storageUnavailable = (): CloudropError =>

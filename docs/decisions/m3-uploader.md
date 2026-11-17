@@ -1548,3 +1548,39 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `Job.watch`), `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts`
   (`withRetry`'s `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`,
   `client/upload-refusals-wait.test.ts`, `client/resume.test.ts` (the start over's backoff rows), `docs/guide/client.md` ("When /upload refuses one file").
+
+### M3-U93: `discard(upload)` drops one listed upload without its file
+
+- **Decision:** `client.discard(upload)` takes an upload from `resumable()` and resolves `Result<{ aborted: boolean }>`;
+  it never rejects. It claims the id (so `resumable()` leaves it out meanwhile, `M4-F22`), reads the namespace's
+  records, takes the upload's Web Lock without waiting (`M3-U73`), sends `/abort` with the token the record keeps,
+  deletes the record once `/abort` has answered, then lets the lock and the claim go. Outcomes:
+  - `/abort` answered: the record is deleted, `{ aborted: true }`.
+  - `/abort` refused with a code no attempt with that ticket can pass (`NEEDS_NEW_TICKET`: `INVALID_TOKEN`,
+    `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD` and the refusals): the record is deleted, `{ aborted: false }`.
+  - Any other failure (no connection, a timeout, a server error, a `429`): the record stays and the error is returned,
+    so a second try can succeed.
+  - No record, and the argument's `expiresAt` is within `resumable()`'s one-minute margin (`M3-U72`): the browser
+    already deleted the record with its token, so nothing is sent and `{ aborted: false }` says so.
+  - No record otherwise: `NOT_FOUND` ("This upload is no longer in this browser's list: it finished, or was cancelled
+    or discarded. Read the list again."), nothing sent.
+  - The lock is held by another tab or this page: `UPLOAD_IN_USE` (the resume refusal's message), nothing sent, the
+    record kept. The browser refuses Web Locks there: `STORAGE_ERROR` ("The browser did not let this page lock the
+    upload, so it was left as it was. Reload the page, then try again."), nothing sent (`M3-U88`).
+  - Anything but an object with a string `id`: `INVALID_INPUT`, "Pass discard() an upload from resumable()."
+  The client's `Endpoints.abort` now resolves the call's `Result` instead of `void`; every other caller still ignores
+  it.
+- **Why:** `forget()` deletes records but sends no `/abort`, so a user who drops one upload left its parts in the
+  bucket until the lifecycle rule ran and, with a store, its pending row reserving quota until the sweep. A Discard
+  button per row needs one upload, without its file, which only the record's token allows. The server takes an expired
+  token for `/abort` (spec §5.5), so any record still listed can be aborted; only a record the browser already deleted
+  as expired has lost its token. The lock is taken for the same reason a resume takes it: another holder may complete
+  the upload, which this `/abort` would then delete (`M3-U73`), and it is let go only after the answer. A retryable
+  failure keeps the record because deleting it would leave the upload with no way to abort it from this browser.
+- **If wrong:** if deleting the record on any failure proves simpler for apps, it is one branch; the result shape stays.
+  A `forget()` that also aborts would be a second option, not a change to this one.
+- **Status:** in force (task B fix round 1, M4b).
+- **Source:** controller ruling on task B's concern 1, 2026-11-17.
+- **Visible in:** `client/discard.ts`, `client/discard.test.ts`, `client/endpoints.ts` (`abort`), `client/failures.ts`
+  (`notListed`, `lockRefused`), `client.ts` (`CloudropClient.discard`, `Discarded`),
+  `docs/guide/resume.md#discard-one-upload`.
