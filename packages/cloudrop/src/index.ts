@@ -24,12 +24,14 @@ export {
   type AuthorizeContext,
   allowAnyone,
   type CompleteContext,
+  forbidden,
   type KeyContext,
+  type Refusal,
   type Route,
+  type RouteCallbacks,
   type RouteDefinition,
-  type RouteOptions,
+  type RoutePolicy,
   route,
-  type Unauthorized,
   unauthorized,
 } from "./server/route.ts";
 export type { StandardSchema } from "./server/schema.ts";

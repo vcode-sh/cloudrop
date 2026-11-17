@@ -190,7 +190,7 @@ describe("POST /upload: malformed requests from plain JavaScript", () => {
 
 describe("POST /upload: keys", () => {
   it("normalizes the key the prefix built to NFC", async () => {
-    const decomposed = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => "cafe\u0301" });
+    const decomposed = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { prefix: () => "cafe\u0301" });
     const { body } = await upload(serverFixture({ files: decomposed }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
     expect(ticket.key).toBe(`café/${ticket.id}.png`);
@@ -200,7 +200,7 @@ describe("POST /upload: keys", () => {
     { name: "a relative folder with a trailing slash", prefix: "users/42/", folder: "users/42/" },
     { name: "an empty folder (the bucket root)", prefix: "", folder: "" },
   ])("stores under $name", async ({ prefix, folder }) => {
-    const rooted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => prefix });
+    const rooted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { prefix: () => prefix });
     const { body } = await upload(serverFixture({ files: rooted }), { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
     expect(ticket.key).toBe(`${folder}${ticket.id}.png`);
@@ -220,7 +220,7 @@ describe("POST /upload: keys", () => {
       log: 'TypeError: Route "files": prefix must be a relative folder such as "users/42", without a leading slash.',
     },
   ])("answers a prefix that $name with a generic 500 instead of using the bucket root", async ({ prefix, log }) => {
-    const broken = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => prefix as string });
+    const broken = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { prefix: () => prefix as string });
     const fixture = serverFixture({ files: broken });
     const { status, body } = await upload(fixture, { route: "files", files: [png()] });
     expect({ status, code: body.error?.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
@@ -232,7 +232,10 @@ describe("POST /upload: keys", () => {
 
   it("answers a prefix that would escape its folder with a generic 500 and logs why", async () => {
     // The prefix often holds user data (an id, a team name); a traversal there is a server bug, never a user's key.
-    const escaping = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone, prefix: () => "users/../admin" });
+    const escaping = route(
+      { accept: "*/*", maxSize: "1GB", authorize: allowAnyone },
+      { prefix: () => "users/../admin" },
+    );
     const fixture = serverFixture({ files: escaping });
     const { status, body } = await upload(fixture, { route: "files", files: [png()] });
     expect({ status, code: body.error?.code }).toEqual({ status: 500, code: "SERVER_ERROR" });

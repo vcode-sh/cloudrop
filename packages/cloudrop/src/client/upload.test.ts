@@ -14,17 +14,21 @@ import { fakeXhr } from "../testing/fake-xhr.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 import { albumSchema } from "../testing/upload-fixture.ts";
 
-const albums = route({
-  accept: ["image/png", "application/octet-stream"],
-  maxSize: "100MB",
-  metadata: albumSchema,
-  authorize: ({ request }) => {
-    const userId = request.headers.get("x-user");
-    return userId ? { userId } : unauthorized("Sign in to upload to an album.");
+const albums = route(
+  {
+    accept: ["image/png", "application/octet-stream"],
+    maxSize: "100MB",
+    metadata: albumSchema,
+    authorize: ({ request }) => {
+      const userId = request.headers.get("x-user");
+      return userId ? { userId } : unauthorized("Sign in to upload to an album.");
+    },
   },
-  prefix: ({ userId }) => `users/${userId}`,
-  onComplete: ({ userId, file, metadata }) => ({ owner: userId, bytes: file.size, albumId: metadata.albumId }),
-});
+  {
+    prefix: ({ userId }) => `users/${userId}`,
+    onComplete: ({ userId, file, metadata }) => ({ owner: userId, bytes: file.size, albumId: metadata.albumId }),
+  },
+);
 
 const notes = route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone });
 

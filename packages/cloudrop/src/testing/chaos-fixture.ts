@@ -41,14 +41,16 @@ function chaosCloudrop(storage: StorageDriver, prefix: string, logger: Recording
     // Every non-last part is 8 MiB whatever the threshold; this one makes a 20 MiB file go in three of them.
     multipartThreshold: "8MB",
     routes: {
-      files: route({
-        accept: ["application/octet-stream"],
-        maxSize: "100MB",
-        // The soak sends up to 20 files through one /upload.
-        maxFiles: 20,
-        authorize: allowAnyone,
-        prefix: () => prefix,
-      }),
+      files: route(
+        {
+          accept: ["application/octet-stream"],
+          maxSize: "100MB",
+          // The soak sends up to 20 files through one /upload.
+          maxFiles: 20,
+          authorize: allowAnyone,
+        },
+        { prefix: () => prefix },
+      ),
     },
   });
 }

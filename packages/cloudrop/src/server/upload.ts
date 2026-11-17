@@ -9,7 +9,7 @@ import type { EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
-import { isUnauthorized, unauthorized } from "./route.ts";
+import { isRefusal, refusalError } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 import { prepareFile, readRequest } from "./upload-request.ts";
@@ -79,17 +79,13 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (validated.error) return validated;
   const { value: metadata, json: metadataJson } = validated.data;
   const auth = await route.definition.authorize({ request, metadata });
-  if (isUnauthorized(auth)) {
-    // A refusal built by plain JavaScript or another copy of cloudrop may lack a message; it still refuses.
-    const message = typeof auth.message === "string" && auth.message !== "" ? auth.message : unauthorized().message;
-    return fail(new CloudropError("UNAUTHORIZED", message));
-  }
+  if (isRefusal(auth)) return fail(refusalError(auth));
   // Only a plain object whose JSON is an object authorizes: a Response or an Error is an object too, and reading one
   // as the user would sign uploads for a refused request. The token carries this one JSON snapshot, measured and
   // signed as the same text, because a toJSON may answer differently each time it runs. JSON.stringify throws for a
   // BigInt or a cycle, which the handler reports.
   if (!isPlainObject(auth)) {
-    throw new TypeError(`Route "${route.name}": authorize must return a plain object or unauthorized().`);
+    throw new TypeError(`Route "${route.name}": authorize must return a plain object, unauthorized() or forbidden().`);
   }
   const ownerJson: string | undefined = JSON.stringify(auth);
   if (ownerJson?.[0] !== "{") {

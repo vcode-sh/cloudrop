@@ -203,6 +203,7 @@ describe("the public entry", () => {
       "CloudropError",
       "allowAnyone",
       "createCloudrop",
+      "forbidden",
       "r2",
       "route",
       "s3",

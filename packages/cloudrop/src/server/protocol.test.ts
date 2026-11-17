@@ -23,13 +23,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const albums = route({
-  accept: ["image/png", "application/octet-stream"],
-  maxSize: "100MB",
-  authorize: ({ request }) => ({ userId: request.headers.get("x-user") ?? "anonymous" }),
-  prefix: ({ userId }) => `users/${userId}`,
-  onComplete: ({ userId, file }) => ({ owner: userId, bytes: file.size }),
-});
+const albums = route(
+  {
+    accept: ["image/png", "application/octet-stream"],
+    maxSize: "100MB",
+    authorize: ({ request }) => ({ userId: request.headers.get("x-user") ?? "anonymous" }),
+  },
+  {
+    prefix: ({ userId }) => `users/${userId}`,
+    onComplete: ({ userId, file }) => ({ owner: userId, bytes: file.size }),
+  },
+);
 
 function client() {
   const fixture = serverFixture({ albums }, { multipartThreshold: "8MB" });

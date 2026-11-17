@@ -3,7 +3,7 @@ import type { SingleTicket } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
 import { albumSchema, NOW, png, upload } from "../testing/upload-fixture.ts";
-import { allowAnyone, route, unauthorized } from "./route.ts";
+import { allowAnyone, forbidden, route, unauthorized } from "./route.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -14,20 +14,30 @@ afterEach(() => {
 });
 
 describe("POST /upload: authorization comes first", () => {
-  it("refuses with authorize's message and starts nothing", async () => {
+  it.for([
+    { name: "unauthorized()", refusal: unauthorized("Log in first."), status: 401, code: "UNAUTHORIZED" },
+    // Signed in, but not allowed: quota, plan or role.
+    { name: "forbidden()", refusal: forbidden("Your plan stores 1 GB."), status: 403, code: "FORBIDDEN" },
+  ])("refuses with $name's status and message and starts nothing", async ({ refusal, status, code }) => {
     const fixture = serverFixture(
-      { files: route({ accept: "*/*", maxSize: "1GB", authorize: () => unauthorized("Log in first.") }) },
+      { files: route({ accept: "*/*", maxSize: "1GB", authorize: () => refusal }) },
       { multipartThreshold: 0 },
     );
-    const { status, body } = await upload(fixture, {
-      route: "files",
-      files: [{ name: "a.bin", size: 9 * MiB, type: "" }],
-    });
-    expect({ status, error: body.error }).toEqual({
-      status: 401,
-      error: { code: "UNAUTHORIZED", message: "Log in first.", retryable: false },
+    const answer = await upload(fixture, { route: "files", files: [{ name: "a.bin", size: 9 * MiB, type: "" }] });
+    expect({ status: answer.status, error: answer.body.error }).toEqual({
+      status,
+      error: { code, message: refusal.message, retryable: false },
     });
     expect(fixture.storageCalls).toEqual([]);
+  });
+
+  it("refuses forbidden() without a message with a sentence that says the user may not upload", async () => {
+    const fixture = serverFixture({ files: route({ accept: "*/*", maxSize: "1GB", authorize: () => forbidden() }) });
+    const { status, body } = await upload(fixture, { route: "files", files: [png()] });
+    expect({ status, error: body.error }).toEqual({
+      status: 403,
+      error: { code: "FORBIDDEN", message: "You are not allowed to upload files here.", retryable: false },
+    });
   });
 
   // The authorize result rides in every token, which the browser can read: it must be a small JSON object.
@@ -35,24 +45,24 @@ describe("POST /upload: authorization comes first", () => {
     {
       name: "null",
       auth: null,
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+      log: 'TypeError: Route "files": authorize must return a plain object, unauthorized() or forbidden().',
     },
     // A Next.js habit: a 401 Response is an object, so a typeof check alone would sign for it.
     {
       name: "a Response",
       auth: new Response(null, { status: 401 }),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+      log: 'TypeError: Route "files": authorize must return a plain object, unauthorized() or forbidden().',
     },
     {
       name: "an Error",
       auth: new Error("Not signed in"),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+      log: 'TypeError: Route "files": authorize must return a plain object, unauthorized() or forbidden().',
     },
     // A refusal brand on a class instance is neither a refusal nor a user.
     {
       name: "a branded class instance",
       auth: Object.assign(new (class Denied {})(), { [Symbol.for("cloudrop.unauthorized")]: true, message: "No." }),
-      log: 'TypeError: Route "files": authorize must return a plain object or unauthorized().',
+      log: 'TypeError: Route "files": authorize must return a plain object, unauthorized() or forbidden().',
     },
     // Its JSON is the text "x": the token would carry an owner that is not an object.
     {
@@ -97,12 +107,10 @@ describe("POST /upload: authorization comes first", () => {
       toJSON: (key: string) => (key === "" ? { userId: "42" } : "x".repeat(5000)),
     };
     const fixture = serverFixture({
-      files: route({
-        accept: "*/*",
-        maxSize: "1GB",
-        authorize: () => live,
-        prefix: (context) => (typeof context.toJSON === "function" ? `users/${context.userId}` : "lost"),
-      }),
+      files: route(
+        { accept: "*/*", maxSize: "1GB", authorize: () => live },
+        { prefix: (context) => (typeof context.toJSON === "function" ? `users/${context.userId}` : "lost") },
+      ),
     });
     const { body } = await upload(fixture, { route: "files", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
