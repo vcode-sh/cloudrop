@@ -17,8 +17,9 @@ Load the matching skill from `.claude/skills/` before the work:
 
 - Write everything in English.
 - Decisions live in `docs/decisions/`, cited by series id: `M1-R`, `M1-C`, `M1-N`, `M2-D`, `M2-X`, `M2-P`, `M3-O`,
-  `M3-H`, `M3-S`, `M3-U` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry
-  there in the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
+  `M3-H`, `M3-S`, `M3-U`, `M3-K` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets
+  an entry there in the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in
+  this list.
 - `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`. The compiler enforces
   it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.
   `src/node.ts` describes Node's request and response by hand for the same reason; `src/node.test.ts` proves real Node
@@ -47,6 +48,8 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run verify` for every change: check (Biome, file size, complexity), typecheck, test, build and package checks.
 - `bun run test:rustfs`, `bun run test:wrangler` and `bun run test:live` for storage-layer changes.
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
+- `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a
+  fault-injecting proxy, and the lane fails when Docker is missing.
 - `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
   19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`).
   `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`

@@ -420,10 +420,17 @@ Audits of two private production codebases informed these rules (findings kept o
    colocated lane files) run against an in-process fake encoding R2's rules (every commit), the
    Wrangler local S3 endpoint and RustFS (every pull request), and a real R2 bucket (nightly and before every release,
    with a dedicated bucket and CI-only credentials). The upload protocol runs end to end through `cloudrop.handler` on
-   the fake (unit lane) and on real R2 (`bun run test:live`); RustFS and Wrangler run only the storage contract until
-   M3.
+   the fake (unit lane), on RustFS from a browser (`bun run test:browser`, item 4) and under injected faults
+   (`bun run test:chaos`, item 3), and on real R2 (`bun run test:live`); Wrangler runs only the storage contract.
 3. **Chaos:** a fault-injecting proxy (dropped connections, 429, 503, latency, truncated responses, expired URLs). A
-   run passes when every upload ends correct or with a clear error code.
+   run passes when every upload ends correct or with a clear error code. The proxy is test-only code in
+   `src/testing/` between the server's `s3()` storage and RustFS, and faults single requests, presigned or the
+   server's own (`M3-K1`, `M3-K4`). What runs where (`M3-K2`): the Node lane `bun run test:chaos` (real server, real
+   client on the fetch transport) on every pull request and push to `main`; rows that need real XHR (opaque refusals,
+   stalls, offline, pause, the progress bar) in the browser lane `bun run test:browser`; a seeded random soak over
+   many files on the nightly schedule, its seed printed for replay (`M3-K7`). Live R2 stays out: it routes by its own
+   host name, which a URL signed for the proxy does not carry. Design:
+   `docs/superpowers/specs/2026-11-17-chaos-design.md`.
 4. **Browser (Playwright):** progress, pause, reload-resume with IndexedDB (an OPFS copy is deferred to a later
    opt-in, §6.3), offline and online, CORS.
 5. **Types:** inference tests (`expect-type`) for route names, metadata and the `onComplete` result.
