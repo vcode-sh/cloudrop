@@ -159,18 +159,24 @@ bun run test:browser:live
 
 `test:browser` starts its own RustFS container on port **19100**, starts the chaos proxy in front of it on port
 **19110**, builds cloudrop, and has Playwright build and serve [`examples/next`](../../examples/next/README.md) on port
-**5173**. It runs Playwright twice: the stateless example with every row but `*.store.browser.test.ts`, then the
+**5173**. It runs Playwright three times: the stateless example with every row but `*.store.browser.test.ts`, then the
 example with its database store (`CLOUDROP_EXAMPLE_STORE` set to a database file of the run's own, a quota of 50 MB)
-with those rows alone; extra arguments reach both passes. It removes the container and the store's database and stops
-the proxy afterwards. It needs Docker, no credentials, and leaves any `.env.local` alone.
+with those rows alone. The third pass starts a Postgres container of the run's own, applies
+[`examples/hono`](../../examples/hono/README.md)'s migrations and has Playwright start that API on port **5181** and
+[`examples/vite-react`](../../examples/vite-react/README.md) on 5173, uploading straight to RustFS with a quota of 50 MB.
+Extra arguments reach every pass. It removes both containers and the store's database and stops the proxy afterwards.
+It needs Docker, no credentials, and leaves any `.env.local` or `.env` alone.
 
 | Port | What | Override |
 | --- | --- | --- |
 | 19100 | RustFS | `CLOUDROP_RUSTFS_PORT` |
 | 19110 | The chaos proxy, which the example's presigned URLs name | `CLOUDROP_CHAOS_PROXY_PORT` |
 | 5173 | The example | None: the bucket's CORS rule names this origin |
+| 5181 | The Hono example's API (third pass) | None: the Vite app calls this origin |
+| 19610 | The third pass's Postgres | `CLOUDROP_EXAMPLE_POSTGRES_PORT` |
 
-What the browser tests cover is described in [the example's README](../../examples/next/README.md#the-browser-tests).
+What the browser tests cover is described in [the Next.js example's README](../../examples/next/README.md#the-browser-tests)
+and [the Vite example's README](../../examples/vite-react/README.md#the-browser-tests).
 
 ### On live R2
 
@@ -196,7 +202,7 @@ Each lane picks its own default port, so the lanes can run at the same time:
 | --- | --- | --- |
 | `test:rustfs` | 19000 | `CLOUDROP_RUSTFS_PORT` |
 | `test:wrangler` | 18787 | `CLOUDROP_WRANGLER_PORT` |
-| `test:browser` | 19100 (RustFS), 19110 (proxy), 5173 (example) | `CLOUDROP_RUSTFS_PORT`, `CLOUDROP_CHAOS_PROXY_PORT` |
+| `test:browser` | 19100 (RustFS), 19110 (proxy), 5173 (example), 5181 (API), 19610 (Postgres) | `CLOUDROP_RUSTFS_PORT`, `CLOUDROP_CHAOS_PROXY_PORT`, `CLOUDROP_EXAMPLE_POSTGRES_PORT` |
 | `test:chaos`, `test:chaos:soak` | 19300 | `CLOUDROP_RUSTFS_PORT` |
 | `test:db` | 19500 | `CLOUDROP_POSTGRES_PORT` |
 
@@ -213,7 +219,7 @@ The full rules are in `.claude/skills/testing-patterns/SKILL.md`. In brief:
   code runs or exists. "No new test" is a valid outcome.
 - **Colocated.** `src/foo.ts` sits beside `src/foo.test.ts`. There is no `test/` folder and no file snapshots.
 - **The lane is chosen by filename.** `*.test.ts` is the unit lane. `*.integration.test.ts` runs only through its lane
-  script. `*.browser.test.ts` lives in `examples/next/app/` and runs under Playwright.
+  script. `*.browser.test.ts` lives in `examples/next/app/` and `examples/vite-react/src/` and runs under Playwright.
 - **Call the real unit** through the entry point its users call. Endpoint tests run the real handler on the fake R2
   through `src/testing/server-fixture.ts`.
 - **Independent expected values.** Write them as literals from an oracle (AWS SigV4 test vectors, CRC check values, R2's

@@ -87,6 +87,9 @@ cookies. What remains is the cookie itself:
 With `authorize` that finds no session, every upload ends `UNAUTHORIZED`: check in the browser's DevTools whether the
 `/upload` request carried the cookie.
 
+A whole app in this shape, a Vite SPA on one origin and a Hono API with better-auth on another of the same site, step by
+step and with its CORS middleware kept off cloudrop's path: [Hono with better-auth and Drizzle](hono.md).
+
 ## Behind a proxy that terminates TLS
 
 The handler takes its own origin from the request URL and trusts no `X-Forwarded-*` header. Behind a load balancer or

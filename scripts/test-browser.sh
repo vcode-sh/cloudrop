@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Browser lane: the Next.js example, built and started by Playwright, uploads from headless Chromium to a
 # disposable RustFS container, through the chaos proxy (scripts/chaos-proxy.ts) that the `*.chaos.browser.test.ts`
-# rows fault through its control endpoint. Playwright runs twice: the stateless example with every row but the store
-# rows, then the example with a database store (CLOUDROP_EXAMPLE_STORE) with the store rows alone. The trap stops the
-# proxy, removes this run's container and its store database on success, failure and interrupt; Playwright stops the
-# server.
+# rows fault through its control endpoint. Playwright runs three times: the stateless example with every row but the
+# store rows, then the example with a database store (CLOUDROP_EXAMPLE_STORE) with the store rows alone, then the Vite
+# app (examples/vite-react) and the Hono API (examples/hono) on this run's own Postgres container, straight to RustFS.
+# The trap stops the proxy, removes this run's containers and its store database on success, failure and interrupt;
+# Playwright stops the servers.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -25,9 +26,19 @@ if ss -ltnH "sport = :${PROXY_PORT}" | grep -q .; then
   echo "Port ${PROXY_PORT} is in use. Set CLOUDROP_CHAOS_PROXY_PORT to a free port." >&2
   exit 1
 fi
+# The Hono example's API serves on 5181, which the Vite app calls; its Postgres gets a port of its own.
+POSTGRES_PORT="${CLOUDROP_EXAMPLE_POSTGRES_PORT:-19610}"
+for port in 5181 "$POSTGRES_PORT"; do
+  if ss -ltnH "sport = :${port}" | grep -q .; then
+    echo "Port ${port} is in use. Stop what listens there, or set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port." >&2
+    exit 1
+  fi
+done
 export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-browser-rustfs-$$"
 export CLOUDROP_CHAOS_PROXY_PORT="$PROXY_PORT"
+export CLOUDROP_EXAMPLE_POSTGRES_PORT="$POSTGRES_PORT"
+export CLOUDROP_EXAMPLE_POSTGRES_NAME="cloudrop-browser-postgres-$$"
 PROXY_PID=""
 # The store pass's database: this run's own, in the example's git-ignored .data/.
 STORE_DB="$ROOT/examples/next/.data/browser-$$.db"
@@ -39,6 +50,7 @@ cleanup() {
   fi
   rm -f "$STORE_DB" "$STORE_DB-journal"
   "$ROOT/scripts/rustfs.sh" down
+  "$ROOT/scripts/postgres.sh" down
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -81,3 +93,17 @@ bun run setup:rustfs
 bunx playwright test ${1:+--pass-with-no-tests} "$@"
 # A quota of 50 MB: the store rows' refusal sends a 51 MiB file.
 CLOUDROP_EXAMPLE_STORE="$STORE_DB" CLOUDROP_EXAMPLE_QUOTA_MB=50 bunx playwright test ${1:+--pass-with-no-tests} "$@"
+
+# The Vite app and the Hono API. The API talks to RustFS directly, not through the proxy: no chaos rows here. Its quota
+# is 50 MB, so the quota row's 51 MiB file never fits.
+cd "$ROOT"
+CLOUDROP_EXAMPLE_POSTGRES_TEST=1 scripts/postgres.sh up
+export DATABASE_URL="postgres://cloudrop:cloudrop-example@127.0.0.1:${POSTGRES_PORT}/cloudrop_example"
+BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+export BETTER_AUTH_SECRET
+export CLOUDROP_S3_ENDPOINT="http://127.0.0.1:${PORT}"
+export CLOUDROP_S3_BUCKET=cloudrop-example-hono
+export UPLOAD_QUOTA_MB=50
+(cd examples/hono && bun run setup:rustfs && bun run db:migrate)
+cd examples/vite-react
+bunx playwright test ${1:+--pass-with-no-tests} "$@"

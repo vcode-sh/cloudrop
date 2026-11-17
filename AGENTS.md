@@ -57,8 +57,9 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a
   fault-injecting proxy, stateless and with a store, and the lane fails when Docker is missing.
 - `bun run test:browser` for client and example changes: the example uploads from headless Chromium to RustFS on port
-  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in two
-  passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store.
+  19100 (install the shell once with `bunx playwright install --only-shell chromium` in `examples/next`), in three
+  passes: the stateless example, then `*.store.browser.test.ts` with its SQLite store, then `examples/vite-react` with
+  the `examples/hono` API on its own Postgres (port 19610, `CLOUDROP_EXAMPLE_POSTGRES_PORT`; the API on 5181).
   `bun run test:browser:live` runs the same tests on live R2; the test bucket's CORS rule `cloudrop-browser-tests`
   allows `PUT` from `http://localhost:5173` and `http://127.0.0.1:5173` with `content-type`, `content-disposition`,
   `if-none-match`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme` and `x-amz-meta-cloudrop-id` and exposes

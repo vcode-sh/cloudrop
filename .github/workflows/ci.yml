@@ -41,6 +41,8 @@ jobs:
       - run: bun run build
       - run: bun run package:check
       - run: bun run --filter cloudrop-example-next typecheck
+      - run: bun run --filter cloudrop-example-hono typecheck
+      - run: bun run --filter cloudrop-example-vite-react typecheck
 
   rustfs:
     needs: check

@@ -262,6 +262,9 @@ cover `Retry-After`.
 | [Troubleshooting](docs/guide/troubleshooting.md) | Symptoms and their usual causes |
 | [Testing](docs/guide/testing.md) | For contributors: every test lane and what it needs |
 | [`examples/next`](examples/next/README.md) | A Next.js app that uploads to RustFS, Wrangler or R2, with a lab page and an opt-in SQLite store |
+| [Hono with better-auth and Drizzle](docs/guide/hono.md) | A Hono API with better-auth, Drizzle on Postgres and a Vite SPA on another origin, step by step |
+| [`examples/hono`](examples/hono/README.md) | The Hono API of that guide: better-auth, the Drizzle store on Postgres, an oRPC router and a sweep worker |
+| [`examples/vite-react`](examples/vite-react/README.md) | Its Vite and React web app: the hooks with shadcn on Base UI, cross-origin with cookies |
 | [`docs/decisions`](docs/decisions/README.md) | Why the code is the way it is |
 | [`docs/research`](docs/research) | Measured R2 and backend behaviour ([test backends](docs/research/test-backends.md)) |
 
