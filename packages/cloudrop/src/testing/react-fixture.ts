@@ -1,5 +1,5 @@
-// Hooks on a cloudrop server on the in-process fake R2, for the cloudrop/react tests, and the helpers those tests share.
-// Never shipped.
+// Hooks on a cloudrop server on the in-process fake R2, for the cloudrop/react tests, and the helpers those tests
+// share. Never shipped.
 
 import type { UploadFile } from "../react/types.ts";
 import { createUploadHooks } from "../react.ts";

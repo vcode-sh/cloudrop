@@ -51,7 +51,8 @@ export function createUploadHooks<TCloudrop extends InferableCloudrop = Inferabl
       return created;
     },
   };
-  // The factory (M4-B1) runs once, at module level where an app defines its hooks, so the hooks it returns never change.
+  // The factory (M4-B1) runs once, at module level where an app defines its hooks, so the hooks it returns never
+  // change.
   // biome-ignore lint/correctness/noComponentHookFactories: route types are inferred only through a factory.
   function useUpload(route: string, options?: UseUploadOptions<unknown>) {
     return useUploadWith(source, route, options);

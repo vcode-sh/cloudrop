@@ -111,6 +111,9 @@ export interface UploadHooks<TCloudrop extends InferableCloudrop> {
     route: TName,
     ...options: UseUploadArguments<RouteMetadata<TCloudrop, TName>>
   ): UseUploadResult<RouteResult<TCloudrop, TName>, TName, RouteMetadata<TCloudrop, TName>>;
-  /** The unfinished uploads this browser keeps, of `route` or of every route, read after mount and after each upload. */
+  /**
+   * The unfinished uploads this browser keeps, of `route` or of every route, without the ones this page holds; read
+   * after mount and whenever an upload of these hooks may have changed them.
+   */
   useResumable<TName extends RouteName<TCloudrop> = RouteName<TCloudrop>>(route?: TName): UseResumableResult<TName>;
 }

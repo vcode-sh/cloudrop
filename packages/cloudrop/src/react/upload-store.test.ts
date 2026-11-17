@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // Contract: spec §6.1 (M4-B2, M4-B4, M4-B8, M4-B11) for what useUpload renders, through createUploadHooks on the real
-// client and the fake server: `files` lists every file of the hook's jobs in start order and keeps a file's object until
-// that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs; a hook hidden by
-// <Activity> shows what its jobs did meanwhile; unmounting leaves the jobs running.
+// client and the fake server: `files` lists every file of the hook's jobs in start order and keeps a file's object
+// until that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs; a hook
+// hidden by <Activity> shows what its jobs did meanwhile; unmounting leaves the jobs running.
 // Oracle: the server's verdicts for the route below, the requests the fixture saw and the statuses the client reports.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";

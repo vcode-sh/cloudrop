@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// Contract: spec §6.1 (M4-B1, M4-B2, M4-B4) through createUploadHooks on the real client and the fake server: each file's
-// controls act on that file and the hook's on every job; upload(null) starts nothing, and upload() passes what it gets
-// to the client, which checks it is a File; a wrong client option resolves INVALID_CONFIG; upload() reads the latest
-// options; the input clears after a pick; StrictMode duplicates nothing. What the hook renders: upload-store.test.ts.
+// Contract: spec §6.1 (M4-B1, M4-B2, M4-B4) through createUploadHooks on the real client and the fake server: each
+// file's controls act on that file and the hook's on every job; upload(null) starts nothing, and upload() passes what
+// it gets to the client, which checks it is a File; a wrong client option resolves INVALID_CONFIG; upload() reads the
+// latest options; the input clears after a pick; StrictMode duplicates nothing. What the hook renders:
+// upload-store.test.ts.
 // Oracle: the requests the fixture saw, the server's verdicts for the routes below and the statuses the client reports.
 
 import { File as NodeFile } from "node:buffer";

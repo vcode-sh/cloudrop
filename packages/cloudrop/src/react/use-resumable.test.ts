@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // Contract: spec §6.1 and §6.2 (M4-B2, M4-B3, M4-B12): useResumable lists the client's resumable(), which leaves out
-// the uploads this page holds (M4-F22), read after mount, when a job of the hooks starts, whenever one of its files ends
-// or starts again, and when it settles; `[]` before the first read. useUpload's resume(upload, file) continues a record
-// into that hook's `files`; refresh() reads again and resolves with the client's Result.
+// the uploads this page holds (M4-F22), read after mount, when a job of the hooks starts, whenever one of its files
+// ends or starts again, and when it settles; `[]` before the first read. useUpload's resume(upload, file) continues a
+// record into that hook's `files`; refresh() reads again and resolves with the client's Result.
 // Oracle: the page before the reload (persist-fixture's reloaded(): a four-part upload interrupted after two parts)
 // leaves exactly one record; a failed multipart file of start() keeps its record for retry(), and a file that ends done
 // deletes it (resume spec §2, client/persist.ts); the fake IndexedDB holds what the browser keeps.

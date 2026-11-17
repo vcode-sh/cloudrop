@@ -35,7 +35,6 @@ const cloudrop = createCloudrop({
   },
 });
 
-/** Another server, whose only route returns a different result. */
 /** A server with only the notes route: fewer route names than `cloudrop`. */
 const fewer = createCloudrop({
   storage: r2({ bucket: "few", accountId: "0123456789abcdef0123456789abcdef", accessKeyId: "k", secretAccessKey: "s" }),
@@ -43,6 +42,7 @@ const fewer = createCloudrop({
   routes: { notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }) },
 });
 
+/** Another server, whose only route returns a different result. */
 const other = createCloudrop({
   storage: r2({
     bucket: "other",
