@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe } from "vitest";
 import type { CloudropStore } from "../server/store.ts";
+import { atomicityCases } from "./store-contract/atomicity.ts";
 import { claimCases } from "./store-contract/claim.ts";
 import { endCases } from "./store-contract/end.ts";
 import { reserveCases } from "./store-contract/reserve.ts";
@@ -13,9 +14,13 @@ import { usageCases } from "./store-contract/usage.ts";
 import type { RawTables } from "./store-rows.ts";
 
 /**
- * A capability some backend lacks; the cases that need it skip there, naming the reason. "transaction": no interactive
- * transaction (SQLite, D1). "concurrency": one connection runs one call at a time (SQLite), so the concurrent cases run
- * but prove nothing. "failureInjection": no way to fail a call halfway. "tables": not a SQL table store.
+ * A capability some backend lacks; the cases that need it skip there, naming the reason.
+ * - "transaction": no interactive transaction (SQLite, D1).
+ * - "concurrency": the backend cannot take calls concurrently at all. A backend that only serialises them (one SQLite
+ *   connection) should not declare it: its concurrent cases then pass without proving exclusivity (spec §8: stated,
+ *   not counted as proof), and still catch `SQLITE_BUSY` or an async driver interleaving two calls.
+ * - "failureInjection": no way to make a usage-table write fail (see `StoreTarget.injectFailure`).
+ * - "tables": not a SQL table store.
  */
 export type StoreGap = "transaction" | "concurrency" | "failureInjection" | "tables";
 
@@ -25,8 +30,13 @@ export interface StoreTarget {
   raw: RawTables;
   /** Each present entry names what the backend lacks; the cases that need it skip with that reason. */
   gaps: Partial<Record<StoreGap, string>>;
-  /** Unless "failureInjection" is a gap: makes the next call of `method` throw after `afterWrites` row writes. */
-  injectFailure?: (method: "reserve" | "complete", afterWrites: number) => void;
+  /**
+   * Unless "failureInjection" is a gap: makes the **next write to the usage table** fail, once, whichever method makes
+   * it, so the method's unit must roll back the files row it already changed. A SQL lane implements it with a one-shot
+   * trigger on the usage table (Postgres `RAISE EXCEPTION`, SQLite and D1 `RAISE(ABORT, …)`) that drops itself or is
+   * dropped in `teardown`.
+   */
+  injectFailure?: () => Promise<void>;
   /** Unless "tables" is a gap: stores built with other table options over the same database. */
   tables?: {
     /** A store over tables with custom names, and a reader of those tables. */
@@ -38,7 +48,11 @@ export interface StoreTarget {
   teardown(): Promise<void>;
 }
 
-/** Connects to the backend before each case. The tables it returns must be empty, so a case sees only its own rows. */
+/**
+ * Connects to the backend before each case. The tables it returns must be empty, so a case sees only its own rows.
+ * The transaction cases call the store outside the transaction while it is open, so a pooled backend needs at least
+ * two connections.
+ */
 export type SetupStore = () => Promise<StoreTarget>;
 
 export function describeStoreContract(name: string, setup: SetupStore): void {
@@ -65,6 +79,7 @@ export function describeStoreContract(name: string, setup: SetupStore): void {
     endCases(suite);
     staleCases(suite);
     usageCases(suite);
+    atomicityCases(suite);
     transactionCases(suite);
   });
 }

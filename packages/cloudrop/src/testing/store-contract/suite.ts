@@ -45,6 +45,14 @@ export function usageRow(owner: string, counts: Partial<RawUsageRow>): RawUsageR
   return { owner, reservedBytes: 0, activeBytes: 0, files: 0, updatedAt: at(0), ...counts };
 }
 
+/** A member a target must provide unless it declares the matching gap; one that does neither fails here, loudly. */
+export function provided<T>(value: T | undefined, member: string): T {
+  if (value === undefined) {
+    throw new Error(`The store target has no ${member}. Provide it, or declare its gap with the reason.`);
+  }
+  return value;
+}
+
 /** The statuses a pending row passes through to reach each status, the way the server moves it. */
 const PATHS: Record<FileStatus, ("completing" | "completed" | EndedStatus)[]> = {
   pending: [],
@@ -63,6 +71,8 @@ export interface StoreSuite {
   readonly store: CloudropStore<unknown>;
   readonly raw: RawTables;
   skipWithout(ctx: TestContext, gap: StoreGap): void;
+  /** Skips without "failureInjection", otherwise arms the target's one-shot usage-write failure. */
+  failNextUsageWrite(ctx: TestContext): Promise<void>;
   /** One files row, read past the store. */
   rawFile(id: string): Promise<RawFileRow | undefined>;
   /** Reserves `files` for `owner` at `at(0)` without a limit; throws unless every one is reserved. */
@@ -73,6 +83,11 @@ export interface StoreSuite {
 
 export function storeSuite(connected: () => StoreTarget): StoreSuite {
   const store = (): CloudropStore<unknown> => connected().store;
+
+  function skipWithout(ctx: TestContext, gap: StoreGap): void {
+    const reason = connected().gaps[gap];
+    ctx.skip(reason !== undefined, reason);
+  }
 
   /** One step of `advance`: true when the store made it. */
   async function step(
@@ -105,9 +120,10 @@ export function storeSuite(connected: () => StoreTarget): StoreSuite {
     get raw() {
       return connected().raw;
     },
-    skipWithout(ctx, gap) {
-      const reason = connected().gaps[gap];
-      ctx.skip(reason !== undefined, reason);
+    skipWithout,
+    async failNextUsageWrite(ctx) {
+      skipWithout(ctx, "failureInjection");
+      await provided(connected().injectFailure, "injectFailure")();
     },
     async rawFile(id) {
       return (await connected().raw.files()).find((row) => row.id === id);

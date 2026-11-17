@@ -41,4 +41,6 @@ export interface RawTables {
   usage(): Promise<RawUsageRow[]>;
   /** Inserts or replaces one usage row, bypassing the store: how a test makes the counters drift. */
   putUsage(row: RawUsageRow): Promise<void>;
+  /** Deletes one owner's usage row, bypassing the store: how a test leaves rows without counters. */
+  deleteUsage(owner: string): Promise<void>;
 }

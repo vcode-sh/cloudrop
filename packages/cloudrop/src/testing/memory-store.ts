@@ -35,16 +35,41 @@ export interface MemoryStore extends CloudropStore<MemoryTx> {
    * then undoes those writes, as a database rolls back a failed statement; later calls run normally.
    */
   injectFailure(method: MemoryWrite, afterWrites: number): void;
+  /**
+   * Makes the next write to the usage table fail, whichever method makes it; the call undoes what it wrote before. The
+   * store contract's `injectFailure`, which a SQL lane implements with a one-shot trigger.
+   */
+  failNextUsageWrite(): void;
   /** The app rows committed through `tx.write`, in order. */
   appRows(): string[];
 }
 
 type Undo = () => void;
 
+const COUNTERS = ["reservedBytes", "activeBytes", "files"] as const;
+
+/**
+ * Takes back one write to a usage row. A row nothing has rewritten since is restored as it was. A row a call outside
+ * the transaction rewrote meanwhile keeps that call's change and loses only this write's: under a database the two
+ * would have been ordered by the row's lock, and both of their changes would count.
+ */
+function undoUsage(usage: Map<string, RawUsageRow>, stored: RawUsageRow, before: RawUsageRow | undefined): void {
+  const current = usage.get(stored.owner);
+  if (current === stored || current === undefined) {
+    if (before) usage.set(stored.owner, before);
+    else usage.delete(stored.owner);
+    return;
+  }
+  const taken = { ...current };
+  for (const counter of COUNTERS) taken[counter] -= stored[counter] - (before?.[counter] ?? 0);
+  usage.set(stored.owner, taken);
+}
+
 export function memoryStore(): MemoryStore {
   const tables: MemoryTables = { files: new Map(), usage: new Map() };
   const app: { entry: string }[] = [];
   let fault: { method: string; afterWrites: number } | null = null;
+  let usageFault = false;
 
   /**
    * Runs one method as an atomic unit. Its writes are recorded in an undo list: on a throw they are undone; on success
@@ -54,19 +79,30 @@ export function memoryStore(): MemoryStore {
     const armed = fault?.method === method ? fault : null;
     if (armed) fault = null;
     const undo: Undo[] = [];
-    const record = <V>(map: Map<string, V>, key: string, value: V) => {
+    const checkFault = () => {
       if (armed && undo.length === armed.afterWrites) {
         throw new Error(`Injected failure in ${method} after ${armed.afterWrites} writes.`);
       }
-      const had = map.has(key);
-      const before = map.get(key);
-      undo.push(() => (had ? map.set(key, before as V) : map.delete(key)));
-      // A copy, so a caller that later changes the object or a Date it passed cannot change the stored row.
-      map.set(key, structuredClone(value));
     };
     const write: Write = {
-      file: (row) => record(tables.files, row.id, row),
-      usage: (row) => record(tables.usage, row.owner, row),
+      file(row) {
+        checkFault();
+        const before = tables.files.get(row.id);
+        undo.push(() => (before ? tables.files.set(row.id, before) : tables.files.delete(row.id)));
+        // A copy, so a caller that later changes the object or a Date it passed cannot change the stored row.
+        tables.files.set(row.id, structuredClone(row));
+      },
+      usage(row) {
+        if (usageFault) {
+          usageFault = false;
+          throw new Error("Injected failure writing the usage table.");
+        }
+        checkFault();
+        const before = tables.usage.get(row.owner);
+        const stored = structuredClone(row);
+        tables.usage.set(row.owner, stored);
+        undo.push(() => undoUsage(tables.usage, stored, before));
+      },
     };
     try {
       const result = body(write);
@@ -107,8 +143,9 @@ export function memoryStore(): MemoryStore {
     try {
       return await run(tx, recorded);
     } catch (error) {
-      // Undoes this transaction's writes key by key, newest first: writes made outside it to other rows survive, as
-      // under a database. An outside write to a row the transaction wrote would have waited for its lock instead.
+      // Undoes this transaction's writes row by row, newest first: writes made outside it to other rows survive, as
+      // under a database, and so do outside changes to a usage row it also wrote (undoUsage). An outside write to a
+      // files row it wrote would have waited for its lock instead; the rollback overwrites it.
       for (const step of journal.toReversed()) step();
       throw error;
     }
@@ -124,9 +161,13 @@ export function memoryStore(): MemoryStore {
       files: async (): Promise<RawFileRow[]> => sorted(tables.files),
       usage: async (): Promise<RawUsageRow[]> => sorted(tables.usage),
       putUsage: async (row) => void tables.usage.set(row.owner, structuredClone(row)),
+      deleteUsage: async (owner) => void tables.usage.delete(owner),
     },
     injectFailure(method, afterWrites) {
       fault = { method, afterWrites };
+    },
+    failNextUsageWrite() {
+      usageFault = true;
     },
     appRows: () => app.map((row) => row.entry),
   };

@@ -60,7 +60,8 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
 
   /** Adds `delta` to an owner's counters in the same unit as the status change; rows without an owner count nowhere. */
   function adjust(write: Write, owner: string | null, delta: Partial<OwnerUsage>, now: Date): void {
-    if (owner === null) return;
+    // Nothing to move (an owner-less row, or leaving an ended status): the usage row is not written at all.
+    if (owner === null || Object.keys(delta).length === 0) return;
     const counts = countsOf(owner);
     write.usage({
       owner,

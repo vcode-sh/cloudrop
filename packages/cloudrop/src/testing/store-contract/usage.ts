@@ -33,6 +33,15 @@ export function usageCases(suite: StoreSuite): void {
     expect(await raw.usage()).toEqual([]);
   });
 
+  it("reconcile of an owner with rows but no usage row creates the row from the rows", async () => {
+    const { store, raw } = suite;
+    await seed("u-1", [newFile("f-1", 10), newFile("f-2", 20)]);
+    await raw.deleteUsage("u-1");
+    expect(await store.reconcile("u-1")).toBe(true);
+    // reconcile takes no time, so the store's clock stamps the row.
+    expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 30, updatedAt: expect.any(Date) })]);
+  });
+
   it("reconcile running beside reserves loses none of them", async (ctx) => {
     const { store } = suite;
     skipWithout(ctx, "concurrency");

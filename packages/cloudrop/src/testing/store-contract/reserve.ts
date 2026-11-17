@@ -1,10 +1,10 @@
 // reserve and attach: the rows written before anything is signed, the quota checked per file, and the upload id.
 
 import { expect, it } from "vitest";
-import { at, EXPIRES, MINUTE, newFile, pendingRow, type StoreSuite, usageRow } from "./suite.ts";
+import { at, EXPIRES, LEASE, MINUTE, newFile, pendingRow, type StoreSuite, usageRow } from "./suite.ts";
 
 export function reserveCases(suite: StoreSuite): void {
-  const { skipWithout, rawFile, seed, advance } = suite;
+  const { rawFile, seed, advance } = suite;
 
   it("reserve writes one pending row per file and adds their bytes to the owner's reserved bytes", async () => {
     const { store, raw } = suite;
@@ -49,13 +49,40 @@ export function reserveCases(suite: StoreSuite): void {
     ]);
   });
 
-  it("reserve without an owner writes the rows, counts no usage and applies no limit", async () => {
+  it("reserve checks the quota of an owner the store has never counted, from the first file", async () => {
     const { store, raw } = suite;
-    const file = newFile("f-1", 500);
-    expect(await store.reserve({ owner: null, limit: 1, expiresAt: EXPIRES, files: [file] }, at(0))).toEqual([
+    const files = [newFile("f-1", 101), newFile("f-2", 100)];
+    const outcomes = await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0));
+    expect(outcomes).toEqual(["over-quota", "reserved"]);
+    expect(await raw.files()).toEqual([pendingRow(newFile("f-2", 100), "u-1")]);
+    expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 100 })]);
+  });
+
+  it("reserve that refuses every file writes no row and no usage", async () => {
+    const { store, raw } = suite;
+    const files = [newFile("f-1", 101)];
+    expect(await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0))).toEqual(["over-quota"]);
+    expect({ files: await raw.files(), usage: await raw.usage() }).toEqual({ files: [], usage: [] });
+  });
+
+  it("rows without an owner ignore the limit and go through every status without touching usage", async () => {
+    const { store, raw } = suite;
+    const files = [newFile("f-1", 500), newFile("f-2", 20), newFile("f-3", 30)];
+    expect(await store.reserve({ owner: null, limit: 1, expiresAt: EXPIRES, files }, at(0))).toEqual([
+      "reserved",
+      "reserved",
       "reserved",
     ]);
-    expect(await raw.files()).toEqual([pendingRow(file, null)]);
+    expect(await store.claim("f-1", "claim-a", at(MINUTE), LEASE)).toEqual({ kind: "claimed" });
+    expect((await store.complete("f-1", "claim-a", null, at(MINUTE))).changed).toBe(true);
+    expect((await store.end("f-1", "completed", "deleted", at(2 * MINUTE))).changed).toBe(true);
+    expect((await store.end("f-2", "pending", "aborted", at(2 * MINUTE))).changed).toBe(true);
+    expect(await store.revoke("u-1", at(2 * MINUTE))).toBe(0);
+    expect((await raw.files()).map(({ id, owner, status }) => ({ id, owner, status }))).toEqual([
+      { id: "f-1", owner: null, status: "deleted" },
+      { id: "f-2", owner: null, status: "aborted" },
+      { id: "f-3", owner: null, status: "pending" },
+    ]);
     expect(await raw.usage()).toEqual([]);
   });
 
@@ -69,22 +96,6 @@ export function reserveCases(suite: StoreSuite): void {
       store.reserve({ owner: "u-1", limit: null, expiresAt: EXPIRES, files }, at(MINUTE)),
     ).rejects.toBeInstanceOf(Error);
     expect({ files: await raw.files(), usage: await raw.usage() }).toEqual(before);
-  });
-
-  it("reserve with a quota that fails after its first write leaves nothing written", async (ctx) => {
-    const { store, raw, target } = suite;
-    skipWithout(ctx, "failureInjection");
-    target.injectFailure?.("reserve", 1);
-    const files = [newFile("f-1", 10), newFile("f-2", 20)];
-    await expect(store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0))).rejects.toBeInstanceOf(
-      Error,
-    );
-    expect({ files: await raw.files(), usage: await raw.usage() }).toEqual({ files: [], usage: [] });
-    // The failure was injected once: the same call now succeeds.
-    expect(await store.reserve({ owner: "u-1", limit: 100, expiresAt: EXPIRES, files }, at(0))).toEqual([
-      "reserved",
-      "reserved",
-    ]);
   });
 
   it("attach stores the upload id on a pending row, again for the same id, and never another", async () => {

@@ -10,7 +10,7 @@ describeStoreContract("memory store", async () => {
     gaps: {
       tables: "the memory store keeps maps, not SQL tables",
     },
-    injectFailure: store.injectFailure,
+    injectFailure: async () => store.failNextUsageWrite(),
     teardown: async () => {},
   };
 });
@@ -43,5 +43,21 @@ describe("memory store transaction handle", () => {
     });
     await expect(failing).rejects.toThrow("onComplete failed");
     expect(store.appRows()).toEqual(["kept"]);
+  });
+
+  // Not a contract case: on Postgres the outside reserve would wait for the usage row the transaction holds, and the
+  // transaction waits for it, a deadlock. In memory both run, and the rollback must keep the outside bytes.
+  it("keeps an outside reserve for the same owner when a transaction that completed a file rolls back", async () => {
+    const store = memoryStore();
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: T, files: [file] }, T);
+    const failing = store.transaction(async (_tx, inner) => {
+      await inner.claim("f-1", "claim-a", T, 60_000);
+      await inner.complete("f-1", "claim-a", null, T);
+      const other = { ...file, id: "f-2", size: 7 };
+      await store.reserve({ owner: "u-1", limit: null, expiresAt: T, files: [other] }, T);
+      throw new Error("onComplete failed");
+    });
+    await expect(failing).rejects.toThrow("onComplete failed");
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 12, activeBytes: 0, files: 0 });
   });
 });

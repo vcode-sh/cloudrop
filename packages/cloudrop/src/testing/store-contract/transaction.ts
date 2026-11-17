@@ -1,13 +1,7 @@
 // transaction, and the table options of SQL stores: custom table names and the schema check's message.
 
 import { expect, it } from "vitest";
-import { at, EXPIRES, LEASE, MINUTE, newFile, pendingRow, type StoreSuite, usageRow } from "./suite.ts";
-
-/** The member a declared-capable backend must provide; a lane that declares neither fails here, loudly. */
-function provided<T>(value: T | undefined, member: string): T {
-  if (value === undefined) throw new Error(`The store target has no ${member}; provide it or declare its gap.`);
-  return value;
-}
+import { at, EXPIRES, LEASE, MINUTE, newFile, pendingRow, provided, type StoreSuite, usageRow } from "./suite.ts";
 
 export function transactionCases(suite: StoreSuite): void {
   const { skipWithout, rawFile, seed } = suite;

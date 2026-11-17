@@ -20,6 +20,22 @@ export function claimCases(suite: StoreSuite): void {
     expect(await rawFile("f-1")).toMatchObject({ claim: "claim-b", claimedAt: at(MINUTE + LEASE + 1) });
   });
 
+  it("claim with the holder's own token while its claim lives is busy and leaves the claim as it was", async () => {
+    const { store } = suite;
+    await seed("u-1", [file]);
+    await store.claim("f-1", "claim-a", at(MINUTE), LEASE);
+    expect(await store.claim("f-1", "claim-a", at(2 * MINUTE), LEASE)).toEqual({ kind: "busy" });
+    expect(await rawFile("f-1")).toEqual(
+      pendingRow(file, "u-1", { status: "completing", claim: "claim-a", claimedAt: at(MINUTE), updatedAt: at(MINUTE) }),
+    );
+  });
+
+  it("claim takes a pending row past its token's deadline: the server, not the store, checks the deadline", async () => {
+    const { store } = suite;
+    await seed("u-1", [file], at(0));
+    expect(await store.claim("f-1", "claim-a", at(MINUTE), LEASE)).toEqual({ kind: "claimed" });
+  });
+
   it("claim answers a completed row with its record, an ended row with its record, and a missing row", async () => {
     const { store } = suite;
     await seed("u-1", [file, newFile("f-2", 10)]);
@@ -95,16 +111,5 @@ export function claimCases(suite: StoreSuite): void {
     expect(await store.release("f-1", "claim-a", at(LEASE + 2))).toBe(false);
     expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 100 })]);
     expect((await store.complete("f-1", "claim-b", null, at(LEASE + 3))).changed).toBe(true);
-  });
-
-  it("complete that fails between the row and the usage write changes neither", async (ctx) => {
-    const { store, raw, target } = suite;
-    skipWithout(ctx, "failureInjection");
-    await seed("u-1", [file]);
-    await store.claim("f-1", "claim-a", at(MINUTE), LEASE);
-    const before = { files: await raw.files(), usage: await raw.usage() };
-    target.injectFailure?.("complete", 1);
-    await expect(store.complete("f-1", "claim-a", null, at(2 * MINUTE))).rejects.toBeInstanceOf(Error);
-    expect({ files: await raw.files(), usage: await raw.usage() }).toEqual(before);
   });
 }

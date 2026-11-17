@@ -75,12 +75,13 @@ export function staleCases(suite: StoreSuite): void {
     expect(await ask(null, 3)).toMatchObject({ cursor: null });
   });
 
-  it("cleanup pages by end time then id", async () => {
+  it("cleanup pages by end time then id, and ends with null", async () => {
     const { store } = suite;
     await seed("u-1", [newFile("f-1", 1), newFile("f-2", 1), newFile("f-3", 1)]);
     await advance("f-1", "aborted", at(3 * MINUTE));
     await advance("f-2", "aborted", at(MINUTE));
-    await advance("f-3", "rejected", at(2 * MINUTE));
+    // f-2 and f-3 ended at the same time, so the id decides between them.
+    await advance("f-3", "rejected", at(MINUTE));
     const first = await store.stale({ kind: "cleanup", before, claimedBefore, limit: 2, cursor: null });
     expect(ids(first)).toEqual(["f-2", "f-3"]);
     const second = await store.stale({ kind: "cleanup", before, claimedBefore, limit: 2, cursor: first.cursor });
