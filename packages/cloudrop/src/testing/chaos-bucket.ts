@@ -4,8 +4,9 @@
 // signed here, as the RustFS contract lane signs its bucket creation (audit I1); the library does not change for it.
 
 import { expect } from "vitest";
+import { S3_RULES } from "../rules.ts";
 import type { StorageDriver } from "../storage/driver.ts";
-import { s3 } from "../storage/presets.ts";
+import { createS3Driver } from "../storage/s3-driver.ts";
 import { EMPTY_SHA256, sha256Hex, signRequest } from "../storage/sigv4.ts";
 import { xmlBlocks, xmlText } from "../storage/xml.ts";
 
@@ -13,6 +14,10 @@ const BUCKET = "chaos";
 // The disposable container's keys from scripts/rustfs.sh: test-only, never a real account.
 const credentials = { accessKeyId: "cloudrop-test", secretAccessKey: "cloudrop-test-secret" };
 const region = "us-east-1";
+// Captured at import: the sweep row fakes Date to move the server's clock a day ahead, and RustFS refuses a signature
+// dated then. Every request to RustFS, the server's and the oracle's, is signed on the real clock.
+const RealDate = Date;
+const realNow = () => new RealDate();
 
 /** An open multipart upload, as ListMultipartUploads names it. */
 export interface OpenUpload {
@@ -29,13 +34,13 @@ export function rustfsEndpoint(): string {
   return endpoint;
 }
 
-/** An s3() driver on the lane's bucket at `endpoint`: the proxy for the server, RustFS itself for the oracle. */
+/** An S3 driver on the lane's bucket at `endpoint`: the proxy for the server, RustFS itself for the oracle. */
 export function chaosStorage(endpoint: string): StorageDriver {
-  return s3({ endpoint, region, bucket: BUCKET, ...credentials });
+  return createS3Driver({ endpoint, region, bucket: BUCKET, credentials, rules: S3_RULES, now: realNow });
 }
 
 async function signedFetch(method: "PUT" | "GET", url: URL): Promise<Response> {
-  const headers = await signRequest({ method, url, credentials, region, date: new Date(), payloadHash: EMPTY_SHA256 });
+  const headers = await signRequest({ method, url, credentials, region, date: realNow(), payloadHash: EMPTY_SHA256 });
   return fetch(url, { method, headers });
 }
 
