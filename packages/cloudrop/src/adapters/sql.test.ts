@@ -14,8 +14,7 @@ const executor = (dialect: string): SqlExecutor =>
     batch: async () => [],
   }) as SqlExecutor;
 
-const NO_SQLITE_SCHEMA =
-  "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.";
+const NO_SQLITE_SCHEMA = "SQLite has no schemas: remove schema from { tables }.";
 
 test.each([
   { name: "a quote", tables: { files: 'files"; DROP TABLE x; --' } },
@@ -28,7 +27,7 @@ test.each([
   );
 });
 
-test("a schema name is checked like a table name, and refused on SQLite, which has no schemas", () => {
+test("a schema name is checked like a table name", () => {
   expect(() => sqlStore(executor("postgres"), { tables: { schema: "app; DROP SCHEMA public" } })).toThrow(
     expect.objectContaining({
       code: "INVALID_CONFIG",
@@ -36,6 +35,9 @@ test("a schema name is checked like a table name, and refused on SQLite, which h
         'The schema name "app; DROP SCHEMA public" is not allowed. Use letters, digits and "_", not starting with a digit: { tables: { schema: "..." } }.',
     }),
   );
+});
+
+test("a schema is refused on SQLite, which has no schemas", () => {
   // Every SQLite executor (node:sqlite, D1, Drizzle's, Prisma's) reaches this one check through its dialect.
   expect(() => sqlStore(executor("sqlite"), { tables: { schema: "app" } })).toThrow(
     expect.objectContaining({ code: "INVALID_CONFIG", message: NO_SQLITE_SCHEMA }),

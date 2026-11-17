@@ -7,7 +7,7 @@ import Database from "better-sqlite3";
 import { drizzle as betterSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as libsql } from "drizzle-orm/libsql";
 import { drizzle as nodePostgres } from "drizzle-orm/node-postgres";
-import { PgDialect, pgTable, text } from "drizzle-orm/pg-core";
+import { getTableConfig as getPgTableConfig, PgDialect, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle as pgProxy } from "drizzle-orm/pg-proxy";
 import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import pg from "pg";
@@ -119,8 +119,7 @@ describe("drizzleSql", () => {
   });
 });
 
-const NO_SQLITE_SCHEMA =
-  "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.";
+const NO_SQLITE_SCHEMA = "SQLite has no schemas: remove schema from { tables }.";
 
 describe("cloudropPgTables and cloudropSqliteTables", () => {
   test.for([
@@ -128,6 +127,12 @@ describe("cloudropPgTables and cloudropSqliteTables", () => {
     { name: "cloudropSqliteTables", tables: () => cloudropSqliteTables({ tables: { files: "my files" } }) },
   ])("$name refuses a table name the store would refuse, naming the option", ({ tables }) => {
     expect(tables).toThrow(invalidConfig(expect.stringContaining("The files table name")));
+  });
+
+  test('cloudropPgTables puts the tables in "public" when tables.schema says so, as the store qualifies them', () => {
+    // Drizzle's pgSchema() refuses "public"; the store accepts it and writes "public"."cloudrop_files".
+    const { files, usage } = cloudropPgTables({ tables: { schema: "public" } });
+    expect([getPgTableConfig(files).schema, getPgTableConfig(usage).schema]).toEqual(["public", "public"]);
   });
 
   test("cloudropSqliteTables and drizzleStore on SQLite refuse tables.schema, which SQLite does not have", () => {
@@ -203,5 +208,7 @@ const postgresTables = cloudropPgTables();
 const sqliteTables = cloudropSqliteTables({ tables: { files: "uploads" } });
 expectTypeOf<typeof postgresTables.files.$inferSelect>().toEqualTypeOf<FileRow>();
 expectTypeOf<typeof postgresTables.usage.$inferSelect>().toEqualTypeOf<UsageRow>();
+// One table type for both shapes: a schema's tables and the search path's.
+expectTypeOf<typeof postgresTables.files._.schema>().toEqualTypeOf<string | undefined>();
 expectTypeOf<typeof sqliteTables.files.$inferSelect>().toEqualTypeOf<FileRow>();
 expectTypeOf<typeof sqliteTables.usage.$inferSelect>().toEqualTypeOf<UsageRow>();

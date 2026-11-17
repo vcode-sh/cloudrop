@@ -12,12 +12,11 @@ import { withRoute } from "./transactional.ts";
 
 export type { StoreTables } from "../store/sql/tables.ts";
 export type { DrizzlePostgres, DrizzlePostgresQueryable, DrizzleTransaction } from "./drizzle/postgres.ts";
-export type { CloudropPgTables } from "./drizzle/postgres-tables.ts";
+export type { CloudropPgTables, CloudropTablesOptions } from "./drizzle/postgres-tables.ts";
 export { cloudropPgTables } from "./drizzle/postgres-tables.ts";
 export type { DrizzleAsyncSqlite, DrizzleSqlite, DrizzleSqliteQueryable } from "./drizzle/sqlite.ts";
 export type { CloudropSqliteTables } from "./drizzle/sqlite-tables.ts";
 export { cloudropSqliteTables } from "./drizzle/sqlite-tables.ts";
-export type { CloudropTablesOptions } from "./drizzle/tables.ts";
 
 /** What the overloads below take; each one names its dialect as a literal. */
 interface DrizzleStoreOptions {

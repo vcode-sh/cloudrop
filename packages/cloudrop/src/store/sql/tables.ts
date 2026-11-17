@@ -34,8 +34,7 @@ type Reader = Pick<SqlExecutor<unknown>, "query">;
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-const NO_SQLITE_SCHEMA =
-  "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.";
+const NO_SQLITE_SCHEMA = "SQLite has no schemas: remove schema from { tables }.";
 
 const USAGE_COLUMNS = ["owner", "reserved_bytes", "active_bytes", "files", "updated_at"];
 
@@ -56,6 +55,7 @@ export function tableNames(tables: StoreTables = {}, dialect: SqlDialect): Table
   return checked;
 }
 
+/** The names as SQL: quoted, and prefixed with the quoted schema when there is one. */
 export function quoteTables({ files, usage, schema }: TableNames): QuotedTables {
   const prefix = schema === undefined ? "" : `"${schema}".`;
   return { files: `${prefix}"${files}"`, usage: `${prefix}"${usage}"` };

@@ -69,7 +69,6 @@ const count = (name: string) => integer(name, { mode: "number" }).notNull();
  * ```ts
  * export const { files: cloudropFiles, usage: cloudropUsage } = cloudropSqliteTables();
  * ```
- * SQLite has no schemas, so `tables` takes no `schema` (a `schema` that gets past the type is `INVALID_CONFIG`).
  */
 export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "schema"> } = {}): CloudropSqliteTables {
   const names = tableNames(options.tables, "sqlite");

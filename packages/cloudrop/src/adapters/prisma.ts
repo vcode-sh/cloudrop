@@ -113,7 +113,7 @@ function prismaExecutor(
  * of it (they belong in `afterComplete`).
  *
  * On Postgres, tables outside `public` take `tables: { schema: "app" }`, with both models declared `@@schema("app")`
- * and `schemas = ["app"]` in the datasource. PrismaPg's `schema` option does not reach the store, whose raw SQL uses
+ * and `schemas = ["public", "app"]` in the datasource; every model then needs its `@@schema`. PrismaPg's `schema` option does not reach the store, whose raw SQL uses
  * only `tables`. Without `tables.schema` the store's SQL finds its tables through the connection's search path, set
  * once for the role with `ALTER ROLE <user> SET search_path = app` (this also works behind a connection pooler) or per
  * connection with `?options=-c%20search_path%3Dapp` in the connection string (some poolers drop or refuse that startup

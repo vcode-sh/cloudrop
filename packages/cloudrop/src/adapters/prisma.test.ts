@@ -83,8 +83,7 @@ test.each([
   {
     name: "tables.schema on SQLite, which has no schemas",
     options: { dialect: "sqlite", tables: { schema: "app" } },
-    message:
-      "SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables }; SQLite finds the tables by their names alone.",
+    message: "SQLite has no schemas: remove schema from { tables }.",
   },
   {
     name: "transactionOptions without transaction: true",
