@@ -15,7 +15,30 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["src/**/*.integration.test.ts"],
+          exclude: [
+            ...configDefaults.exclude,
+            "src/**/*.chaos.integration.test.ts",
+            "src/**/*.soak.integration.test.ts",
+          ],
           testTimeout: 60_000,
+          hookTimeout: 120_000,
+        },
+      },
+      {
+        // RustFS behind the chaos proxy (scripts/test-chaos.sh); a row may wait out a Retry-After or a slow link.
+        test: {
+          name: "chaos",
+          include: ["src/**/*.chaos.integration.test.ts"],
+          testTimeout: 60_000,
+          hookTimeout: 120_000,
+        },
+      },
+      {
+        // The nightly seeded soak (`scripts/test-chaos.sh soak`): many files under random faults (M3-K7, audit I3).
+        test: {
+          name: "soak",
+          include: ["src/**/*.soak.integration.test.ts"],
+          testTimeout: 600_000,
           hookTimeout: 120_000,
         },
       },

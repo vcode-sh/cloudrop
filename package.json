@@ -15,6 +15,8 @@
     "test:live": "bun scripts/test-live-r2.ts",
     "test:rustfs": "scripts/test-rustfs.sh",
     "test:wrangler": "scripts/test-wrangler.sh",
+    "test:chaos": "scripts/test-chaos.sh",
+    "test:chaos:soak": "scripts/test-chaos.sh soak",
     "test:browser": "scripts/test-browser.sh",
     "test:browser:live": "bun scripts/test-browser-live.ts",
     "build": "bun run --filter cloudrop build",

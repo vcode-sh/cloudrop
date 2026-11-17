@@ -17,7 +17,7 @@
   "include": ["src"],
   "exclude": [
     "**/*.test.ts",
-    "src/testing/chaos-proxy*.ts",
+    "src/testing/chaos-*.ts",
     "src/testing/page-events.ts",
     "src/testing/persist-fixture.ts",
     "src/testing/storage-contract.ts",

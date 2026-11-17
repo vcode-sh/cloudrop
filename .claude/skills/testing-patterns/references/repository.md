@@ -16,6 +16,7 @@ never use Bun's built-in runner. Import `describe`, `test`, `expect`, `vi`, `bef
 | `bun run test:wrangler` | Contract lane against Wrangler's local R2 endpoint (`scripts/test-wrangler.sh`), with guaranteed teardown. |
 | `bun run test:live` | Contract lane and upload-protocol lane (`src/server/handler.r2.integration.test.ts`) against a real R2 bucket; reads credentials from the file named by `CLOUDROP_R2_ENV_FILE`. |
 | `bun run test:chaos` | Chaos lane (`scripts/test-chaos.sh`): `*.chaos.integration.test.ts` files run the real server and client on RustFS in Docker (port 19300, `CLOUDROP_RUSTFS_PORT`) behind the fault-injecting proxy `src/testing/chaos-proxy.ts`, rows stubbing `Math.random` to 0 (`M3-K3`), with guaranteed teardown. Needs Docker; fails without it. |
+| `bun run test:chaos:soak` | The nightly seeded soak (`scripts/test-chaos.sh soak`): `*.soak.integration.test.ts` files on the same RustFS-behind-the-proxy setup, Vitest project `soak`. |
 | `bun run test:browser` | Browser lane (`scripts/test-browser.sh`): Playwright runs `examples/next/app/*.browser.test.ts` in Chromium's headless shell against the example on a RustFS container (port 19100), with guaranteed teardown. Needs Docker and `bunx playwright install --only-shell chromium` in `examples/next`. |
 | `bun run test:browser:live` | The same browser tests on a real R2 bucket (`scripts/test-browser-live.ts`), credentials as `test:live`; the bucket's CORS rule must allow `http://localhost:5173`. |
 | `bun run verify` | Every gate in one command: check, typecheck, test, build and `bun run package:check` (publint, attw and size budgets on the built package). |
@@ -27,12 +28,13 @@ live lane a verbose report (both checked 2026-11-15).
 
 ## Lanes
 
-- **The lane is chosen by filename.** `packages/cloudrop/vitest.config.ts` defines three Vitest projects: `unit`
+- **The lane is chosen by filename.** `packages/cloudrop/vitest.config.ts` defines four Vitest projects: `unit`
   (`src/**/*.test.ts` and the root `scripts/**/*.test.ts`, minus `*.integration.test.ts`), `integration` (only
-  `*.integration.test.ts` minus `*.chaos.integration.test.ts`, longer timeouts for live services) and `chaos` (only
-  `*.chaos.integration.test.ts`, so the contract lanes never run a chaos file). `bun run test` runs `vitest run
-  --project unit`, without `--passWithNoTests`, so an empty lane fails; backend lane scripts select `--project
-  integration`, and `scripts/test-chaos.sh` selects `--project chaos`. See vitest.md. `*.browser.test.ts` files are
+  `*.integration.test.ts` minus the chaos and soak files, longer timeouts for live services), `chaos` (only
+  `*.chaos.integration.test.ts`, so the contract lanes never run a chaos file) and `soak` (only
+  `*.soak.integration.test.ts`, the nightly soak). `bun run test` runs `vitest run --project unit`, without
+  `--passWithNoTests`, so an empty lane fails; backend lane scripts select `--project integration`, and
+  `scripts/test-chaos.sh` selects `--project chaos`, or `--project soak` when its first argument is `soak`. See vitest.md. `*.browser.test.ts` files are
   not Vitest's: they live in `examples/next/app/` and run under Playwright (`examples/next/playwright.config.ts`)
   through the browser lane scripts.
 - **A lane whose service or credentials are missing fails, never skips.** Check the prerequisite in `beforeAll` and
@@ -57,7 +59,8 @@ live lane a verbose report (both checked 2026-11-15).
   `complete-fixture.ts` and `presets-fixture.ts` build routes, bodies and calls for the handler, `/upload`, `/complete`
   and `r2()`/`s3()` tests. They build inputs only; every expected value stays in the tests. `chaos-proxy.ts` (the
   fault-injecting proxy, Node-only, excluded from the library's `tsconfig.json`) and `chaos-fixture.ts` (a server and
-  client on RustFS behind it, with the stored-bytes and no-uploads-left oracle) serve the chaos lanes.
+  client on RustFS behind it, with the stored-bytes and no-uploads-left oracle, which reads RustFS directly through
+  `chaos-bucket.ts`) serve the chaos lanes.
 
 ## Unit lane
 

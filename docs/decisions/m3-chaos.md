@@ -114,8 +114,9 @@ behaviour or a public contract follow from `M3-K9`, each naming its source.
   to fix rather than a row to drop.
 - **Status:** decided (plan Task 7).
 - **Source:** chaos design §3, §4 row 18; research §4 row 18, §5 Q8.
-- **Visible in:** `packages/cloudrop/src/chaos/soak.chaos.integration.test.ts`, `.github/workflows/ci.yml` (job
-  `chaos-soak`).
+- **Visible in:** `packages/cloudrop/src/chaos/uploads.soak.integration.test.ts` (its own Vitest project `soak`, so
+  the `chaos` project never collects it; plan audit I3), `bun run test:chaos:soak` (`scripts/test-chaos.sh soak`),
+  `.github/workflows/ci.yml` (job `chaos-soak`).
 
 ### M3-K8: `Retry-After` exposed through CORS
 
