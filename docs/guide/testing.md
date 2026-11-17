@@ -14,6 +14,7 @@ and the `testing-patterns` skill in `.claude/skills/testing-patterns/`.
 | `bun run test:rustfs` | The storage contract on RustFS | Docker |
 | `bun run test:wrangler` | The storage contract on Wrangler's local R2 | Nothing (Wrangler is a dev dependency) |
 | `bun run test:live` | The storage contract and the upload protocol on real R2 | R2 credentials |
+| `bun run test:db` | The database store's fixtures and contract on Postgres 18 and SQLite (`node:sqlite`) | Docker |
 | `bun run test:chaos` | The upload protocol on RustFS behind a fault-injecting proxy | Docker |
 | `bun run test:chaos:soak` | The nightly seeded soak on the same setup | Docker |
 | `bun run test:browser` | The example in Chromium's headless shell, uploading to RustFS | Docker, Playwright's headless shell |
@@ -25,6 +26,7 @@ Which lanes a change needs:
 - **Storage-layer changes:** `test:rustfs`, `test:wrangler` and `test:live`.
 - **Server changes:** `test:live`, which also runs the upload protocol against real R2.
 - **Client and server changes:** `test:chaos`.
+- **Store and adapter changes:** `test:db`.
 - **Client and example changes:** `test:browser`.
 
 A lane whose service or credentials are missing **fails** with a message that names what to set. It never skips.
@@ -82,6 +84,27 @@ Runs the storage contract and the upload protocol (`src/server/handler.r2.integr
   presigned URL reaches the terminal. The last line says how many occurrences were redacted.
 - **Cleanup:** everything goes under a random `live-test/cloudrop-<hex>/` prefix, which the lane deletes. If the lane is
   stopped before its teardown, it names the prefixes left behind.
+
+## Database lane
+
+```bash
+bun run test:db
+bun run test:db src/testing/db/fixtures.db.integration.test.ts   # extra arguments reach Vitest
+```
+
+Runs the `*.db.integration.test.ts` files (Vitest project `db`) against two databases:
+
+- **Postgres 18** (`postgres:18.6`) in Docker on port **19500**, data in a tmpfs. Set `CLOUDROP_POSTGRES_PORT` to use
+  another port; the lane stops if the port is in use. Each test file gets its own schema (`cloudrop_test_<hex>`),
+  dropped after the file. The lane removes the container on success, failure and interrupt.
+- **SQLite** through `node:sqlite`, a fresh database per test: in memory, or a file under `.superpowers/test-db/` when
+  a second client must open it.
+
+Before the tests the lane generates the Prisma 7 test clients from `src/testing/db/prisma/*.prisma` into
+`packages/cloudrop/.prisma-client/` (git-ignored). Generation needs no network. The fixtures are in
+`src/testing/db/`: the DDL (`schema.ts`), the two databases (`postgres.ts`, `sqlite.ts`), the raw reader the store
+contract checks results with (`raw-reader.ts`) and the Prisma clients (`prisma.ts`). The lane fails when Docker is not
+running.
 
 ## Chaos lanes
 
@@ -157,6 +180,7 @@ Each lane picks its own default port, so the lanes can run at the same time:
 | `test:wrangler` | 18787 | `CLOUDROP_WRANGLER_PORT` |
 | `test:browser` | 19100 (RustFS), 19110 (proxy), 5173 (example) | `CLOUDROP_RUSTFS_PORT`, `CLOUDROP_CHAOS_PROXY_PORT` |
 | `test:chaos`, `test:chaos:soak` | 19300 | `CLOUDROP_RUSTFS_PORT` |
+| `test:db` | 19500 | `CLOUDROP_POSTGRES_PORT` |
 
 `test:browser` and `test:browser:live` both need port 5173, so only one of them can run at a time.
 

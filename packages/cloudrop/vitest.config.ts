@@ -19,9 +19,19 @@ export default defineConfig({
             ...configDefaults.exclude,
             "src/**/*.chaos.integration.test.ts",
             "src/**/*.soak.integration.test.ts",
+            "src/**/*.db.integration.test.ts",
           ],
           testTimeout: 60_000,
           hookTimeout: 120_000,
+        },
+      },
+      {
+        // Postgres in Docker and SQLite through node:sqlite (scripts/test-db.sh).
+        test: {
+          name: "db",
+          include: ["src/**/*.db.integration.test.ts"],
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
         },
       },
       {

@@ -1,0 +1,51 @@
+// The test models of the store's tables on SQLite (spec §3), mapped to the shipped column names. Times are BigInt
+// milliseconds since the epoch, as the DDL stores them: Prisma's DateTime encoding on SQLite differs, and Int is 32-bit.
+// scripts/test-db.sh generates the client into packages/cloudrop/.prisma-client/sqlite (git-ignored).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../../../.prisma-client/sqlite"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model CloudropFile {
+  id          String  @id
+  route       String
+  key         String
+  owner       String?
+  status      String
+  name        String
+  type        String
+  size        BigInt
+  uploadId    String? @map("upload_id")
+  metadata    String?
+  result      String?
+  claim       String?
+  claimedAt   BigInt? @map("claimed_at")
+  expiresAt   BigInt  @map("expires_at")
+  createdAt   BigInt  @map("created_at")
+  updatedAt   BigInt  @map("updated_at")
+  completedAt BigInt? @map("completed_at")
+  endedAt     BigInt? @map("ended_at")
+  cleanedAt   BigInt? @map("cleaned_at")
+
+  @@index([status, expiresAt])
+  @@index([status, claimedAt])
+  @@index([status, cleanedAt, endedAt])
+  @@index([owner, status])
+  @@index([key])
+  @@map("cloudrop_files")
+}
+
+model CloudropUsage {
+  owner         String @id
+  reservedBytes BigInt @map("reserved_bytes")
+  activeBytes   BigInt @map("active_bytes")
+  files         Int
+  updatedAt     BigInt @map("updated_at")
+
+  @@map("cloudrop_usage")
+}
