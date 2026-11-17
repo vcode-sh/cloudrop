@@ -791,7 +791,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** spec §3, so an app's drizzle-kit migration builds the tables the store was proven on. Table names are
   validated as the store validates them.
 - **If wrong:** a Drizzle release that renames its builder types breaks the declared types at compile time, not at
-  run time; the peer range may then need an upper bound.
+  run time; the peer range may then need an upper bound. (Fix round 2: the types now name no builder types; see
+  M5-T51.)
 - **Status:** decided.
 - **Source:** task D, 2026-11-17.
 - **Visible in:** `src/adapters/drizzle/tables.ts`, `src/adapters/drizzle/postgres-tables.ts`,
@@ -846,7 +847,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task D fix round 1, 2026-11-17 (review I2).
 - **Visible in:** `src/testing/db/driver-rows.ts`, `src/adapters/{sql,drizzle,prisma}.db.integration.test.ts`.
 
-### M5-T51: the `drizzle-orm` peer range is `>=0.45.0 <1`
+### M5-T51: the `drizzle-orm` peer range (`>=0.45.0 <2` since fix round 2)
 
 - **Decision:** the optional peer is `drizzle-orm >=0.45.0 <1`.
 - **Why:** checked against `drizzle-orm@1.0.0-rc.5` (2026-10-21), the newest RC that is two weeks old, which the
@@ -862,6 +863,34 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Status:** decided.
 - **Source:** task D fix round 1, 2026-11-17 (review M7).
 - **Visible in:** `packages/cloudrop/package.json`.
+- **Amended 2026-11-17 (fix round 2):** the peer range is now **`>=0.45.0 <2`**. drizzle-orm 1.0 must work, types
+  included, because app-a is on 1.0.0-rc.5. What was needed:
+  - **Table types without builder type names.** Each column type is now built from what both lines export: the
+    builder functions' return types (`ReturnType<typeof text>`, `ReturnType<typeof timestamp>`, the `data: number`
+    member of `bigint`'s return union), their `this`-typed methods (`ReturnType<B["notNull"]>`, `["primaryKey"]`),
+    `$type<FileStatus>` instantiated on a type-only `declare const` stand-in, and each table's type as
+    `ReturnType<typeof pgTable<string, Columns>>` (`sqliteTable` on SQLite).
+  - **Two SQLite builders by instantiation expression.** `text` erases to `any` through its named overload on both
+    lines, so it comes from `typeof text<string, [string, ...string[]], never>`: `never` satisfies 0.45's length
+    parameter and 1.0's mode parameter alike. The millisecond timestamp comes from `typeof integer<"timestamp_ms">`.
+    Those are the name-less overloads, typed `""` on 0.45, so the SQLite text and time helpers cast their builders
+    to them. That is the only cast, and only the name and length type differ. The row-type tests and the catalogue
+    test pin the result.
+  - **`DrizzleSqlite.transaction` is non-generic**, `(run: (tx) => SqlRow[][], config?) => unknown`. 0.45 types the
+    answer as the callback's; 1.0 uses a conditional type that refuses async callbacks; both fit this shape. The
+    batch casts the answer back to `SqlRow[][]`.
+  - **The type tests name only what both lines export.** The expected `tx` type is Drizzle's own: the parameter of
+    `db.transaction`'s callback. `drizzleSql` on SQLite is checked by running it on better-sqlite3.
+  - **Proof.** Against 1.0.0-rc.5, from a scratch install in the worktree:
+    - `tsconfig.drizzle.json` (the adapter, its tests and their imports) type-checks;
+    - the unit file passes (10);
+    - the Drizzle db files pass (182 passed, 10 gap skips);
+    - a consumer of the built `dist` pins the §3 row types.
+    The same checks pass against the installed 0.45.4.
+  - **Regression guard.** `scripts/check-drizzle-versions.sh [version]` type-checks that config against another
+    drizzle-orm in a temporary copy of the package, with every other dependency pinned to the installed version. The
+    CI job `drizzle-1` runs it for 1.0.0-rc.5. Restoring round 1's generic `transaction` makes it fail (two
+    "No overload matches" errors).
 
 <!-- Task D appends its entries above this line. -->
 
