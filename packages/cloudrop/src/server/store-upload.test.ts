@@ -141,7 +141,7 @@ describe("POST /upload with a store", () => {
       kind: "rejected",
       error: {
         code: "SERVER_ERROR",
-        message: "The server could not save the upload. Try again in a moment.",
+        message: "The server could not reach its upload records. Try again in a moment.",
         retryable: true,
       },
     };
@@ -226,7 +226,7 @@ describe("POST /upload with a store: files that cannot start", () => {
       kind: "rejected",
       error: {
         code: "SERVER_ERROR",
-        message: "The server could not save the upload. Try again in a moment.",
+        message: "The server could not reach its upload records. Try again in a moment.",
         retryable: true,
       },
     });

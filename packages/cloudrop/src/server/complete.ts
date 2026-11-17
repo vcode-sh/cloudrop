@@ -7,19 +7,16 @@ import type { CompleteResponse } from "../protocol/types.ts";
 import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFile } from "./complete-steps.ts";
 import { cleanUpRefused, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput } from "./config.ts";
-import { nowSeconds } from "./presign.ts";
 import { completeStored } from "./store-complete.ts";
-import { uploadExpired } from "./token.ts";
 import { readTokenRequest } from "./token-request.ts";
 
 export async function handleComplete(input: EndpointInput): Promise<Result<CompleteResponse>> {
   const { request, body, config } = input;
-  // A store may answer an expired token's retry with the stored result, so the row decides about expiry there.
-  const verified = await readTokenRequest(body, config, { allowExpired: config.store !== undefined });
+  // A store may answer an expired token's retry with the stored result, so its row decides about expiry.
+  const verified = await readTokenRequest(body, config, { storedAfterExpiry: true });
   if (verified.error) return verified;
   const { token, route } = verified.data;
   if (config.store && token.stored) return completeStored(input, config.store, token, route);
-  if (nowSeconds() >= token.exp) return fail(uploadExpired());
   const { logger } = config;
   const stored = await verifyUpload(config, token);
   if (stored.kind === "failed") return fail(stored.error);

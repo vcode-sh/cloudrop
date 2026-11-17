@@ -7,7 +7,7 @@ import type { ClaimOutcome, CloudropStore, FileRecord, Transition } from "./stor
 import type { UploadTokenPayload } from "./token.ts";
 
 export const storeUnavailable = (): CloudropError =>
-  new CloudropError("SERVER_ERROR", "The server could not save the upload. Try again in a moment.", {
+  new CloudropError("SERVER_ERROR", "The server could not reach its upload records. Try again in a moment.", {
     retryable: true,
   });
 

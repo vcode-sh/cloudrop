@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
 import { type MemoryTx, memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, NOW, storeFixture, TEXT } from "../testing/store-fixture.ts";
-import { routeFor } from "./route.ts";
+import { route, routeFor } from "./route.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -100,5 +100,19 @@ describe("POST /complete with a transactional store", () => {
       "Another request is completing this upload. Try again in a moment.",
     );
     expect([runs(), (await store.raw.files())[0]?.status]).toEqual([0, "pending"]);
+  });
+
+  it("gives tx only to routes from the store's own route(): a plain route keeps its authorize field tx", async () => {
+    const store = memoryStore();
+    const seen: unknown[] = [];
+    const plain = route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1", tx: "order-42" }) },
+      { owner: ({ userId }) => userId, onComplete: ({ tx }) => void seen.push(tx) },
+    );
+    const fixture = storeFixture({ plain }, { store });
+    const ticket = await fixture.single("plain", TEXT);
+    await fixture.send(ticket.put, hello);
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    expect(seen).toEqual(["order-42"]);
   });
 });

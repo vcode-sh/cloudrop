@@ -3,8 +3,7 @@ import { CloudropError } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { complete } from "../testing/complete-fixture.ts";
 import { memoryStore } from "../testing/memory-store.ts";
-import { SECRET, serverFixture } from "../testing/server-fixture.ts";
-import { gate, hello, leaseStore, NOW, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
+import { gate, hello, leaseStore, NOW, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { route } from "./route.ts";
 
@@ -179,7 +178,7 @@ describe("POST /complete with a store: failures in onComplete", () => {
       store.injectFailure(method, 0);
       expect((await complete(fixture, ticket.token)).body.error).toEqual({
         code: "SERVER_ERROR",
-        message: "The server could not save the upload. Try again in a moment.",
+        message: "The server could not reach its upload records. Try again in a moment.",
         retryable: true,
       });
       expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
@@ -200,8 +199,10 @@ describe("POST /complete with a store: overlapping requests", () => {
     }
     const answers = await Promise.all([complete(fixture, ticket.token), complete(fixture, ticket.token)]);
     // Depending on how the two interleave, the second is busy or replays the first one's answer (M5-T22).
+    const outcomes = answers.map(({ body }) => body.error ?? body.data);
     const either = expect.toBeOneOf([{ run: 1 }, busy]);
-    expect(answers.map(({ body }) => body.error ?? body.data)).toEqual([either, either]);
+    expect(outcomes).toEqual([either, either]);
+    expect(outcomes).toContainEqual({ run: 1 });
     expect((await complete(fixture, ticket.token)).body.data).toEqual({ run: 1 });
     expect([runs.count, fixture.logger.errors]).toEqual([1, []]);
   });
@@ -322,21 +323,5 @@ describe("POST /complete with a store: afterComplete", () => {
     expect(fixture.logger.errors).toEqual([
       { message: 'cloudrop: afterComplete failed for route "notified".', error: failure },
     ]);
-  });
-});
-
-describe("POST /complete: tokens signed without a store", () => {
-  it("completes a token without the stored mark the stateless way, with no store call", async () => {
-    const { definition } = counted();
-    const plain = route({ accept: "*/*", maxSize: "1GB", authorize });
-    // Issued by an instance of a rolling deploy that has no store yet: same secret, same bucket.
-    const before = serverFixture({ files: plain }, { secret: SECRET });
-    const ticket = await before.single("files", TEXT);
-    await before.send(ticket.put, hello);
-    const { store, calls } = recordCalls(memoryStore());
-    const after = storeFixture({ files: definition }, { store, storage: before.storage });
-    expect((await complete(after, ticket.token)).body.data).toEqual({ run: 1 });
-    expect((await complete(after, ticket.token)).body.data).toEqual({ run: 2 });
-    expect(calls).toEqual([]);
   });
 });

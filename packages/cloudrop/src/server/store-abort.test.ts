@@ -107,7 +107,7 @@ describe("POST /abort with a store", () => {
       body: {
         error: {
           code: "SERVER_ERROR",
-          message: "The server could not save the upload. Try again in a moment.",
+          message: "The server could not reach its upload records. Try again in a moment.",
           retryable: true,
         },
       },
