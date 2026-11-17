@@ -109,23 +109,70 @@ describe("libsql", () => {
   const db = useSqliteDatabase({ file: true });
   // A local file database through @libsql/client, the client Turso apps use; its batch is atomic.
   let client: Client | undefined;
+  /** Runs once after the first statement or batch that fails, then forgets itself; set by injectFailure. */
+  let afterFailure: (() => Promise<void>) | undefined;
+  /** The client, with every failed batch or statement reported to `afterFailure` before it rejects. */
+  const watched = (inner: Client): Client =>
+    new Proxy(inner, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (property !== "batch" && property !== "execute")
+          return typeof value === "function" ? value.bind(target) : value;
+        return async (...args: unknown[]) => {
+          try {
+            return await value.apply(target, args);
+          } catch (error) {
+            const disarm = afterFailure;
+            afterFailure = undefined;
+            await disarm?.();
+            throw error;
+          }
+        };
+      },
+    });
   const store = (tables?: { files: string; usage: string }) => {
-    client ??= createClient({ url: `file:${db.path}` });
+    client ??= watched(createClient({ url: `file:${db.path}` }));
     return drizzleStore(libsql({ client }), { dialect: "sqlite", tables });
   };
   // Registered after the fixture's, so it runs before the fixture deletes the file.
   afterEach(() => {
     client?.close();
     client = undefined;
+    afterFailure = undefined;
   });
+
+  /**
+   * libsql cannot register a JS function, so the one-shot state lives outside the database: a trigger on the usage
+   * table that always fails, dropped (through the fixture's connection) right after the first write it failed. The
+   * failed batch rolls back first, as SQLite ends it before the client rejects.
+   */
+  const failingOnce =
+    (setup: SetupStore): SetupStore =>
+    async () => {
+      const target = await setup();
+      return {
+        ...target,
+        injectFailure: async () => {
+          for (const event of ["INSERT", "UPDATE"]) {
+            await db.query(`CREATE TRIGGER cloudrop_fail_libsql_${event.toLowerCase()} BEFORE ${event} ON cloudrop_usage
+              BEGIN SELECT RAISE(ABORT, 'Injected failure: the usage table refused this write.'); END`);
+          }
+          afterFailure = async () => {
+            await db.query("DROP TRIGGER cloudrop_fail_libsql_insert");
+            await db.query("DROP TRIGGER cloudrop_fail_libsql_update");
+          };
+        },
+      };
+    };
 
   describeStoreContract(
     "drizzle, libsql",
-    sqlStoreTarget(db, store, {
-      transaction: "libsql's batch is not interactive; a transaction held across onComplete would block every writer.",
-      failureInjection:
-        "libsql cannot register a JS function (its Database.function throws 'not implemented'), and no SQLite state survives the rollback the failure causes; reserve's duplicate-id case proves the batch atomic.",
-    }),
+    failingOnce(
+      sqlStoreTarget(db, store, {
+        transaction:
+          "libsql's batch is not interactive; a transaction held across onComplete would block every writer.",
+      }),
+    ),
   );
 
   describe("driver", () => {
