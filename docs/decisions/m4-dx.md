@@ -479,6 +479,21 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `README.md`, `docs/guide/server.md`, `docs/guide/deployment.md`, `docs/guide/bucket-setup.md`,
   `docs/guide/client.md`, `docs/guide/troubleshooting.md`, `examples/next/README.md`.
 
+### M4-F24: size ceilings with wide headroom (owner decision)
+
+- **Decision:** the owner asked on 2026-11-17 for "a big margin for what comes". New gzip ceilings, measured size in
+  brackets: `cloudrop` summed 50 kB (36.7), `cloudrop` bundled 30 kB (22.36), `cloudrop/next` 1.5 kB (1.01),
+  `cloudrop/node` 4.5 kB (3.1), `cloudrop/client` 15 kB (11.03), `cloudrop/react` 3 kB (1.96). The spec's goal becomes
+  client plus React at most 18 kB. A ceiling is a guard against accidents, not a target: a change that grows an entry by
+  more than 5% says so in its commit and decision entry, so growth stays visible without a raise.
+- **Why:** the store interface, the M5 plugins and the registry will add code; ceilings set at measured + 10% forced a
+  decision per task (M3-U91, M4-F23, M4-B10) and spent review time on bytes rather than behaviour.
+- **If wrong:** a slow drift goes unnoticed until it is large; the 5% rule and the measured sizes kept in
+  `scripts/size-limit.config.ts` are the check.
+- **Status:** decided. Supersedes the ceilings of M4-F14, M4-F16's summed budget, M4-F23 and M4-B10.
+- **Source:** owner, 2026-11-17.
+- **Visible in:** `scripts/size-limit.config.ts`, spec §1.
+
 <!-- Tasks C and E append their entries above this line. -->
 
 ## Bindings (`M4-B`)

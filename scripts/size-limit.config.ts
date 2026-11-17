@@ -1,8 +1,10 @@
 // Size budgets for the published entries of packages/cloudrop, read by size-limit in `bun run package:check`.
 // The build moves code that entries share into hashed chunks, so each budget counts its entry together with every
 // chunk the entry imports, directly or through another chunk: what a consumer's bundler pulls in for that import.
-// Sizes are gzip, the unit the design spec states its size goals in. A budget is the size measured when it was set
-// plus about 10%; raise one only on purpose, and say why in the commit.
+// Sizes are gzip, the unit the design spec states its size goals in. Since 2026-11-17 the ceilings carry wide headroom
+// for the work still to come (the store interface, plugins, the registry), by the owner's decision (M4-F24): a ceiling
+// is a guard against accidents, not a target. The size measured then is noted beside each; a change that grows an
+// entry by more than 5% says so in its commit and decision entry.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -22,40 +24,34 @@ function withImportedChunks(entry: string): string[] {
 const summed = { disablePlugins: ["@size-limit/esbuild"] };
 
 export default [
-  // Summed files, not a bundle: these budgets count the entry and its chunks as published. "cloudrop" was 36 kB until
-  // route(policy, callbacks), lazy environment settings and forbidden() took it from 34.09 to 36.66 kB (M4-F16).
-  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "40 kB", ...summed },
-  { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
-  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
+  // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17:
+  // cloudrop 36.7 kB, next 1.01 kB, node 3.1 kB.
+  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
+  { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
+  { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
-  // of the unminified files the summed budget counts. 21.33 kB when set (M4-F14).
+  // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB.
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),
     gzip: true,
-    limit: "23.5 kB",
+    limit: "30 kB",
     // index.js has a bare `import "./types-….js"` that sideEffects: false lets esbuild drop, as it should; without
     // this every run prints that as a warning.
     modifyEsbuildConfig: (config: object) => ({ ...config, logOverride: { "ignored-bare-import": "silent" } }),
   },
-  // Bundled and minified, the size an app ships. 8.35 kB after progress plan B. Owner decisions 2026-11-16: resume
-  // after reload is on by default with a raised ceiling, and ceilings get headroom instead of step-by-step raises; the
-  // resume plan measured 9.57 kB before its last feature task, so the ceiling was 10.5 kB. The final review's fixes
-  // (M3-U88 to M3-U90) took the client to 10.57 kB, so by that headroom decision the ceiling is 11 kB (M3-U91). The
-  // M4a fixes ended at 10.95 kB; resumable() leaving out the uploads this page holds took it to 11.03 kB, so the ceiling
-  // is 11.5 kB, the step design §5.7 allows (M4-F23).
+  // Bundled and minified, the size an app ships. History: 8.35 kB after progress plan B, 10.57 kB after resume
+  // (M3-U91), 11.03 kB after M4a (M4-F23). Measured 2026-11-17: 11.03 kB.
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),
     import: "{ createCloudropClient }",
     gzip: true,
-    limit: "11.5 kB",
+    limit: "15 kB",
   },
   // Bundled and minified without react and without the client's chunks (the client and its errors), which an app that
-  // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it. The design aimed at
-  // 1.5 kB (M4-B5); the hooks measured 1.88 kB with every promise of the contract kept, once the client's resumable()
-  // left out the uploads this page holds (M4-F22), so the ceiling is that plus about 10% (M4-B10). The final review's
-  // per-route lists, stable prop getters and one read per burst took them to 1.96 kB, under the same ceiling.
+  // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it (M4-B5, M4-B10).
+  // Measured 2026-11-17: 1.96 kB.
   {
     name: "cloudrop/react",
     path: join(dist, "react.js"),
@@ -65,6 +61,6 @@ export default [
       external: [...(config.external ?? []), "react", "./client-*", "./errors-*"],
     }),
     gzip: true,
-    limit: "2.05 kB",
+    limit: "3 kB",
   },
 ];

@@ -38,9 +38,9 @@ in [`docs/decisions/`](../../decisions/README.md).
 - **Gates:** `bun run verify` passes: 1418 unit tests, 1 skipped (a pre-existing skip). `test:rustfs` 24 passed and
   `test:wrangler` 18 passed (their skips are the backends' declared gaps), `test:live` 32/32 on R2, `test:chaos` 16/16,
   `test:chaos:soak` 4/4, `test:browser` 35/35 on RustFS and `test:browser:live` 22/22 on R2.
-- **Bundle (gzip):** `cloudrop` 36.7 kB of 40 kB as published (22.36 kB of 23.5 kB bundled and minified, `M4-F14`),
-  `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of 3.2 kB, `cloudrop/client` 11.03 kB of 11.5 kB
-  (`M4-F23`), `cloudrop/react` 1.96 kB of 2.05 kB (`M4-B10`).
+- **Bundle (gzip):** `cloudrop` 36.7 kB of 50 kB as published (22.36 kB of 30 kB bundled and minified),
+  `cloudrop/next` 1.01 kB of 1.5 kB, `cloudrop/node` 3.1 kB of 4.5 kB, `cloudrop/client` 11.03 kB of 15 kB,
+  `cloudrop/react` 1.96 kB of 3 kB: wide headroom by the owner's decision (`M4-F24`).
 - **Since M3:** `route(policy, callbacks)` (options in any order), the environment read on the first request (`next
   build` needs no secrets), `r2()`/`s3()` read their settings from the environment, `forbidden()`, `cloudrop/react`, a
   resume record kept after a network failure, endpoint deadlines, `resumable()` leaving out uploads the page holds, keys
@@ -91,9 +91,6 @@ services, a React Native client with background transfer, per-route `Cache-Contr
     from other links;
   - `/complete` makes three storage calls (ListParts, CompleteMultipart, HEAD); whether one can go without weakening
     verification (spec §7) needs analysis.
-- **The "client plus React" target:** spec §1 keeps about 12 kB; after M4a the client is 11.03 kB (ceiling 11.5 kB,
-  `M4-F23`) and `cloudrop/react` 1.96 kB (budget 2.05 kB, `M4-B10`), 12.99 kB together. Confirm the new ceilings, or
-  ask for a size pass.
 - **Unreadable R2 refusals:** a bad-signature `403` reaches the page as a network error, so the client retries for
   about 15 s and answers a retryable `NETWORK_ERROR`. Option: stop at the second unreadable answer on a fresh URL when
   `/sign` succeeded, with a non-retryable code (findings in `r2-spike-findings.md`, "Browser refusals and checksums,
