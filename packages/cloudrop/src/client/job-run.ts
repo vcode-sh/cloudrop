@@ -103,15 +103,16 @@ export function forgetTicket(context: UploadContext, entry: Entry): void {
 }
 
 /**
- * A resumed upload whose probe found it gone asks /upload for a new ticket with the record's route and metadata and
- * sends the whole file, without settling in between (M3-U74). Resolves once the file has settled.
+ * A resumed upload whose probe found it gone asks /upload for a new ticket with the record's route and metadata, on the
+ * file's own signals as any one-file /upload (M3-U92), and sends the whole file, without settling in between (M3-U74).
+ * Resolves once the file has settled.
  */
 async function startOver(job: Job, entry: Entry): Promise<void> {
   // No /abort for the old ticket, as for a retry's new ticket (M3-U55): the bucket's lifecycle rule frees its parts.
   forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
-  await launch(job, [entry]);
+  await launch(job, [entry], { reask: false, first: 1 });
   await entry.run;
 }
 

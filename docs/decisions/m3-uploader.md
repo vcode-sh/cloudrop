@@ -1174,9 +1174,11 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   the record and the lock, and sends the whole file, within the same run. Its first outcome (`M3-U35`) is that run's.
   This holds for every probe, so a `retry()` of a resumed file whose probe got no answer starts over too when its own
   probe finds the upload gone, as spec §3.4's "start again from the probe" reads (audit M9). A file cancelled while
-  its probe was in flight ends aborted instead. A refused new `/upload` ends the file failed with that refusal as
-  `M3-U3` gives it to a job of one file, and `done` is `{ data: { files: [failed] }, error }`: the job had started.
-  No `/abort` is sent for the old ticket, as for a retry's new ticket (`M3-U55`; audit M7's suggestion declined,
+  its probe was in flight ends aborted instead. The new `/upload` runs on the file's own signals, as `M3-U92`'s one-file
+  asks do: a cancel during it or its backoff ends the file aborted at once and sends nothing more, and a pause ends the
+  backoff and holds the file until `resume()` asks at once. A refused new `/upload` ends the file failed with that
+  refusal as `M3-U3` gives it to a job of one file, and `done` is `{ data: { files: [failed] }, error }`: the job had
+  started. No `/abort` is sent for the old ticket, as for a retry's new ticket (`M3-U55`; audit M7's suggestion declined,
   which also saves bytes). `retry()`'s new-ticket list (`M3-U31`) gains `NO_SUCH_UPLOAD`.
 - **Why:** `/complete` answers `NO_SUCH_UPLOAD` only when the multipart upload is gone and no object of this upload's
   `cloudrop-id` and size is stored, so the old ticket can never finish; the user who picked the file wants it stored,
@@ -1184,7 +1186,10 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   sets `mayBeComplete` as any `/complete` does (`M3-S14`), so a file that may be stored never takes this branch.
 - **If wrong:** the old upload's parts wait for the bucket's lifecycle rule (`M3-U55`). The page sees one outcome per
   run and no failure in between.
-- **Status:** in force (`2fe56b7`, `2075eac`, with `M3-U83`). Amends `M3-U31`.
+- **Status:** in force (`2fe56b7`, `2075eac`, with `M3-U83`). Amends `M3-U31`. Amended by `M3-U92` (in force since
+  the chaos final review's M2): the new `/upload` ran on the job's signal, so a cancel in its backoff still sent an
+  `/upload` and an `/abort`, a cancel while it was in flight sent that ticket's `/abort` (audit I1), and a pause did not
+  stop the backoff.
 - **Visible in:** `client/file-run.ts` (`runFile`, `GONE`), `client/job-run.ts` (`runUpload`, `startOver`),
   `client/retry-file.ts` (`NEEDS_NEW_TICKET`), `client/resume.test.ts`, `client/resume-job.test.ts`.
 
@@ -1488,7 +1493,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `200`. Once the attempts run out the file ends `failed` with its last error, which names the file; a later `retry()`
   asks for a new ticket (`M3-U31`). A refusal that is not retryable (the policy's, a storage refusal, the `SERVER_ERROR`
   of a driver that threw) ends the file at once after one `/upload`, as before. A re-ask, like the new-ticket `/upload`
-  of a `retry()` that asks for one file, runs on that file's own signals instead of the job's: it waits after a refusal,
+  of a `retry()` that asks for one file and of a resumed file whose upload is gone (`M3-U74`), runs on that file's own
+  signals instead of the job's: it waits after a refusal,
   and in the backoff after an `/upload` that failed as a whole. While it waits the file stays `queued` with no bytes, as
   a part waiting to retry leaves its file's status and bytes alone. `pause()` ends either wait and holds the file
   `paused`, also when the file was paused before the answer came (`M3-U28`); `resume()` asks at once, and the attempt
@@ -1520,8 +1526,9 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `/upload` and its `/abort`, and a pause did not stop it (review Important 1); a one-file `retry()`'s new-ticket
   `/upload` had the same gap. Since fix round 2, `ABORTED` counts as a pause only when the pause aborted the backoff, as
   `runFile` decides: an answer carrying that code made the re-ask loop with no backoff and no budget (re-review
-  Important 1); and offline is stated as built (re-review Minor 2).
-- **Visible in:** `client/job-run.ts` (`refused`, `askAlone`, `launch`'s `Alone`, `Job.watch`), `client/retry-file.ts`
-  (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts` (`withRetry`'s `first`),
-  `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`, `client/upload-refusals-wait.test.ts`, README
-  ("Client").
+  Important 1); and offline is stated as built (re-review Minor 2). Since the chaos final review's M2, a resumed file's
+  start over (`M3-U74`) asks its new ticket the same way: it alone still ran on the job's signal.
+- **Visible in:** `client/job-run.ts` (`refused`, `askAlone`, `launch`'s `Alone`, `startOver`, `Job.watch`),
+  `client/retry-file.ts` (`retryFiles`), `client/endpoints.ts` (`start`, `post`), `client/retry.ts` (`withRetry`'s
+  `first`), `client/file-run.ts` (`held`), `client/upload-refusals.test.ts`, `client/upload-refusals-wait.test.ts`,
+  `client/resume.test.ts` (the start over's backoff rows), README ("Client").

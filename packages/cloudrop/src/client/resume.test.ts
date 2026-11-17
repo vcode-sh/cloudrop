@@ -1,16 +1,16 @@
-// Contract: resume spec §3.4 with rulings M3-U74 and M3-U75 and the plan audit's I1, I3, I6, I8, I9, M8, M9 and M14,
-// through the real client after a simulated reload (the page's locks let go, a new client on the same IndexedDB, server
-// and bucket; the old client's held requests never reach the bucket). A resumed file asks /complete first: what landed
-// is not sent again, a finished upload is done without a PUT (onComplete runs again), the probe's first PARTS_MISSING
-// takes no repair round and credits the landed parts' bytes, and an upload that is gone starts over with one new
-// /upload within the same run, in its first run and in a retry. Otherwise a resumed job is any job: pause, cancel,
-// failure and retry.
+// Contract: resume spec §3.4 with rulings M3-U74, M3-U75 and M3-U92 and the plan audit's I1, I3, I6, I8, I9, M8, M9 and
+// M14, through the real client after a simulated reload (the page's locks let go, a new client on the same IndexedDB,
+// server and bucket; the old client's held requests never reach the bucket). A resumed file asks /complete first: what
+// landed is not sent again, a finished upload is done without a PUT (onComplete runs again), the probe's first
+// PARTS_MISSING takes no repair round and credits the landed parts' bytes, and an upload that is gone starts over with
+// one new /upload within the same run, in its first run and in a retry; the file's cancel and pause stop that /upload
+// and its backoff. Otherwise a resumed job is any job: pause, cancel, failure and retry.
 // Oracle: the requests the fixture saw and the bodies it read, the tickets /upload answered, what the fake IndexedDB
 // holds, the locks the fake LockManager holds, and the bucket's object hashed by node:crypto against the file's bytes.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MiB } from "../rules.ts";
-import { type FaultCall, lostPart } from "../testing/client-fixture.ts";
+import { type FaultCall, lostPart, storageBusy } from "../testing/client-fixture.ts";
 import {
   bodiesOf,
   bytesHash,
@@ -37,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -282,12 +283,76 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     });
   });
 
-  it("cancelled while its new /upload is in flight, sends /abort with the new token only (I1)", async () => {
-    const aborts = bodiesOf("POST /abort");
+  /**
+   * Resumes an upload the probe finds gone and resolves in the backoff after its new /upload was answered 503, the next
+   * wait at least 499.5 ms of fake time. The third /upload gives a ticket.
+   */
+  async function inNewTicketBackoff() {
+    const busy = Promise.withResolvers<void>();
+    const setup = await reloaded(
+      gate(partThree),
+      (call) => (call.label === "POST /complete" && call.nth === 1 ? noSuchUpload() : undefined),
+      (call) => {
+        if (!nth("POST /upload", 2)(call)) return undefined;
+        busy.resolve();
+        return storageBusy();
+      },
+    );
+    // After the reload, which waits on the store's setTimeout: only the backoff's timers are fake.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.mocked(Math.random).mockReturnValue(0.999);
+    const job = setup.client.resume(setup.upload, fourParts());
+    await busy.promise;
+    // A macrotask, which fake timers leave alone: the 503 has been read and the backoff has begun.
+    await new Promise((resolve) => setImmediate(resolve));
+    return { setup, job, status: () => job.getSnapshot().files[0]?.status };
+  }
+
+  it("cancelled in the backoff of its new /upload, ends aborted at once and sends nothing more (M3-U92)", async () => {
+    const { setup, job, status } = await inNewTicketBackoff();
+    const waiting = status();
+    job.files[0]?.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+    const ended = status();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect({ waiting, ended, sent: setup.sent() }).toEqual({
+      waiting: "queued",
+      ended: "aborted",
+      sent: ["POST /complete", "POST /upload"],
+    });
+  });
+
+  it("paused in the backoff of its new /upload, asks nothing until resume(), then sends the file (M3-U92)", async () => {
+    const { setup, job, status } = await inNewTicketBackoff();
+    job.pause();
+    const paused = status();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const whilePaused = setup.sent();
+    job.resume();
+    const { error } = await job.done;
+
+    expect({ paused, whilePaused, error, sent: setup.sent() }).toEqual({
+      paused: "paused",
+      whilePaused: ["POST /complete", "POST /upload"],
+      error: null,
+      sent: [
+        "POST /complete",
+        "POST /upload",
+        "POST /upload",
+        "PUT part 1",
+        "PUT part 2",
+        "PUT part 3",
+        "PUT part 4",
+        "POST /complete",
+      ],
+    });
+  });
+
+  it("cancelled while its new /upload is in flight, stops that /upload and sends nothing more (I1, M3-U92)", async () => {
     const newTicket = gate(nth("POST /upload", 2));
     const setup = await reloaded(
       gate(partThree),
-      aborts.fault,
       (call) => (call.label === "POST /complete" ? noSuchUpload() : undefined),
       newTicket.fault,
     );
@@ -296,6 +361,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     // Queued again while it waits for its new ticket, so a pause applies (M3-U36, M3-U4).
     const waiting = job.getSnapshot().files[0]?.status;
     job.files[0]?.abort();
+    // Lets the /upload through had the cancel not stopped it: a ticket would then bring a PUT or an /abort.
     newTicket.open();
     const { data } = await job.done;
     await setup.drained();
@@ -304,14 +370,12 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
       waiting,
       status: data?.files[0]?.status,
       sent: setup.sent(),
-      aborted: aborts.bodies,
       stored: setup.db.stored(),
       locks: setup.locks.held(),
     }).toEqual({
       waiting: "queued",
       status: "aborted",
-      sent: ["POST /complete", "POST /upload", "POST /abort"],
-      aborted: [{ token: setup.issued[1]?.token }],
+      sent: ["POST /complete", "POST /upload"],
       stored: {},
       locks: [],
     });
