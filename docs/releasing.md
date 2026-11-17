@@ -39,7 +39,8 @@ Trusted publishing works from a private repository, with these differences:
 
 - **The environment depends on the plan.** On GitHub Free, a private repository has no environments. Leave the trusted
   publisher's **Environment name** empty (the field is optional) and delete the line `environment: npm` from the
-  `publish` job in `release.yml`; the two must agree, or npm refuses the publish. On GitHub Pro or Team, create the
+  `publish` job in `release.yml`, in a commit on `main` before you tag: a run uses the workflow file of the tagged
+  commit. The two must agree, or npm refuses the publish. On GitHub Pro or Team, create the
   environment with its tag rule (step 2) and keep both as they are, but its required reviewers do nothing.
 - **No approval step.** Either way, **publish** starts as soon as **build** passes: pushing a `v*` tag on `main` is the
   release. For a human check that does not depend on GitHub's plan, use npm's
@@ -98,8 +99,10 @@ Trusted publishing works from a private repository, with these differences:
   - `repository.url` in `package.json` does not match the repository (see [Package metadata](#package-metadata)).
 - **The version is on npm.** Do not re-run: npm refuses a version it already has (`You cannot publish over the
   previously published versions`), even after an unpublish. Fix forward with the next patch version.
-- **The download of the artifact fails for lack of a scope.** The `publish` job grants only `id-token: write`; add
-  `contents: read` back to its `permissions` and re-run.
+- **The download of the artifact fails for lack of a scope.** The `publish` job grants only `id-token: write`. A
+  re-run replays the workflow file of the tagged commit, so editing it on `main` changes nothing for this tag: add
+  `contents: read` back to the job's `permissions` in a new commit on `main`, then delete the tag and tag the new
+  commit, as for a failed tag check.
 
 ## One-time setup
 
