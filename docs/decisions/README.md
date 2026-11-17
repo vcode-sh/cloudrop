@@ -18,6 +18,7 @@ uses one of these prefixes instead.
 | `M3-S<n>` | The M3 vertical slice (`cloudrop/client`, the Next.js example, the browser lanes): the plan's decisions S1 to S27 under their own numbers, then the controller's execution rulings from 28 upward. | [m3-slice.md](m3-slice.md) |
 | `M3-U<n>` | The M3 uploader (progress, the shared pool, several files per job, pause and resume, automatic concurrency, stalls, offline, retry, resume after a reload): plan A's rulings P1 to P9 as `M3-U1` to `M3-U9`, the design's decisions from 10, plan A's execution rulings 14 to 22, plan B's rulings Q1 to Q17 as `M3-U23` to `M3-U39`, plan B's outcomes and execution rulings 40 to 59, the resume design's decisions 60 to 69, the resume plan's rulings R1 to R10 as `M3-U70` to `M3-U79`, then its execution rulings and owner decisions from 80 upward. | [m3-uploader.md](m3-uploader.md) |
 | `M3-K<n>` | The M3 chaos work (the fault-injecting proxy, the `test:chaos` lane, the browser chaos rows, the nightly soak): the plan's rulings K1 to K8 under their own numbers, then its execution rulings from 9 upward. | [m3-chaos.md](m3-chaos.md) |
+| `M4-F<n>` | M4a: the fixes from the 2026-11-17 client and server audits, the `route()` and configuration changes, and the developer-experience work from the cold-developer tests (`docs/superpowers/specs/2026-11-17-m4-dx-and-react-design.md` §3 to §5). `M4-B<n>` are the same milestone's React bindings (§6). | [m4-dx.md](m4-dx.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 
