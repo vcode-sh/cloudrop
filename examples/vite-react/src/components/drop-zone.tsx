@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 import { UploadRow } from "./upload-row";
 import { useRefreshFilesWhenDone } from "./use-refresh-files";
 
+/** The drop zone's input, where focus goes when the unfinished-uploads panel it was in disappears. */
+export const ATTACHMENTS_INPUT_ID = "attachments-input";
+
 /** The attachments route: drop or choose several files; each shows its progress, with cancel and retry. */
 export function DropZone() {
   const { files, totals, isDragOver, getDropProps, getInputProps, clear } = useUpload("attachments", {
@@ -31,7 +34,7 @@ export function DropZone() {
           <p>{isDragOver ? "Drop to upload" : "Drop files here, or"}</p>
           <label className={buttonVariants({ variant: "outline" })}>
             Choose files
-            <input {...getInputProps()} aria-label="Choose attachments" className="sr-only" />
+            <input {...getInputProps()} id={ATTACHMENTS_INPUT_ID} aria-label="Choose attachments" className="sr-only" />
           </label>
         </div>
         {files.length > 0 && (

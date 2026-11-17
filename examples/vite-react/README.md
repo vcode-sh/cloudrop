@@ -16,7 +16,7 @@ no rewrite. [Hono with better-auth and Drizzle](../../docs/guide/hono.md) walks 
     cloudrop's statuses onto the Attachment states: `queued` and `paused` are idle, `uploading` is uploading,
     `completing` is processing, `done` is done, `failed` is error, `aborted` is idle;
   - `unfinished-uploads.tsx`: `useResumable` after a reload: pick the same file again to send the missing parts, or
-    discard them all with the client's `forget()`;
+    discard one upload or all of them with the hook's `discard`, which aborts each on the API;
   - `avatar-picker.tsx`: the avatar route, and the current avatar from `files.avatar`;
   - `files-table.tsx`: the user's files from `files.list`, each with a delete;
   - `auth-panel.tsx`: sign-up, sign-in and sign-out, which forgets the browser's unfinished uploads first.
@@ -45,6 +45,7 @@ own RustFS and Postgres containers, applies the API's migrations and lets Playwr
 up a new user: an avatar uploaded in one PUT and shown from the bucket; three attachments, one in three parts, listed
 by `files.list`, then one deleted; a 51 MiB file refused with `QUOTA_EXCEEDED` at a 50 MB quota before any byte is sent;
 an upload while signed out refused with `UNAUTHORIZED`; a multipart upload interrupted by a reload and resumed by
-picking the same file, sending only the missing parts; cloudrop's own preflight answered through the API's global CORS
+picking the same file, sending only the missing parts; one of two unfinished uploads discarded after a reload, its row
+aborted in the API's database while the other resumes; cloudrop's own preflight answered through the API's global CORS
 middleware; and a multipart form posted to an oRPC procedure from another origin, with the session cookie, refused with
 403 (`CSRF_TOKEN_MISMATCH`). Install the shell once with `bunx playwright install --only-shell chromium`.

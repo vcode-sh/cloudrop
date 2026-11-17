@@ -1063,7 +1063,7 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
   reported as a pilot gap. What a discarded upload left in the bucket goes with the sweep (after its ticket expires plus
   grace) and the bucket's lifecycle rule.
 - **If wrong:** add `forget(upload)` to the client and a per-row Discard here.
-- **Status:** decided.
+- **Status:** superseded by `M4-E28` for the panel; sign-out and the shared client stand.
 - **Source:** M4b task A, 2026-11-17.
 - **Visible in:** `examples/vite-react/src/components/unfinished-uploads.tsx`,
   `examples/vite-react/src/components/auth-panel.tsx`, `examples/vite-react/src/lib/upload.ts`.
@@ -1117,3 +1117,25 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
 - **Source:** M4b task A, 2026-11-17.
 - **Visible in:** `examples/hono/src/settings.ts`, `examples/hono/src/auth.ts`, `examples/hono/src/types.ts`,
   `examples/hono/src/worker.ts`.
+
+## M4b: integration
+
+### M4-E28: the Vite panel discards per row as the Next one does; sign-out still forgets
+
+- **Decision:** the Vite example's unfinished-uploads panel gets **Discard <name>** on every row and **Discard all**,
+  both through `useResumable("attachments").discard` (`M4-B16`), with the Next panel's focus handling and second-press
+  guard (`M4-E12`, `M4-E13`): focus moves to the next row's Discard, else the previous row's, and for Discard all or
+  the last row to the drop zone's input (`ATTACHMENTS_INPUT_ID`); a running discard disables its row's button and
+  Discard all; a failed one shows its message in a `role="alert"` line. Sign-out still calls the shared client's
+  `forget()` before better-auth's `signOut()`, so `src/lib/upload.ts` keeps creating the client and passing it as
+  `{ client }`. The browser row reads `cloudrop_files` straight from the API's Postgres (`DATABASE_URL`, through `pg`,
+  a dev dependency of the example) to see the discarded row `aborted` and the other `pending`, then `completed`.
+- **Why:** `discard(upload)` landed with task B (`M3-U93`); the Vite panel's "Discard all via `forget()`" (`M4-E24`)
+  existed only for want of it, and left the reservation in the quota until the sweep. Sign-out must clear every record,
+  including ones whose `/abort` would fail, and runs outside a component, so it keeps the client's `forget()`. The
+  database is the oracle because the example has no usage endpoint, and the row's status is what `/abort` promises.
+- **If wrong:** move sign-out to the hook's `forget()` inside the auth panel and drop the shared client.
+- **Status:** in force.
+- **Source:** M4b integration brief, item 1.
+- **Visible in:** `examples/vite-react/src/components/unfinished-uploads.tsx`,
+  `examples/vite-react/src/components/drop-zone.tsx`, `examples/vite-react/src/app.browser.test.ts`.

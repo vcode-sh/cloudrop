@@ -1,9 +1,10 @@
 // The Vite app and the Hono API in a real browser against a real S3 API and Postgres, run by scripts/test-browser.sh
 // (its third pass). Every row signs up a new user, so rows share no files or quota. The oracles are the bytes each row
 // created, the bucket requests the page sent (their kind, never their URL: a presigned URL must not reach a log), the
-// API's own answers, and `files.list`, which reads cloudrop's table.
+// API's own answers, `files.list`, which reads cloudrop's table, and that table read straight from the database.
 import { writeFile } from "node:fs/promises";
 import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import pg from "pg";
 
 const MIB = 1024 * 1024;
 const API = "http://localhost:5181";
@@ -60,6 +61,23 @@ async function fileOnDisk(testInfo: TestInfo, name: string, size: number): Promi
   const path = testInfo.outputPath(name);
   await writeFile(path, patternBytes(size));
   return path;
+}
+
+/** The status of each of this user's rows in cloudrop's table, by file name, read from the API's database. */
+async function storedStatuses(email: string): Promise<Record<string, string>> {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is not set. Run this test through `bun run test:browser`.");
+  const client = new pg.Client(url);
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ name: string; status: string }>(
+      'SELECT f.name, f.status FROM cloudrop_files f JOIN "user" u ON u.id = f.owner WHERE u.email = $1',
+      [email],
+    );
+    return Object.fromEntries(rows.map(({ name, status }) => [name, status]));
+  } finally {
+    await client.end();
+  }
 }
 
 test("cloudrop answers its own preflight through the app's global CORS middleware", async ({ request }) => {
@@ -181,8 +199,9 @@ test("a multipart upload interrupted by a reload resumes from the parts the buck
   await page.getByLabel("Choose attachments").setInputFiles(path);
   await firstPart;
 
-  await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.reload();
+  // After the reload: the held PUTs died with the old page. Unrouted before it, they could still reach the bucket.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   const unfinished = page.getByRole("list", { name: "Unfinished uploads" });
   await expect(unfinished.getByRole("listitem")).toContainText(["resume.bin, 20.0 MB"]);
   const puts = recordBucketPuts(page);
@@ -192,4 +211,42 @@ test("a multipart upload interrupted by a reload resumes from the parts the buck
   expect(puts.toSorted()).toEqual(["PUT part 2", "PUT part 3"]);
   await expect(unfinished).toHaveCount(0);
   await expect.poll(() => listedFiles(page)).toEqual([["resume.bin", "attachments", "20.0 MB"]]);
+});
+
+test("of two unfinished uploads, Discard aborts one in the store and the other still resumes", async ({
+  page,
+}, testInfo) => {
+  const kept = await fileOnDisk(testInfo, "kept.bin", 20 * MIB);
+  const dropped = await fileOnDisk(testInfo, "dropped.bin", 20 * MIB);
+  const email = await signUp(page);
+  // Each file's part 1 reaches the bucket before the reload; every later part is held.
+  await page.route(/[?&]partNumber=[23](&|$)/, () => {});
+  let partOnes = 0;
+  page.on("response", (response) => {
+    if (/[?&]partNumber=1(&|$)/.test(response.url()) && response.ok()) partOnes += 1;
+  });
+  await page.getByLabel("Choose attachments").setInputFiles([kept, dropped]);
+  await expect.poll(() => partOnes, { timeout: 20_000 }).toBe(2);
+
+  await page.reload();
+  // After the reload: the held PUTs died with the old page. Unrouted before it, they could still reach the bucket.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const unfinished = page.getByRole("list", { name: "Unfinished uploads" });
+  await expect(unfinished.getByRole("listitem")).toHaveCount(2);
+  await unfinished.getByRole("button", { name: "Discard dropped.bin" }).focus();
+  await page.keyboard.press("Enter");
+
+  // The discarded row unmounts; focus is on the row that stays.
+  await expect(unfinished.getByRole("listitem")).toHaveCount(1);
+  await expect(unfinished.getByRole("listitem")).toContainText("kept.bin, 20.0 MB");
+  await expect(unfinished.getByRole("button", { name: "Discard kept.bin" })).toBeFocused();
+  await expect.poll(() => storedStatuses(email)).toEqual({ "dropped.bin": "aborted", "kept.bin": "pending" });
+
+  const puts = recordBucketPuts(page);
+  await page.getByLabel("Pick kept.bin again").setInputFiles(kept);
+  await expect(rowStatus(page, "kept.bin")).toHaveText("Uploaded, 20.0 MB", { timeout: 20_000 });
+  expect(puts.toSorted()).toEqual(["PUT part 2", "PUT part 3"]);
+  await expect(unfinished).toHaveCount(0);
+  await expect.poll(() => listedFiles(page)).toEqual([["kept.bin", "attachments", "20.0 MB"]]);
+  expect(await storedStatuses(email)).toEqual({ "dropped.bin": "aborted", "kept.bin": "completed" });
 });
