@@ -348,6 +348,67 @@ prisma migrate resolve --applied 0_cloudrop
 
 On Postgres Prisma finds nothing to change in tables made from the SQL.
 
+### Tables in another schema
+
+On Postgres, pass the schema with the names: `tables: { schema: "app" }` (letters, digits and `_`). Every statement
+then names `"app"."cloudrop_files"` and `"app"."cloudrop_usage"`, the first-call table check included, whatever the
+connection's search path is. SQLite has no schemas, so every adapter refuses the option there with `INVALID_CONFIG`.
+
+- **Plain SQL:** `CREATE SCHEMA app;`, then the SQL above with each table name written `app.cloudrop_files` and
+  `app.cloudrop_usage`. Pass `sqlStore(executor, { tables: { schema: "app" } })`.
+- **Drizzle:** pass the same `tables` to the tables and the store, and export the schema from your schema file too, so
+  drizzle-kit creates it:
+
+  ```ts
+  // db/schema.ts
+  import { cloudropPgTables } from "cloudrop/adapters/drizzle";
+  import { pgSchema } from "drizzle-orm/pg-core";
+
+  export const app = pgSchema("app");
+  export const cloudropTables = { schema: "app" };
+  export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables({ tables: cloudropTables });
+  ```
+
+  and build the store with them: `drizzleStore(db, { dialect: "postgres", tables: cloudropTables })`.
+
+- **Prisma:** list the schema in the datasource and put both models in it, then pass
+  `prismaStore(prisma, { dialect: "postgres", tables: { schema: "app" } })`. Prisma 7 needs no preview feature for
+  this. Once the datasource lists `schemas`, every model needs its `@@schema`, your own included
+  (`@@schema("public")`), and the CHECK line above names `app.cloudrop_usage`. PrismaPg's own `schema` option is not
+  needed and does not reach the store.
+
+  ```prisma
+  datasource db {
+    provider = "postgresql"
+    schemas  = ["public", "app"]
+  }
+
+  model CloudropFile {
+    // the fields as shipped
+    @@map("cloudrop_files")
+    @@schema("app")
+  }
+
+  model CloudropUsage {
+    // the fields as shipped
+    @@map("cloudrop_usage")
+    @@schema("app")
+  }
+  ```
+
+The alternative is to leave `schema` out and let the search path find the tables: set it once for the database role,
+which also works behind connection poolers:
+
+```sql
+ALTER ROLE app_user SET search_path = app, public;
+```
+
+or per connection with `?options=-c%20search_path%3Dapp` in the connection string, which some poolers drop or refuse
+(PgBouncer without `ignore_startup_parameters`, some hosted pooled endpoints). With Prisma, the search path reaches the
+store's SQL, and PrismaPg's `schema` option (`new PrismaPg({ connectionString }, { schema: "app" })`) reaches model
+queries; set both. If `public` also has tables with the same names, the store uses whichever comes first in the search
+path.
+
 ## Owners and quota
 
 ```ts
@@ -530,18 +591,8 @@ as required.
 ## Postgres notes
 
 - **Isolation:** READ COMMITTED, the default. See [`onComplete` with `tx`](#oncomplete-with-tx).
-- **Tables outside `public`:** the store's SQL finds its tables through the connection's `search_path`. Set it once for
-  the database role, which also works behind connection poolers:
-
-  ```sql
-  ALTER ROLE app_user SET search_path = app, public;
-  ```
-
-  Alternatively set it per connection with `?options=-c%20search_path%3Dapp` in the connection string, which some
-  poolers drop or refuse (PgBouncer without `ignore_startup_parameters`, some hosted pooled endpoints). With Prisma,
-  PrismaPg's `schema` option (`new PrismaPg({ connectionString }, { schema: "app" })`) reaches only model queries, so
-  set the search path as well. If `public` also has tables with the same names, the store uses whichever comes first
-  in the search path.
+- **Tables outside `public`:** pass `tables: { schema: "app" }`, or set the search path; see
+  [Tables in another schema](#tables-in-another-schema).
 - **Connection pools:** with `transaction: true`, a completion holds one connection and the file's row lock for the
   length of `onComplete`, plain `route()`s included. Size the pool for your concurrent completions plus your other
   traffic, or leave `transaction` off and completions use a lease, holding no connection.

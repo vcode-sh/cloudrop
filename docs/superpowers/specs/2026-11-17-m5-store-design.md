@@ -56,8 +56,10 @@ it, so it is not claimed).
 ## 3. Data model (`M5-T1`)
 
 Two tables. Table names are configurable (`{ tables: { files, usage } }`, defaults `cloudrop_files`,
-`cloudrop_usage`, validated `^[A-Za-z_][A-Za-z0-9_]*$` and quoted); column names are fixed snake_case (Prisma users map
-fields with `@map`). Postgres types shown; SQLite uses `TEXT` and `INTEGER`, times as integer milliseconds since the
+`cloudrop_usage`, validated `^[A-Za-z_][A-Za-z0-9_]*$` and quoted). On Postgres, `tables.schema` (validated the same
+way) qualifies both everywhere the core writes SQL, `"app"."cloudrop_files"`; without it the names stand alone and the
+search path finds them; on SQLite it is `INVALID_CONFIG` (amended 2026-11-17 by M5-T120 to M5-T122). Column names are
+fixed snake_case (Prisma users map fields with `@map`). Postgres types shown; SQLite uses `TEXT` and `INTEGER`, times as integer milliseconds since the
 epoch, with the same names.
 
 `cloudrop_files`:
@@ -92,7 +94,7 @@ is 32-bit and its `DateTime` encoding on SQLite differs: measured in task E), Dr
 from `cloudrop/adapters/drizzle` as `cloudropPgTables({ tables? })` and `cloudropSqliteTables({ tables? })`, amended
 2026-11-17 by M5-T47) and plain SQL DDL. Each
 adapter checks the schema once, lazily, with `SELECT <every column> FROM <table> WHERE 1 = 0`, and fails with
-`INVALID_CONFIG` naming the table and the first missing column.
+`INVALID_CONFIG` naming the table (schema-qualified when `tables.schema` is set) and the first missing column.
 
 ## 4. The store interface (`M5-T2`)
 

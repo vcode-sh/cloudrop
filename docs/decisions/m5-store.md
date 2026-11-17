@@ -1058,7 +1058,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   the same need. An adapter-only option would split one concept across adapters.
 - **If wrong:** if the owner wants it, rule it once for every adapter: `tables: { schema?: string }`, validated like
   the names and emitted as `"app"."cloudrop_files"` everywhere, including the schema check. That would be a new entry.
-- **Status:** decided (review M2, fix round 1).
+- **Status:** superseded by M5-T120 (the owner asked for `tables.schema`, 2026-11-17). Was decided in review M2, fix
+  round 1.
 - **Source:** task E, 2026-11-17.
 - **Visible in:** `src/adapters/prisma.ts`.
 
@@ -1351,3 +1352,99 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** final fix round, 2026-11-17.
 - **Visible in:** `docs/guide/store.md`, `README.md`, `docs/guide/resume.md`, `docs/guide/server.md`,
   `docs/guide/testing.md`, `examples/next/README.md`, the M5 spec §7.
+
+## After M5: tables.schema (task S)
+
+### M5-T120: `tables.schema` qualifies both tables for every adapter (supersedes M5-T59)
+
+- **Decision:** `StoreTables` gains `schema?: string`. The core validates it with the table names' pattern
+  (`^[A-Za-z_][A-Za-z0-9_]*$`), quotes it, and qualifies both tables with it everywhere it writes SQL
+  (`"app"."cloudrop_files"`), the lazy schema check (`checkSchema`, `findMissing`) included, whose messages then name
+  the qualified table: `The table "app"."cloudrop_files" does not exist.` A bad name is `INVALID_CONFIG` at
+  construction: `The schema name "…" is not allowed. Use letters, digits and "_", not starting with a digit: { tables:
+  { schema: "..." } }.` Without `schema` every statement is unchanged and the search path still finds the tables; the
+  guide keeps it as the alternative. Internally `quoteTables` splits in two: `tableNames(tables, dialect)` (defaults,
+  validation, the SQLite refusal) and `quoteTables(names)`, and `checkSchema` takes the quoted names. No adapter has an
+  option of its own.
+- **Why:** the owner asked for it. M5-T59 had ruled it once for every adapter if wanted; the names were already quoted
+  once in the core, so the statements needed no change beyond the quoted text they interpolate. Postgres accepts the
+  qualified name in `ON CONFLICT … SET reserved_bytes = "app"."cloudrop_usage".reserved_bytes` and in `UPDATE … FROM`
+  (measured: the contract passes in a schema).
+- **If wrong:** the option is additive; leaving it out behaves as before.
+- **Status:** decided.
+- **Source:** task S, 2026-11-17.
+- **Visible in:** `src/store/sql/tables.ts`, `src/store/sql/store.ts`, `src/adapters/sql.test.ts`,
+  `src/store/sql/tables.db.integration.test.ts`.
+
+### M5-T121: `tables.schema` is Postgres only, refused on SQLite with one message
+
+- **Decision:** on SQLite (`sqliteExecutor`, `d1Executor`, Drizzle and Prisma on SQLite) a `schema` is
+  `INVALID_CONFIG` at construction, from the core's `tableNames`, so every adapter and `cloudropSqliteTables` share the
+  message: `SQLite has no schemas, so { tables: { schema } } applies only to Postgres. Remove schema from { tables };
+  SQLite finds the tables by their names alone.` The types refuse it too where the dialect is known statically:
+  `cloudropSqliteTables` takes `{ tables?: Omit<StoreTables, "schema"> }` and so does `drizzleStore`'s SQLite overload
+  (an object literal with `schema` does not compile; anything that gets past the type is refused at run time).
+  `sqlStore` and `prismaStore` learn the dialect from the executor or a union option and refuse at run time only. An
+  attached SQLite database is out of scope.
+- **Why:** SQLite's only qualifier is an attached database's name, which is not a schema and needs an `ATTACH` the
+  store does not run.
+- **If wrong:** a later option may name an attached database; the refusal keeps that open.
+- **Status:** decided.
+- **Source:** task S, 2026-11-17.
+- **Visible in:** `src/store/sql/tables.ts`, `src/adapters/drizzle/sqlite-tables.ts`, `src/adapters/drizzle.ts`,
+  `src/adapters/sql.test.ts`, `src/adapters/drizzle.test.ts`, `src/adapters/prisma.test.ts`.
+
+### M5-T122: `cloudropPgTables` declares the tables with `pgSchema(schema).table`
+
+- **Decision:** with `tables.schema`, `cloudropPgTables` builds both tables with `pgSchema(schema).table(...)`, so a
+  drizzle-kit migration creates them in that schema and Drizzle's queries name it; without it, `pgTable` as before.
+  `CloudropPgTables`' members are each a union of the two table types (`schema: undefined` and `schema: string`),
+  spelled through `ReturnType<typeof pgSchema<string>>`, which drizzle-orm 0.45 and 1.0 both export; the row types
+  are unchanged on both lines (the existing `$inferSelect` pins pass on the union). The guide shows exporting
+  `pgSchema("app")` from the schema file so drizzle-kit creates the schema (Drizzle's documented behaviour; drizzle-kit
+  is not installed here, so not run). The equivalence test (`drizzle-tables.db.integration.test.ts`) gains a schema
+  row: the tables made by the DDL in a schema match the declared tables, and both declared tables report that schema.
+- **Why:** ruling 3 of the task: typed queries and migrations in the app's schema with no Drizzle-only option.
+- **If wrong:** if the union type gets in an app's way, overloads keyed on `schema` could return one type each; that
+  adds an exported type.
+- **Status:** decided.
+- **Source:** task S, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/postgres-tables.ts`, `src/adapters/drizzle/tables.ts`,
+  `src/adapters/drizzle-tables.db.integration.test.ts`, `scripts/check-drizzle-versions.sh` (passes on 1.0.0-rc.5).
+
+### M5-T123: Prisma gets `tables.schema` through `tables`; the models take `@@schema`
+
+- **Decision:** `prismaStore` passes `tables` through as before, so `tables: { schema: "app" }` works with no Prisma
+  option. The guide shows `schemas = ["public", "app"]` in the datasource and `@@schema("app")` on both models. Checked
+  with `prisma validate` on the installed Prisma 7.10.1: multi-schema needs no preview feature, and once `schemas` is
+  set every model needs its `@@schema` (a model without one fails validation), so the guide says so. The factory's
+  TSDoc no longer says only the search path works: it names `tables.schema` first and keeps the search path as the
+  alternative; PrismaPg's `schema` option still reaches model queries only.
+- **Why:** ruling 4 of the task; the store's raw SQL takes its names from the core alone.
+- **If wrong:** wording only.
+- **Status:** decided.
+- **Source:** task S, 2026-11-17.
+- **Visible in:** `src/adapters/prisma.ts`, `docs/guide/store.md`.
+
+### M5-T124: how `tables.schema` is proven, and what it costs
+
+- **Decision:** `test:db` runs the store contract with `tables.schema` through `pgExecutor` and through Drizzle over
+  node-postgres (`src/store/sql/tables.db.integration.test.ts`). `sqlStoreTarget(db, storeOver, gaps, schema?)`
+  creates every table of the contract (default, renamed, broken) in the schema and keeps empty default tables on the
+  search path, so a statement that left the schema out writes or reads the wrong table; a fault probe that dropped the
+  qualifier failed 60 of the file's cases. Beside the contract: a row reads the store's rows back schema-qualified
+  through the raw reader, finds the search path's tables empty, and reads the rows through `cloudropPgTables({ tables
+  })` with Drizzle; a row pins the lazy check's message for a table missing from the schema while the search path has
+  one. `useAppSchema(db)` names the file's second schema (`<schema>_app`, unique per file, since files share the
+  server) and drops it after the file. The test DDL (`schemaStatements`), raw reader and raw tables take an optional
+  `schema` and qualify names through one `qualified(schema, table)` helper. Unit rows cover only what the db rows do
+  not: the exact message for a bad schema name and the SQLite refusal per entry point. The tables were created through
+  the lane's DDL, which the equivalence test ties to the Drizzle tables. Sizes (M4-F24, summed): sql 13.72 → 13.94 kB,
+  drizzle 15.70 → 16.06 kB, prisma 12.78 → 13.01 kB, each under 5 % growth and within its budget.
+- **Why:** the brief's test plan, with the decoy tables making every contract case discriminate the qualifier.
+- **If wrong:** add the Prisma adapter to the schema contract; its raw SQL is the same core's.
+- **Status:** decided.
+- **Source:** task S, 2026-11-17.
+- **Visible in:** `src/store/sql/tables.db.integration.test.ts`, `src/testing/db/sql-target.ts`,
+  `src/testing/db/postgres.ts`, `src/testing/db/schema.ts`, `src/testing/db/raw-reader.ts`,
+  `src/testing/db/raw-tables.ts`, `scripts/size-limit.config.ts`.
