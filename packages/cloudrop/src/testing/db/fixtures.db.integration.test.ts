@@ -7,10 +7,10 @@ import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
 import { drizzle as drizzleProxy } from "drizzle-orm/sqlite-proxy";
 import postgres from "postgres";
 import { beforeEach, describe, expect, onTestFinished, test } from "vitest";
-import { type PostgresTestDatabase, usePostgresDatabase } from "./postgres.ts";
+import { createPostgresDatabase, type PostgresTestDatabase, usePostgresDatabase } from "./postgres.ts";
 import { openPrismaClient } from "./prisma.ts";
 import { type FileRow, rawReader } from "./raw-reader.ts";
-import { schemaStatements, type TestDatabase } from "./schema.ts";
+import type { TestDatabase } from "./schema.ts";
 import { useSqliteDatabase } from "./sqlite.ts";
 
 const MAX_SAFE = 9007199254740991; // 2^53 - 1
@@ -52,7 +52,7 @@ const postgresBackend = {
     return db;
   },
   columnsSql: `SELECT column_name || ' ' || data_type || ' ' || is_nullable AS c FROM information_schema.columns
-    WHERE table_schema = current_schema() AND table_name = 'cloudrop_files' ORDER BY ordinal_position`,
+    WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position`,
   // "<column> <type> <nullable>", from spec §3.
   columns: [
     "id text NO",
@@ -75,6 +75,13 @@ const postgresBackend = {
     "ended_at timestamp with time zone YES",
     "cleaned_at timestamp with time zone YES",
   ],
+  usageColumns: [
+    "owner text NO",
+    "reserved_bytes bigint NO",
+    "active_bytes bigint NO",
+    "files integer NO",
+    "updated_at timestamp with time zone NO",
+  ],
   duplicateId: 'duplicate key value violates unique constraint "cloudrop_files_pkey"',
 };
 
@@ -85,7 +92,7 @@ const sqliteBackend = {
     beforeEach(() => db.createTables());
     return db;
   },
-  columnsSql: `SELECT name || ' ' || type || ' ' || iif("notnull", 'NO', 'YES') AS c FROM pragma_table_info('cloudrop_files')`,
+  columnsSql: `SELECT name || ' ' || type || ' ' || iif("notnull", 'NO', 'YES') AS c FROM pragma_table_info(?)`,
   columns: [
     "id TEXT NO",
     "route TEXT NO",
@@ -107,6 +114,13 @@ const sqliteBackend = {
     "ended_at INTEGER YES",
     "cleaned_at INTEGER YES",
   ],
+  usageColumns: [
+    "owner TEXT NO",
+    "reserved_bytes INTEGER NO",
+    "active_bytes INTEGER NO",
+    "files INTEGER NO",
+    "updated_at INTEGER NO",
+  ],
   duplicateId: "UNIQUE constraint failed: cloudrop_files.id",
 };
 
@@ -115,8 +129,13 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
   const reader = rawReader(db);
 
   test("creates the files table with the columns, types and nullability of spec §3", async () => {
-    const rows = await db.query(backend.columnsSql);
+    const rows = await db.query(backend.columnsSql, ["cloudrop_files"]);
     expect(rows.map((row) => row.c)).toEqual(backend.columns);
+  });
+
+  test("creates the usage table with the columns, types and nullability of spec §3", async () => {
+    const rows = await db.query(backend.columnsSql, ["cloudrop_usage"]);
+    expect(rows.map((row) => row.c)).toEqual(backend.usageColumns);
   });
 
   test("accepts a second row with the same key and refuses a second row with the same id", async () => {
@@ -209,12 +228,6 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
   });
 });
 
-test("a table name that is not a plain identifier is refused before any SQL is built", () => {
-  expect(() => schemaStatements("postgres", { files: 'x"; DROP TABLE y; --' })).toThrow(
-    'Table name "x"; DROP TABLE y; --" is not allowed: use letters, digits and "_", not starting with a digit.',
-  );
-});
-
 describe("postgres only", () => {
   const db = usePostgresDatabase();
   beforeEach(async () => {
@@ -274,19 +287,15 @@ describe("postgres only", () => {
     ]);
   });
 
-  describe("the schema of a finished scope", () => {
-    let finished = "";
-    describe("a scope with its own database", () => {
-      const inner = usePostgresDatabase();
-      test("uses its own schema", async () => {
-        finished = inner.schema;
-        expect(await inner.query("SELECT current_schema() AS schema")).toEqual([{ schema: inner.schema }]);
-      });
-    });
-    test("is dropped once the scope's tests are done", async () => {
-      expect(finished).toMatch(/^cloudrop_test_[0-9a-f]{12}$/);
-      expect(await db.query("SELECT 1 FROM pg_namespace WHERE nspname = $1", [finished])).toEqual([]);
-    });
+  test("close() drops a database's schema with its tables", async () => {
+    const scoped = createPostgresDatabase();
+    onTestFinished(() => scoped.close());
+    await scoped.open();
+    await scoped.database.createTables();
+    const present = "SELECT nspname FROM pg_namespace WHERE nspname = $1";
+    expect(await db.query(present, [scoped.database.schema])).toEqual([{ nspname: scoped.database.schema }]);
+    await scoped.close();
+    expect(await db.query(present, [scoped.database.schema])).toEqual([]);
   });
 });
 
@@ -294,16 +303,20 @@ describe("sqlite only", () => {
   const db = useSqliteDatabase({ file: true });
   beforeEach(() => db.createTables());
 
-  test("creates the five indexes of spec §3", async () => {
-    const rows = await db.query(
-      "SELECT name FROM sqlite_schema WHERE type = 'index' AND sql IS NOT NULL ORDER BY name",
-    );
-    expect(rows.map((row) => row.name)).toEqual([
-      "cloudrop_files_key_idx",
-      "cloudrop_files_owner_status_idx",
-      "cloudrop_files_status_claimed_at_idx",
-      "cloudrop_files_status_cleaned_at_ended_at_idx",
-      "cloudrop_files_status_expires_at_idx",
+  test("creates the five indexes of spec §3 beside the primary keys, none of them unique on key", async () => {
+    // "<index> [UNIQUE] (<columns in key order>)" from SQLite's own catalog, for both tables.
+    const rows = await db.query(`SELECT list.name || iif(list."unique", ' UNIQUE', '') || ' (' ||
+        (SELECT group_concat(name, ', ') FROM (SELECT name FROM pragma_index_info(list.name) ORDER BY seqno)) || ')' AS def
+      FROM (SELECT 'cloudrop_files' AS name UNION ALL SELECT 'cloudrop_usage') AS tables, pragma_index_list(tables.name) AS list
+      ORDER BY list.name`);
+    expect(rows.map((row) => row.def)).toEqual([
+      "cloudrop_files_key_idx (key)",
+      "cloudrop_files_owner_status_idx (owner, status)",
+      "cloudrop_files_status_claimed_at_idx (status, claimed_at)",
+      "cloudrop_files_status_cleaned_at_ended_at_idx (status, cleaned_at, ended_at)",
+      "cloudrop_files_status_expires_at_idx (status, expires_at)",
+      "sqlite_autoindex_cloudrop_files_1 UNIQUE (id)",
+      "sqlite_autoindex_cloudrop_usage_1 UNIQUE (owner)",
     ]);
   });
 

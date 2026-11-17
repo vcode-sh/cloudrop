@@ -58,8 +58,10 @@ function text(row: Row, column: string): string {
 
 function integer(row: Row, column: string): number {
   const value = row[column];
-  // node-postgres and postgres.js return bigint columns as decimal text; node:sqlite returns numbers.
-  const number = typeof value === "string" && /^-?\d+$/.test(value) ? Number(value) : value;
+  // node-postgres and postgres.js return bigint columns as decimal text, node:sqlite numbers; a driver set to read
+  // bigints gives a bigint.
+  const decimal = typeof value === "string" && /^-?\d+$/.test(value);
+  const number = decimal || typeof value === "bigint" ? Number(value) : value;
   if (typeof number === "number" && Number.isSafeInteger(number)) return number;
   return fail(column, value, "an integer within 2^53");
 }

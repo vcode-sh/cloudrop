@@ -6,7 +6,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-IMAGE=postgres:18
+# An exact 18.x release, so every run and CI use the same server; bump it deliberately.
+IMAGE=postgres:18.6
 if ! docker info >/dev/null 2>&1; then
   echo "Docker is not running, and the database lane needs it for Postgres. Start Docker, then run the lane again." >&2
   exit 1
@@ -27,7 +28,14 @@ echo "Prisma test clients generated in packages/cloudrop/.prisma-client"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull "$IMAGE"
 # Registered before `docker run` so a container that starts but never becomes ready is still removed. `-v` takes the
 # image's anonymous volume with it; the data itself lives in a tmpfs.
-trap 'docker rm -f -v "$NAME" >/dev/null 2>&1 || true; echo "Postgres container ${NAME} removed"' EXIT
+remove_container() {
+  if docker rm -f -v "$NAME" >/dev/null 2>&1; then
+    echo "Postgres container ${NAME} removed"
+  else
+    echo "Could not remove the Postgres container ${NAME}. Remove it with: docker rm -f -v ${NAME}" >&2
+  fi
+}
+trap remove_container EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # A disposable database: durability settings off for speed.

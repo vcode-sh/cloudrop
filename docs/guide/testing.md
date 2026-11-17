@@ -94,7 +94,7 @@ bun run test:db src/testing/db/fixtures.db.integration.test.ts   # extra argumen
 
 Runs the `*.db.integration.test.ts` files (Vitest project `db`) against two databases:
 
-- **Postgres 18** (`postgres:18`) in Docker on port **19500**, data in a tmpfs. Set `CLOUDROP_POSTGRES_PORT` to use
+- **Postgres 18** (`postgres:18.6`) in Docker on port **19500**, data in a tmpfs. Set `CLOUDROP_POSTGRES_PORT` to use
   another port; the lane stops if the port is in use. Each test file gets its own schema (`cloudrop_test_<hex>`),
   dropped after the file. The lane removes the container on success, failure and interrupt.
 - **SQLite** through `node:sqlite`, a fresh database per test: in memory, or a file under `.superpowers/test-db/` when

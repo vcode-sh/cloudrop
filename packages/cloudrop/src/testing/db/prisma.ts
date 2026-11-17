@@ -30,8 +30,9 @@ async function loadClient(dialect: "postgres" | "sqlite"): Promise<PrismaClientC
 }
 
 /**
- * A Prisma client on the fixture's database: on Postgres in its schema (the URL carries the search path), on SQLite on its file (open the fixture with
- * `{ file: true }`). The caller disconnects it, registering that as soon as it has the client.
+ * A Prisma client on the fixture's database: on Postgres in its schema (the URL carries the search path), on SQLite
+ * on its file (open the fixture with `{ file: true }`). The caller disconnects it, registering that as soon as it has
+ * the client.
  */
 export async function openPrismaClient(db: PostgresTestDatabase | SqliteTestDatabase): Promise<PrismaTestClient> {
   if (db.dialect === "postgres") {

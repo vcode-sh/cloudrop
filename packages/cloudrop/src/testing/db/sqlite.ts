@@ -32,7 +32,12 @@ export function useSqliteDatabase(options: { file?: boolean } = {}): SqliteTestD
       mkdirSync(FILE_ROOT, { recursive: true });
       directory = mkdtempSync(join(FILE_ROOT, "sqlite-"));
     }
-    state = { directory, database: new DatabaseSync(directory ? join(directory, "test.db") : ":memory:") };
+    try {
+      state = { directory, database: new DatabaseSync(directory ? join(directory, "test.db") : ":memory:") };
+    } catch (error) {
+      if (directory) rmSync(directory, { recursive: true, force: true });
+      throw error;
+    }
   });
   afterEach(() => {
     if (!state) return;

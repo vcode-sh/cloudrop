@@ -31,37 +31,26 @@ function serverUrl(): string {
   return url;
 }
 
-/**
- * Call at the top of a test file or `describe`. It creates the schema before the scope's tests and drops it after
- * them; the teardown is registered here, before anything is acquired, so a failed setup is still cleaned up.
- */
-export function usePostgresDatabase(): PostgresTestDatabase {
+/** A Postgres test database with its lifecycle in the caller's hands; usePostgresDatabase() wires it to hooks. */
+export interface PostgresLifecycle {
+  readonly database: PostgresTestDatabase;
+  /** Connects and creates the schema. Call close() even when this fails. */
+  open(): Promise<void>;
+  /** Drops the schema with everything in it and ends the pool; does nothing when nothing was opened. */
+  close(): Promise<void>;
+}
+
+export function createPostgresDatabase(): PostgresLifecycle {
   const schema = `cloudrop_test_${randomBytes(6).toString("hex")}`;
   let state: { pool: pg.Pool; url: string } | undefined;
 
-  beforeAll(async () => {
-    const options = `-c search_path=${schema}`;
-    const url = new URL(serverUrl());
-    url.searchParams.set("options", options);
-    state = { pool: new pg.Pool({ connectionString: serverUrl(), options, max: 10 }), url: url.href };
-    await state.pool.query(`CREATE SCHEMA ${schema}`);
-  });
-  afterAll(async () => {
-    if (!state) return;
-    try {
-      await state.pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    } finally {
-      await state.pool.end();
-    }
-  });
-
   const ready = () => {
-    if (!state) throw new Error("usePostgresDatabase() is ready only in tests and hooks that run after its beforeAll.");
+    if (!state) throw new Error("This Postgres test database is not open: use it after its beforeAll (or open()) ran.");
     return state;
   };
   const query = async (sql: string, params: readonly unknown[] = []) =>
     (await ready().pool.query(sql, [...params])).rows;
-  return {
+  const database: PostgresTestDatabase = {
     dialect: "postgres",
     schema,
     get url() {
@@ -79,4 +68,36 @@ export function usePostgresDatabase(): PostgresTestDatabase {
       await query(`CREATE SCHEMA ${schema}`);
     },
   };
+  return {
+    database,
+    async open() {
+      const options = `-c search_path=${schema}`;
+      const url = new URL(serverUrl());
+      url.searchParams.set("options", options);
+      // Kept before CREATE SCHEMA, so close() ends the pool even when the schema could not be created.
+      state = { pool: new pg.Pool({ connectionString: serverUrl(), options, max: 10 }), url: url.href };
+      await state.pool.query(`CREATE SCHEMA ${schema}`);
+    },
+    async close() {
+      if (!state) return;
+      const { pool } = state;
+      state = undefined;
+      try {
+        await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      } finally {
+        await pool.end();
+      }
+    },
+  };
+}
+
+/**
+ * Call at the top of a test file or `describe`. It creates the schema before the scope's tests and drops it after
+ * them; the teardown is registered here, before anything is acquired, so a failed setup is still cleaned up.
+ */
+export function usePostgresDatabase(): PostgresTestDatabase {
+  const lifecycle = createPostgresDatabase();
+  beforeAll(lifecycle.open);
+  afterAll(lifecycle.close);
+  return lifecycle.database;
 }
