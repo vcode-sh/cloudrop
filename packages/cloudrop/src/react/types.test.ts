@@ -39,6 +39,13 @@ const cloudrop = createCloudrop({
 });
 
 /** Another server, whose only route returns a different result. */
+/** A server with only the notes route: fewer route names than `cloudrop`. */
+const fewer = createCloudrop({
+  storage: r2({ bucket: "few", accountId: "0123456789abcdef0123456789abcdef", accessKeyId: "k", secretAccessKey: "s" }),
+  secret: "test-secret-0123456789abcdef0123456789",
+  routes: { notes: route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone }) },
+});
+
 const other = createCloudrop({
   storage: r2({
     bucket: "other",
@@ -112,6 +119,10 @@ describe("cloudrop/react types", () => {
     const wrongServer = () =>
       // @ts-expect-error a client of another server's routes
       createUploadHooks<typeof cloudrop>({ client: createCloudropClient<typeof other>() });
+    const fewerRoutes = () =>
+      // @ts-expect-error a client that lacks the avatar and optional routes
+      createUploadHooks<typeof cloudrop>({ client: createCloudropClient<typeof fewer>() });
     expectTypeOf(wrongServer).toBeFunction();
+    expectTypeOf(fewerRoutes).toBeFunction();
   });
 });

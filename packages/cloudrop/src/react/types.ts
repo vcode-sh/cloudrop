@@ -21,8 +21,9 @@ export type UploadHooksOptions<TCloudrop extends InferableCloudrop> =
   | ClientOptions
   | {
       // The added member is not generic, so a client of another server's routes is refused: the client's own generic
-      // methods compare by their constraints, which would let any CloudropClient pass.
-      client: CloudropClient<TCloudrop> & { resumable(route?: RouteName<TCloudrop>): unknown };
+      // methods compare by their constraints, which would let any CloudropClient pass. A property, not a method, so
+      // its parameter is compared strictly and a client of fewer routes is refused too.
+      client: CloudropClient<TCloudrop> & { resumable: (route?: RouteName<TCloudrop>) => unknown };
     };
 
 export interface UseUploadOptions<TMetadata> {
