@@ -14,9 +14,9 @@ in [`docs/decisions/`](../../decisions/README.md).
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*`, Next and Node adapters | **Done** 2026-11-16 (closed at `2483890`, then the hardening phase, `ca91b33`) |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
 | M4 | `cloudrop/react`, shadcn registry, examples | **M4a done** 2026-11-17: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b (shadcn registry, Hono and Vite examples) not started |
-| M5 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
-| M6 | Docs, 0.x beta, 1.0 | Not started |
-| 1.1 | Drizzle adapter | Not started |
+| M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | In progress on `feat/m5-store` |
+| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
+| M7 | Docs, 0.x beta, 1.0 | Not started |
 
 ## Plans
 

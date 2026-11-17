@@ -523,6 +523,6 @@ parallelism cap is tuned for Workers yet.
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*` |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy |
 | M4 | `react`, shadcn registry, examples |
-| M5 | Plugins: `contentChecks`, `limits`, `images`, `checksums` |
-| M6 | Docs, 0.x beta, 1.0 |
-| 1.1 | Drizzle adapter |
+| M5 | Database store: `createCloudrop({ store })`, rows before signing, `onComplete` once, hard quota, revocation, sweep; adapters for SQL executors, Drizzle and Prisma ([design](2026-11-17-m5-store-design.md)); moved ahead of the plugins by the owner, 2026-11-17 |
+| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` |
+| M7 | Docs, 0.x beta, 1.0 |
