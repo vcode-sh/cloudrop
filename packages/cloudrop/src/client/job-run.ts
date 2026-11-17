@@ -180,8 +180,8 @@ async function askAlone<T>(
     const pass = new AbortController();
     entry.pass = pass;
     const answer = await withRetry(ask, pass.signal, next());
-    // ABORTED without a cancel is a pause that ended the backoff.
-    if (answer.error?.code !== "ABORTED" || signal.aborted) return answer;
+    // A pause ended the backoff only when this pass fired, as in runFile: an answer may carry ABORTED itself.
+    if (answer.error?.code !== "ABORTED" || !pass.signal.aborted || signal.aborted) return answer;
   }
 }
 

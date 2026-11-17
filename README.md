@@ -180,8 +180,10 @@ const { data, error } = await client.upload("avatar", file, { signal: controller
   renewed once; parts that `/complete` reports missing are sent again, at most twice.
 - A file that `/upload` refuses with a retryable error (the storage service failed or was busy while the server
   started it) asks `/upload` again for itself alone, with the backoff above and within the attempts the job's
-  `/upload` left, while the job's other files go on. It stays `queued` while it waits; pausing it or going offline
-  stops the wait until it resumes, and cancelling it ends it `aborted` at once without another request. A refusal that
+  `/upload` left, while the job's other files go on. It stays `queued` while it waits; pausing it stops the wait
+  until it resumes, and cancelling it ends it `aborted` at once without another request. Going offline stops the wait
+  after the refusal too; in the backoff after a later `/upload` that failed as a whole, only while another file of the
+  job is uploading, and otherwise that `/upload` goes through its attempts as the job's own does. A refusal that
   is not retryable, such as a file over the size limit, fails the file at once.
 - In a browser, a bucket `PUT` that makes no progress for 30 s, or whose answer takes that long after the last byte,
   counts as a network error and is tried again. Through `fetch`, which reports no progress, a `PUT` gets 30 s plus its
