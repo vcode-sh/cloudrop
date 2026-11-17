@@ -490,7 +490,10 @@ review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22
   once and lets the upload go only when they end. Each read waits for a microtask: a file cancelled while its
   `/complete` is in doubt settles and publishes before the client deletes its record and releases its claim, so a read
   started inside the publish would list the deleted upload (re-review 2, N5; fix round 2 had dropped the microtask).
-  `[]` on the server, before the first read and when the read failed. `refresh()` reads again and resolves with the
+  Changes in one burst share that microtask, and a job whose every file has settled holds the read back until its
+  `done` settles, which reads anyway: one `abort()` of a 20-file job, or one `/upload` that refuses 20 files, costs one
+  read, not 20 (final review M1, measured 21 before). While a cancelled resume's checks run, that hold also delays the
+  reads other jobs ask for until the checks end; `refresh()` is not held. `[]` on the server, before the first read and when the read failed. `refresh()` reads again and resolves with the
   client's `Result`, so a failure is not lost. A read that answers after a newer read started does not replace the newer
   list.
 - **Why:** design §6.1. The first version read only when `job.done` settled and listed this page's own uploads (review
@@ -498,7 +501,7 @@ review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22
   of the same file; fix round 2 moved the filter into the client by id. "Every job of the client" is read as every job
   the hooks started (`M4-B12`).
 - **If wrong:** exposing an `error` field later is non-breaking.
-- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`, `eafa4d4`).
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`, `eafa4d4`); one read per burst is the final review's M1.
 - **Source:** design §6.1; task D review I1, the controller's rulings on it and on the re-review's client proposal;
   re-review 2 N5.
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/job-tracker.ts`, `docs/guide/react.md#resume-after-a-reload`.
