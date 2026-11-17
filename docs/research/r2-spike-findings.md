@@ -427,6 +427,11 @@ What this means for cloudrop:
 
 ## Browser refusals and checksums, 2026-11-16
 
+**Erratum (2026-11-17):** the Preflight column below shows Playwright's answers, not R2's: while `page.route` is
+active, Playwright answers every intercepted CORS preflight itself with `204` and an echo of the requested headers. The
+`fetch` and "Outside the browser" columns stand. R2's own preflights were measured from a served page in [Bad
+checksum, gone upload and throttling from a browser](#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16).
+
 Measured 2026-11-16 (11:44:02–11:44:35 UTC) on the same test bucket and CORS rule as
 [Browser, 2026-11-16](#browser-2026-11-16). Chromium 159.0.8154.6 headless shell, driven by Playwright 1.65.1 under
 Bun 1.4.4. Method as in that section: a temporary script (deleted afterwards) routed `http://localhost:5173/` to a
