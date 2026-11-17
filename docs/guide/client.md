@@ -32,6 +32,38 @@ A wrong option throws `INVALID_CONFIG` when the client is created. Wire types (`
 `ErrorBody` and the rest) and the route inference types (`RouteName`, `RouteMetadata`, `RouteResult`,
 `InferableCloudrop`) are imported from `cloudrop/client`, never from `cloudrop`.
 
+In React, [`cloudrop/react`](react.md) creates the client for you and gives you hooks for inputs, drop zones and
+progress.
+
+### Send a bearer token
+
+The client sends cookies to your server. An app that keeps its session in a token instead, such as a desktop or mobile
+shell around a web view, or a session handed over by QR code, adds it with a `fetch` of its own:
+
+```ts
+const API = "https://api.example.com/api/cloudrop";
+
+const client = createCloudropClient<typeof cloudrop>({
+  basePath: API,
+  fetch: (url, init) => {
+    // Bucket PUTs go through this fetch too. Send the token only to your server: a presigned URL must not carry it.
+    if (!url.startsWith(`${API}/`)) return fetch(url, init);
+    const headers = new Headers(init.headers);
+    headers.set("authorization", `Bearer ${getToken()}`); // your app's token
+    return fetch(url, { ...init, headers });
+  },
+});
+```
+
+On the server, `authorize` reads `request.headers.get("authorization")`.
+
+- Passing `fetch` also sends bucket `PUT`s through it, so progress moves a part at a time instead of byte by byte (see
+  [Transports](#transports-xhr-or-fetch)).
+- From a page on another origin, the `authorization` header makes the browser send a preflight first. The handler
+  allows the headers a page on a `trustedOrigins` origin asks for.
+- A request without an `Origin` header, as a native app sends, needs no `trustedOrigins` entry (see
+  [Origins](server.md#origins)).
+
 ## Upload one file
 
 ```ts
@@ -77,6 +109,21 @@ for (const outcome of data?.files ?? []) {
   `/upload` refused the whole job (such as `TOO_MANY_FILES`).
 - An error that belongs to one file carries `error.file`, `{ id, name }`.
 - A value typed `File | File[]` fits neither `upload()` signature: pass it to `start()` and await `start(...).done`.
+
+### Reset the file input
+
+A browser fires no `change` event when the user picks the same file again, so clear the input after each pick. Copy the
+files out of the input before you clear it.
+
+```ts
+input.addEventListener("change", () => {
+  const files = Array.from(input.files ?? []);
+  input.value = ""; // picking the same file again now fires change
+  if (files.length > 0) void client.upload("files", files);
+});
+```
+
+In React, `getInputProps()` from [`cloudrop/react`](react.md#one-file) does this for you.
 
 ## Jobs: progress, pause and retry
 
@@ -158,6 +205,17 @@ after a reload starts `queued` while its record is checked, then goes to `comple
   is completing (its bytes all sent) ignores it.
 - `resume()` sends only the parts not yet stored in the bucket. A single `PUT` starts again from the beginning.
 - `job.pause()` and `job.resume()` do that for every file.
+
+### Test pause and progress locally
+
+On `localhost` an upload finishes before you can press Pause. Slow it down:
+
+- In Chrome's DevTools, open the Network panel and pick a throttling profile such as "Slow 4G", or add a custom one.
+  It slows the tab's bucket `PUT`s too, so progress, speed and Pause have time to show. The Offline profile fires the
+  page's `offline` event, which pauses the uploads (see [Offline](#offline)).
+- Use a file over the server's `multipartThreshold` to see parts. In development you can lower the threshold, as
+  [`examples/next`](../../examples/next/README.md) does with `multipartThreshold: "8MB"`.
+- The example's `/lab` page can delay every bucket `PUT` and inject failures, and shows each request.
 
 ### Cancel
 

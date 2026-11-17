@@ -90,6 +90,19 @@ const storage = r2({ bucket: "media" });
 An option that is unset or empty falls back to its variable. One `INVALID_CONFIG` error lists everything missing at
 once, on the first request (at start in development). An option you pass is checked when `r2()` is called.
 
+With every variable set, `r2()` needs no argument at all:
+
+```sh
+CLOUDROP_R2_ACCOUNT_ID=<32 hexadecimal characters>
+CLOUDROP_R2_ACCESS_KEY_ID=<access key id>
+CLOUDROP_R2_SECRET_ACCESS_KEY=<secret access key>
+CLOUDROP_R2_BUCKET=media
+```
+
+```ts
+const storage = r2();
+```
+
 ### Any S3-compatible service
 
 ```ts
@@ -101,8 +114,9 @@ const storage = s3({ endpoint: "https://s3.us-east-1.amazonaws.com", region: "us
 ```
 
 `s3()` takes `endpoint`, `region`, `bucket`, `accessKeyId` and `secretAccessKey`, each from its option or its variable,
-as `r2()` does. `endpoint` is an `http` or `https` URL with no query or fragment; a path in it is kept as a prefix of
-every request, for a service behind a proxy path. `publicUrl` and `fetch` work as for `r2()`.
+as `r2()` does, so with all five variables set `s3()` needs no argument. `endpoint` is an `http` or `https` URL with no
+query or fragment; a path in it is kept as a prefix of every request, for a service behind a proxy path. `publicUrl` and
+`fetch` work as for `r2()`.
 
 Which permissions the credentials need: [Bucket setup](bucket-setup.md#credentials-and-permissions).
 
@@ -118,7 +132,7 @@ const photo = route(
   {
     accept: ["image/png", "image/jpeg", "image/webp"],
     maxSize: "10MB",
-    maxFiles: 20,
+    maxFiles: 20, // files per /upload call; the default is 10
     metadata: z.object({ albumId: z.string() }),
     authorize: async ({ request, metadata }) => {
       const user = await getUser(request); // your app's session lookup
@@ -147,6 +161,24 @@ const photo = route(
 | `key` | The whole key instead of `<prefix>/<ulid><ext>`. Pass `prefix` or `key`, not both. A custom key must be unique (see below). |
 | `visibility` | `"public"` or `"private"`. `"public"` needs the storage's `publicUrl`. Default: `"public"` when the storage has a `publicUrl`, otherwise `"private"`. |
 | `onComplete` | Runs inside `/complete` once the file is verified. What it returns reaches the client as `data.data`, as JSON. |
+
+A route that takes any type of file says so with `accept: "*/*"`. The extension check still applies to the types
+cloudrop knows, so `photo.png` sent as `image/jpeg` is still refused, and a file the browser gives no type is stored as
+`application/octet-stream`:
+
+```ts
+const attachment = route(
+  {
+    accept: "*/*",
+    maxSize: "100MB",
+    authorize: async ({ request }) => {
+      const user = await getUser(request); // your app's session lookup
+      return user ? { userId: user.id } : unauthorized();
+    },
+  },
+  { prefix: ({ userId }) => `users/${userId}/attachments` },
+);
+```
 
 `prefix`, `key` and `onComplete` receive what `authorize` returned, plus `request`, `metadata` and, for `prefix` and
 `key`, the `file` (`id`, `name`, `size`, `type`, `ext`). `onComplete` receives the stored `file` (`id`, `key`, `name`,
@@ -194,7 +226,62 @@ authorize: async ({ request }) => {
   `authorize` returns, in whatever order the options are written.
 - What `authorize` returns is signed into the upload token, which the browser can read. Return ids, never secrets.
 - The client sends cookies with every call to your server (`credentials: "include"`), so `authorize` can read the
-  session from `request`.
+  session from `request`. A page on another site needs cookies set for that: see [Deployment](deployment.md).
+
+Refuse a signed-out user with `unauthorized()` and a signed-in user who may not upload with `forbidden()`, so the user
+is not told to sign in when they already have:
+
+```ts
+authorize: async ({ request }) => {
+  const user = await getUser(request); // your app's session lookup
+  if (!user) return unauthorized();
+  if (user.plan === "free") return forbidden("Uploads need a paid plan. Upgrade in Settings, then try again.");
+  return { userId: user.id };
+},
+```
+
+### Read the session
+
+`request` is a standard `Request`, whatever framework mounts the handler. With
+[better-auth](https://www.better-auth.com), pass its headers to `getSession`:
+
+```ts
+import { route, unauthorized } from "cloudrop";
+import { auth } from "./auth"; // your better-auth instance
+
+const avatar = route(
+  {
+    accept: "image/*",
+    maxSize: "5MB",
+    authorize: async ({ request }) => {
+      const session = await auth.api.getSession({ headers: request.headers });
+      return session ? { userId: session.user.id } : unauthorized();
+    },
+  },
+  { prefix: ({ userId }) => `users/${userId}/avatars` },
+);
+```
+
+With your own session cookie, read it from the `Cookie` header:
+
+```ts
+function readCookie(request: Request, name: string): string | undefined {
+  for (const pair of request.headers.get("cookie")?.split(";") ?? []) {
+    const [key, ...value] = pair.trim().split("=");
+    if (key === name) return value.join("=");
+  }
+  return undefined;
+}
+
+// In the route's policy:
+authorize: async ({ request }) => {
+  const user = await findUserBySession(readCookie(request, "session")); // your app's session lookup
+  return user ? { userId: user.id } : unauthorized();
+},
+```
+
+An app that sends a bearer token instead of a cookie reads `request.headers.get("authorization")`; the client side is in
+[Client](client.md#send-a-bearer-token).
 
 ## The upload token and what it allows
 
@@ -361,9 +448,43 @@ such as `localhost`, it answers `400` when:
 
 A hand-built request without `rawHeaders` is read from `headers` alone.
 
+### Hono
+
+```ts
+import { Hono } from "hono";
+import { cloudrop } from "./lib/cloudrop";
+
+const app = new Hono();
+app.all("/api/cloudrop/*", (c) => cloudrop.handler(c.req.raw));
+
+export default app;
+```
+
+`c.req.raw` is the standard `Request`. The path is your `basePath` followed by `/*`.
+
+- Use `app.all`, not `app.post`. The handler answers the CORS preflight (`OPTIONS`) itself, and answers any other
+  method with `METHOD_NOT_ALLOWED`.
+- Keep that path out of CORS middleware such as `hono/cors`. The handler already answers preflights from
+  `trustedOrigins` and sets the CORS headers on its own answers. A middleware would apply its own rules instead: scope
+  it to your other routes, for example `app.use("/api/app/*", cors())`.
+
+### Bun
+
+```ts
+import { cloudrop } from "./lib/cloudrop";
+
+Bun.serve({
+  port: 3000,
+  routes: {
+    "/api/cloudrop/*": (request) => cloudrop.handler(request),
+  },
+  fetch: () => new Response("Not found", { status: 404 }), // your app's other requests
+});
+```
+
 ### Any runtime with Request and Response
 
-Bun, Deno, Cloudflare Workers and frameworks that speak `Request` and `Response` call the handler directly:
+Deno, Cloudflare Workers and frameworks that speak `Request` and `Response` call the handler directly:
 
 ```ts
 // Cloudflare Workers
@@ -392,6 +513,9 @@ The handler sees its own origin in the request URL and trusts no `X-Forwarded-*`
 terminates TLS or rewrites `Host`, your own pages look cross-origin:** list the app's public origin in
 `trustedOrigins`. The first time the handler refuses a request from an origin, it logs a warning naming the refused
 origin and the one it sees, for up to 16 origins.
+
+Same-origin versus cross-origin setups, cookies across sites and which origin the bucket's CORS rule lists:
+[Deployment](deployment.md).
 
 ## File API
 

@@ -39,7 +39,21 @@ createCloudrop({
 ```
 
 The same fix applies when the page and the API are on different origins. The handler logs that warning once per refused
-origin, for up to 16 origins.
+origin, for up to 16 origins. Both setups: [Deployment](deployment.md).
+
+## Every upload ends UNAUTHORIZED from another origin
+
+Uploads work when the page and the API share an origin, but a page on another origin always gets `UNAUTHORIZED`:
+`authorize` finds no session because the browser did not send the cookie.
+
+- **The page and the API are on different sites**, such as `app.example.com` and `api.example.net`. The session
+  cookie must be `SameSite=None; Secure`, and some browsers still block it as a third-party cookie. Put both on one
+  site, or send a bearer token ([Send a bearer token](client.md#send-a-bearer-token)).
+- **The cookie is set for the page's host only.** A cookie for `app.example.com` never reaches `api.example.com`. Set
+  it from the API's host or with `Domain=example.com`.
+
+DevTools' Network panel shows whether the `/upload` request carried the cookie, and why the browser left it out. More:
+[Deployment](deployment.md#cross-origin-an-api-on-another-origin).
 
 ## Requests through Node get 400
 
@@ -71,9 +85,10 @@ refused the request. Contact the site owner if this keeps happening." The server
 support this request".
 
 **Wrangler's local R2 does not implement `ListParts`**, which the server needs to verify a multipart upload. Use RustFS
-or real R2 to test multipart uploads. After the failure, `upload()` sends `/abort` at once, which removes the parts. A
-file of `start()` keeps its ticket and parts for `retry()` until `abort()`, `pagehide` or the ticket's expiry; call
-`job.abort()` to remove them sooner.
+or real R2 to test multipart uploads. The failure is not retryable, so the client keeps no record to resume it:
+`upload()` sends `/abort` at once, which removes the parts. A file of `start()` keeps its ticket and parts for `retry()`
+until `abort()` or `pagehide`, which send `/abort`, or until the ticket expires; call `job.abort()` to remove them
+sooner.
 `checkBucket` there reports CORS and lifecycle as `unknown`, since Wrangler cannot report bucket settings. Details:
 [`examples/next`](../../examples/next/README.md#run-with-wrangler-single-uploads-only).
 

@@ -1,8 +1,12 @@
 # Bucket setup
 
 This page covers what your bucket needs before browsers can upload to it: the CORS rule, in R2's format and in the S3
-format, the lifecycle rule that cleans up abandoned uploads, the Wrangler commands that set both on R2, which
-credentials and permissions cloudrop needs, and what `checkBucket` can and cannot report about all of this.
+format, the lifecycle rule that cleans up abandoned uploads, the Wrangler commands that set both on R2 and the AWS CLI
+commands for any S3-compatible service, which credentials and permissions cloudrop needs, and what `checkBucket` can
+and cannot report about all of this.
+
+The rule lists the origin of the **page** that uploads, not the origin of your API: the browser sends the bytes from
+the page. With the page and the API on different origins, see [Deployment](deployment.md).
 
 ## What any bucket needs
 
@@ -99,6 +103,46 @@ AWS's `PutBucketCors` API and the AWS CLI wrap that list in `CORSRules`:
 ```
 
 Wrangler refuses this `CORSRules` format: convert it to the `rules` format above for `wrangler r2 bucket cors set`.
+To apply it with the AWS CLI, see [the next section](#set-both-rules-with-the-aws-cli).
+
+## Set both rules with the AWS CLI
+
+The AWS CLI sets the CORS rule and the lifecycle rule on any S3-compatible service: AWS S3, RustFS, MinIO, Backblaze
+B2, and others. For a service other than AWS, point it at the service with `--endpoint-url`. Save the `CORSRules`
+document above as `cors.json`, and this as `lifecycle.json`:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "abort-incomplete-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}
+```
+
+The empty prefix makes the rule apply to the whole bucket, which `checkBucket` requires. Then apply both:
+
+```bash
+export AWS_ACCESS_KEY_ID=<access key id> AWS_SECRET_ACCESS_KEY=<secret access key> AWS_REGION=us-east-1
+ENDPOINT=http://127.0.0.1:9000   # your service's S3 endpoint; leave out --endpoint-url for AWS S3
+
+aws s3api put-bucket-cors --bucket <bucket> --cors-configuration file://cors.json --endpoint-url "$ENDPOINT"
+aws s3api put-bucket-lifecycle-configuration --bucket <bucket> \
+  --lifecycle-configuration file://lifecycle.json --endpoint-url "$ENDPOINT"
+
+# Read them back
+aws s3api get-bucket-cors --bucket <bucket> --endpoint-url "$ENDPOINT"
+aws s3api get-bucket-lifecycle-configuration --bucket <bucket> --endpoint-url "$ENDPOINT"
+```
+
+Both commands replace the bucket's whole CORS or lifecycle configuration, so merge in any rules it already has. The
+credentials need permission to change bucket settings, which upload credentials often lack. Use an admin key for this
+step, not the key you give cloudrop. These commands were checked against RustFS, with `checkBucket` reporting both rules
+`ok` afterwards.
 
 ## Add the lifecycle rule
 
@@ -117,6 +161,8 @@ Add one if it is missing, for the whole bucket:
 ```bash
 wrangler r2 bucket lifecycle add <bucket> abort-incomplete-uploads --abort-multipart-days 1
 ```
+
+On S3 and other services, set it with [the AWS CLI](#set-both-rules-with-the-aws-cli).
 
 `checkBucket` accepts any enabled rule that applies to the whole bucket (no prefix) and aborts incomplete multipart
 uploads, whatever its number of days. The example's RustFS setup uses one day.
