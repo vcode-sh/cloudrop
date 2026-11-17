@@ -1,16 +1,12 @@
 // Chaos rows 1-3 (design spec §4): a presigned part PUT whose connection the proxy resets mid-body, once and on every
 // attempt, through upload() and through start() then retry(). The proxy log is what reached the bucket; the app calls
 // are what reached the server. Run with `bun run test:chaos`.
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { MiB } from "../rules.ts";
 import { chaosFile, MULTIPART_FILE_SIZE, useChaosFixture } from "../testing/chaos-fixture.ts";
 import type { ChaosRule } from "../testing/chaos-proxy.ts";
 
 const chaos = useChaosFixture();
-
-/** Waits for upload()'s background /abort to answer, which it does after its last storage call (decision S15, M1). */
-const abortAnswered = () =>
-  vi.waitFor(() => expect(chaos.appRequests()).toContain("POST /abort 200"), { timeout: 5000, interval: 10 });
 
 /** Every attempt of part 2 loses its connection after 1 MiB of its 8 MiB. */
 const RESET_PART_2: ChaosRule = {
@@ -47,12 +43,14 @@ test("row 2: a part reset on all 6 attempts fails upload() with a retryable NETW
 
   expect(data).toBeNull();
   expect([error?.code, error?.retryable]).toEqual(["NETWORK_ERROR", true]);
-  await abortAnswered();
+  // upload() answers before its /abort lands (decision S15); its answer comes after its last storage call.
+  await chaos.waitForApp("POST /abort 200");
   // One renewal for the part, after its first failure only (S11).
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /sign 200", "POST /abort 200"]);
   const requests = chaos.bucketRequests();
   expect(requests[0]).toBe("CreateMultipartUpload 200");
   // Parts 1 and 3 were already sent and finish (M3-U18); part 2 has its 6 attempts and not one more (S9).
+  // M3-U18's "no new part starts" needs more than 4 parts; client/parts.test.ts:181 proves it.
   expect(requests.slice(1, -2).toSorted()).toEqual([
     "PUT part 1 200",
     "PUT part 2 reset",
@@ -80,8 +78,18 @@ test("row 3: after the same failure through start(), retry() keeps the ticket an
   const open = await chaos.uploadsLeft();
   expect(open.length).toBe(1);
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /sign 200"]);
-  expect(chaos.bucketRequests().filter((request) => !request.startsWith("PUT part"))).toEqual([
-    "CreateMultipartUpload 200",
+  const requests = chaos.bucketRequests();
+  expect(requests[0]).toBe("CreateMultipartUpload 200");
+  // The same 6 attempts of part 2 as row 2, and parts 1 and 3 once each.
+  expect(requests.slice(1).toSorted()).toEqual([
+    "PUT part 1 200",
+    "PUT part 2 reset",
+    "PUT part 2 reset",
+    "PUT part 2 reset",
+    "PUT part 2 reset",
+    "PUT part 2 reset",
+    "PUT part 2 reset",
+    "PUT part 3 200",
   ]);
 
   chaos.proxy.set([]);

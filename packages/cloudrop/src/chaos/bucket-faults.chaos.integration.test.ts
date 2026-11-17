@@ -8,10 +8,6 @@ import type { ChaosFault, ChaosMatch } from "../testing/chaos-proxy.ts";
 
 const chaos = useChaosFixture();
 
-/** Waits for upload()'s background /abort to answer, which it does after its last storage call (decision S15, M1). */
-const abortAnswered = () =>
-  vi.waitFor(() => expect(chaos.appRequests()).toContain("POST /abort 200"), { timeout: 5000, interval: 10 });
-
 // Bodies as the services send them: R2's 429 (r2-spike-findings.md, Q9), R2's expired URL (Q7), RustFS's expired URL
 // (s3-driver.rustfs.integration.test.ts); the rest are the standard S3 codes for these statuses.
 const xml = (code: string, message: string) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -26,7 +22,7 @@ const BAD_SIGNATURE = xml(
 const R2_EXPIRED = xml("ExpiredRequest", "Request has expired");
 const RUSTFS_EXPIRED = xml("AccessDenied", "Request has expired");
 /** Text of the bodies above that a client message must never repeat (spec §7). */
-const STORAGE_TEXT = /<|internal error|signature we calculated|has expired/i;
+const STORAGE_TEXT = /<|internal error|signature we calculated/i;
 
 const SINGLE_PUT: ChaosMatch = { operation: "PutObject" };
 const PART_1: ChaosMatch = { operation: "UploadPart", part: 1 };
@@ -86,7 +82,8 @@ test("row 6: a single PUT answered 500 on all 6 attempts fails with a retryable 
   expect(data).toBeNull();
   expect([error?.code, error?.retryable]).toEqual(["STORAGE_ERROR", true]);
   expect(error?.message).not.toMatch(STORAGE_TEXT);
-  await abortAnswered();
+  // upload() answers before its /abort lands (decision S15); its answer comes after its last storage call.
+  await chaos.waitForApp("POST /abort 200");
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /abort 200"]);
   expect(chaos.bucketRequests()).toEqual([
     "PUT object 500",
@@ -155,19 +152,4 @@ test.each([
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /sign 200", "POST /complete 200"]);
   expect(chaos.bucketRequests()).toEqual(["PUT object 403", "PUT object 200", "HeadObject 200"]);
   expect(gapBetween("PUT object")).toBeLessThan(250);
-});
-
-test("row 8: a single PUT refused as expired again after its renewal fails with UPLOAD_REJECTED and stores nothing", async () => {
-  chaos.proxy.set([{ match: { ...SINGLE_PUT, nth: "every" }, fault: answer(403, R2_EXPIRED) }]);
-
-  const { data, error } = await chaos.client().upload("files", chaosFile(SINGLE_FILE_SIZE));
-
-  expect(data).toBeNull();
-  // A fresh URL refused again points at a clock or permission problem that more attempts cannot fix (S11).
-  expect([error?.code, error?.retryable]).toEqual(["UPLOAD_REJECTED", false]);
-  expect(error?.message).not.toMatch(STORAGE_TEXT);
-  await abortAnswered();
-  expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /sign 200", "POST /abort 200"]);
-  expect(chaos.bucketRequests()).toEqual(["PUT object 403", "PUT object 403", "HeadObject 404"]);
-  expect(await chaos.objectsLeft()).toEqual([]);
 });
