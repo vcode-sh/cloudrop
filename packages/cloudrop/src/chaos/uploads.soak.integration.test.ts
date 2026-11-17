@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FileOutcome, FileStatus, UploadJob, UploadResult } from "../client/types.ts";
 import { MiB } from "../rules.ts";
 import { BAD_SIGNATURE } from "../testing/chaos-bodies.ts";
+import { chaosStorage, rustfsEndpoint } from "../testing/chaos-bucket.ts";
 import { chaosFile, useChaosFixture } from "../testing/chaos-fixture.ts";
 import type { ChaosRandom } from "../testing/chaos-proxy.ts";
 
@@ -106,6 +107,24 @@ function expectFaultsInjected(): void {
 
 const settled: readonly FileStatus[] = ["done", "failed", "aborted"];
 
+/** The sizes of the objects under the prefix outside `kept`, read from RustFS directly. */
+async function orphanSizes(kept: readonly string[]): Promise<number[]> {
+  const storage = chaosStorage(rustfsEndpoint());
+  const left = (await chaos.objectsLeft()).filter((key) => !kept.includes(key));
+  return Promise.all(left.map(async (key) => (await storage.head(key)).data?.size ?? -1));
+}
+
+/** The orphans no single file's whole-body cut PUT accounts for, each cut PUT accounting for one orphan at most. */
+function unexplainedOrphans(sizes: readonly number[], cutBytes: readonly number[]): number[] {
+  const unclaimed = [...cutBytes];
+  return sizes.filter((size) => {
+    const claim = unclaimed.indexOf(size);
+    if (claim === -1 || !SINGLE.includes(size)) return true;
+    unclaimed.splice(claim, 1);
+    return false;
+  });
+}
+
 test(`abort() while a seeded faulty run still sends frees every upload, a failed file's too, and keeps the done files (seed ${seed})`, async () => {
   // The first part 3 to arrive is refused for good: its file fails at once and keeps its upload for retry() (M3-U31).
   chaos.proxy.set([
@@ -139,23 +158,29 @@ test(`abort() while a seeded faulty run still sends frees every upload, a failed
   const codes = outcomes.flatMap((outcome) => (outcome.status === "done" ? [] : [outcome.error.code]));
   expect(codes.filter((code) => code === "UPLOAD_REJECTED")).toEqual(["UPLOAD_REJECTED"]);
   // abort() frees the refused file's kept upload (M3-U32) and every running file's ticket (M3-U38); a failed file's
-  // /abort runs in the background. The only object it may leave outside the done files is one of a single PUT it cut
-  // after the bytes reached the bucket, which can land after its /abort's HEAD (M3-S14): at most one per cut PUT.
+  // /abort runs in the background. The only object it may leave outside the done files is that of a single PUT it cut
+  // after all its bytes reached the bucket, which can land after its /abort's HEAD (M3-S14). The single files' sizes
+  // all differ, so an orphan's size names its file, and that file's PUT must be one the proxy saw cut whole.
   const keys = doneKeys(outcomes);
-  let orphans = 0;
+  let orphans: number[] = [];
   await vi.waitFor(
     async () => {
       await chaos.expectNoUploadsLeft();
-      orphans = (await chaos.objectsLeft()).filter((key) => !keys.includes(key)).length;
-      const cut = chaos.proxy.log().filter((entry) => entry.label === "PUT object" && entry.outcome === "aborted");
-      expect(orphans, `objects outside the done files, ${cut.length} single PUTs cut`).toBeLessThanOrEqual(cut.length);
+      orphans = await orphanSizes(keys);
+      const cutWhole = chaos.proxy
+        .log()
+        .filter((entry) => entry.label === "PUT object" && entry.outcome === "aborted")
+        .map((entry) => entry.bytesIn);
+      expect(unexplainedOrphans(orphans, cutWhole), "objects outside the done files no cut PUT explains").toEqual([]);
     },
     { timeout: 10_000, interval: 50 },
   );
   const statuses = outcomes.map((outcome) => (outcome.status === "done" ? "done" : "aborted"));
   expect(snapshot().map((file) => file.status)).toEqual(statuses);
   const aborted = statuses.filter((status) => status === "aborted").length;
-  console.info(`Chaos soak seed ${seed}: ${sending} still sending at abort(), ${aborted} aborted, ${orphans} orphans.`);
+  console.info(
+    `Chaos soak seed ${seed}: ${sending} still sending at abort(), ${aborted} aborted, ${orphans.length} orphans.`,
+  );
 });
 
 test(`retry() with the faults off finishes every file a seeded faulty run failed (seed ${seed})`, async () => {
