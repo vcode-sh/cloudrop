@@ -13,8 +13,11 @@ export const PARTS_IN_FLIGHT: number = 4;
 
 export interface PartSender {
   signal: AbortSignal;
-  /** The URLs the /upload ticket carried. */
-  first: readonly SignedPart[];
+  /**
+   * The upload's URLs by part number: the ticket's, then each one /sign answers, kept across passes so a part signed
+   * or renewed once is not signed again (M4-F8).
+   */
+  urls: Map<number, SignedRequest>;
   /** POST /sign for these parts; the answer holds exactly them (answers.ts checks it). */
   sign(partNumbers: readonly number[]): Promise<Result<SignedPart[]>>;
   /** PUT this part's bytes to the URL. `stop` fires on a cancel or once the file has failed: start nothing after it. */
@@ -32,7 +35,6 @@ const RENEW_MARGIN_MS = 60_000;
 interface Run {
   sender: PartSender;
   partNumbers: readonly number[];
-  urls: Map<number, SignedRequest>;
   /** The /sign call that workers reaching unsigned parts share. */
   batch: Promise<CloudropError | null> | null;
   /** The first part failure that fails the file. */
@@ -66,11 +68,11 @@ export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boole
 /** Signs `partNumber` and the next unsigned parts, at most PARTS_PER_SIGN, in one call that waiting workers share. */
 function signAhead(run: Run, partNumber: number): Promise<CloudropError | null> {
   if (run.batch) return run.batch;
-  const unsigned = run.partNumbers.filter((n) => n !== partNumber && !run.urls.has(n));
+  const unsigned = run.partNumbers.filter((n) => n !== partNumber && !run.sender.urls.has(n));
   const call = run.sender.sign([partNumber, ...unsigned].slice(0, PARTS_PER_SIGN)).then((signed) => {
     run.batch = null;
     if (signed.error) return signed.error;
-    for (const part of signed.data) run.urls.set(part.partNumber, part);
+    for (const part of signed.data) run.sender.urls.set(part.partNumber, part);
     return null;
   });
   run.batch = call;
@@ -78,21 +80,21 @@ function signAhead(run: Run, partNumber: number): Promise<CloudropError | null> 
 }
 
 async function urlFor(run: Run, partNumber: number, renew: boolean): Promise<Result<SignedRequest>> {
-  let known = run.urls.get(partNumber);
+  let known = run.sender.urls.get(partNumber);
   // A batch that did not include this part (another worker started it) is followed by one that does. A third pass
   // would mean a /sign answer that leaves the part out, which answers.ts refuses: stop rather than spin.
   for (let pass = 1; known === undefined; pass++) {
     if (pass > 2) return fail(unreadableAnswer(200));
     const error = await signAhead(run, partNumber);
     if (error) return fail(error);
-    known = run.urls.get(partNumber);
+    known = run.sender.urls.get(partNumber);
   }
   if (!renew && !expiresSoon(known)) return ok(known);
   const renewed = await run.sender.sign([partNumber]);
   if (renewed.error) return renewed;
   const [part] = renewed.data;
   if (part === undefined) return fail(unreadableAnswer(200)); // unreachable: answers.ts checked the parts
-  run.urls.set(partNumber, part);
+  run.sender.urls.set(partNumber, part);
   return ok(part);
 }
 
@@ -125,7 +127,6 @@ export async function sendParts(sender: PartSender, partNumbers: readonly number
   const run: Run = {
     sender,
     partNumbers,
-    urls: new Map(sender.first.map((part) => [part.partNumber, part])),
     batch: null,
     failure: null,
     stop: new AbortController(),

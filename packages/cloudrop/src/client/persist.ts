@@ -17,7 +17,7 @@ import type { Entry } from "./file-run.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import type { Job } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";
-import type { Upload, UploadContext } from "./upload.ts";
+import { newUpload, type Upload, type UploadContext } from "./upload.ts";
 
 /** `entry`'s upload under the ticket that just arrived; a persisted one is locked at once, and saved once locked. */
 export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): Upload {
@@ -56,7 +56,7 @@ export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): 
         })),
     );
   }
-  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe: false };
+  return newUpload(ticket, entry, unlock);
 }
 
 /**

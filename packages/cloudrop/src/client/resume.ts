@@ -15,7 +15,7 @@ import { lockUpload } from "./locks.ts";
 import type { UploadRecord } from "./records.ts";
 import { type Retried, retryFiles } from "./retry-file.ts";
 import type { FileOutcome, ResumableUpload, UploadJob } from "./types.ts";
-import type { UploadContext } from "./upload.ts";
+import { newUpload, type UploadContext } from "./upload.ts";
 
 /** The namespace's unfinished uploads, newest first, for `route` or every route, without a token, key or metadata. */
 export async function resumable(context: UploadContext, route?: string): Promise<Result<ResumableUpload[]>> {
@@ -105,7 +105,7 @@ async function resumeRun(job: Job, id: string, passed: () => void): Promise<Clou
   // expiry is the record's, verbatim, which a retry reads (audit M14).
   const ticket: Ticket = { ...record, kind: "multipart", parts: [] };
   for (let part = 1; part <= record.partCount; part++) entry.landed.add(part);
-  const upload = { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe: true };
+  const upload = newUpload(ticket, entry, unlock, true);
   entry.upload = upload;
   const run = job.runUpload(upload).finally(job.idle);
   entry.run = run;

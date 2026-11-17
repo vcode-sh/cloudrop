@@ -104,6 +104,23 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **Visible in:** `client/upload.ts` (`sendAndComplete`), `client/upload-failures.test.ts` ("ends aborted, never
   uploading again").
 
+### M4-F8: an upload keeps the URLs signed for it across passes
+
+- **Decision:** the URLs of an upload, the ticket's and every one `/sign` answers (a lazy batch or a renewal), live on
+  the upload (`Upload.urls`) for as long as it keeps its ticket: passes after a pause, repair rounds and same-ticket
+  retries reuse them, renewing only one that expires within a minute (`S11`). A single `PUT`'s URL is part 1 of the
+  same map. `newUpload` builds an upload for `/upload`'s ticket and for `resume()`'s record alike.
+- **Why:** design §3 F8. The map was rebuilt from the ticket on every pass: after a pause, or in each repair round,
+  parts signed in an earlier pass were signed again (up to 20 per `/sign`, one call per pass), and a renewed URL fell
+  back to the ticket's expired one, costing a refused `PUT` and another renewal. A resumed upload, whose ticket carries
+  no URLs, paid one `/sign` per repair round.
+- **If wrong:** a URL is reused until a minute before its expiry, as within one pass already; nothing new is trusted.
+- **Status:** in force.
+- **Source:** design §3 F8; code audit of `main` at `907cc77`.
+- **Visible in:** `client/upload.ts` (`Upload.urls`, `newUpload`, `senderFor`), `client/parts.ts` (`PartSender.urls`),
+  `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumeRun`), `client/resume-job.test.ts` ("pauses and
+  resumes", "fails keeping its record and lock"), `client/resume.test.ts` ("takes no repair round").
+
 <!-- Task A appends its entries above this line. -->
 
 ### Server and storage (design §4, `M4-F10` to `M4-F14`)

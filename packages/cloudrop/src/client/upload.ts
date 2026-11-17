@@ -67,6 +67,16 @@ export interface Upload {
    * or PARTS_MISSING (resume spec §3.4). Until then every part counts as landed and no byte as sent.
    */
   probe: boolean;
+  /** Every URL signed for it so far (PartSender.urls). */
+  readonly urls: Map<number, SignedRequest>;
+}
+
+/** `entry`'s upload under `ticket`, from its first pass; `probe` when resume() rebuilt it from a record. */
+export function newUpload(ticket: Ticket, entry: Entry, unlock: () => void, probe = false): Upload {
+  // A single PUT is part 1 of 1, so one routine sends both kinds.
+  const signed = ticket.kind === "single" ? [{ partNumber: 1, ...ticket.put }] : ticket.parts;
+  const urls = new Map(signed.map((part) => [part.partNumber, part]));
+  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe, urls };
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -77,7 +87,7 @@ function moveTo(entry: Entry, status: "uploading" | "completing"): void {
 }
 
 /** Sends through `signal`, the pass's: a pause or a cancel aborts the PUTs and /sign calls in flight. */
-function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: AbortSignal): PartSender {
+function senderFor(context: UploadContext, { ticket, entry, urls }: Upload, signal: AbortSignal): PartSender {
   const { file, rank } = entry;
   const { pool } = context;
   // A slot is held for the PUT alone: it is free again before a retry's wait (spec §4.4). A part still waiting for one
@@ -110,19 +120,13 @@ function senderFor(context: UploadContext, { ticket, entry }: Upload, signal: Ab
     }
   };
   if (ticket.kind === "multipart") {
-    return {
-      signal,
-      first: ticket.parts,
-      put,
-      sign: (parts) => context.endpoints.signParts(ticket.token, parts, signal),
-    };
+    return { signal, urls, put, sign: (parts) => context.endpoints.signParts(ticket.token, parts, signal) };
   }
-  // A single PUT is part 1 of 1, so one routine sends both kinds.
   const sign = async (): Promise<Result<SignedPart[]>> => {
     const renewed = await context.endpoints.signSingle(ticket.token, signal);
     return renewed.error ? renewed : ok([{ partNumber: 1, ...renewed.data }]);
   };
-  return { signal, first: [{ partNumber: 1, ...ticket.put }], put, sign };
+  return { signal, urls, put, sign };
 }
 
 /**

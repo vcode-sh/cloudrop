@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("a resumed job sending its missing parts", () => {
-  it("pauses and resumes: the paused PUT stops, and the next pass signs and sends the parts left", async () => {
+  it("pauses and resumes: the paused PUT stops, and the next pass sends the parts left on their URLs (M4-F8)", async () => {
     const third = gate(nth("PUT part 3", 2));
     const setup = await reloaded(gate(partThree), third.fault);
     const job = setup.client.resume(setup.upload, fourParts());
@@ -63,7 +63,8 @@ describe("a resumed job sending its missing parts", () => {
       error: null,
       sent: [
         ...["POST /complete", "POST /sign", "PUT part 3"],
-        ...["POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
+        // The first pass's /sign signed parts 3 and 4: the next pass signs neither again.
+        ...["PUT part 3", "PUT part 4", "POST /complete"],
       ],
       object: bytesHash(FOUR_PARTS),
       stored: {},
@@ -121,8 +122,9 @@ describe("a resumed file whose probe got no answer (M9)", () => {
       retried: "done",
       sent: [
         ...["POST /complete", "POST /sign", "PUT part 3", "PUT part 4", "POST /complete"],
-        ...["POST /sign", "PUT part 3", "POST /complete"],
-        ...["POST /sign", "PUT part 3", "POST /complete"],
+        // Part 3's URL from the first /sign serves both repair rounds (M4-F8).
+        ...["PUT part 3", "POST /complete"],
+        ...["PUT part 3", "POST /complete"],
       ],
       stored: {},
     });
