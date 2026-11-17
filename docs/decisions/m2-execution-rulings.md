@@ -14,7 +14,9 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
   token never deletes a stored file; aborting an incomplete multipart upload is always allowed.
 - **Why:** owner decision on audit T10-1 (audit owner decision 1); spec §5.5 requires the delete.
 - **If wrong:** abort semantics and the 1.1 adapters' migration change with the product contract.
-- **Status:** in force; it is the final form of M2-D20.
+- **Status:** in force; it is the final form of M2-D20. Amended 2026-11-17 (M5-T8, M5-T28): with a database store and
+  a token marked `stored`, the row decides instead of the token's age: `/abort` never deletes a completed or completing
+  file, and cleans up an unfinished one even after `exp`. Tokens without the mark keep this rule.
 - **Visible in:** spec §5.5, `src/server/abort.ts`, `src/server/route.ts` (`onComplete` TSDoc).
 
 ### M2-X2: the Node adapter never rejects or crashes
@@ -256,7 +258,9 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 - **Why:** M2-D4 and the stateless design bind; durable revocation belongs to M5 limits and the 1.1 adapters.
 - **If wrong:** an aborted upload can land and complete again unless an app's `afterVerify` refuses it.
 - **Status:** in force. The docs lane found the "sign again" part holds for single PUT only (an aborted multipart
-  upload is gone).
+  upload is gone). Amended 2026-11-17 (M5-T6, M5-T7): with a database store, an ended row refuses `/sign` and
+  `/complete` with `UPLOAD_EXPIRED`, so `/abort` and `api.revokeUploads` revoke; a URL signed before stays usable for
+  its 15 minutes, and the sweep's cleanup pass removes what it uploads.
 - **Visible in:** spec §5.5 and §8, `docs/guide/server.md` ("The upload token and what it allows").
 
 ### M2-X28: a failed cleanup keeps the reservation; an own-object 412 is a retry

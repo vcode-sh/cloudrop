@@ -224,7 +224,8 @@ The server decides; the client cannot.
   `STORAGE_ERROR`; the upload stays open and the client completes again.
 - A retried or replayed request runs its hooks again: `afterVerify` and `onComplete` on `/complete`, `onAbort` on
   `/abort`. Their side effects are idempotent by the stable `file.id`; the server keeps no state that would run them
-  exactly once.
+  exactly once. (Amended 2026-11-17, M5-T7: with a database store, a retried `/complete` of a completed file is
+  answered from its row with no storage call and no hook, and `onComplete` runs once; see the M5 store spec §5.5.)
 
 ### 5.5 Abandoned uploads
 
@@ -242,7 +243,9 @@ a single-PUT URL signed before the abort stays usable for its 15 minutes, a sing
 through `/sign`, upload and complete, and any live token can delete its own completed object through `/abort`. (An
 aborted multipart upload is gone from the bucket, so its parts cannot be uploaded again.) An application that must
 refuse such a late upload checks its own record in `afterVerify` (for example a released quota reservation) and
-refuses it, which deletes the object. The 1.1 database adapters close this window.
+refuses it, which deletes the object. A database store closes this window (amended 2026-11-17, M5-T6 to M5-T8): the
+file's row refuses `/sign` and `/complete` once ended, and `/abort` never deletes a completed file; see the M5 store
+spec §5.4 and §5.6.
 
 ## 6. Client resilience
 
