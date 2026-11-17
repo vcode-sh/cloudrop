@@ -1039,4 +1039,113 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 
 ## Lanes, example and docs (task F)
 
+### M5-T84: D1 runs the store contract in Node, through Wrangler's `getPlatformProxy`
+
+- **Decision:** the Wrangler lane runs the store contract and the driver rows on the fixture's D1 binding
+  (`wrangler.jsonc` declares `DB`), reached from Node with `getPlatformProxy({ persist: false })`
+  (`src/testing/db/d1.ts`). The test file starts and stops workerd itself, in memory; `scripts/test-wrangler.sh` runs it
+  beside the storage contract. Gaps: `transaction` and `failureInjection`, each with its reason. The binding is typed
+  with `@cloudflare/workers-types` (dev only, 5.20261113.1, the release of the installed workerd), which proves that
+  the real `D1Database` fits `d1Executor`. `sqlStoreTarget` takes any SQLite database with `reset()`, described
+  structurally, so the database lane never loads Wrangler.
+- **Why:** the contract is a Vitest suite reading results through the raw reader, and the proxy hands Node the very
+  binding a Worker gets (batches measured atomic through it: a duplicate key rolled the batch back). Running the
+  suite inside workerd would need `@cloudflare/vitest-pool-workers`, a heavier dependency and a second Vitest setup,
+  and a fetch-handler bridge would test the bridge as much as D1. `createTestHarness` also works (measured); the
+  proxy is the documented API and keeps nothing on disk.
+- **If wrong:** if the proxy ever serialises values differently from a Worker, move the lane into workerd; the contract
+  files need no change. A probe that made `d1Executor`'s batch non-atomic was killed by four rows.
+- **Status:** decided.
+- **Source:** task F, 2026-11-17.
+- **Visible in:** `src/testing/db/d1.ts`, `src/adapters/sql-d1.wrangler.integration.test.ts`,
+  `fixtures/wrangler/wrangler.jsonc`, `scripts/test-wrangler.sh`, `src/testing/db/sql-target.ts`.
+
+### M5-T85: Drizzle over D1 runs its batches through the binding Drizzle keeps as `$client`
+
+- **Decision:** `drizzleStore` over a `drizzle-orm/d1` database detects the binding on `db.$client` (an object with
+  `prepare` and `batch`) and runs through `d1Executor`'s path. libsql and the synchronous drivers are unchanged. The
+  Wrangler lane runs the contract through `drizzleStore(drizzle(env.DB), { dialect: "sqlite" })`, gaps as M5-T84.
+  `tsconfig.drizzle.json` leaves the Wrangler file out, since the 1.0 type guard's copy installs neither Wrangler nor
+  the Workers types.
+- **Why:** measured: with drizzle-orm 0.45.4 every batch with parameters threw `Cannot read properties of undefined
+  (reading 'bind')` before reaching D1, because Drizzle's D1 `batch` reads a prepared `stmt` that `db.run(sql)` never
+  creates (`SQLiteRaw._prepare()` returns itself). Every contract case failed. 1.0.0-rc.5 prepares raw statements, but
+  the peer range admits 0.45, and `$client` exists on both lines.
+- **If wrong:** a Drizzle release that renames `$client` falls back to `db.batch`, which the lane would show red at once.
+- **Status:** decided; amends M5-T46 (task D's async SQLite path) for D1.
+- **Source:** task F, 2026-11-17.
+- **Visible in:** `src/adapters/drizzle/sqlite.ts`, `src/adapters/drizzle-d1.wrangler.integration.test.ts`,
+  `tsconfig.drizzle.json`.
+
+### M5-T86: the chaos lane's store is `sqlStore` over in-memory `node:sqlite`, and app faults lose finished answers
+
+- **Decision:** `useChaosFixture({ store: true })` gives the server `sqlStore(sqliteExecutor(db))` on the §3 DDL, one
+  owner, counters on `onComplete` and `afterComplete`, and a hold on the next `onComplete` (`chaos-server.ts`, which
+  now builds both servers). `faultApp` (`chaos-app.ts`) loses an answer the server already worked out: `reset` (the
+  connection drops before the client reads it), `late` (the client's deadline passes while the server works, at a
+  moment `until` places, such as when `onComplete` has started) and `gateway` (a proxy's status page replaces it).
+  `closeTab()` ends a client's calls as a closed tab would, `/abort` included. The lane's storage signs on the real
+  clock (captured `Date`), so the sweep row can move the server's clock a day ahead with fake `Date`.
+- **Why:** the store exists for answers lost after the server committed, which the bucket-side proxy cannot fault.
+  The real SQL core is a stronger oracle than the memory store, and it reads back through the raw reader. `late`
+  without `until` raced the first call's verification (two HEADs) when the row ran alone: a real 120 s deadline passes
+  long after `onComplete` starts.
+- **If wrong:** rows that need a Postgres transaction under chaos belong in `test:db`'s handler files, which have one.
+- **Status:** decided. Probes: completed rows treated as open, no replay, the sweep keeping the multipart upload and
+  `/sign` ignoring the row were each killed; deleting any object at a key (ignoring `cloudrop-id`) survived, as no
+  chaos row stores a foreign object at a swept key (the unit sweep tests cover it).
+- **Source:** task F, 2026-11-17.
+- **Visible in:** `src/chaos/store.chaos.integration.test.ts`, `src/testing/chaos-app.ts`,
+  `src/testing/chaos-server.ts`, `src/testing/chaos-fixture.ts`, `src/testing/chaos-bucket.ts`.
+
+### M5-T87: the example's store is opt-in, and the browser lanes run a second pass with it
+
+- **Decision:** `CLOUDROP_EXAMPLE_STORE=sqlite` (`.data/cloudrop.db`, git-ignored) or a path turns on
+  `sqlStore(sqliteExecutor(new DatabaseSync(path, { timeout: 5000 })))`, with cloudrop's tables from
+  `lib/cloudrop-tables.sql` and the app's `example_uploads` applied at startup. The route's `owner` is the demo user,
+  `quota` is `CLOUDROP_EXAMPLE_QUOTA_MB` (500 MB), `onComplete` records the upload idempotently (`ON CONFLICT … SET
+  completions = completions + 1`, so a second run shows), `afterComplete` logs a line, and `/api/usage` answers
+  `cloudrop.api.usage` plus the user's records, which the lab shows. Unset, the example is stateless and every earlier
+  row runs unchanged. `test:browser` and `test:browser:live` run Playwright twice: every row but
+  `*.store.browser.test.ts`, then those rows alone with the store on (a database of the run's own, removed after) and a
+  50 MB quota.
+- **Why:** one server per run (the bucket's CORS rule names port 5173 only), and the stateless default must stay
+  tested. Two passes cost a second `next build` of a few seconds.
+- **If wrong:** a store-only example app would avoid the second build, at the price of a second example to maintain.
+- **Status:** decided. The held-`/complete` row was killed by a probe that recorded each upload twice
+  (`completions: 2`).
+- **Source:** task F, 2026-11-17.
+- **Visible in:** `examples/next/lib/store.ts`, `examples/next/lib/cloudrop.ts`, `examples/next/app/api/usage/route.ts`,
+  `examples/next/app/lab/usage.tsx`, `examples/next/app/lab.store.browser.test.ts`, `examples/next/playwright.config.ts`,
+  `scripts/test-browser.sh`, `scripts/test-browser-live.ts`.
+
+### M5-T88: the store guide links to the shipped Prisma models, and a unit test keeps every DDL copy equal
+
+- **Decision:** `docs/guide/store.md` links to both `cloudrop.prisma` files rather than copying them. It does show the
+  plain DDL for Postgres and SQLite, each block marked `<!-- ddl:<dialect> -->`; `src/testing/db/schema.test.ts` checks
+  both blocks, and the example's `cloudrop-tables.sql` (with `IF NOT EXISTS`), against `schemaStatements`, the DDL
+  every lane tests the store on. The Prisma CHECK line in the guide was run on `postgres:18.6`: the three constraints
+  get the plain DDL's default names, and a negative `reserved_bytes` is refused.
+- **Why:** a copy nothing compares drifts (task E review M4). The DDL must be shown, since users run it; linking it
+  would send them to a test file. Probes that renamed a column in the guide and dropped an `IF NOT EXISTS` in the
+  example were both killed.
+- **If wrong:** if the docs move to generated pages, generate the blocks from `schemaStatements` instead.
+- **Status:** decided.
+- **Source:** task F, 2026-11-17.
+- **Visible in:** `docs/guide/store.md`, `src/testing/db/schema.test.ts`, `examples/next/lib/cloudrop-tables.sql`.
+
+### M5-T89: the docs sweep after M5
+
+- **Decision:** the base spec's "1.1" passages (§2, §3, §4, §5.2, §8) carry dated amendments naming M5; §3's table
+  lists the three adapter subpaths. The server guide names the store options and callbacks and points to the store
+  guide, and calls the plugins M6. The errors guide gains the store file API errors; the testing guide the D1, chaos
+  and browser store rows; the resume guide says a store answers a finished `/complete` from its row; the README the
+  feature, a store section, the docs row and `test:db`; `AGENTS.md` the gates; the plans README M5 as done on
+  `feat/m5-store`. The M5 spec's dangling "§5.9" now points at §5.7, where the idempotency key is discussed.
+- **Why:** spec §9 row F and the spec review's item 9.
+- **If wrong:** wording only.
+- **Status:** decided.
+- **Source:** task F, 2026-11-17.
+- **Visible in:** the files named above.
+
 <!-- Task F appends its entries above this line. -->
