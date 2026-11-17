@@ -115,6 +115,11 @@ export interface CompleteResponse<TResult = unknown> {
 
 export interface AbortRequest {
   token: string;
+  /**
+   * Never delete an object that landed, even while the token is valid: only an unfinished multipart upload is aborted
+   * (and, with a store, the row ended). The client's discard() sends it, for an upload a /complete may have finished.
+   */
+  keep?: boolean;
 }
 
 export interface AbortResponse {

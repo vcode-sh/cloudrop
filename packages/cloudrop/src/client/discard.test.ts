@@ -7,7 +7,23 @@
 // holds, the requests the fixture saw, and literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { gate, partThree, persistFixture, reloaded, serverError, unreachable } from "../testing/persist-fixture.ts";
+import type { ResumableUpload } from "../client.ts";
+import { MiB } from "../rules.ts";
+import type { Fault } from "../testing/client-fixture.ts";
+import {
+  bytesHash,
+  gate,
+  partThree,
+  persistFixture,
+  reloaded,
+  serverError,
+  threeParts,
+  unreachable,
+} from "../testing/persist-fixture.ts";
+
+/** threeParts()'s size: 16 MiB and 5 bytes. */
+const THREE_PARTS = 16 * MiB + 5;
+
 import { createRecords, type UploadRecord } from "./records.ts";
 
 const brief = (error: { code: string; message: string } | null) =>
@@ -72,6 +88,28 @@ describe("discard(upload)", () => {
     });
   });
 
+  it("keeps the object of an upload whose /complete finished while the page heard nothing (M3-U94)", async () => {
+    // The server completes the upload, and its answer never reaches the page, which then reloads: the record stays.
+    const answerLost: Fault = (call) =>
+      call.label === "POST /complete" ? call.forward(call.init).then(() => new Promise<never>(() => {})) : undefined;
+    const setup = persistFixture({ fault: answerLost });
+    setup.client.start("files", threeParts());
+    await vi.waitFor(() => expect(setup.fixture.requests).toContain("POST /complete"));
+    await setup.drained();
+    const client = setup.reload();
+    const [upload] = (await client.resumable()).data ?? [];
+    const key = setup.issued[0]?.key ?? "";
+
+    const result = await client.discard(upload as ResumableUpload);
+    await setup.db.settled();
+
+    expect({ result, stored: await setup.storedHash(key), records: Object.keys(setup.db.stored()) }).toEqual({
+      result: { data: { aborted: true }, error: null },
+      stored: bytesHash(THREE_PARTS),
+      records: [],
+    });
+  });
+
   it("refuses an upload another tab is sending, before any request, and keeps its record", async () => {
     const held = gate(partThree);
     const { client, upload, sent, locks } = await reloaded(held);
@@ -88,6 +126,25 @@ describe("discard(upload)", () => {
       },
       requests: [],
       listed: [upload],
+    });
+  });
+
+  it("refuses, before any request, where the browser refuses Web Locks, and keeps the record", async () => {
+    const { client, db, fixture } = persistFixture({ webLocks: "refused" });
+    createRecords(true).save(otherRecord());
+    await db.settled();
+    const { id, route, name, size, type, lastModified, expiresAt } = otherRecord();
+
+    const result = await client.discard({ id, route, name, size, type, lastModified, expiresAt });
+
+    expect({ error: brief(result.error), requests: fixture.requests, stored: Object.keys(db.stored()) }).toEqual({
+      error: {
+        code: "STORAGE_ERROR",
+        message:
+          "The browser did not let this page lock the upload, so it was left as it was. Reload the page, then try again.",
+      },
+      requests: [],
+      stored: ["other"],
     });
   });
 

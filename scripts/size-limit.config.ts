@@ -1,10 +1,10 @@
 // Size budgets for the published entries of packages/cloudrop, read by size-limit in `bun run package:check`.
 // The build moves code that entries share into hashed chunks, so each budget counts its entry together with every
 // chunk the entry imports, directly or through another chunk: what a consumer's bundler pulls in for that import.
-// Sizes are gzip, the unit the design spec states its size goals in. Since 2026-11-17 the ceilings carry wide headroom
-// for the work still to come (the plugins), by the owner's decision (M4-F24): a ceiling is a guard against accidents,
-// not a target. The size measured then is noted beside each; a change that grows an
-// entry by more than 5% says so in its commit and decision entry.
+// Sizes are gzip, the unit the design spec states its size goals in. Since 2026-11-17 the ceilings carry the wide
+// headroom the owner set for the store interface, landed since, and the M6 plugins (M4-F24): a ceiling is a guard
+// against accidents, not a target. The size measured then is noted beside each; a change that grows an entry by more
+// than 5% says so in its commit and decision entry.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -30,7 +30,7 @@ export default [
   // Summed files, not a bundle: these budgets count the entry and its chunks as published. Measured 2026-11-17 after
   // M5's final fix round: cloudrop 46.08 kB, next 1.16 kB, node 3.24 kB; after the /upload idempotency key (M5-T104):
   // cloudrop 46.27 kB. Since the build drops JSDoc from the .js (M4-F25): cloudrop 37.01 kB, next 0.78 kB, node
-  // 2.26 kB.
+  // 2.26 kB. After /abort's `keep` (M3-U94): cloudrop 37.08 kB.
   { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "50 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.5 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "4.5 kB", ...summed },
@@ -58,7 +58,8 @@ export default [
   },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
-  // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104).
+  // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.36 kB after /abort's
+  // `keep` (M3-U94).
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),
@@ -70,7 +71,7 @@ export default [
   },
   // Bundled and minified, the size an app ships. History: 8.35 kB after progress plan B, 10.57 kB after resume
   // (M3-U91), 11.03 kB after M4a (M4-F23), 11.09 kB after the /upload idempotency key (M5-T104), 11.3 kB after
-  // discard() (M3-U93).
+  // discard() (M3-U93), 11.32 kB once it sends `keep` (M3-U94).
   {
     name: "cloudrop/client",
     path: join(dist, "client.js"),

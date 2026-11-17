@@ -10,7 +10,7 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient } from "../client.ts";
+import { createCloudropClient, type ResumableUpload } from "../client.ts";
 import { createUploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
@@ -289,8 +289,8 @@ describe("useResumable's discard() and forget()", () => {
     const { useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => useResumable("files"));
     await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
-    const [record] = result.current.uploads;
-    if (!record) throw new Error("useResumable listed no upload.");
+    // The waitFor above proved the list holds exactly this upload.
+    const record = result.current.uploads[0] as ResumableUpload<"files">;
 
     const answer = await act(() => result.current.discard(record));
 

@@ -138,6 +138,55 @@ describe("POST /abort", () => {
     ]);
   });
 
+  describe("with keep: true (M3-U94)", () => {
+    it("keeps a single PUT that landed while the token is valid, and tells no plugin", async () => {
+      const calls: AbortContext[] = [];
+      const fixture = serverFixture({ files }, { plugins: [recordingPlugin(calls)] });
+      const ticket = await fixture.single("files", TEXT);
+      await fixture.send(ticket.put, new TextEncoder().encode("hello"));
+      const response = await fixture.post("abort", { token: ticket.token, keep: true });
+      expect([response.status, (await fixture.storage.head(ticket.key)).data?.size, calls]).toEqual([200, 5, []]);
+    });
+
+    it("still aborts an unfinished multipart upload and tells the plugins", async () => {
+      const calls: AbortContext[] = [];
+      const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [recordingPlugin(calls)] });
+      const ticket = await fixture.multipart("files", { name: "big.bin", size: 9 * MiB, type: "" });
+      const response = await fixture.post("abort", { token: ticket.token, keep: true });
+      expect([response.status, fixture.fake.pendingUploads(), calls.map((call) => call.reason)]).toEqual([
+        200,
+        0,
+        ["aborted"],
+      ]);
+    });
+
+    it.each([
+      { name: "a string", keep: "yes" },
+      { name: "null", keep: null },
+      { name: "a number", keep: 1 },
+    ])("refuses keep as $name with INVALID_INPUT and deletes nothing", async ({ keep }) => {
+      const fixture = serverFixture({ files });
+      const ticket = await fixture.single("files", TEXT);
+      await fixture.send(ticket.put, new TextEncoder().encode("hello"));
+      const response = await fixture.post("abort", { token: ticket.token, keep });
+      expect({
+        status: response.status,
+        body: await response.json(),
+        size: (await fixture.storage.head(ticket.key)).data?.size,
+      }).toEqual({
+        status: 400,
+        body: {
+          error: {
+            code: "INVALID_INPUT",
+            message: 'keep must be true or false. Send { "token": "...", "keep": true }, or leave keep out.',
+            retryable: false,
+          },
+        },
+        size: 5,
+      });
+    });
+  });
+
   it("refuses a token rebound to another key and deletes nothing", async () => {
     const fixture = serverFixture({ files: route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }) });
     await fixture.storage.put("victim.txt", "keep me");

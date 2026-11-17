@@ -175,14 +175,18 @@ const { data, error } = await client.discard(upload);
 if (error) showMessage(error.message); // the upload is still listed: try again later
 ```
 
-It takes the upload's Web Lock, as a resume would, sends `/abort` with the token the record keeps, deletes the record
-and lets the lock go. `/abort` aborts the multipart upload, so its parts leave the bucket at once; with a
-[database store](store.md) it also ends the upload's row and frees the bytes it reserved against the quota. The server
-takes an expired token for `/abort`, so any listed upload can be aborted.
+It takes the upload's Web Lock, as a resume would, sends `/abort` with the token the record keeps and `keep: true`,
+deletes the record and, once the delete has run, lets the lock go. `/abort` aborts the multipart upload, so its parts
+leave the bucket at once; with a [database store](store.md) it also ends the upload's row and frees the bytes it
+reserved against the quota. `keep` tells the server never to delete an object that landed: a listed upload may be one
+whose `/complete` finished while the page heard nothing (a reload during the last step, or an answer lost), and its file
+stays. The server takes an expired token for `/abort`, so any listed upload can be aborted. A server older than this
+release ignores `keep` and, while the token is valid, deletes such a finished file: update the server with the client.
 
 | What happens | Result | The record |
 | --- | --- | --- |
 | The server aborted the upload | `{ data: { aborted: true }, error: null }` | deleted |
+| The upload had already finished (its `/complete` went through unheard): the file is kept, nothing is aborted | `{ data: { aborted: true }, error: null }` | deleted |
 | The server refused the token for good (`INVALID_TOKEN`, `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD` and the other codes a new ticket would be needed for), for example after the server's secret changed | `{ data: { aborted: false }, error: null }` | deleted |
 | The record expired and the browser already deleted it, with its token (a minute before `expiresAt`) | `{ data: { aborted: false }, error: null }`, no request | already gone |
 | `/abort` did not get through (no connection, a server error, a timeout) | that error, such as a retryable `NETWORK_ERROR` | kept, for another try |
@@ -203,7 +207,8 @@ plain HTTP, such as a LAN address), nothing is read or written:
 
 - `resumable()` resolves `[]`;
 - `resume()` ends with `NOT_FOUND`;
-- `discard()` resolves `NOT_FOUND`, sending nothing;
+- `discard()` resolves `NOT_FOUND` (or `{ aborted: false }` for an upload within a minute of `expiresAt`), sending
+  nothing;
 - `forget()` resolves `{ forgotten: 0 }`.
 
 The same goes where the browser refuses the lock (a document no longer active, an opaque origin): that upload keeps no

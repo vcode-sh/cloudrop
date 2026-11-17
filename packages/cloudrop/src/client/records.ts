@@ -39,7 +39,8 @@ export interface Records {
    * is dropped: an upload never waits for or fails on the store.
    */
   save(record: UploadRecord | Promise<UploadRecord>): void;
-  remove(id: string): void;
+  /** Resolves once the delete has run (a failure resolves STORAGE_ERROR); most callers ignore it. */
+  remove(id: string): Promise<Result<unknown>>;
   /** The namespace's unexpired records, newest first (`savedAt` descending); expired ones are removed. */
   list(namespace: string): Promise<Result<UploadRecord[]>>;
   /** Deletes the namespace's records, or every record when `namespace` is null; resolves the count. */
@@ -54,7 +55,7 @@ export const EXPIRY_MARGIN_MS = 60_000;
 const noRecords: Records = {
   enabled: false,
   save: () => undefined,
-  remove: () => undefined,
+  remove: async () => ok(undefined),
   list: async () => ok([]),
   clear: async () => ok(0),
 };
@@ -197,9 +198,7 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
       work.catch(() => undefined);
       void enqueue(work);
     },
-    remove(id) {
-      void enqueue((store) => store.delete(id));
-    },
+    remove: (id) => enqueue((store) => store.delete(id)),
     list: (namespace) =>
       enqueue((store, settle) =>
         onResult(store.getAll(), (all: UploadRecord[]) => {

@@ -241,13 +241,16 @@ The server decides; the client cannot.
 ### 5.5 Abandoned uploads
 
 The client calls `/abort` when a user cancels and when a file fails after `/upload` (abort is free on R2; after a
-failure it runs in the background, M3-S15). The client never sends `/abort` after a `/complete` that may have
-succeeded. `/abort` aborts a multipart upload and, while the token is valid, deletes the upload's own object (matched
-by `cloudrop-id`), even after `/complete`. An expired token only
-aborts; it never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed,
-so that upload can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with
-`UNKNOWN_ROUTE`. Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle
-rule; `api.checkBucket()` verifies it exists.
+failure it runs in the background, M3-S15). The client never sends an `/abort` that may delete after a `/complete` that
+may have succeeded (`discard()` sends `keep`, below). `/abort` aborts a multipart upload and, while the token is valid,
+deletes the upload's own object (matched by `cloudrop-id`), even after `/complete`. An expired token only aborts; it
+never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed, so that upload
+can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with `UNKNOWN_ROUTE`.
+Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle rule; `api.checkBucket()` verifies it
+exists. `/abort { token, keep: true }` never deletes an object that landed, whatever the token's age or the row's
+status: it aborts an unfinished multipart upload and ends a store's pending row, and runs `onAbort` only when no object
+of this upload exists. `keep` can only narrow what the token allows; anything but a boolean is `INVALID_INPUT`. The
+client sends it only from `discard()`, for an upload a `/complete` may have finished (amended 2026-11-17, M3-U94).
 
 `/abort` is cleanup, not revocation. The server keeps no state, so until the token expires 24 hours after `/upload`:
 a single-PUT URL signed before the abort stays usable for its 15 minutes, a single-PUT token can still get a new URL

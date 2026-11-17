@@ -40,9 +40,9 @@ export interface Endpoints {
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
   /**
    * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects. Only discard() reads
-   * the result (M3-U93); the answer's id is ignored.
+   * the result (M3-U93), and only discard() sends `keep` (M3-U94); the answer's id is ignored.
    */
-  abort(token: string): Promise<Result<true>>;
+  abort(token: string, options?: { keep: true }): Promise<Result<true>>;
 }
 
 // How long each call may wait for its whole answer, so a server that never answers cannot hold a file queued,
@@ -142,6 +142,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
     complete: (token) => post("complete", { token }, { timeoutMs: COMPLETE_TIMEOUT_MS }, readCompleted),
     // The body is a token, far under the 64 KiB a browser allows keepalive requests. A failed /abort changes nothing
     // for a cancelled upload; the lifecycle rule cleans up.
-    abort: (token) => post("abort", { token }, { keepalive: true, timeoutMs: ABORT_TIMEOUT_MS }, () => true),
+    abort: (token, options) =>
+      post("abort", { token, ...options }, { keepalive: true, timeoutMs: ABORT_TIMEOUT_MS }, () => true),
   };
 }

@@ -16,7 +16,9 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 - **If wrong:** abort semantics and the 1.1 adapters' migration change with the product contract.
 - **Status:** in force; it is the final form of M2-D20. Amended 2026-11-17 (M5-T8, M5-T28): with a database store and
   a token marked `stored`, the row decides instead of the token's age: `/abort` never deletes a completed or completing
-  file, and cleans up an unfinished one even after `exp`. Tokens without the mark keep this rule.
+  file, and cleans up an unfinished one even after `exp`. Tokens without the mark keep this rule. Amended 2026-11-17
+  (M3-U94): `/abort { token, keep: true }` never deletes a landed object, whatever the token's age; only the client's
+  `discard()` sends it.
 - **Visible in:** spec §5.5, `src/server/abort.ts`, `src/server/route.ts` (`onComplete` TSDoc).
 
 ### M2-X2: the Node adapter never rejects or crashes

@@ -86,6 +86,18 @@ describe("POST /abort with a store", () => {
     expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
   });
 
+  it("with keep: true, ends a pending row and frees its bytes, but keeps an object that landed (M3-U94)", async () => {
+    const reasons: AbortContext["reason"][] = [];
+    const fixture = storeFixture({ owned }, { plugins: [recorder(reasons)] });
+    const ticket = await fixture.single("owned", TEXT);
+    // Landed, and /complete never arrived: the page reloaded before it, or its answer was lost.
+    await fixture.send(ticket.put, hello);
+    const response = await fixture.post("abort", { token: ticket.token, keep: true });
+    expect([response.status, (await fixture.storage.head(ticket.key)).data?.size, reasons]).toEqual([200, 5, []]);
+    expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+  });
+
   it("does nothing for a stored token whose row is missing", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);

@@ -1551,10 +1551,12 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 
 ### M3-U93: `discard(upload)` drops one listed upload without its file
 
-- **Decision:** `client.discard(upload)` takes an upload from `resumable()` and resolves `Result<{ aborted: boolean }>`;
-  it never rejects. It claims the id (so `resumable()` leaves it out meanwhile, `M4-F22`), reads the namespace's
-  records, takes the upload's Web Lock without waiting (`M3-U73`), sends `/abort` with the token the record keeps,
-  deletes the record once `/abort` has answered, then lets the lock and the claim go. Outcomes:
+- **Decision:** `client.discard(upload)` takes an upload from `resumable()` and resolves `Result<{ aborted: boolean }>`
+  (an inline shape, as `forget()`'s; no named type is exported); it never rejects. It claims the id (so `resumable()`
+  leaves it out meanwhile, `M4-F22`), reads the namespace's records, takes the upload's Web Lock without waiting
+  (`M3-U73`), sends `/abort` with the token the record keeps and `keep: true` (`M3-U94`), deletes the record once
+  `/abort` has answered and waits for that delete to run (`Records.remove` now resolves when it has), then lets the
+  lock and the claim go, so no other tab finds the record with its lock free in between. Outcomes:
   - `/abort` answered: the record is deleted, `{ aborted: true }`.
   - `/abort` refused with a code no attempt with that ticket can pass (`NEEDS_NEW_TICKET`: `INVALID_TOKEN`,
     `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD` and the refusals): the record is deleted, `{ aborted: false }`.
@@ -1579,8 +1581,35 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   failure keeps the record because deleting it would leave the upload with no way to abort it from this browser.
 - **If wrong:** if deleting the record on any failure proves simpler for apps, it is one branch; the result shape stays.
   A `forget()` that also aborts would be a second option, not a change to this one.
-- **Status:** in force (task B fix round 1, M4b).
+- **Status:** in force (task B fix round 1, M4b). Amended in fix round 2 (re-review N1, N2, N5): `/abort` carries
+  `keep` (`M3-U94`), the record delete is awaited inside the lock, and the `Discarded` type is no longer exported.
 - **Source:** controller ruling on task B's concern 1, 2026-11-17.
 - **Visible in:** `client/discard.ts`, `client/discard.test.ts`, `client/endpoints.ts` (`abort`), `client/failures.ts`
-  (`notListed`, `lockRefused`), `client.ts` (`CloudropClient.discard`, `Discarded`),
+  (`notListed`, `lockRefused`), `client/records.ts` (`remove`), `client.ts` (`CloudropClient.discard`),
   `docs/guide/resume.md#discard-one-upload`.
+
+### M3-U94: `/abort` accepts `keep`, and `discard()` sends it
+
+- **Decision:** the `/abort` body is `{ token, keep? }`. `keep` must be a boolean when present; anything else is
+  `INVALID_INPUT` ("keep must be true or false. Send { "token": "...", "keep": true }, or leave keep out."). With
+  `keep: true` the handler takes its existing keep-stored branch on both paths: it aborts an unfinished multipart upload,
+  never deletes an object of this upload that landed, and runs `onAbort` only when no such object exists; with a store,
+  a pending row still ends as aborted and frees its reservation, and a completed or completing row is kept as before.
+  `keep` can only narrow what the token allows. Only `discard()` sends it (`Endpoints.abort(token, { keep: true })`);
+  a cancel, `drop()` and the `/upload` cleanup send `{ token }` as before. The protocol type `AbortRequest` gains
+  `keep?: boolean`. This series owns the change because it exists for `discard()`'s resume semantics; `M2-X1`, which
+  owns `/abort`'s delete rule, carries an amendment note.
+- **Why:** a record can outlive a `/complete` that finished: the page reloaded while the file was completing, or a
+  failed `upload()` kept its record for a resume to settle the doubt (`M3-U82`). `discard()` of such a record sent
+  `/abort` with a live token, and without a store the server deleted the finished object and ran `onAbort`, although
+  `onComplete` had recorded it (re-review N1). Every other client path refuses that delete (`M3-H16`). The server
+  already had the branch that keeps a landed object (an expired token's); asking for it is exact, needs no extra
+  IndexedDB write per completion, and covers records older versions wrote.
+- **If wrong:** a client-side mark on the record before the first `/complete` (re-review option B) would make
+  `discard()` send nothing for such a record; it costs a write per completion and misses older records.
+- **Status:** in force (task B fix round 2, M4b). A server older than this ignores `keep` and keeps today's behaviour;
+  `docs/guide/resume.md` says to update the server with the client.
+- **Source:** task B re-review N1, controller ruling 2026-11-17.
+- **Visible in:** `server/abort.ts`, `server/abort.test.ts` and `server/store-abort.test.ts` (the `keep` rows),
+  `protocol/types.ts` (`AbortRequest`), `client/endpoints.ts` (`abort`), `client/discard.ts`,
+  `client/discard.test.ts` (the finished-unheard row), spec §5.5, `docs/guide/server.md`, `docs/guide/resume.md`.
