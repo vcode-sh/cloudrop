@@ -11,12 +11,6 @@ import type { UploadTokenPayload } from "./token.ts";
 
 const MAX_OWNER_LENGTH = 255;
 
-/** Why a file was not started, and what its plugins are told: "rejected" for its quota, "failed" otherwise. */
-export interface StoreRefusal {
-  error: CloudropError;
-  reason: "rejected" | "failed";
-}
-
 /** The route's owner for this upload: who its files count against. A bad value is the route's bug. */
 export async function readOwner(route: RouteConfig, context: OwnerContext<object, unknown>): Promise<string | null> {
   if (!route.definition.owner) return null;
@@ -65,12 +59,11 @@ export async function reserveFiles(
     metadataJson: string | undefined;
     exp: number;
   },
-): Promise<ReadonlyMap<string, StoreRefusal>> {
+): Promise<ReadonlyMap<string, CloudropError>> {
   const { store } = config;
   const { route, owner, files } = input;
   if (!store || files.length === 0) return new Map();
-  const everyFile = (error: CloudropError) =>
-    new Map(files.map((file): [string, StoreRefusal] => [file.id, { error, reason: "failed" }]));
+  const everyFile = (error: CloudropError) => new Map(files.map((file) => [file.id, error]));
   const limit = await readLimit(config, route, owner);
   if (limit.error) return everyFile(limit.error);
   const metadata = input.metadataJson ?? null;
@@ -89,9 +82,7 @@ export async function reserveFiles(
   );
   if (reserved.error) return everyFile(reserved.error);
   const refused = files.filter((_, index) => reserved.data[index] !== "reserved");
-  return new Map(
-    refused.map((file): [string, StoreRefusal] => [file.id, { error: quotaExceeded(), reason: "rejected" }]),
-  );
+  return new Map(refused.map((file) => [file.id, quotaExceeded()]));
 }
 
 /** Stores a new multipart upload's id on its row. An error means the upload must be aborted and the file not started. */
@@ -118,17 +109,20 @@ export async function releaseUnstarted(
   config: ServerConfig,
   shared: { route: string; metadata: unknown; auth: unknown },
   unstarted: readonly PluginFile[],
-  refusals: ReadonlyMap<string, StoreRefusal>,
+  refusals: ReadonlyMap<string, CloudropError>,
 ): Promise<void> {
   const { store, plugins, logger } = config;
-  const overQuota = unstarted.filter((file) => refusals.get(file.id)?.reason === "rejected");
+  const overQuota = unstarted.filter((file) => refusals.get(file.id)?.code === "QUOTA_EXCEEDED");
   const failed = unstarted.filter((file) => !overQuota.includes(file));
   if (store) {
-    for (const file of failed.filter(({ id }) => !refusals.has(id))) {
-      await storeCall(logger, `end the unstarted file ${file.id}`, () =>
-        store.end(file.id, "pending", "failed", new Date()),
-      );
-    }
+    const reserved = failed.filter(({ id }) => !refusals.has(id));
+    await Promise.all(
+      reserved.map((file) =>
+        storeCall(logger, `end the unstarted file ${file.id}`, () =>
+          store.end(file.id, "pending", "failed", new Date()),
+        ),
+      ),
+    );
   }
   await runOnAbort(plugins, abortContexts(shared, overQuota, "rejected"), logger);
   await runOnAbort(plugins, abortContexts(shared, failed, "failed"), logger);

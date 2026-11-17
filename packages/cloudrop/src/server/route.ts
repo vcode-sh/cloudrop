@@ -146,8 +146,10 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
   owner?: (context: OwnerContext<TAuth, TMetadata>) => Awaitable<string | null>;
   /**
    * With a store: runs after the completion is recorded, at most once per file and best effort. A crash right after the
-   * recording skips it, and a throw is logged while the client still gets its answer. Call storage and other network
-   * services here, not in `onComplete`; for work that must happen, write an outbox row through `tx` in `onComplete`.
+   * recording skips it, and a throw is logged while the client still gets its answer, which waits for it: keep it short.
+   * Call storage and other network services here, not in `onComplete`; for work that must happen, write an outbox row
+   * through `tx` in `onComplete`. Write it after `onComplete`: TypeScript infers `data`'s type from `onComplete` only
+   * when `onComplete` comes first.
    */
   afterComplete?: (context: AfterCompleteContext<TAuth, TMetadata, TResult>) => Awaitable<void>;
 }
