@@ -208,7 +208,7 @@ describe("useUpload", () => {
     expect(statuses(result.current.files)).toEqual(["a.txt done", "b.txt done"]);
   });
 
-  it("sends the latest render's metadata, unless the call passes its own, with controls that keep their identity", async () => {
+  it("sends the latest render's metadata unless the call passes its own, and keeps every control's identity", async () => {
     const { useUpload } = setup();
     const { result, rerender } = renderHook(({ tag }) => useUpload("tagged", { metadata: { tag } }), {
       initialProps: { tag: "first" },
