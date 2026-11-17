@@ -31,30 +31,26 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   // Event handlers read the committed render's route and options, so the functions below never change.
   const controller = { latest: initial, store };
 
-  function start(
-    route: string,
-    files: readonly unknown[],
-    begin: (client: CloudropClient) => UploadJob<unknown>,
-  ): Promise<UploadResult<unknown>> {
+  function start(begin: (client: CloudropClient) => UploadJob<unknown>): Promise<UploadResult<unknown>> {
     const client = source.client();
     if (client.error) return Promise.resolve({ data: null, error: client.error });
     const job = begin(client.data);
     store.add(job);
-    source.track(job, route, files);
+    source.track(job);
     return job.done;
   }
   const upload: Hook["upload"] = (files, call = {}) => {
-    // As the client reads its argument (readFiles in client/arguments.ts): a list, or one value it checks is a File.
-    const list = files === null ? [] : isList(files) ? Array.from(files) : [files];
-    if (list.length === 0) return Promise.resolve(null);
+    // Anything but null or an empty list goes to the client, which checks it is a File or a list of them (readFiles in
+    // client/arguments.ts).
+    if (files === null || (isList(files) && files.length === 0)) return Promise.resolve(null);
     const { route, options } = controller.latest;
     const metadata = "metadata" in call ? call.metadata : options.metadata;
-    return start(route, list, (client) => client.start(route, list, { metadata }));
+    return start((client) => client.start(route, files, { metadata }));
   };
   function resume(): void;
   function resume(upload: ResumableUpload, file: File): Promise<UploadResult<unknown>>;
   function resume(...record: [] | [ResumableUpload, File]): Promise<UploadResult<unknown>> | undefined {
-    if (record.length === 2) return start(record[0].route, [record[1]], (client) => client.resume(...record));
+    if (record.length === 2) return start((client) => client.resume(...record));
     for (const job of store.jobs()) job.resume();
   }
   const onChange: InputProps["onChange"] = (event) => {

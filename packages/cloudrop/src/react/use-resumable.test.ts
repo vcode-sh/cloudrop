@@ -1,32 +1,21 @@
 // @vitest-environment happy-dom
-// Contract: spec §6.1 and §6.2 (M4-B2, M4-B3, M4-B12): useResumable lists the client's resumable() without the uploads
-// this page holds through the hooks (running, paused, failed and waiting for retry(), or being resumed), read after
-// mount, when a job starts and whenever one of its files ends or starts again; `[]` before the first read.
-// useUpload's resume(upload, file) continues a record into that hook's `files`; refresh() reads again and resolves with
-// the listed Result.
+// Contract: spec §6.1 and §6.2 (M4-B2, M4-B3, M4-B12): useResumable lists the client's resumable(), which leaves out
+// the uploads this page holds (M4-F22), read after mount, when a job of the hooks starts, whenever one of its files ends
+// or starts again, and when it settles; `[]` before the first read. useUpload's resume(upload, file) continues a record
+// into that hook's `files`; refresh() reads again and resolves with the client's Result.
 // Oracle: the page before the reload (persist-fixture's reloaded(): a four-part upload interrupted after two parts)
 // leaves exactly one record; a failed multipart file of start() keeps its record for retry(), and a file that ends done
-// deletes it (resume spec §2, client/persist.ts); the client's own resumable() is what the browser keeps.
+// deletes it (resume spec §2, client/persist.ts); the fake IndexedDB holds what the browser keeps.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUploadHooks } from "../react.ts";
-import type { Fault } from "../testing/client-fixture.ts";
-import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { fourParts, gate, nth, partThree, persistFixture, reloaded, threeParts } from "../testing/persist-fixture.ts";
-import { fast } from "../testing/react-fixture.ts";
+import { failing, fast } from "../testing/react-fixture.ts";
 
 const ids = (uploads: readonly { id: string }[] | null | undefined) => uploads?.map(({ id }) => id);
-
-/** Every attempt at the PUT `label` (from its `fromNth` call on) fails while `failing.on`: the file ends failed. */
-function failing(label: string, fromNth = 1) {
-  const failing = { on: true };
-  const fault: Fault = (call) =>
-    failing.on && call.label === label && call.nth >= fromNth
-      ? errorResponse(500, "InternalError", "We encountered an internal error. Please try again.")
-      : undefined;
-  return { failing, fault };
-}
+/** The ids of the records the fake IndexedDB holds. */
+const stored = (setup: { db: { stored(): Record<string, unknown> } }) => Object.keys(setup.db.stored());
 
 beforeEach(() => {
   // Every backoff wait becomes 0 ms.
@@ -90,7 +79,7 @@ describe("useResumable", () => {
     await waitFor(() => expect(result.current.resumable.uploads).toEqual([]), fast);
     const whileRunning = {
       status: result.current.hook.files[0]?.status,
-      kept: ids((await setup.client.resumable()).data),
+      kept: stored(setup),
     };
     resumedPart.open();
     await act(() => resumed);
@@ -103,7 +92,7 @@ describe("useResumable", () => {
   });
 
   it("never lists this page's failed file, and lists nothing once its retry() ends done", async () => {
-    const broken = failing("PUT part 2");
+    const broken = failing((call) => call.label === "PUT part 2");
     const setup = persistFixture({ fault: broken.fault, options: { concurrency: 1 } });
     const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
@@ -112,7 +101,7 @@ describe("useResumable", () => {
     const whileFailed = {
       status: result.current.hook.files[0]?.status,
       listed: ids((await act(() => result.current.resumable.refresh())).data),
-      kept: (await setup.client.resumable()).data?.length,
+      kept: stored(setup).length,
     };
     broken.failing.on = false;
     await act(() => result.current.hook.files[0]?.retry());
@@ -121,7 +110,7 @@ describe("useResumable", () => {
     expect({
       whileFailed,
       after: result.current.resumable.uploads,
-      kept: (await setup.client.resumable()).data,
+      kept: stored(setup),
     }).toEqual({
       whileFailed: { status: "failed", listed: [], kept: 1 },
       after: [],
@@ -129,41 +118,67 @@ describe("useResumable", () => {
     });
   });
 
-  it("lists nothing once this page cancels its running upload, whose record the client deletes", async () => {
-    const third = gate(partThree);
-    const setup = persistFixture({ fault: third.fault, options: { concurrency: 1 } });
+  it("lists an upload again once its resume is cancelled while its checks run", async () => {
+    const setup = await reloaded(gate(partThree));
     const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
-    let done: Promise<unknown> = Promise.resolve();
-    act(() => {
-      done = result.current.hook.upload(threeParts());
-    });
-    await act(() => third.reached);
-    await setup.drained();
-    const keptWhileRunning = (await setup.client.resumable()).data?.length;
-    act(() => result.current.hook.abort());
-    await act(() => done);
-    await setup.drained();
+    await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
+    const [record] = result.current.resumable.uploads;
+    if (!record) throw new Error("useResumable listed no upload.");
 
-    expect({ keptWhileRunning, listed: result.current.resumable.uploads }).toEqual({ keptWhileRunning: 1, listed: [] });
+    const resumed = act(() => {
+      const answer = result.current.hook.resume(record, fourParts());
+      // Ends the file at once (M4-F2); the checks still run, and let the upload go when they end.
+      result.current.hook.abort();
+      return answer;
+    });
+    const answer = await resumed;
+    await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
+
+    expect({ code: answer.error?.code, status: result.current.hook.files[0]?.status }).toEqual({
+      code: "ABORTED",
+      status: "aborted",
+    });
   });
 
-  it("lists an earlier upload again once the same file, uploaded anew, ends done after a retry()", async () => {
+  it("lists an upload while another tab holds it, and nothing once the refused resume's retry() ends done", async () => {
+    const setup = await reloaded(gate(partThree));
+    const otherTabLetsGo = setup.locks.holdElsewhere(`cloudrop:upload:${setup.upload.id}`);
+    const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
+    await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
+    const [record] = result.current.resumable.uploads;
+    if (!record) throw new Error("useResumable listed no upload.");
+
+    const refused = (await act(() => result.current.hook.resume(record, fourParts()))).error?.code;
+    await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
+    otherTabLetsGo();
+    const retried = await act(() => result.current.hook.files[0]?.retry());
+    await setup.drained();
+    await waitFor(() => expect(result.current.resumable.uploads).toEqual([]), fast);
+
+    expect({ refused, retried: retried?.status, stored: stored(setup) }).toEqual({
+      refused: "UPLOAD_IN_USE",
+      retried: "done",
+      stored: [],
+    });
+  });
+
+  it("keeps listing an earlier upload while the same file is uploaded anew", async () => {
     // The new upload's part 2 fails: the page before the reload sent part 2 once already.
-    const broken = failing("PUT part 2", 2);
+    const broken = failing((call) => call.label === "PUT part 2" && call.nth >= 2);
     const setup = await reloaded(gate(partThree), broken.fault);
     const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
     await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
-    // Uploaded anew, not resumed: a new upload of the same file, which the list cannot tell from the earlier one's.
+    // Uploaded anew, not resumed: a new upload under its own id, which resumable() tells from the earlier one's.
     await act(() => result.current.hook.upload(fourParts()));
     await setup.drained();
-    const whileFailed = ids(result.current.resumable.uploads);
-    broken.failing.on = false;
-    await act(() => result.current.hook.files[0]?.retry());
-    await setup.drained();
-    await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
 
-    expect({ whileFailed, status: result.current.hook.files[0]?.status }).toEqual({ whileFailed: [], status: "done" });
+    expect({
+      status: result.current.hook.files[0]?.status,
+      listed: ids(result.current.resumable.uploads),
+      stored: stored(setup).length,
+    }).toEqual({ status: "failed", listed: [setup.upload.id], stored: 2 });
   });
 });

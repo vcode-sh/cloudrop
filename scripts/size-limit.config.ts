@@ -52,8 +52,8 @@ export default [
   },
   // Bundled and minified without react and without the client's chunks (the client and its errors), which an app that
   // uses the hooks ships anyway. react.js holds all of src/react, since no other entry imports it. The design aimed at
-  // 1.5 kB (M4-B5); the hooks measured 2.07 kB with every promise of the contract kept, after the review's fixes added
-  // the resumable list's tracking of held uploads, so the ceiling is that plus about 10% (M4-B10).
+  // 1.5 kB (M4-B5); the hooks measured 1.87 kB with every promise of the contract kept, once the client's resumable()
+  // left out the uploads this page holds (M4-F22), so the ceiling is that plus about 10% (M4-B10).
   {
     name: "cloudrop/react",
     path: join(dist, "react.js"),
@@ -63,6 +63,6 @@ export default [
       external: [...(config.external ?? []), "react", "./client-*", "./errors-*"],
     }),
     gzip: true,
-    limit: "2.3 kB",
+    limit: "2.05 kB",
   },
 ];

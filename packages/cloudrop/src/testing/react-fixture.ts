@@ -4,7 +4,7 @@
 import type { UploadFile } from "../react/types.ts";
 import { createUploadHooks } from "../react.ts";
 import type { Route } from "../server/route.ts";
-import { clientFixture, type Fault } from "./client-fixture.ts";
+import { clientFixture, type Fault, type FaultCall } from "./client-fixture.ts";
 import { errorResponse } from "./fake-r2/responses.ts";
 import { gate } from "./persist-fixture.ts";
 
@@ -20,15 +20,18 @@ export const note = (text: string, name: string): File => new File([text], name,
 /** Holds the single PUT of the file of `size` bytes: sizes 5, 6 and 7 tell the files apart. */
 export const holdPut = (size: number): ReturnType<typeof gate> =>
   gate((call) => call.label === "PUT object" && (call.init.body as Blob).size === size);
-/** Every PUT of a file of `size` bytes fails while `failing.on`, through all its attempts: STORAGE_ERROR. */
-export function failPut(size: number): { failing: { on: boolean }; fault: Fault } {
+/** Every call `matches` picks fails while `failing.on`, through all its attempts: a PUT ends STORAGE_ERROR. */
+export function failing(matches: (call: FaultCall) => boolean): { failing: { on: boolean }; fault: Fault } {
   const failing = { on: true };
   const fault: Fault = (call) =>
-    failing.on && call.label === "PUT object" && (call.init.body as Blob).size === size
+    failing.on && matches(call)
       ? errorResponse(500, "InternalError", "We encountered an internal error. Please try again.")
       : undefined;
   return { failing, fault };
 }
+/** Every PUT of a file of `size` bytes fails while `failing.on`. */
+export const failPut = (size: number): ReturnType<typeof failing> =>
+  failing((call) => call.label === "PUT object" && (call.init.body as Blob).size === size);
 /** "a.txt done", "b.txt uploading": a file reduced to its name and status. */
 export const statuses = (files: readonly UploadFile<unknown>[]): string[] =>
   files.map((file) => `${file.name} ${file.status}`);

@@ -1,6 +1,6 @@
-// useResumable (spec §6.1, M4-B3, M4-B12): the client's resumable() list without the uploads this page holds through
-// the hooks, read after mount, when a job starts and whenever one of its files ends or starts again. Only reads happen
-// in the effect; StrictMode's second effect reads once more and changes nothing.
+// useResumable (spec §6.1, M4-B3, M4-B12): the client's resumable() list, which leaves out the uploads this page holds
+// (M4-F22), read after mount and whenever a job of the hooks may have changed it (job-tracker.ts). Only reads happen in
+// the effect; StrictMode's second effect reads once more and changes nothing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Result, ResumableUpload } from "../client.ts";
@@ -17,11 +17,9 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     const read = ++reads.current;
     const client = source.client();
     const answer = client.error ? client : await client.data.resumable(route);
-    // Filtered when the read answers, against what the page holds then.
-    const listed = answer.error ? answer : { data: answer.data.filter((upload) => !source.holds(upload)), error: null };
     // A read that answers after a newer one started must not replace the newer list.
-    if (read === reads.current) setUploads(listed.data ?? NO_UPLOADS);
-    return listed;
+    if (read === reads.current) setUploads(answer.data ?? NO_UPLOADS);
+    return answer;
   }, [source, route]);
   useEffect(() => {
     void refresh();
