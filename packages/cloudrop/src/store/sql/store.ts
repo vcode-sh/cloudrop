@@ -69,17 +69,24 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
       let answer: { value: T } | undefined;
       try {
         return await transaction<T>(async (inner, tx) => {
-          if (dialect === "postgres") await inner.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, []);
           const methods = methodsOver({ executor: inner, dialect, tables });
-          // Another /complete holds the row lock past the timeout: the row is busy, not broken.
+          const lockTimeout = async (value: string) => {
+            if (dialect === "postgres") await inner.query(`SET LOCAL lock_timeout = ${value}`, []);
+          };
+          // The cap covers the claim alone: onComplete's own statements through tx wait as long as the database lets
+          // them. Another /complete holding the row lock past the cap makes the row busy, not broken.
           const claim: StoreMethods["claim"] = async (...args) => {
+            await lockTimeout(`'${LOCK_TIMEOUT}'`);
+            let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
             try {
-              return await methods.claim(...args);
+              outcome = await methods.claim(...args);
             } catch (error) {
               if (!isLockTimeout(error)) throw error;
               timedOut = true;
               return { kind: "busy" };
             }
+            await lockTimeout("DEFAULT");
+            return outcome;
           };
           const value = await run(tx, { ...methods, claim });
           answer = { value };
