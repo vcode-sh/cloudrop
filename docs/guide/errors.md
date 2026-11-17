@@ -123,7 +123,7 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 | `INVALID_CONFIG` | `createCloudrop`, `route`, `r2`, `s3`, `createCloudropClient`, `toNextHandler`, `toNodeHandler`, and a plugin's `extendRoute` | Fix the option the message names. A missing setting names its environment variable when there is one. |
 
 Settings read from the environment (`CLOUDROP_SECRET`, `CLOUDROP_R2_*`, `CLOUDROP_S3_*`) are reported on the first
-request instead of thrown, and `INVALID_CONFIG` then arrives in a result: the handler logs it once and answers every
+request instead of thrown, and `INVALID_CONFIG` then arrives in a result: the handler logs it (again only when the message changes) and answers every
 request with `SERVER_ERROR` 500, every `cloudrop.api` call returns `{ data: null, error }` with it, and a storage
 preset's own methods return it until its settings are complete. See
 [Every request answers 500](troubleshooting.md#every-request-answers-500-server_error).

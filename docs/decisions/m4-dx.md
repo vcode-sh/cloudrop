@@ -328,8 +328,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   reads and key imports.
 - **If wrong:** a misconfigured production server starts and fails on its first request instead of at boot, which a
   health check that hits the handler catches; development still fails at start.
-- **Size:** M4-F15 to M4-F18 together take the summed `cloudrop` budget from 34.09 to 36.33 kB gzip (published files
-  with their doc comments) and the bundled one from 21.32 to 22.16 kB, measured 2026-11-17 against `c31a8b0`. The
+- **Size:** M4-F15 to M4-F18 together take the summed `cloudrop` budget from 34.09 to 36.66 kB gzip (published files
+  with their doc comments) and the bundled one from 21.32 to 22.32 kB, measured 2026-11-17 after the fix round. The
   bundled budget (23.5 kB, M4-F14) holds; the summed one rises from 36 to 40 kB, the measured size plus about 10% as
   `scripts/size-limit.config.ts` prescribes. `readSetting` lives in `storage/lazy-driver.ts`, not `errors.ts`, which
   would have put it in the chunk `cloudrop/next` and `cloudrop/node` import (+0.15 kB each, measured).
