@@ -62,7 +62,14 @@ function contained(logger: Logger): Logger {
   };
 }
 
-async function answer(request: Request, config: ServerConfig, hint: (request: Request) => void): Promise<Response> {
+interface Reporters {
+  /** A refused origin that may be the app's own behind a proxy. */
+  origin(request: Request): void;
+  /** Settings still missing from the environment. */
+  notReady(error: CloudropError): void;
+}
+
+async function answer(request: Request, config: ServerConfig, report: Reporters): Promise<Response> {
   const endpoint = endpointOf(request, config.basePath);
   if (endpoint === null) {
     return errorResponse(new CloudropError("NOT_FOUND", "There is no cloudrop endpoint at this path. Check basePath."));
@@ -75,7 +82,7 @@ async function answer(request: Request, config: ServerConfig, hint: (request: Re
   }
   const origin = checkOrigin(request, config.trustedOrigins);
   if (!origin.allowed) {
-    hint(request);
+    report.origin(request);
     return errorResponse(originNotAllowed());
   }
   if (!isJsonRequest(request)) {
@@ -87,7 +94,16 @@ async function answer(request: Request, config: ServerConfig, hint: (request: Re
   const body = await readJson(request);
   if (body.error) return errorResponse(body.error, origin.cors);
   try {
-    const result = await ENDPOINTS[endpoint]({ request, body: body.data, config });
+    const ready = await config.ready();
+    if (ready.error) {
+      report.notReady(ready.error);
+      return errorResponse(serverError(), origin.cors);
+    }
+    const result = await ENDPOINTS[endpoint]({
+      request,
+      body: body.data,
+      config: { ...config, tokenKeys: ready.data },
+    });
     if (!result.error) return jsonResponse(result.data, 200, origin.cors);
     if (!hasKnownCode(result.error)) {
       config.logger.error(
@@ -136,9 +152,22 @@ function originHint(logger: Logger): (request: Request) => void {
   };
 }
 
+/**
+ * Logs a missing environment setting once, not on every request it fails; again only when the problem changes, such as
+ * after a partial fix.
+ */
+function notReadyReport(logger: Logger): (error: CloudropError) => void {
+  let reported: string | undefined;
+  return (error) => {
+    if (error.message === reported) return;
+    reported = error.message;
+    logger.error(`cloudrop: every request answers 500 until this is fixed. ${error.message}`, error);
+  };
+}
+
 export function createHandler(given: ServerConfig): (request: Request) => Promise<Response> {
   const config = { ...given, logger: contained(given.logger) };
-  const hint = originHint(config.logger);
+  const report: Reporters = { origin: originHint(config.logger), notReady: notReadyReport(config.logger) };
   let bucketChecked = false;
   return async (request) => {
     try {
@@ -151,7 +180,7 @@ export function createHandler(given: ServerConfig): (request: Request) => Promis
           config.logger.error("cloudrop: the development bucket check failed.", error);
         });
       }
-      return await answer(request, config, hint);
+      return await answer(request, config, report);
     } catch (error) {
       // The endpoints catch their own failures: what lands here is an input that is not a Request.
       config.logger.error("cloudrop: the handler failed before any endpoint ran. Pass it a Fetch API Request.", error);

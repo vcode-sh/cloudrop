@@ -1,17 +1,9 @@
 import { createCloudrop, r2, route, s3, unauthorized } from "cloudrop";
 
-// An empty CLOUDROP_S3_ENDPOINT counts as unset, so the live run can switch a RustFS .env.local back to R2.
-const endpoint = process.env.CLOUDROP_S3_ENDPOINT;
+// The presets read their settings from CLOUDROP_S3_* or CLOUDROP_R2_* (README.md). An empty CLOUDROP_S3_ENDPOINT
+// counts as unset, so the live run can switch a RustFS .env.local back to R2.
 // Exported for the browser test, which reads the uploads back through the same storage.
-export const storage = endpoint
-  ? s3({
-      endpoint,
-      region: process.env.CLOUDROP_S3_REGION ?? "us-east-1",
-      bucket: process.env.CLOUDROP_S3_BUCKET ?? "",
-      accessKeyId: process.env.CLOUDROP_S3_ACCESS_KEY_ID ?? "",
-      secretAccessKey: process.env.CLOUDROP_S3_SECRET_ACCESS_KEY ?? "",
-    })
-  : r2({ bucket: process.env.CLOUDROP_R2_BUCKET ?? "" });
+export const storage = process.env.CLOUDROP_S3_ENDPOINT ? s3() : r2();
 
 /**
  * Demo only, never ship this: any visitor can set this cookie to any name and upload under that user's prefix.
@@ -20,8 +12,8 @@ export const storage = endpoint
 const demoUser = (request: Request): string | undefined =>
   /(?:^|;\s*)demo-user=([a-z0-9-]{1,32})(?:;|$)/.exec(request.headers.get("cookie") ?? "")?.[1];
 
-// Created when the module loads, as the quickstart shows: `next build` loads it too, so the build needs the storage
-// settings and CLOUDROP_SECRET (see README.md).
+// Created when the module loads, as the quickstart shows. `next build` loads it too, and needs no settings: cloudrop
+// reads CLOUDROP_SECRET and the storage variables on the first request.
 export const cloudrop = createCloudrop({
   storage,
   // Small enough that the page's 20 MiB test file goes in three parts; the default is 64 MiB.

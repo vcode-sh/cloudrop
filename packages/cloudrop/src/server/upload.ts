@@ -5,7 +5,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
-import type { EndpointInput, ServerConfig } from "./config.ts";
+import type { EndpointConfig, EndpointInput } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
@@ -16,11 +16,11 @@ import { prepareFile, readRequest } from "./upload-request.ts";
 
 /** One file's ticket: create the multipart upload if needed, sign the first URLs and the token. */
 async function startFile(
-  config: ServerConfig,
+  config: EndpointConfig,
   base: Omit<UploadTokenPayload, "uploadId" | "partSize">,
 ): Promise<FileTicket> {
   const { storage, logger } = config;
-  const { signing } = await config.tokenKeys;
+  const { signing } = config.tokenKeys;
   const expiresAt = new Date(base.exp * 1000).toISOString();
   const ticket = { id: base.id, key: base.key, expiresAt };
   const rejected = (error: CloudropError): FileTicket => ({
@@ -60,7 +60,7 @@ async function startFile(
 
 /** A custom StorageDriver may throw: that file is rejected and released like a storage failure, and the others go on. */
 async function startFileSafely(
-  config: ServerConfig,
+  config: EndpointConfig,
   base: Omit<UploadTokenPayload, "uploadId" | "partSize">,
 ): Promise<FileTicket> {
   try {

@@ -143,15 +143,20 @@ async function deletePrefix(
 
 export function createFileApi(config: ServerConfig): FileApi {
   const { storage } = config;
+  // Every call waits for the environment's settings, so a server missing one answers INVALID_CONFIG everywhere.
+  const whenReady = async <T>(call: () => Promise<Result<T>>): Promise<Result<T>> => {
+    const ready = await config.ready();
+    return ready.error ? fail(ready.error) : call();
+  };
   // Arrow wrappers, not storage.head and friends: an unbound driver method would lose a `this` it relies on.
   return {
-    getUrl: (key, options) => getUrl(storage, key, options),
-    head: (key) => storage.head(key),
-    put: (key, body, options) => storage.put(key, body, options),
-    delete: (key) => storage.delete(key),
-    deleteMany: (keys) => storage.deleteMany(keys),
-    copy: (from, to) => storage.copy(from, to),
-    deletePrefix: (prefix) => deletePrefix(storage, prefix),
+    getUrl: (key, options) => whenReady(() => getUrl(storage, key, options)),
+    head: (key) => whenReady(() => storage.head(key)),
+    put: (key, body, options) => whenReady(() => storage.put(key, body, options)),
+    delete: (key) => whenReady(() => storage.delete(key)),
+    deleteMany: (keys) => whenReady(() => storage.deleteMany(keys)),
+    copy: (from, to) => whenReady(() => storage.copy(from, to)),
+    deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, prefix)),
     checkBucket: async (given) => {
       const options = given ?? {};
       const origins = isPlainObject(options) ? (options.origins ?? [...config.trustedOrigins]) : null;
@@ -163,7 +168,7 @@ export function createFileApi(config: ServerConfig): FileApi {
           ),
         );
       }
-      return checkBucket(config, origins);
+      return whenReady(() => checkBucket(config, origins));
     },
   };
 }

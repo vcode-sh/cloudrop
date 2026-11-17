@@ -1,14 +1,15 @@
 // createCloudrop's options, checked once at construction. Every mistake here throws INVALID_CONFIG with the option's
-// name and the fix, so a misconfigured server fails at startup instead of on a user's first upload.
+// name and the fix, so a misconfigured server fails at startup instead of on a user's first upload. Settings from the
+// environment are the exception: environment.ts reads them on the first request.
 
-import { fromEnv } from "../env.ts";
-import { CloudropError, configError } from "../errors.ts";
+import { CloudropError, configError, type Result } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
+import { environmentReader } from "./environment.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { isFunction, readRoute } from "./route-config.ts";
 import { parseSize, type Size } from "./size.ts";
-import { importTokenKeys, type TokenKeys } from "./token.ts";
+import type { TokenKeys } from "./token.ts";
 
 export interface CloudropOptions<TRoutes extends Record<string, Route>> {
   /** `r2({ bucket })` or `s3({ ... })`. */
@@ -46,7 +47,11 @@ export interface RouteConfig {
 export interface ServerConfig {
   storage: StorageDriver;
   routes: ReadonlyMap<string, RouteConfig>;
-  tokenKeys: Promise<TokenKeys>;
+  /**
+   * Reads the settings that come from the environment, again on each call until they are complete: the token keys, or
+   * INVALID_CONFIG naming what is missing. Awaited before every endpoint and api call.
+   */
+  ready: () => Promise<Result<TokenKeys>>;
   basePath: string;
   trustedOrigins: ReadonlySet<string>;
   multipartThreshold: number | undefined;
@@ -57,25 +62,7 @@ export interface ServerConfig {
 export const ROUTE_NAME: RegExp = /^[A-Za-z0-9_-]{1,64}$/;
 // No "." or ".." segment: the URL parser resolves them away, so the handler would never match a request.
 const BASE_PATH = /^(\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+$/;
-const MIN_SECRET_LENGTH = 32;
-
 const PLUGIN_HOOKS = ["beforeUpload", "afterVerify", "onAbort", "extendRoute"] as const;
-
-function readSecrets(secret: unknown): [string, ...string[]] {
-  const secrets = secret === undefined ? [fromEnv("CLOUDROP_SECRET")].filter(Boolean) : [secret].flat();
-  if (secrets.length === 0) {
-    throw configError(
-      "Missing the upload token secret. Set CLOUDROP_SECRET or pass secret to createCloudrop(); generate one with `openssl rand -base64 32`.",
-    );
-  }
-  // The secret itself is never quoted: messages end up in logs.
-  if (!secrets.every((value) => typeof value === "string" && value.length >= MIN_SECRET_LENGTH)) {
-    throw configError(
-      "Each upload token secret must be text of at least 32 characters. Generate one with `openssl rand -base64 32`.",
-    );
-  }
-  return secrets as [string, ...string[]];
-}
 
 /**
  * Only a scheme and host survive URL's own serialization unchanged: a path, credentials, "*", "null" and the line
@@ -198,17 +185,22 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   const multipartThreshold = readThreshold(options.multipartThreshold);
   const plugins = readPlugins(options.plugins);
   const logger = readLogger(options.logger);
-  const tokenKeys = importTokenKeys(readSecrets(options.secret));
+  const ready = environmentReader(options.secret, storage);
   const trustedOrigins = readOrigins(options.trustedOrigins);
   const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
-  const config = { storage, routes, tokenKeys, basePath, trustedOrigins, multipartThreshold, plugins, logger };
+  const config = { storage, routes, ready, basePath, trustedOrigins, multipartThreshold, plugins, logger };
   announce(config);
   return config;
+}
+
+/** The configuration an endpoint runs with: the environment has been read, so the token keys are known. */
+export interface EndpointConfig extends ServerConfig {
+  tokenKeys: TokenKeys;
 }
 
 /** What every endpoint receives: the request (for authorize and hooks), its parsed JSON body and the configuration. */
 export interface EndpointInput {
   request: Request;
   body: unknown;
-  config: ServerConfig;
+  config: EndpointConfig;
 }

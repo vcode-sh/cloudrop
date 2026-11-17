@@ -22,8 +22,9 @@ function withImportedChunks(entry: string): string[] {
 const summed = { disablePlugins: ["@size-limit/esbuild"] };
 
 export default [
-  // Summed files, not a bundle: these budgets count the entry and its chunks as published.
-  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "36 kB", ...summed },
+  // Summed files, not a bundle: these budgets count the entry and its chunks as published. "cloudrop" was 36 kB until
+  // route(policy, callbacks), lazy environment settings and forbidden() took it from 34.09 to 36.33 kB (M4-F16).
+  { name: "cloudrop", path: withImportedChunks("index.js"), gzip: true, limit: "40 kB", ...summed },
   { name: "cloudrop/next", path: withImportedChunks("next.js"), gzip: true, limit: "1.1 kB", ...summed },
   { name: "cloudrop/node", path: withImportedChunks("node.js"), gzip: true, limit: "3.2 kB", ...summed },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
