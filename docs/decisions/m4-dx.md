@@ -194,21 +194,24 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 ### M4-F22: `resumable()` leaves out the uploads this page holds
 
 - **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.held`), and `resumable()` leaves them
-  out. An id is held from a persisted multipart ticket's arrival (`uploadOf`) until its unlock, which every way of
-  giving the ticket up calls (`letGo`, `giveUp`, a `/complete` in doubt of `upload()`), and from a `resume()` call,
-  before its first await, until its checks refuse it or its upload's unlock. A resume of an upload another job of the
-  client holds claims nothing, so its refusal (`UPLOAD_IN_USE`) does not list that upload. An upload another tab holds
-  is still listed.
+  out. Each holder makes its own claim with `hold()`, which returns the release for that claim alone: a persisted
+  multipart ticket from its arrival (`uploadOf`) until its unlock, which every way of giving the ticket up calls
+  (`letGo`, `giveUp`, a `/complete` in doubt of `upload()`), and a `resume()` from its call, before its first await,
+  until its checks refuse it or its upload's unlock. An upload is left out while any claim on it remains, so a refused
+  resume of an upload a file of the client holds (`UPLOAD_IN_USE`) does not list it, and of two resumes in flight the
+  one that ends first does not unhide the other. An upload another tab holds is still listed.
 - **Why:** `resumable()` listed a running upload and a failed file of `start()` kept for `retry()`, which `resume()`
   refuses with `UPLOAD_IN_USE` in the same page. `cloudrop/react` matched held files by name, size, type and
   `lastModified` to hide them, which also hid an earlier unfinished upload of the same file (task D re-review). By id
-  it is exact, and the hooks drop their matching (`M4-B3`).
+  it is exact, and the hooks drop their matching (`M4-B3`). Fix round 2 claimed an id only when no claim existed, so
+  two resumes in flight shared one and the first to end released it while the other ran (re-review 2, N4); one release
+  per claim is exact under any interleaving.
 - **If wrong:** listing held uploads again is a behaviour change in a minor version; a page that wants them can keep its
   own jobs' files.
-- **Status:** in force (`516bac5`).
-- **Source:** task D re-review's client proposal; controller ruling, fix round 2.
-- **Visible in:** `client/upload.ts` (`held`), `client/persist.ts` (`uploadOf`), `client/resume.ts` (`resumable`,
-  `check`), `client/forget.test.ts`, `client/resume-job.test.ts`, `docs/guide/resume.md#two-tabs`.
+- **Status:** in force (`516bac5`, `8b864a9`).
+- **Source:** task D re-review's client proposal; controller rulings, fix rounds 2 and 3.
+- **Visible in:** `client/upload.ts` (`held`, `hold`), `client/persist.ts` (`uploadOf`), `client/resume.ts`
+  (`resumable`, `check`), `client/forget.test.ts`, `client/resume-job.test.ts`, `docs/guide/resume.md#two-tabs`.
 
 ### M4-F23: the client's ceiling is 11.5 kB
 
@@ -422,7 +425,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 `M4-B1` to `M4-B6` are the design's §6 as built; `M4-B7` onwards are task D's execution rulings. Fix round 1 of the
 task D review amended `M4-B1` to `M4-B4`, `M4-B10` and `M4-B12` in place, before the branch merged, and added `M4-B13`
 to `M4-B15`; fix round 2 amended `M4-B1`, `M4-B3`, `M4-B10`, `M4-B12` and `M4-B15`, with `M4-F22` and `M4-F23` in the
-client section.
+client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again).
 
 ### M4-B1: `createUploadHooks<typeof cloudrop>(options?)`, with a lazy client
 
@@ -449,9 +452,9 @@ client section.
   rule (failed and aborted files out of the bytes; an all-empty set is finished once its counted files are done);
   `upload()` takes a `File`, an array or a `FileList` (`M4-B14`) and resolves `null` for none; `clear()` drops the jobs
   whose every file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed
-  file's ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the latest committed render (assigned in
-  `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry` and `clear` never change identity, while
-  `getInputProps()` and `getDropProps()` are built per render.
+  file's ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
+  latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry` and
+  `clear` never change identity, while `getInputProps()` and `getDropProps()` are built per render.
 - **Why:** design §6.1; stable functions keep an effect that lists `upload` in its dependencies from uploading again on
   every render.
 - **If wrong:** per-render functions would be a breaking change for code that relies on identity.
@@ -467,16 +470,20 @@ client section.
   continued with `files[n].retry()`), a listed upload leaves the list when its resume starts, and a refused resume lists
   it again. The list is read after mount, when a job of the hooks starts, whenever one of its files ends or starts again
   (its `done + failed + aborted` changes), and when the job settles: a resume cancelled while its checks run ends at
-  once and lets the upload go only when they end. `[]` on the server, before the first read and when the read failed.
-  `refresh()` reads again and resolves with the client's `Result`, so a failure is not lost. A read that answers after
-  a newer read started does not replace the newer list.
+  once and lets the upload go only when they end. Each read waits for a microtask: a file cancelled while its
+  `/complete` is in doubt settles and publishes before the client deletes its record and releases its claim, so a read
+  started inside the publish would list the deleted upload (re-review 2, N5; fix round 2 had dropped the microtask).
+  `[]` on the server, before the first read and when the read failed. `refresh()` reads again and resolves with the
+  client's `Result`, so a failure is not lost. A read that answers after a newer read started does not replace the newer
+  list.
 - **Why:** design §6.1. The first version read only when `job.done` settled and listed this page's own uploads (review
   I1); fix round 1 matched held files by name, size, type and `lastModified` in the hooks, which hid an earlier upload
   of the same file; fix round 2 moved the filter into the client by id. "Every job of the client" is read as every job
   the hooks started (`M4-B12`).
 - **If wrong:** exposing an `error` field later is non-breaking.
-- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`).
-- **Source:** design §6.1; task D review I1, the controller's rulings on it and on the re-review's client proposal.
+- **Status:** in force (`542ae74`, `99f795a`, `9cacad8`, `eafa4d4`).
+- **Source:** design §6.1; task D review I1, the controller's rulings on it and on the re-review's client proposal;
+  re-review 2 N5.
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/job-tracker.ts`, `docs/guide/react.md#resume-after-a-reload`.
 
 ### M4-B4: behaviour under server rendering, StrictMode and unmounting
@@ -554,7 +561,8 @@ client section.
 
 ### M4-B10: the `cloudrop/react` ceiling is 2.05 kB, not 1.5 kB
 
-- **Decision:** the budget is 2.05 kB gzip: the 1.87 kB size-limit measured after fix round 2, plus about 10%, the rule
+- **Decision:** the budget is 2.05 kB gzip: the 1.87 kB size-limit measured after fix round 2 (1.88 kB after round 3's
+  microtask), plus about 10%, the rule
   `size-limit.config.ts` states. Like the client's chunk, the client's errors chunk (`CloudropError`) is left out: an
   app that uses the hooks ships both with the client.
 - **Why:** with every promise of §6.1 kept (the per-file identity cache, the latest-options handlers, drag counting,
