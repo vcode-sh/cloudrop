@@ -54,7 +54,7 @@ describe("Postgres, tables in a schema", () => {
       const tables = { schema };
       expect(
         await sqlStore(pgExecutor(db.pool), { tables }).reserve(
-          { owner: "u-1", limit: null, expiresAt: NOW, files: [file] },
+          { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file] },
           NOW,
         ),
       ).toEqual(["reserved"]);

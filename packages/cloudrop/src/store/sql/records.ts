@@ -26,11 +26,12 @@ export const FILE_COLUMNS: readonly string[] = [
   "completed_at",
   "ended_at",
   "cleaned_at",
+  "request_key",
 ];
 
-/** The files columns a `FileRecord` is read from: every column except `claim` and `updated_at`. */
+/** The files columns a `FileRecord` is read from: every column except `claim`, `updated_at` and `request_key`. */
 export const RECORD_COLUMNS: string = FILE_COLUMNS.filter(
-  (column) => column !== "claim" && column !== "updated_at",
+  (column) => column !== "claim" && column !== "updated_at" && column !== "request_key",
 ).join(", ");
 
 function describe(value: unknown): string {

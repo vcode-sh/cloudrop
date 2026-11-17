@@ -27,10 +27,11 @@ function setup(options: { fault?: Fault } = {}) {
 }
 
 const live = () => new AbortController().signal;
+const KEY = "0123456789abcdef0123456789abcdef";
 
 /** The token of a one-file /upload's ticket, for the calls that follow it. */
 async function startOne(endpoints: Endpoints, file: File): Promise<string> {
-  const [ticket] = (await endpoints.start("files", [file], undefined, live())).data ?? [];
+  const [ticket] = (await endpoints.start("files", [file], undefined, KEY, live())).data ?? [];
   return ticket instanceof CloudropError ? "" : (ticket?.token ?? "");
 }
 const page = (status: number) =>
@@ -49,7 +50,7 @@ afterEach(() => {
 describe("start", () => {
   it("reads a single-PUT ticket from /upload", async () => {
     const { endpoints } = setup();
-    const { data } = await endpoints.start("files", [png], undefined, live());
+    const { data } = await endpoints.start("files", [png], undefined, KEY, live());
     expect(data).toEqual([
       expect.objectContaining({
         kind: "single",
@@ -61,7 +62,7 @@ describe("start", () => {
 
   it("reads a multipart ticket and its first URLs", async () => {
     const { endpoints } = setup();
-    const { data } = await endpoints.start("files", [twoParts], undefined, live());
+    const { data } = await endpoints.start("files", [twoParts], undefined, KEY, live());
     expect(data).toEqual([
       expect.objectContaining({
         kind: "multipart",
@@ -75,7 +76,7 @@ describe("start", () => {
   it("answers one entry per file, in order, with a rejected file as its error", async () => {
     const { endpoints } = setup();
     const text = (size: number) => new File([new Uint8Array(size)], "note.txt", { type: "text/plain" });
-    const { data } = await endpoints.start("notes", [text(16), text(17)], undefined, live());
+    const { data } = await endpoints.start("notes", [text(16), text(17)], undefined, KEY, live());
     expect({ data, rejected: data?.[1] instanceof CloudropError }).toEqual({
       data: [
         expect.objectContaining({ kind: "single" }),
@@ -99,7 +100,7 @@ describe("start", () => {
         return Response.json({ files: tickets(answer.files) });
       },
     });
-    const result = await endpoints.start("files", [png, png], undefined, live());
+    const result = await endpoints.start("files", [png, png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
@@ -108,14 +109,14 @@ describe("start", () => {
     { name: "does not retry an unreadable client error", status: 404, retryable: false },
   ])("$name", async ({ status, retryable }) => {
     const { endpoints } = setup({ fault: () => page(status) });
-    const result = await endpoints.start("files", [png], undefined, live());
+    const result = await endpoints.start("files", [png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(status), retryable });
   });
 
   it("refuses an error answer of another shape", async () => {
     // A gateway's own JSON error: it has an `error`, but not cloudrop's.
     const { endpoints } = setup({ fault: () => Response.json({ error: { message: "Bad gateway" } }, { status: 502 }) });
-    const result = await endpoints.start("files", [png], undefined, live());
+    const result = await endpoints.start("files", [png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(502), retryable: true });
   });
 
@@ -128,7 +129,7 @@ describe("start", () => {
       headers: { "retry-after": "2" },
     });
     const { fixture, endpoints } = setup({ fault: ({ nth }) => (nth === 1 ? rateLimited : undefined) });
-    const result = withRetry(() => endpoints.start("files", [png], undefined, live()), live());
+    const result = withRetry(() => endpoints.start("files", [png], undefined, KEY, live()), live());
     await vi.advanceTimersByTimeAsync(1999);
     const before = [...fixture.requests];
     await vi.advanceTimersByTimeAsync(1);
@@ -142,7 +143,7 @@ describe("start", () => {
   it("reports a proxy that stays rate-limited as a busy server, not a wrong basePath", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const { fixture, endpoints } = setup({ fault: () => page(429) });
-    const result = await withRetry(() => endpoints.start("files", [png], undefined, live()), live());
+    const result = await withRetry(() => endpoints.start("files", [png], undefined, KEY, live()), live());
     expect({ error: errorOf(result), requests: fixture.requests.length }).toEqual({
       error: { code: "RATE_LIMITED", message: "The upload server is busy. Try again in a moment.", retryable: true },
       requests: 6,
@@ -151,7 +152,7 @@ describe("start", () => {
 
   it("refuses JSON of another shape", async () => {
     const { endpoints } = setup({ fault: () => Response.json({ files: [] }) });
-    const result = await endpoints.start("files", [png], undefined, live());
+    const result = await endpoints.start("files", [png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
@@ -164,7 +165,7 @@ describe("start", () => {
         return Response.json(answer);
       },
     });
-    const result = await endpoints.start("files", [twoParts], undefined, live());
+    const result = await endpoints.start("files", [twoParts], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
@@ -174,7 +175,7 @@ describe("start", () => {
         throw new TypeError("Failed to fetch");
       },
     });
-    const result = await endpoints.start("files", [png], undefined, live());
+    const result = await endpoints.start("files", [png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({
       code: "NETWORK_ERROR",
       message: "The upload server could not be reached. Check the connection, then try again.",
@@ -186,7 +187,7 @@ describe("start", () => {
     const { endpoints } = setup();
     const controller = new AbortController();
     controller.abort();
-    const result = await endpoints.start("files", [png], undefined, controller.signal);
+    const result = await endpoints.start("files", [png], undefined, KEY, controller.signal);
     expect(errorOf(result)).toEqual({
       code: "ABORTED",
       message: "The upload was cancelled. Start it again to upload the file.",
@@ -202,7 +203,7 @@ describe("start", () => {
         return undefined;
       },
     });
-    await endpoints.start("files", [png], undefined, live());
+    await endpoints.start("files", [png], undefined, KEY, live());
     expect(
       sent.map((init) => ({
         method: init.method,
@@ -216,7 +217,7 @@ describe("start", () => {
         headers: { "content-type": "application/json" },
         credentials: "include",
         // No metadata key: the route takes none, and the call was given none.
-        body: { route: "files", files: [{ name: "a.png", size: 10, type: "image/png" }] },
+        body: { route: "files", files: [{ name: "a.png", size: 10, type: "image/png" }], idempotencyKey: KEY },
       },
     ]);
   });
@@ -287,7 +288,7 @@ describe("a server that never answers (M4-F3)", () => {
   const settledNow = <T>(promise: Promise<T>) => Promise.race([promise, Promise.resolve("pending" as const)]);
 
   it.each([
-    { name: "/upload after 30 s", ms: 30_000, call: (e: Endpoints) => e.start("files", [png], undefined, live()) },
+    { name: "/upload after 30 s", ms: 30_000, call: (e: Endpoints) => e.start("files", [png], undefined, KEY, live()) },
     { name: "/sign after 30 s", ms: 30_000, call: (e: Endpoints) => e.signParts("token", [1], live()) },
     // /complete may list 10,000 parts, which the server verifies before it answers.
     { name: "/complete after 120 s", ms: 120_000, call: (e: Endpoints) => e.complete("token") },
@@ -342,7 +343,7 @@ describe("a server that never answers (M4-F3)", () => {
   it("answers ABORTED, not NETWORK_ERROR, when the caller cancels before the timeout", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    const result = createEndpoints("/api/cloudrop", silent).start("files", [png], undefined, controller.signal);
+    const result = createEndpoints("/api/cloudrop", silent).start("files", [png], undefined, KEY, controller.signal);
     await vi.advanceTimersByTimeAsync(1_000);
     controller.abort();
     expect((await result).error?.code).toBe("ABORTED");

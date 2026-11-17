@@ -89,7 +89,7 @@ export function claimCases(suite: StoreSuite): void {
       completedAt: at(2 * MINUTE),
       updatedAt: at(2 * MINUTE),
     });
-    const { claim: _claim, updatedAt: _updatedAt, ...record } = completed;
+    const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = completed;
     expect(await store.complete("f-1", "claim-a", '{"photoId":7}', at(2 * MINUTE))).toEqual({ changed: true, record });
     expect(await rawFile("f-1")).toEqual(completed);
     const counted = [usageRow("u-1", { reservedBytes: 30, activeBytes: 100, files: 1, updatedAt: at(2 * MINUTE) })];

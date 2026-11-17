@@ -38,6 +38,7 @@ type FileColumns = {
   completedAt: Time;
   endedAt: Time;
   cleanedAt: Time;
+  requestKey: Text;
 };
 
 type UsageColumns = {
@@ -95,6 +96,8 @@ export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "sche
       completedAt: time("completed_at"),
       endedAt: time("ended_at"),
       cleanedAt: time("cleaned_at"),
+      /** The idempotency key of the `/upload` that wrote the row: a retry with it supersedes the row while pending. */
+      requestKey: textColumn("request_key"),
     },
     (t) => [
       index(`${names.files}_status_expires_at_idx`).on(t.status, t.expiresAt),
@@ -102,6 +105,7 @@ export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "sche
       index(`${names.files}_status_cleaned_at_ended_at_idx`).on(t.status, t.cleanedAt, t.endedAt),
       index(`${names.files}_owner_status_idx`).on(t.owner, t.status),
       index(`${names.files}_key_idx`).on(t.key),
+      index(`${names.files}_route_request_key_idx`).on(t.route, t.requestKey),
     ],
   );
   const usage = sqliteTable(names.usage, {

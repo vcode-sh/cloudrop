@@ -84,7 +84,10 @@ describe("Postgres under lock contention", () => {
       // Takes 2 s by design: the lock timeout is what turns the wait into an answer. The waiting transaction then ends
       // normally, so the driver must also cope with committing a transaction the timeout aborted.
       const { store, transaction } = await transactionalStore(executor);
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 1)] }, NOW);
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 1)] },
+        NOW,
+      );
       const held = gate();
       const claimed = gate();
       const holder = transaction(async (_tx, inner) => {
@@ -107,7 +110,10 @@ describe("Postgres under lock contention", () => {
     "$name: a refusal that waited for a transaction's completion answers the completed row",
     async ({ executor, backendPid }) => {
       const { store, transaction } = await transactionalStore(executor);
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 10)] },
+        NOW,
+      );
       const held = gate();
       let holder: unknown;
       const completed = gate();
@@ -133,10 +139,51 @@ describe("Postgres under lock contention", () => {
     },
   );
 
+  test.for(executors)(
+    "$name: a keyed reserve waits for the lost attempt's row before it locks usage, so a revoke holding that row ends",
+    async ({ executor, backendPid }) => {
+      // Every writer locks file rows before the owner's usage row. A transaction holds the lost attempt's row (through
+      // attach) while the retry's reserve starts, then revokes, which needs the usage row. A reserve that locked usage
+      // first would deadlock here: Postgres aborts one side with 40P01 after its 1 s deadlock_timeout.
+      const { store, transaction } = await transactionalStore(executor);
+      const key = "request-key-0000000001";
+      const reserve = (id: string) =>
+        store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, requestKey: key, files: [file(id, 60)] }, NOW);
+      expect(await reserve("lost")).toEqual(["reserved"]);
+      const held = gate();
+      const attached = gate();
+      let holder: unknown;
+      const revoking = transaction(async (tx, inner) => {
+        holder = await backendPid(tx);
+        expect(await inner.attach("lost", "upload-1", NOW)).toBe(true);
+        attached.open();
+        await held.opened;
+        return inner.revoke("u-1", NOW);
+      });
+      await attached.opened;
+      const retried = reserve("retry");
+      try {
+        await untilBlockedBy(holder);
+      } finally {
+        held.open();
+      }
+      expect(await Promise.allSettled([revoking, retried])).toEqual([
+        { status: "fulfilled", value: 1 },
+        { status: "fulfilled", value: ["reserved"] },
+      ]);
+      // The revoke ended the lost row and released its 60 bytes; the retry found it no longer pending.
+      expect((await rawTables(db).files()).map(({ id, status }) => [id, status])).toEqual([
+        ["lost", "aborted"],
+        ["retry", "pending"],
+      ]);
+      expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
+    },
+  );
+
   test("an app statement through tx may wait longer than the claim's 2 s lock timeout", async () => {
     // Takes 2.5 s by design: the app's lock is held past the claim's timeout.
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 10)] }, NOW);
     await db.query("CREATE TABLE app_rows (id integer PRIMARY KEY, note text)");
     await db.query("INSERT INTO app_rows VALUES (1, NULL)");
     const other = await db.pool.connect();
@@ -165,7 +212,10 @@ describe("Postgres under lock contention", () => {
     try {
       await pool.query("SET lock_timeout = '7s'");
       const store = sqlStore(pgExecutor(pool), { transaction: true });
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 10)] }, NOW);
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 10)] },
+        NOW,
+      );
       const seen = await store.transaction(async (tx, inner) => {
         const during = await inner.claim("f-1", "claim-a", NOW, LEASE);
         return { during, after: (await tx.query("SHOW lock_timeout")).rows };
@@ -178,14 +228,17 @@ describe("Postgres under lock contention", () => {
 
   test("reconcile waits for a reserve that is still open, then counts it", async () => {
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-0", 10)] }, NOW);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-0", 10)] }, NOW);
     await rawTables(db).putUsage({ owner: "u-1", reservedBytes: 999, activeBytes: 0, files: 0, updatedAt: NOW });
     const held = gate();
     const reserved = gate();
     let holder: unknown;
     const reserving = transaction(async (tx, inner) => {
       holder = await executors[0]?.backendPid(tx);
-      await inner.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 5)] }, NOW);
+      await inner.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 5)] },
+        NOW,
+      );
       reserved.open();
       await held.opened;
     });
@@ -205,7 +258,7 @@ describe("Postgres under lock contention", () => {
 
   test("reconcile after the usage row was deleted by hand keeps a reserve that created it meanwhile", async () => {
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-0", 10)] }, NOW);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-0", 10)] }, NOW);
     await db.query("DELETE FROM cloudrop_usage");
     const held = gate();
     const reserved = gate();
@@ -213,7 +266,10 @@ describe("Postgres under lock contention", () => {
     // This reserve finds no usage row, so it inserts one; it stays uncommitted until reconcile waits for it.
     const reserving = transaction(async (tx, inner) => {
       holder = await executors[0]?.backendPid(tx);
-      await inner.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", 5)] }, NOW);
+      await inner.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 5)] },
+        NOW,
+      );
       reserved.open();
       await held.opened;
     });

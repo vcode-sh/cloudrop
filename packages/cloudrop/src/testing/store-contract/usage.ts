@@ -53,7 +53,10 @@ export function usageCases(suite: StoreSuite): void {
     await seed("u-1", [newFile("f-0", 1)]);
     await suite.raw.putUsage(usageRow("u-1", { reservedBytes: 500 }));
     const reserves = Array.from({ length: 8 }, (_, index) =>
-      store.reserve({ owner: "u-1", limit: null, expiresAt: EXPIRES, files: [newFile(`f-${index + 1}`, 2)] }, at(0)),
+      store.reserve(
+        { owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: null, files: [newFile(`f-${index + 1}`, 2)] },
+        at(0),
+      ),
     );
     await Promise.all([store.reconcile("u-1"), ...reserves]);
     // 1 + 8 × 2, whichever order the calls ran in.
@@ -75,7 +78,10 @@ export function usageCases(suite: StoreSuite): void {
       const outcomes = await Promise.all(
         owners.flatMap((owner) =>
           Array.from({ length: 8 }, (_, index) =>
-            store.reserve({ owner, limit, expiresAt: EXPIRES, files: [newFile(`${owner}-${index}`, 10)] }, at(0)),
+            store.reserve(
+              { owner, limit, expiresAt: EXPIRES, requestKey: null, files: [newFile(`${owner}-${index}`, 10)] },
+              at(0),
+            ),
           ),
         ),
       );

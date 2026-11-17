@@ -23,12 +23,13 @@ export type Ticket = SingleTicket | MultipartTicket;
 export interface Endpoints {
   /**
    * POST /upload for every file at once: one entry per file, in order; a rejected file is its error, which carries the
-   * answer's Retry-After (M3-U92).
+   * answer's Retry-After (M3-U92). `idempotencyKey` names the ask: every retry of one ask sends the same.
    */
   start(
     route: string,
     files: readonly File[],
     metadata: unknown,
+    idempotencyKey: string,
     signal: AbortSignal,
   ): Promise<Result<(Ticket | CloudropError)[]>>;
   /** POST /sign { token }: a new URL for a single PUT. */
@@ -117,12 +118,13 @@ export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints
   }
 
   return {
-    start(route, files, metadata, signal) {
+    start(route, files, metadata, idempotencyKey, signal) {
       // JSON.stringify leaves out a metadata of undefined, as UploadRequest's optional field allows.
       const request: UploadRequest = {
         route,
         files: files.map(({ name, size, type }) => ({ name, size, type })),
         metadata,
+        idempotencyKey,
       };
       return post(
         "upload",

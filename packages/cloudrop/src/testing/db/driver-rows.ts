@@ -21,7 +21,10 @@ export function driverRows(storeOver: () => CloudropStore<unknown> | Promise<Clo
   test("a size of 2^53 - 1 and millisecond times come back exactly, counted in usage", async () => {
     const store = await storeOver();
     expect(
-      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("f-1", MAX_SAFE)] }, NOW),
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", MAX_SAFE)] },
+        NOW,
+      ),
     ).toEqual(["reserved"]);
     expect(await store.get("f-1")).toMatchObject({
       size: MAX_SAFE,
@@ -34,11 +37,14 @@ export function driverRows(storeOver: () => CloudropStore<unknown> | Promise<Clo
 
   test("concurrent reserves of one owner never overshoot the quota", async () => {
     const store = await storeOver();
-    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, files: [file("q-0", 10)] }, NOW);
+    await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("q-0", 10)] }, NOW);
     // 10 bytes held, limit 60: room for exactly 5 of the 8 racing 10-byte files.
     const outcomes = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
-        store.reserve({ owner: "u-1", limit: 60, expiresAt: NOW, files: [file(`q-${index + 1}`, 10)] }, NOW),
+        store.reserve(
+          { owner: "u-1", limit: 60, expiresAt: NOW, requestKey: null, files: [file(`q-${index + 1}`, 10)] },
+          NOW,
+        ),
       ),
     );
     expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(5);

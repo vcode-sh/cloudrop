@@ -96,7 +96,9 @@ describe("drizzleStore", () => {
       size: 5,
       metadata: null,
     };
-    expect(await store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, files: [file] }, NOW)).toEqual(["reserved"]);
+    expect(
+      await store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, requestKey: null, files: [file] }, NOW),
+    ).toEqual(["reserved"]);
     expect(await store.usage("u-1")).toEqual({ reservedBytes: 5, activeBytes: 0, files: 0 });
   });
 });
@@ -201,6 +203,7 @@ type FileRow = {
   completedAt: Date | null;
   endedAt: Date | null;
   cleanedAt: Date | null;
+  requestKey: string | null;
 };
 type UsageRow = { owner: string; reservedBytes: number; activeBytes: number; files: number; updatedAt: Date };
 

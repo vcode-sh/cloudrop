@@ -59,6 +59,8 @@ export async function reserveFiles(
     files: readonly PluginFile[];
     metadataJson: string | undefined;
     exp: number;
+    /** The request's idempotency key: a retry with it supersedes the rows of the attempt whose answer was lost. */
+    requestKey: string | null;
   },
 ): Promise<ReadonlyMap<string, CloudropError>> {
   const { store } = config;
@@ -79,7 +81,7 @@ export async function reserveFiles(
   }));
   const expiresAt = new Date(input.exp * 1000);
   const reserved = await storeCall(config.logger, `reserve the files of an upload on route "${route.name}"`, () =>
-    store.reserve({ owner, limit: limit.data, expiresAt, files: rows }, new Date()),
+    store.reserve({ owner, limit: limit.data, expiresAt, requestKey: input.requestKey, files: rows }, new Date()),
   );
   if (reserved.error) return everyFile(reserved.error);
   const refused = files.filter((_, index) => reserved.data[index] !== "reserved");

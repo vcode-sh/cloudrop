@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS "cloudrop_files" (
   updated_at INTEGER NOT NULL,
   completed_at INTEGER,
   ended_at INTEGER,
-  cleaned_at INTEGER
+  cleaned_at INTEGER,
+  request_key TEXT
 );
 
 CREATE INDEX IF NOT EXISTS "cloudrop_files_status_expires_at_idx" ON "cloudrop_files" (status, expires_at);
@@ -31,6 +32,8 @@ CREATE INDEX IF NOT EXISTS "cloudrop_files_status_cleaned_at_ended_at_idx" ON "c
 CREATE INDEX IF NOT EXISTS "cloudrop_files_owner_status_idx" ON "cloudrop_files" (owner, status);
 
 CREATE INDEX IF NOT EXISTS "cloudrop_files_key_idx" ON "cloudrop_files" (key);
+
+CREATE INDEX IF NOT EXISTS "cloudrop_files_route_request_key_idx" ON "cloudrop_files" (route, request_key);
 
 CREATE TABLE IF NOT EXISTS "cloudrop_usage" (
   owner TEXT NOT NULL PRIMARY KEY,

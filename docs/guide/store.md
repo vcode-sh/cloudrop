@@ -255,7 +255,8 @@ CREATE TABLE "cloudrop_files" (
   updated_at timestamptz NOT NULL,
   completed_at timestamptz,
   ended_at timestamptz,
-  cleaned_at timestamptz
+  cleaned_at timestamptz,
+  request_key text
 );
 
 CREATE INDEX "cloudrop_files_status_expires_at_idx" ON "cloudrop_files" (status, expires_at);
@@ -267,6 +268,8 @@ CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files"
 CREATE INDEX "cloudrop_files_owner_status_idx" ON "cloudrop_files" (owner, status);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
+
+CREATE INDEX "cloudrop_files_route_request_key_idx" ON "cloudrop_files" (route, request_key);
 
 CREATE TABLE "cloudrop_usage" (
   owner text NOT NULL PRIMARY KEY,
@@ -300,7 +303,8 @@ CREATE TABLE "cloudrop_files" (
   updated_at INTEGER NOT NULL,
   completed_at INTEGER,
   ended_at INTEGER,
-  cleaned_at INTEGER
+  cleaned_at INTEGER,
+  request_key TEXT
 );
 
 CREATE INDEX "cloudrop_files_status_expires_at_idx" ON "cloudrop_files" (status, expires_at);
@@ -312,6 +316,8 @@ CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files"
 CREATE INDEX "cloudrop_files_owner_status_idx" ON "cloudrop_files" (owner, status);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
+
+CREATE INDEX "cloudrop_files_route_request_key_idx" ON "cloudrop_files" (route, request_key);
 
 CREATE TABLE "cloudrop_usage" (
   owner TEXT NOT NULL PRIMARY KEY,
@@ -503,6 +509,12 @@ short. For work that must happen, write an outbox row through `tx` in `onComplet
   the client sends its `/abort`. `retry()` asks for a new ticket through `/upload` and `authorize`, so a signed-out
   user is refused. A `resume()` after a reload asks for a new ticket by itself and starts the file again while the
   user is still signed in ([Resume](resume.md)).
+- **A lost `/upload` answer** no longer holds its reservation. Each ask of `/upload` carries a random
+  `idempotencyKey`, the same on every automatic retry of that ask. When the client gives up waiting (30 seconds, or a
+  dropped connection) and asks again, the retry ends the earlier attempt's rows as `aborted`, releasing their bytes
+  before the quota is checked, so a user near their limit is not refused for files they never got tickets for. The
+  sweep's cleanup pass aborts any multipart upload those rows had started. Only `pending` rows with the same key,
+  route and owner are ended; plugins hear no `onAbort` for them, as with the sweep and `revokeUploads`.
 - **A second `/complete` of a file being completed** is answered busy: `SERVER_ERROR`, retryable, "Another request is
   completing this upload. Try again in a moment.", with `Retry-After: 2`. The client waits and asks again, and gets
   the stored answer. Busy is not logged as an error.
@@ -611,9 +623,13 @@ as required.
 
 ## Known costs
 
-- **A lost `/upload` answer holds its reservation.** When the client gives up on `/upload` (after 30 seconds) and asks
-  again, the first call's rows still reserve their bytes until the sweep expires them (deadline plus `graceMs`) or
-  `revokeUploads` releases them. A user near their quota may be refused meanwhile.
+- **A lost `/upload` answer from an old client holds its reservation.** A client that sends no `idempotencyKey`
+  (one older than this release, or your own code calling `/upload`) cannot be told apart from a new request: its first
+  attempt's rows reserve their bytes until the sweep expires them (deadline plus `graceMs`) or `revokeUploads`
+  releases them. A retry whose `beforeUpload` refuses the request reaches no store call, so it supersedes nothing
+  either. Nor does a retry that reaches the store before its first attempt does (a first request still being worked
+  on, its `authorize` slow, when the client gives up on it): that attempt's rows are written after the retry's and keep
+  their bytes until the sweep. Plugin reservations of a superseded attempt need their own expiry.
 - **A `PUT` that lands after cleanup stays.** The sweep cleans a row once. A `PUT` already under way that lands after
   that is left in the bucket; with the default hour of grace this is unlikely.
 - **A completion's record that fails after `onComplete` ran, in lease mode**, keeps the file busy until the lease ends

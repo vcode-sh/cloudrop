@@ -9,6 +9,7 @@ import { endCases } from "./store-contract/end.ts";
 import { reserveCases } from "./store-contract/reserve.ts";
 import { staleCases } from "./store-contract/stale.ts";
 import { storeSuite } from "./store-contract/suite.ts";
+import { supersedeCases } from "./store-contract/supersede.ts";
 import { transactionCases } from "./store-contract/transaction.ts";
 import { usageCases } from "./store-contract/usage.ts";
 import type { RawTables } from "./store-rows.ts";
@@ -77,6 +78,7 @@ export function describeStoreContract(name: string, setup: SetupStore): void {
 
     // Registered in this order, so every lane log lists the cases the same way.
     reserveCases(suite);
+    supersedeCases(suite);
     claimCases(suite);
     endCases(suite);
     staleCases(suite);

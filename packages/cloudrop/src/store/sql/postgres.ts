@@ -14,7 +14,8 @@ import { RECORD_COLUMNS, toSafeInteger } from "./records.ts";
 type GuardedWrites = Pick<StoreMethods, "reserve" | "claim" | "complete" | "end" | "revoke" | "reconcile">;
 
 const INPUT_COLUMNS = "ord integer, id text, route text, key text, name text, type text, size bigint, metadata text";
-const INSERT_COLUMNS = "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at";
+const INSERT_COLUMNS =
+  "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at, request_key";
 
 /** The accepted files as one JSON parameter, numbered from 1 in the order the quota checks them. */
 const inputJson = (files: readonly NewFile[]): string =>
@@ -30,6 +31,23 @@ const inputJson = (files: readonly NewFile[]): string =>
       metadata,
     })),
   );
+
+/**
+ * A retry of a request whose answer was lost ends that attempt's pending rows in the reserve's statement: the CTE that
+ * does it, and the bytes it frees. Every CTE reads one snapshot, so the counters read beside it still hold those bytes
+ * and the freed sum is taken off them. `key` and `who` are bound placeholders (`who` may be `NULL`). No key: no CTE,
+ * nothing freed.
+ */
+function superseding(files: string, key: string | null, who: string, at: string) {
+  if (key === null) return { cte: "", freed: "0" };
+  const cte = `, superseded AS (
+    UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
+    WHERE request_key = ${key} AND owner IS NOT DISTINCT FROM ${who}
+      AND route IN (SELECT route FROM input) AND status = 'pending'
+    RETURNING size
+  )`;
+  return { cte, freed: "(SELECT coalesce(sum(size), 0) FROM superseded)" };
+}
 
 export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites {
   const { files, usage } = tables;
@@ -60,20 +78,27 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
   }
 
   return {
-    async reserve({ owner, limit, expiresAt, files: accepted }, now) {
+    async reserve({ owner, limit, expiresAt, requestKey, files: accepted }, now) {
       if (accepted.length === 0) return [];
       const b = binder("postgres");
-      const [input, expires, at] = [b.json(inputJson(accepted)), b.time(expiresAt), b.time(now)];
+      const [input, expires, at, key] = [
+        b.json(inputJson(accepted)),
+        b.time(expiresAt),
+        b.time(now),
+        b.text(requestKey),
+      ];
+      const who = owner === null ? "NULL" : b.text(owner);
+      const { cte, freed } = superseding(files, requestKey === null ? null : key, who, at);
+      const head = `input AS (SELECT * FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS}))${cte}`;
+      const values = `input.id, input.route, input.key, ${who}, 'pending', input.name, input.type, input.size,
+        input.metadata, ${expires}, ${at}, ${at}, ${key}`;
       if (owner === null) {
         await runStatement(
           executor,
-          b.statement(`INSERT INTO ${files} (${INSERT_COLUMNS})
-            SELECT id, route, key, NULL, 'pending', name, type, size, metadata, ${expires}, ${at}, ${at}
-            FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS})`),
+          b.statement(`WITH ${head} INSERT INTO ${files} (${INSERT_COLUMNS}) SELECT ${values} FROM input`),
         );
         return accepted.map(() => "reserved" as const);
       }
-      const who = b.text(owner);
       const fits = limit === null ? "true" : `decided.used + input.size <= ${b.bigint(limit)}`;
       // Without a limit, a first reserve racing another for the same new owner adds to the row the other created. With
       // one it cannot: its quota decisions assumed no row, so the insert fails on the unique owner and is run again.
@@ -84,9 +109,14 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
           : "";
       // The usage row is locked before any decision, so concurrent reserves of one owner queue and each sees the
       // counters the previous one committed. `decided` walks the files in order, adding each that fits.
-      const sql = `WITH RECURSIVE
-        input AS (SELECT * FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS})),
-        locked AS (SELECT reserved_bytes + active_bytes AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE),
+      // Lock order: file rows, then the usage row, as in every other writer (end, complete, revoke). The freed sum sits
+      // in `locked`'s projection, which the scan computes before FOR UPDATE locks the row, so `superseded` waits for a
+      // row another transaction holds before this statement takes the usage row; the other order deadlocks (40P01).
+      // With no usage row there is no pending row of the owner to free.
+      const sql = `WITH RECURSIVE ${head},
+        locked AS (
+          SELECT reserved_bytes + active_bytes - ${freed} AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE
+        ),
         decided (ord, used, reserved) AS (
           SELECT 0, coalesce((SELECT used FROM locked), 0), false
           UNION ALL
@@ -95,15 +125,13 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
         ),
         inserted AS (
           INSERT INTO ${files} (${INSERT_COLUMNS})
-          SELECT input.id, input.route, input.key, ${who}, 'pending', input.name, input.type, input.size,
-            input.metadata, ${expires}, ${at}, ${at}
-          FROM input JOIN decided ON decided.ord = input.ord WHERE decided.reserved
+          SELECT ${values} FROM input JOIN decided ON decided.ord = input.ord WHERE decided.reserved
           RETURNING size
         ),
-        total AS (SELECT coalesce(sum(size), 0) AS bytes, count(*) AS reserved FROM inserted),
+        total AS (SELECT coalesce(sum(size), 0) AS bytes, count(*) AS reserved, ${freed} AS freed FROM inserted),
         counted AS (
-          UPDATE ${usage} SET reserved_bytes = reserved_bytes + total.bytes, updated_at = ${at}
-          FROM total WHERE owner = ${who} AND total.reserved > 0
+          UPDATE ${usage} SET reserved_bytes = reserved_bytes + total.bytes - total.freed, updated_at = ${at}
+          FROM total WHERE owner = ${who} AND (total.reserved > 0 OR total.freed > 0)
         ),
         created AS (
           INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at)

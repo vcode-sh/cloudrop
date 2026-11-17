@@ -48,10 +48,10 @@ Goals:
    SQLite) and Prisma 7, all over one SQL core, proven by one contract suite on real databases.
 
 Non-goals: MySQL (no `RETURNING`; later), Prisma 8 until stable (the executor seam allows it), MongoDB, a schema
-generator CLI (docs ship the schema), derivatives and domain links (the app's), bucket-driven orphan scans,
-cross-device resume, an idempotency key on `/upload` (a later protocol change, see §5.7), per-file refusal from plugin
-`beforeUpload` (moved to M6 with `limits()`), `bun:sqlite` as a tested target (the executor shape fits it; no lane runs
-it, so it is not claimed).
+generator CLI (docs ship the schema), derivatives and domain links (the app's), bucket-driven orphan scans, cross-device
+resume, an idempotency key on `/upload` (a later protocol change, see §5.7; added after M5 by M5-T100), per-file refusal
+from plugin `beforeUpload` (moved to M6 with `limits()`), `bun:sqlite` as a tested target (the executor shape fits it;
+no lane runs it, so it is not claimed).
 
 ## 3. Data model (`M5-T1`)
 
@@ -81,8 +81,10 @@ as integer milliseconds since the epoch, with the same names.
 | `expires_at` | `timestamptz` not null | The token's `exp` (computed before the insert). |
 | `created_at`, `updated_at` | `timestamptz` not null | |
 | `completed_at`, `ended_at`, `cleaned_at` | `timestamptz` null | Completion; reaching a terminal non-completed state or `deleted`; the sweep's cleanup done. |
+| `request_key` | `text` null | The `/upload` request's `idempotencyKey`, or null; a retry with it supersedes the row while it is `pending` (added after M5, M5-T101). |
 
-Indexes: `(status, expires_at)`, `(status, claimed_at)`, `(status, cleaned_at, ended_at)`, `(owner, status)`, `(key)`.
+Indexes: `(status, expires_at)`, `(status, claimed_at)`, `(status, cleaned_at, ended_at)`, `(owner, status)`, `(key)`,
+`(route, request_key)`.
 
 `cloudrop_usage`, maintained for every row with an owner (so turning `quota` on later needs no backfill):
 `owner text primary key`, `reserved_bytes bigint`, `active_bytes bigint`, `files integer` (completed and not deleted),
@@ -129,9 +131,11 @@ type Transition =
 
 interface CloudropStore<TTx = never> {
   /** One /upload, one owner. Atomic for the call: every outcome written, or a throw and nothing written. With a
-   *  limit, each file in order is a guarded increment: reserved + active + size <= limit, else "over-quota". */
-  reserve(input: { owner: string | null; limit: number | null; expiresAt: Date; files: readonly NewFile[] },
-    now: Date): Promise<readonly ("reserved" | "over-quota")[]>;
+   *  limit, each file in order is a guarded increment: reserved + active + size <= limit, else "over-quota". With a
+   *  requestKey (added after M5, M5-T101), first ends as aborted the pending rows of that key, route and owner,
+   *  releasing their bytes before the quota check; new rows store the key. */
+  reserve(input: { owner: string | null; limit: number | null; expiresAt: Date; requestKey: string | null;
+    files: readonly NewFile[] }, now: Date): Promise<readonly ("reserved" | "over-quota")[]>;
   /** pending with upload_id null or equal → true (idempotent); anything else → false. */
   attach(id: string, uploadId: string, now: Date): Promise<boolean>;
   get(id: string): Promise<FileRecord | null>;
@@ -181,7 +185,8 @@ Every rule here applies only when `store` is configured; the stateless path is u
 
 ### 5.2 `/upload` (`M5-T4`)
 After `authorize`, metadata, the per-file policy and `beforeUpload`, with `exp` computed first: resolve `owner` and the
-quota limit, then `store.reserve` for the accepted files. `over-quota` files get the new per-file `QUOTA_EXCEEDED`
+quota limit, then `store.reserve` for the accepted files, with the request's `idempotencyKey` as `requestKey` (null when
+the client sent none; added after M5, M5-T101). `over-quota` files get the new per-file `QUOTA_EXCEEDED`
 (below) and plugins that accepted them get `onAbort("rejected")`; a throw refuses every file of the call with a
 retryable `SERVER_ERROR` and nothing is signed. Then signing as today. After `createMultipart`, `store.attach`: false or
 a throw → `abortMultipart`, `end(id, "pending", "failed")` (best effort), and a rejected ticket (`UPLOAD_EXPIRED` when
@@ -236,10 +241,15 @@ stored token since the row decides. `completed` or `completing`: `ok`, nothing d
 
 ### 5.7 Owner and quota (`M5-T9`)
 Usage counts rows with an owner. Quota rule: `reserved_bytes + active_bytes + size <= limit`. `api.usage(owner)` works
-with or without `quota`. A lost `/upload` answer (the client's 30 s deadline, then a retry) holds its reservation until
-the sweep expires it (`expires_at` + grace) or `revokeUploads` releases it: a known cost; the real fix is an idempotency
-key on `/upload`, out of M5's scope. The sweep and `revoke` run no `onAbort` (rows carry no auth JSON), so plugin
-reservations still need their own expiry (base spec §8).
+with or without `quota`. A lost `/upload` answer (the client's 30 s deadline, a dropped connection, then a retry) no
+longer holds its reservation (amended after M5, M5-T100 to M5-T104): each ask carries an `idempotencyKey`, and the
+retry's `reserve` ends the lost attempt's `pending` rows as `aborted` and releases their bytes before its own quota
+check. The lost attempt's multipart upload is aborted by the sweep's cleanup pass (M5-T64). What remains: a retry
+without a key (an older client, or an app's own client) holds the old reservation until the sweep expires it
+(`expires_at` + grace) or `revokeUploads` releases it; a retry refused by `beforeUpload` reaches no `reserve` and
+supersedes nothing; an attempt whose `reserve` commits after its retry's (a first request still running when the client
+gave up on it) is not superseded either. The sweep, `revoke` and superseding run no `onAbort` (rows carry no auth JSON),
+so plugin reservations still need their own expiry (base spec §8).
 
 ## 6. File API with a store (`M5-T10`)
 

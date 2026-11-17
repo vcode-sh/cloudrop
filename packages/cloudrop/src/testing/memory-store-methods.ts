@@ -22,7 +22,7 @@ const RESERVING: ReadonlySet<FileStatus> = new Set(["pending", "completing"]);
 const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
 
 function toRecord(row: RawFileRow): FileRecord {
-  const { claim: _claim, updatedAt: _updatedAt, ...record } = structuredClone(row);
+  const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = structuredClone(row);
   return record;
 }
 
@@ -84,9 +84,26 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   };
 
   return {
-    reserve: ({ owner, limit, expiresAt, files: accepted }, now) =>
-      atomic("reserve", (write) =>
-        accepted.map((file) => {
+    reserve: ({ owner, limit, expiresAt, requestKey, files: accepted }, now) =>
+      atomic("reserve", (write) => {
+        if (accepted.length === 0) return [];
+        // A retry of a request whose answer was lost: its earlier attempt's pending rows end first, freeing their bytes.
+        const routes = new Set(accepted.map((file) => file.route));
+        const superseded =
+          requestKey === null
+            ? []
+            : [...files.values()].filter(
+                (row) =>
+                  row.requestKey === requestKey &&
+                  row.owner === owner &&
+                  routes.has(row.route) &&
+                  row.status === "pending",
+              );
+        for (const row of superseded) {
+          write.file({ ...row, status: "aborted", endedAt: now, updatedAt: now });
+          adjust(write, owner, { reservedBytes: -row.size }, now);
+        }
+        return accepted.map((file) => {
           if (owner !== null && limit !== null) {
             const { reservedBytes, activeBytes } = countsOf(owner);
             if (reservedBytes + activeBytes + file.size > limit) return "over-quota";
@@ -106,11 +123,12 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
             completedAt: null,
             endedAt: null,
             cleanedAt: null,
+            requestKey,
           });
           adjust(write, owner, { reservedBytes: file.size }, now);
           return "reserved";
-        }),
-      ),
+        });
+      }),
 
     attach: (id, uploadId, now) =>
       atomic("attach", (write) => {

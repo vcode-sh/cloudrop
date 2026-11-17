@@ -76,13 +76,15 @@ export function schemaStatements(dialect: Dialect, tables?: Partial<TableNames>)
   updated_at ${time} NOT NULL,
   completed_at ${time},
   ended_at ${time},
-  cleaned_at ${time}
+  cleaned_at ${time},
+  request_key ${text}
 )`,
     index(["status", "expires_at"]),
     index(["status", "claimed_at"]),
     index(["status", "cleaned_at", "ended_at"]),
     index(["owner", "status"]),
     index(["key"]),
+    index(["route", "request_key"]),
     `CREATE TABLE ${qualified(schema, usage)} (
   owner ${text} NOT NULL PRIMARY KEY,
   reserved_bytes ${bigint} NOT NULL${nonNegative("reserved_bytes")},

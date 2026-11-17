@@ -176,9 +176,37 @@ describe("POST /upload: malformed requests from plain JavaScript", () => {
       code: "INVALID_INPUT",
       message: `File 1 ${fileRule}`,
     },
+    ...[
+      { name: "a 15-character idempotencyKey", idempotencyKey: "a".repeat(15) },
+      { name: "a 129-character idempotencyKey", idempotencyKey: "a".repeat(129) },
+      { name: "an idempotencyKey with a dot", idempotencyKey: "0123456789abcdef.0" },
+      { name: "a null idempotencyKey", idempotencyKey: null },
+      { name: "a numeric idempotencyKey", idempotencyKey: 1234567890123456 },
+    ].map(({ name, idempotencyKey }) => ({
+      name,
+      body: { route: "files", files: [png()], idempotencyKey },
+      code: "INVALID_INPUT",
+      message: 'Send idempotencyKey as 16 to 128 letters, digits, "-" or "_", such as a UUID, or leave it out.',
+    })),
   ])("refuses $name", async ({ body, code, message }) => {
     const result = await upload(serverFixture({ files }), body);
     expect(result.body.error).toEqual({ code, message, retryable: false });
+  });
+
+  it("takes an idempotencyKey of 16 and of 128 characters, and without a store answers the same key twice", async () => {
+    const fixture = serverFixture({ files });
+    const shortest = "A-_0".repeat(4);
+    const longest = "z".repeat(128);
+    const answers = await Promise.all(
+      [shortest, shortest, longest].map((idempotencyKey) =>
+        upload(fixture, { route: "files", files: [png()], idempotencyKey }),
+      ),
+    );
+    expect(answers.map(({ status, body }) => [status, body.files?.[0]?.kind])).toEqual([
+      [200, "single"],
+      [200, "single"],
+      [200, "single"],
+    ]);
   });
 
   it("counts a name's length in characters, so 255 emoji pass", async () => {
