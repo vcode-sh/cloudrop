@@ -1,10 +1,12 @@
 "use client";
 
+import type { RouteResult } from "cloudrop/client";
 import type { UploadFile } from "cloudrop/react";
+import type { cloudrop } from "../lib/cloudrop";
 import { useUpload } from "../lib/upload";
 
 /** The status line of the latest upload; the route's onComplete returns `{ key }`. */
-function statusOf(file: UploadFile<{ key: string }>): string {
+function statusOf(file: UploadFile<RouteResult<typeof cloudrop, "files">>): string {
   if (file.error) return `${file.error.code}: ${file.error.message}`;
   if (file.result) return `Uploaded ${file.name} (${file.size} bytes) as ${file.result.data.key}`;
   return `Uploading ${file.name}…`;
