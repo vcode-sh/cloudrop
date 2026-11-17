@@ -716,7 +716,7 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   callback form in Prisma 7's generated client, so `onComplete({ tx })` is `Omit<PrismaClient, ITXClientDenyList>`. The
   client is typed by hand (`PrismaClientLike`); `src/` imports nothing from Prisma. `transactionOptions` takes only
   `maxWait` and `timeout`. `INVALID_CONFIG` at construction for an unknown dialect, `transaction: true` on SQLite, and
-  `transactionOptions` without `transaction: true`. The 2 s `lock_timeout` stays the core's (`sqlStore` runs it first).
+  `transactionOptions` without `transaction: true`. The 2 s `lock_timeout` stays the core's (around the claim only, M5-T76).
 - **Why:** spec §5.5 and §7. No `isolationLevel`: the claim's busy answer relies on Read Committed re-reading a row it
   waited for (`outcomes.ts`), so Serializable would turn overlaps into serialization failures. Prisma's 5 s default
   timeout counts `onComplete`; a completion that outlasts it is rolled back and answered as a retryable store failure
@@ -736,10 +736,10 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   comes back as a number (2^53 − 1 exactly), an expression without a declared type (`sum`, `count`, `1`, `1 = 2`) as
   `BigInt`. A statement without `RETURNING` answers `[]` on both. The core's `toSafeInteger` and `toDate` already accept
   all of these, so the decoder is unchanged. Prisma reports a raw query's failure as `P2010` with the driver adapter's
-  error under `meta.driverAdapterError`, whose `cause.code` is the Postgres code; `isLockTimeout` now follows `cause`,
-  or `meta.driverAdapterError` when there is no `cause`.
+  error under `meta.driverAdapterError`, whose `cause.code` is the Postgres code. The core's SQLSTATE walk (behind
+  `isLockTimeout` and `isUniqueViolation`) now follows `cause`, or `meta.driverAdapterError` when there is no `cause`.
 - **Why:** the brief's one allowed edit to the core. Without it, a claim that times out on the row lock would fail the
-  completion instead of answering `busy`.
+  completion instead of answering `busy`, and a raced first reserve (M5-T74) would not be rerun.
 - **If wrong:** another Prisma major may move the code; the lock-timeout row in `prisma.db.integration.test.ts` and the
   unit row in `src/store/sql/executor.test.ts` fail first.
 - **Status:** decided.
@@ -781,22 +781,24 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Source:** task E, 2026-11-17.
 - **Visible in:** `src/testing/db/prisma.ts`, `src/adapters/prisma.db.integration.test.ts`.
 
-### M5-T58: adapters may import `routeFor`, which puts `route()` in a shared chunk
+### M5-T58: `cloudrop/adapters/prisma` is budgeted 16 kB summed
 
-- **Decision:** the adapter fence in `biome.json` also allows `server/route`, so a transactional adapter can call
-  `routeFor`. Measured after the build:
-  - `cloudrop/adapters/prisma` is 11.8 kB summed (budget 13 kB): its own file 0.89 kB, the core chunk 8.2 kB,
-    `route()` with its imports 1.5 kB plus `errors` 0.88 kB and `input` 0.39 kB.
-  - `cloudrop` grows by 0.8 kB summed (44.5 to 45.3 kB on `d9a4ec1`; 45.74 kB after task B's fix round), because
-    `route()` became a chunk gzipped on its own. The bundled and minified size moves by 0.01 kB (27.09 kB now).
-  - `cloudrop/adapters/sql` goes from 9.86 kB to 10.26 kB, because the core is now a chunk shared with Prisma.
-- **Why:** spec §5.5 has transactional adapters expose `store.route`, made by B's `routeFor` (M5-T31). Copying the
-  brand into each adapter would duplicate `route()`.
-- **If wrong:** if the summed `cloudrop` budget gets tight, move `routeFor` and the brand into a small module of their
-  own, which only `route()` and the adapters import.
+- **Decision:** measured after the build on `ce8c637`:
+  - `cloudrop/adapters/prisma` is 12.18 kB summed, which breaks down as:
+    - its own file, 0.88 kB;
+    - the SQL core chunk, 8.59 kB;
+    - `route()` for `store.route` with `errors` and `input`, 2.78 kB.
+  - Its budget rises from task C's 13 kB to 16 kB.
+  - Importing `routeFor` (allowed by M5-T77) moved `route()` into a chunk that `cloudrop` also loads. Summed `cloudrop`
+    grew 0.8 kB when Prisma first imported it (44.5 to 45.3 kB on `d9a4ec1`) and is 45.87 kB now. The bundled and
+    minified build barely moved (27.14 kB).
+- **Why:** M4-F24 sets ceilings with wide headroom. The 13 kB scaffold predates `routeFor`. It would leave 0.8 kB,
+  about 7%, which would force a raise at the first change to the core.
+- **If wrong:** if the summed `cloudrop` budget gets tight, move `routeFor` and the brand into a module of their own,
+  imported only by `route()` and the adapters.
 - **Status:** decided.
 - **Source:** task E, 2026-11-17.
-- **Visible in:** `biome.json`, `scripts/size-limit.config.ts`.
+- **Visible in:** `scripts/size-limit.config.ts`.
 
 <!-- Task E appends its entries above this line. -->
 
