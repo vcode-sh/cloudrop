@@ -193,8 +193,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 ### M4-F22: `resumable()` leaves out the uploads this page holds
 
-- **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.held`), and `resumable()` leaves them
-  out. Each holder makes its own claim with `hold()`, which returns the release for that claim alone: a persisted
+- **Decision:** the client keeps the ids of the uploads it holds (`UploadContext.claims`), and `resumable()` leaves them
+  out. Each holder makes its own claim with `claim()`, which returns the release for that claim alone: a persisted
   multipart ticket from its arrival (`uploadOf`) until its unlock, which every way of giving the ticket up calls
   (`letGo`, `giveUp`, a `/complete` in doubt of `upload()`), and a `resume()` from its call, before its first await,
   until its checks refuse it or its upload's unlock. An upload is left out while any claim on it remains, so a refused
@@ -208,9 +208,11 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   per claim is exact under any interleaving.
 - **If wrong:** listing held uploads again is a behaviour change in a minor version; a page that wants them can keep its
   own jobs' files.
-- **Status:** in force (`516bac5`, `8b864a9`).
+- **Status:** in force (`516bac5`, `8b864a9`). The final review (M3) renamed `held` and `hold()` to `claims` and
+  `claim()`: `held` already names a paused entry's wait (`client/entry.ts`) and the failed tickets of `pagehide`
+  (`client/lifecycle.ts`).
 - **Source:** task D re-review's client proposal; controller rulings, fix rounds 2 and 3.
-- **Visible in:** `client/upload.ts` (`held`, `hold`), `client/persist.ts` (`uploadOf`), `client/resume.ts`
+- **Visible in:** `client/upload.ts` (`claims`, `claim`), `client/persist.ts` (`uploadOf`), `client/resume.ts`
   (`resumable`, `check`), `client/forget.test.ts`, `client/resume-job.test.ts`, `docs/guide/resume.md#two-tabs`.
 
 ### M4-F23: the client's ceiling is 11.5 kB

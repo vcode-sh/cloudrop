@@ -17,7 +17,7 @@ import type { Entry } from "./entry.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import type { Job } from "./job-run.ts";
 import { lockUpload } from "./locks.ts";
-import { hold, newUpload, type Upload, type UploadContext } from "./upload.ts";
+import { claim, newUpload, type Upload, type UploadContext } from "./upload.ts";
 
 /** `entry`'s upload under the ticket that just arrived; a persisted one is locked at once, and saved once locked. */
 export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): Upload {
@@ -27,7 +27,7 @@ export function uploadOf({ context, args }: Job, entry: Entry, ticket: Ticket): 
   let unlock = () => {};
   if (ticket.kind === "multipart" && records.enabled) {
     const lock = lockUpload(ticket.id);
-    const release = hold(context, ticket.id);
+    const release = claim(context, ticket.id);
     unlock = () => {
       release();
       lock.release();
