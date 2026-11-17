@@ -159,7 +159,7 @@ export default {
 
 - Creating the server per request also works, but every call checks the options again and imports the token secret's
   key: explicit settings are checked and loaded in `createCloudrop`, not lazily. Memoizing per isolate pays that once.
-- An explicit value that is wrong (a short secret, a malformed account id) throws `INVALID_CONFIG` from `r2()` or
-  `createCloudrop` inside `fetch`, so the Worker fails that request with an exception rather than a cloudrop 500.
+- A missing binding (`env.CLOUDROP_SECRET` is `undefined`) or a wrong value (a short secret, a malformed account id)
+  throws `INVALID_CONFIG` from `r2()` or `createCloudrop` inside `fetch`, so the Worker fails that request with an exception rather than a cloudrop 500.
 - How the server's parallel storage calls fit Workers' subrequest limits has not been measured yet, and no test lane
   runs cloudrop on Workers.
