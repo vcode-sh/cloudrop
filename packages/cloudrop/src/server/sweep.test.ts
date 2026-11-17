@@ -240,6 +240,34 @@ describe("api.sweep: paging and failures", () => {
     expect((await statuses(fixture))[poison.id]).toEqual(["expired", at(26 * HOUR + 4000)]);
   });
 
+  it("answers the store's error when it cannot list any work, so a caller's loop stops", async () => {
+    const fixture = storeFixture({ owned });
+    await fixture.single("owned", TEXT);
+    fixture.store.stale = () => Promise.reject(new Error("connection refused"));
+    vi.setSystemTime(PAST_GRACE);
+    expect(await fixture.cloudrop.api.sweep()).toEqual({
+      data: null,
+      error: expect.objectContaining({ code: "SERVER_ERROR", retryable: true }),
+    });
+  });
+
+  it("answers what it did, the failed listing counted and no cursor, when a listing fails after some rows", async () => {
+    const fixture = storeFixture({ owned });
+    const ticket = await fixture.single("owned", TEXT);
+    const { stale } = fixture.store;
+    fixture.store.stale = (input) =>
+      input.kind === "cleanup" ? Promise.reject(new Error("connection refused")) : stale(input);
+    vi.setSystemTime(PAST_GRACE);
+    expect((await fixture.cloudrop.api.sweep()).data).toEqual({
+      expired: 1,
+      cleaned: 0,
+      failed: 1,
+      reported: [],
+      cursor: null,
+    });
+    expect((await statuses(fixture))[ticket.id]?.[0]).toBe("expired");
+  });
+
   it("refuses a grace under 15 minutes, the life of an upload URL, and takes exactly 15", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);
@@ -249,7 +277,7 @@ describe("api.sweep: paging and failures", () => {
       error: expect.objectContaining({
         code: "INVALID_INPUT",
         message:
-          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so a PUT under way at the deadline lands first.",
+          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.",
       }),
     });
     expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.expired).toBe(1);

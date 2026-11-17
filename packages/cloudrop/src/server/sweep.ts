@@ -2,9 +2,10 @@
 // by listing the bucket. It deletes only an object whose cloudrop-id is its row's id, never touches a completed row,
 // and is bounded per call, keyset-paged and idempotent, so two sweeps may run at once.
 
-import { fail, ok, type Result } from "../errors.ts";
+import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
+import { URL_LIFETIME_SECONDS } from "./presign.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
@@ -15,9 +16,10 @@ export interface SweepOptions {
   cursor?: string;
   /**
    * How long past its token's deadline an unfinished upload, and past its end an ended one, is left alone. At least
-   * 900000 (15 minutes, the life of an upload URL), so a PUT under way at the deadline lands before its row is cleaned
-   * up. Default 3600000 (1 hour). The sweep takes each row before it deletes anything, so a completion that started in
-   * time is never harmed; the grace keeps a slow one from being refused.
+   * 900000 (15 minutes, the life of an upload URL), so no new PUT can start once a row may be cleaned up. A PUT already
+   * under way that lands after its row was cleaned is left in the bucket. Default 3600000 (1 hour). The sweep takes
+   * each row before it deletes anything, so a completion that started in time is never harmed; the grace keeps a slow
+   * one from being refused.
    */
   graceMs?: number;
 }
@@ -29,7 +31,7 @@ export interface SweepReport {
   cleaned: number;
   /**
    * Rows that failed this time (a storage or database error, logged with the row's id). Each stays as it was and the
-   * next sweep tries it again; the rows after it were still swept.
+   * next sweep tries it again; the rows after it were still swept. A listing that failed after some rows counts too.
    */
   failed: number;
   /**
@@ -37,7 +39,10 @@ export interface SweepReport {
    * onComplete may have recorded them: check each one. A row is reported once.
    */
   reported: FileRecord[];
-  /** Pass it to the next sweep to continue; null when every row has been seen. */
+  /**
+   * Pass it to the next sweep to continue; null when every row has been seen, or when a listing failed after this call
+   * had handled rows (counted in `failed`). A listing that fails before any row answers the store's error instead.
+   */
   cursor: string | null;
 }
 
@@ -45,10 +50,10 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 const DEFAULT_GRACE_MS = 3_600_000;
 /**
- * A signed URL's life (URL_LIFETIME_SECONDS): a PUT signed before a row ended can land until then, so no row is
- * cleaned up sooner after its deadline or its end.
+ * A signed URL's life: no URL outlives its token's deadline, so with at least this grace no new PUT can start after a
+ * row's deadline or end once the sweep may clean it up.
  */
-const MIN_GRACE_MS = 900_000;
+const MIN_GRACE_MS = URL_LIFETIME_SECONDS * 1000;
 const CURSOR = /^(expire|cleanup):(.*)$/s;
 
 type Pass = "expire" | "cleanup";
@@ -63,7 +68,7 @@ function readOptions(given: unknown): Result<{ limit: number; graceMs: number; p
   if (typeof graceMs !== "number" || !Number.isSafeInteger(graceMs) || graceMs < MIN_GRACE_MS) {
     return fail(
       invalidInput(
-        `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so a PUT under way at the deadline lands first.`,
+        `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.`,
       ),
     );
   }
@@ -149,8 +154,17 @@ async function sweepPage(
   return ok({ handled: found.data.records.length, cursor: found.data.cursor });
 }
 
-/** The report so far, with the cursor to continue from: a sweep always answers what it did. */
 const stoppedAt = (report: SweepReport, cursor: string | null): Result<SweepReport> => ok({ ...report, cursor });
+
+/**
+ * A listing that failed. Before any row was handled in this call: the store's error, so a caller looping on the
+ * cursor stops. After: what was done, the listing counted in `failed`, and no cursor, so the caller stops all the same
+ * and the next sweep starts over.
+ */
+function listingFailed(report: SweepReport, handled: number, error: CloudropError): Result<SweepReport> {
+  if (handled === 0) return fail(error);
+  return stoppedAt({ ...report, failed: report.failed + 1 }, null);
+}
 
 export async function sweep(
   config: ServerConfig,
@@ -167,13 +181,13 @@ export async function sweep(
   let cursor = options.data.cursor;
   if (pass === "expire") {
     const page = await sweepPage(sweeper, "expire", { before: now - graceMs, limit, cursor });
-    if (page.error) return stoppedAt(report, `expire:${cursor ?? ""}`);
+    if (page.error) return fail(page.error);
     if (page.data.cursor !== null) return stoppedAt(report, `expire:${page.data.cursor}`);
     budget -= page.data.handled;
     cursor = null;
     if (budget === 0) return stoppedAt(report, "cleanup:");
   }
   const page = await sweepPage(sweeper, "cleanup", { before: now - graceMs, limit: budget, cursor });
-  if (page.error) return stoppedAt(report, `cleanup:${cursor ?? ""}`);
+  if (page.error) return listingFailed(report, limit - budget, page.error);
   return stoppedAt(report, page.data.cursor === null ? null : `cleanup:${page.data.cursor}`);
 }
