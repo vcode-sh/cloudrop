@@ -152,6 +152,7 @@ cover `Retry-After`.
 | --- | --- |
 | [Server](docs/guide/server.md) | `createCloudrop`, storage drivers, routes, the upload token, mounting, origins, `cloudrop.api` |
 | [Client](docs/guide/client.md) | `createCloudropClient`, `upload()` and `start()`, progress, pause, retry, concurrency, offline |
+| [React](docs/guide/react.md) | `cloudrop/react`: `useUpload` and `useResumable` for inputs, drop zones, progress lists and resume |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |
 | [Bucket setup](docs/guide/bucket-setup.md) | CORS and lifecycle rules for R2 and S3, credentials, `checkBucket` |
 | [Errors](docs/guide/errors.md) | Every error code, where it comes from and what to do |
