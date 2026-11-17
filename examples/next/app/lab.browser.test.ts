@@ -253,34 +253,48 @@ test("going offline pauses an upload and coming back online completes it", async
 const doneFiles = async (page: Page): Promise<string[]> =>
   (await fileRows(page)).filter(([, status]) => status === "done").map(([name]) => name);
 
-// The order's promise is which file completes first, not the PUT sequence: a PUT that finds a free slot is never held
-// back, so with smallest-first part 1 of the large file may go first, and a real retry on R2 adds an attempt.
-for (const { order, first } of [
-  { order: "smallest-first", first: "random-1-KiB.bin" },
-  { order: "added", first: "random-20-MiB.bin" },
-]) {
-  test(`with one connection and order ${order}, ${first} completes first`, async ({ page }) => {
-    await signIn(page);
-    await page.getByLabel("Connections", { exact: true }).selectOption("1");
-    await page.getByLabel("Order", { exact: true }).selectOption(order);
-    // Every PUT waits a second, far longer than a /complete: the two files complete at least a second apart, and a poll
-    // every 100 ms sees the first one done alone.
-    await page.getByLabel(/Delay every bucket PUT by/).fill("1000");
-    for (const size of ["20 MiB", "1 KiB"]) await page.getByRole("button", { name: size, exact: true }).click();
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
+// The order decides which waiting PUT gets a freed slot (M3-U9, M3-U42): with "added" the 20 MiB file's parts by part
+// number, then the 1 KiB file; with "smallest-first" the 1 KiB file first. It decides neither the first PUT, which finds
+// the slot free and is never held back, nor which file completes first: a PUT that fails gives its slot back for its
+// retry's wait, and the next waiter goes meanwhile (spec §4.4). R2 drops a request now and then, and the last row drops
+// part 3 on purpose, as R2 did in a live run that sent the 1 KiB file in that gap. So the oracle is the order in which
+// the first attempts after the first PUT started; retries, noted "retry", may come anywhere between them. With one
+// connection a PUT starts when it is granted, and the table lists requests as they start.
+const BY_RANK = {
+  added: ["PUT part 1", "PUT part 2", "PUT part 3", "PUT single"],
+  "smallest-first": ["PUT single", "PUT part 1", "PUT part 2", "PUT part 3"],
+};
 
-    let doneAtFirst: string[] = [];
-    await expect
-      .poll(
-        async () => {
-          doneAtFirst = await doneFiles(page);
-          return doneAtFirst.length;
-        },
-        { intervals: [100], timeout: 20_000 },
-      )
-      .toBeGreaterThan(0);
-    expect(doneAtFirst).toEqual([first]);
+/** Uploads a 20 MiB file and then a 1 KiB file through one connection, every PUT delayed a second. */
+async function uploadBothThroughOneSlot(page: Page, order: keyof typeof BY_RANK): Promise<void> {
+  await signIn(page);
+  await page.getByLabel("Connections", { exact: true }).selectOption("1");
+  await page.getByLabel("Order", { exact: true }).selectOption(order);
+  // The first PUT holds the one slot for a second: every other first attempt is waiting before the slot is freed.
+  await page.getByLabel(/Delay every bucket PUT by/).fill("1000");
+  for (const size of ["20 MiB", "1 KiB"]) await page.getByRole("button", { name: size, exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+}
+
+/** The first PUT, which found the slot free, and the other first attempts, in the order they started. */
+async function firstAttempts(page: Page): Promise<{ freeSlot: string; queued: string[] }> {
+  const [freeSlot = "", ...queued] = (await requestRows(page))
+    .filter(([kind = "", , note = ""]) => kind.startsWith("PUT ") && !note.startsWith("retry"))
+    .map(([kind = ""]) => kind);
+  return { freeSlot, queued };
+}
+
+/** The order's ranking of every PUT but the one that found the slot free. */
+const queuedByRank = (order: keyof typeof BY_RANK, freeSlot: string) =>
+  BY_RANK[order].filter((kind) => kind !== freeSlot);
+
+for (const order of ["smallest-first", "added"] as const) {
+  test(`with one connection and order ${order}, the waiting PUTs get the slot in that order`, async ({ page }) => {
+    await uploadBothThroughOneSlot(page, order);
     await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+
+    const { freeSlot, queued } = await firstAttempts(page);
+    expect(queued).toEqual(queuedByRank(order, freeSlot));
     expect(await doneFiles(page)).toEqual(["random-20-MiB.bin", "random-1-KiB.bin"]);
     // One connection: never two PUTs in flight, retries included, however many attempts each PUT took.
     await expect(summaryValue(page, "Peak PUTs in flight")).toHaveText("1");
@@ -288,6 +302,26 @@ for (const { order, first } of [
     await expect(summaryValue(page, "Total time")).toHaveText(/^\d+\.\d s$/);
   });
 }
+
+test("with one connection and order added, a PUT that fails frees the slot without breaking the order", async ({
+  page,
+}) => {
+  await uploadBothThroughOneSlot(page, "added");
+  // Part 3's first attempt is the next PUT to be sent: it waits out its second's delay before the lab fails it.
+  await expect
+    .poll(async () => (await requestRows(page)).some(([kind]) => kind === "PUT part 3"), { intervals: [100] })
+    .toBe(true);
+  await page.getByLabel("Fail the next bucket PUT with a network error").check();
+  await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+
+  const rows = await requestRows(page);
+  expect(rows).toContainEqual(["PUT part 3", "network error", "delayed 1000 ms; injected network error"]);
+  expect(rows).toContainEqual(["PUT part 3", "200", "retry; delayed 1000 ms"]);
+  const { freeSlot, queued } = await firstAttempts(page);
+  expect(queued).toEqual(queuedByRank("added", freeSlot));
+  expect(await doneFiles(page)).toEqual(["random-20-MiB.bin", "random-1-KiB.bin"]);
+  await expect(summaryValue(page, "Peak PUTs in flight")).toHaveText("1");
+});
 
 test("a file whose part 2 kept failing is retried with its ticket, sending part 2 alone", async ({ page }) => {
   // Part 2's six attempts wait up to 0.5 + 1 + 2 + 4 + 8 s between them (M3-S9) before the file fails.
