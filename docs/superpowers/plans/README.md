@@ -1,7 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 on `feat/m3-resume` after the resume plan (not merged to `main` yet; **lab rows: pending**, see
-below). This file is the one place
+Updated 2026-11-17 on `feat/m3-resume` after the resume plan (not merged to `main` yet). This file is the one place
 that says what is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked
 done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is
 in [`docs/decisions/`](../../decisions/README.md).
@@ -30,18 +29,18 @@ in [`docs/decisions/`](../../decisions/README.md).
 | Follow-ups after the slice (no plan file) | Done, `90380fb..dcea6c3` | R2 refusals and checksums measured from a browser, clearer `NETWORK_ERROR` message, `/lab` page, example accepts video, audio and PDF |
 | [M3 progress plan A](2026-11-16-m3-progress-plan-a.md) ([audit](2026-11-16-m3-progress-plan-a.audit.md)), design [`2026-11-16-progress-scheduler-design.md`](../specs/2026-11-16-progress-scheduler-design.md) | Done, `27e9152..a003cdb` | XHR progress, the snapshot, one connection pool per client, several files per job with a result per file, pause, resume and cancel, the lab; decisions `M3-U1`..`M3-U22` |
 | [M3 progress plan B](2026-11-16-m3-progress-plan-b.md) ([audit](2026-11-16-m3-progress-plan-b.audit.md)) | Done, `fbc5c15..220332c` | `concurrency: "auto"`, `order: "smallest-first"`, stalled PUTs, offline and online, `retry()` with the failed-file rule and `pagehide`, 16 MiB parts from 256 MiB, the lab's controls; decisions `M3-U23`..`M3-U59` |
-| [M3 resume](2026-11-16-m3-resume.md) ([audit](2026-11-16-m3-resume.audit.md)), design [`2026-11-16-resume-design.md`](../specs/2026-11-16-resume-design.md) | Done from `57144e0`, on `feat/m3-resume`; **lab rows: pending** (task 6) and the budget (task 7) | Records in IndexedDB, edge-hash fingerprint, a Web Lock per upload, `resumable()`, `resume(upload, file)`, `forget()`, the `/complete` probe, `persist` and `namespace`; R2's browser refusals measured; decisions `M3-U60`..`M3-U87` |
+| [M3 resume](2026-11-16-m3-resume.md) ([audit](2026-11-16-m3-resume.audit.md)), design [`2026-11-16-resume-design.md`](../specs/2026-11-16-resume-design.md) | Done from `57144e0`, on `feat/m3-resume` | Records in IndexedDB, edge-hash fingerprint, a Web Lock per upload, `resumable()`, `resume(upload, file)`, `forget()`, the `/complete` probe, `persist` and `namespace`; R2's browser refusals measured; the lab's resume rows; decisions `M3-U60`..`M3-U91` |
 
 ## State of `feat/m3-resume` after the resume plan (2026-11-17)
 
-- **Gates:** `bun run verify` passes: 1253 unit tests, 1 skipped (a pre-existing skip), 78 files. `test:browser`
-  17/17 on RustFS after resume landed (task 5). **Lab rows: pending**: the resume rows of `/lab` and their RustFS and
-  live R2 runs (task 6) are not on the branch yet. `test:live`, `test:rustfs` and `test:wrangler` were not run again:
-  the plan changed client and example code and moved two functions, unchanged, from `src/plan.ts` to
+- **Gates:** `bun run verify` passes: 1265 unit tests, 1 skipped (a pre-existing skip). `test:browser` 21/21 on
+  RustFS and `test:browser:live` 21/21 on R2, with the lab's resume rows (a reload mid-upload, a reload after a finished
+  `/complete`, another file refused, a second tab, Forget). `test:live`, `test:rustfs` and `test:wrangler` were not
+  run again: the plan changed client and example code and moved two functions, unchanged, from `src/plan.ts` to
   `src/part-size.ts`; no server or storage code.
 - **Bundle (gzip):** `cloudrop` 33.84 kB of 36 kB, `cloudrop/next` 1.01 kB of 1.1 kB, `cloudrop/node` 3.1 kB of
   3.2 kB, `cloudrop/client` 10.58 kB of the 11 kB ceiling after the final review's fixes (`M3-U91`; 10.45 kB before
-  them, 8.35 kB before the plan). The resume plan's last step sets the budget from measurement.
+  them, 8.35 kB before the plan): about 0.42 kB of room for M4 under the ceiling.
 - **What works end to end:** server (`createCloudrop`, `route`, the four endpoints, verification, `api.*`), Next and
   Node adapters, `cloudrop/client` (single PUT and multipart, four parts of a file in flight, URL renewal,
   `PARTS_MISSING` repair, bounded retry, cancel with keep-or-abort; since plan A: bytes, speed and time left through
@@ -60,8 +59,7 @@ in [`docs/decisions/`](../../decisions/README.md).
 ### M3: the remaining client plans (spec §6)
 
 The progress and scheduler design (`2026-11-16-progress-scheduler-design.md`) merged the progress and scheduler plans
-into plans A and B; the resume design (`2026-11-16-resume-design.md`) gave the resume plan. All three are done (the
-resume plan's lab rows pending). Next:
+into plans A and B; the resume design (`2026-11-16-resume-design.md`) gave the resume plan. All three are done. Next:
 
 1. **M3 chaos plan:** the chaos proxy (§11.3), to test the above under loss, delay and resets. A copy of files into the
    origin-private file system, so a resume needs no new pick, is deferred to a later opt-in (`M3-U65`).
@@ -92,10 +90,6 @@ resume plan's lab rows pending). Next:
 - The findings' "Browser, 2026-11-16" row U2 was measured the same way as the section with the erratum (a routed
   page), so its preflight `204` may be Playwright's too; its conclusion (the expired URL's answer is opaque) stands.
 - The README says Deno has no `indexedDB`; not measured on this machine (no Deno installed).
-- One unit test, `api.deletePrefix`, takes about 268 ms without a stated reason (testing-patterns asks for one over
-  250 ms).
-- The `/lab` page's "already stored" note (a `412` PUT) and its per-part `/sign` label have no browser test; no lab
-  fault triggers them (the resume plan's task 6 takes them; pending).
 - Wording: the slice plan quotes the old `NETWORK_ERROR` message (around line 551), a historical plan left as
   written.
 - Plan B, parked: no unit row observes that `job.abort()` removes the listener on the caller's signal (`M3-U54`);
