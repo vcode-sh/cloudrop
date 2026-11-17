@@ -194,7 +194,8 @@ reviews accepted.
   first CI build that the build needs them; the fix would then be a library change (deferring the setting checks to
   the first request).
 - **Status:** in force (`15d4caa`); carried out by the M3 slice (M3-S21). M3-H15 adds the README line for builds
-  without secrets.
+  without secrets. Amended by M4-F16 (2026-11-17): the example still creates its server when the module loads, but
+  settings from the environment are read on the first request, so `next build` needs none.
 - **Visible in:** `examples/next/lib/cloudrop.ts`, `examples/next/README.md` ("The build needs the settings").
 
 ### M3-H15: the M3 plan audit's five decisions

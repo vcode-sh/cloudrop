@@ -93,6 +93,105 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 
 ### API, configuration and documentation (design §5, `M4-F15` to `M4-F21`)
 
+### M4-F15: `route(policy, callbacks?)`; the single-object form is gone
+
+- **Decision:** `route()` takes two arguments. The first, `RoutePolicy`, holds `accept`, `maxSize`, `maxFiles`,
+  `metadata`, `visibility` and `authorize`; the second, optional `RouteCallbacks`, holds `prefix`, `key` and
+  `onComplete`. Inside each object any order compiles. The single-object form is removed with no shim (pre-1.0), and
+  the public type `RouteOptions` is replaced by `RoutePolicy` and `RouteCallbacks`. An option in the wrong argument is a
+  type error (excess property) and, for JavaScript callers, `route()` throws `INVALID_CONFIG` naming the option and the
+  argument it belongs in; `route-config.ts` still validates the merged definition at `createCloudrop`, and plugins'
+  `extendRoute` still sees one merged `RouteDefinition`.
+- **Why:** TypeScript infers type arguments from context-sensitive callbacks left to right within one object literal,
+  so a callback written before `authorize` fixed `TAuth` at `object` (design §5.1, verified on tsc 7.0.2; `NoInfer`,
+  inferring the whole `authorize` and wrapper helpers do not fix it). Callbacks in a later argument are inferred after
+  the whole first argument. The placement check runs in `route()` because it is the only place that sees the two
+  objects apart; silently ignoring a misplaced `prefix` would store files at the bucket root.
+- **If wrong:** every route in an app moves to the new form, a mechanical change. A third-party wrapper that built
+  routes from one object must split it.
+- **Status:** in force. Amends M2-X6 (the ordering rule).
+- **Source:** design §5.1, owner request 2026-11-17.
+- **Visible in:** `server/route.ts`, `server/types.test.ts` (callbacks in every order, `metadata` after `authorize`),
+  `server/route.test.ts`, every `route(` call in `src/`, `examples/next/lib/cloudrop.ts`, `README.md`,
+  `docs/guide/server.md`, the design spec §4 sample.
+
+### M4-F16: settings from the environment are read on the first request
+
+- **Decision:** `CLOUDROP_SECRET` (when `secret` is omitted) and a storage preset's variables are read on the first
+  request through one memoized reader, `ServerConfig.ready()` (`server/environment.ts`), which the handler awaits
+  before any endpoint and every `cloudrop.api` call awaits too. Endpoints receive the resolved token keys
+  (`EndpointConfig.tokenKeys`). Every option that needs no environment value, and every value passed explicitly
+  (including `secret`), is still checked at construction. With `NODE_ENV === "development"` exactly, the environment
+  is read at construction too, so `next dev` fails at start. A value missing at request time:
+  1. The handler answers `SERVER_ERROR` 500 (with CORS headers for a trusted origin) and logs once
+     `cloudrop: every request answers 500 until this is fixed. <message>` with the `INVALID_CONFIG` as the error; it
+     logs again only when the message changes (a partial fix). Preflight, 404 and 405 answers need no environment.
+  2. `cloudrop.api.*` resolve `{ data: null, error }` with that `INVALID_CONFIG`.
+  3. Recovery, ruled: each request reads the environment again until it is complete, then the result is kept for the
+     life of the server (per setting: token keys and the storage driver are memoized separately). A fixed environment
+     recovers without a restart; a later change to the environment is not picked up.
+  4. The message is the one construction used to throw, and when the storage and the secret are both missing the two
+     messages are joined into one `INVALID_CONFIG`, so a first setup sees everything at once.
+- **Why:** `next build` evaluates the route module while collecting page data, so a construction-time read made every
+  build need production secrets (M3-H14's predicted cost). Workers bind the environment per request; reading at the
+  first request, never at import, works there. Re-reading until success costs one failed lookup per request on a
+  broken server and saves a restart once it is fixed; memoizing after success keeps the hot path free of environment
+  reads and key imports.
+- **If wrong:** a misconfigured production server starts and fails on its first request instead of at boot, which a
+  health check that hits the handler catches; development still fails at start.
+- **Size:** M4-F15 to M4-F18 together take the summed `cloudrop` budget from 34.09 to 36.33 kB gzip (published files
+  with their doc comments) and the bundled one from 21.32 to 22.16 kB, measured 2026-11-17 against `c31a8b0`. The
+  bundled budget (23.5 kB, M4-F14) holds; the summed one rises from 36 to 40 kB, the measured size plus about 10% as
+  `scripts/size-limit.config.ts` prescribes. `readSetting` lives in `storage/lazy-driver.ts`, not `errors.ts`, which
+  would have put it in the chunk `cloudrop/next` and `cloudrop/node` import (+0.15 kB each, measured).
+- **Status:** in force. Amends M3-H14.
+- **Source:** design §5.2.
+- **Visible in:** `server/environment.ts`, `server/config.ts` (`ready`, `EndpointConfig`), `server/handler.ts`,
+  `server/api.ts`, `server/cloudrop.ts` (TSDoc), `server/environment.test.ts`, `storage/lazy-driver.ts`
+  (`readSetting`), `scripts/size-limit.config.ts`.
+
+### M4-F17: `r2()` and `s3()` read every setting from the environment, lazily
+
+- **Decision:** `s3()` reads `CLOUDROP_S3_ENDPOINT`, `CLOUDROP_S3_REGION`, `CLOUDROP_S3_BUCKET`,
+  `CLOUDROP_S3_ACCESS_KEY_ID` and `CLOUDROP_S3_SECRET_ACCESS_KEY`; `r2()` adds `CLOUDROP_R2_BUCKET` to its three. Both
+  take no argument at all. An option wins over its variable; an unset or empty option, and an empty variable, count as
+  unset (so an empty `bucket` option is no longer a bucket-name error: it falls back to the variable). One
+  `INVALID_CONFIG` names every missing setting by option and variable: "Missing S3 settings: region
+  (CLOUDROP_S3_REGION), … Pass them to s3() or set the environment variables in parentheses." When any setting comes
+  from the environment, the preset returns a lazy driver (`storage/lazy-driver.ts`) that builds the real driver on
+  first use under M4-F16's rules: every method answers that `INVALID_CONFIG` until the settings are complete, and the
+  server reads its state through a module-private `WeakMap`, so `StorageDriver` gains no public member. When every
+  setting is passed, the preset returns the real driver, as before.
+- **Why:** design §5.3: a cold-developer test found `s3()` read nothing. Explicit values are checked at construction by
+  building the driver once with valid stand-ins for the settings the environment will supply: every check stays in
+  `createS3Driver` and the presets, in one place, instead of a second per-setting copy that could drift. `rules` and
+  `publicUrl` need no environment value, so route checks at construction still see them.
+- **If wrong:** an app that relied on an empty `bucket` throwing at construction now learns at the first request.
+- **Status:** in force.
+- **Source:** design §5.3.
+- **Visible in:** `storage/presets.ts`, `storage/lazy-driver.ts`, `storage/presets-env.test.ts`,
+  `storage/presets.test.ts`, `examples/next/lib/cloudrop.ts` (`CLOUDROP_S3_ENDPOINT ? s3() : r2()`),
+  `docs/guide/server.md`.
+
+### M4-F18: `forbidden(message?)` answers `403 FORBIDDEN`
+
+- **Decision:** `forbidden(message = "You are not allowed to upload files here.")` is exported beside
+  `unauthorized()` and returned from `authorize`; `/upload` answers `403` with code `FORBIDDEN`, not retryable.
+  Both return the public type `Refusal`, which replaces `Unauthorized`: the same `Symbol.for("cloudrop.unauthorized")`
+  brand plus `code: "UNAUTHORIZED" | "FORBIDDEN"`. A branded refusal without a code (another copy of cloudrop, plain
+  JavaScript) still means `UNAUTHORIZED`, and a missing message takes the default of its code. Plugin hooks return a
+  `CloudropError`, never a `Refusal`, so a plugin refuses with `new CloudropError("FORBIDDEN", message)`.
+  `FORBIDDEN` joins `CloudropErrorCode` and the handler's status table; the client keeps no list of server codes, so
+  it needs no change.
+- **Why:** design §5.4: a quota, plan or role refusal answered `UNAUTHORIZED`, telling the user to sign in when they
+  already had. One brand keeps foreign copies' refusals recognised; one type keeps `authorize`'s return type
+  `TAuth | Refusal`, so TypeScript never infers a second refusal type into `TAuth`.
+- **If wrong:** code naming the `Unauthorized` type renames it to `Refusal`.
+- **Status:** in force.
+- **Source:** design §5.4.
+- **Visible in:** `server/route.ts` (`forbidden`, `Refusal`, `refusalError`), `server/upload.ts`, `server/http.ts`,
+  `errors.ts`, `index.ts`, `docs/guide/errors.md`, `docs/guide/server.md` (the quota plugin example).
+
 <!-- Tasks C and E append their entries above this line. -->
 
 ## Bindings (`M4-B`)

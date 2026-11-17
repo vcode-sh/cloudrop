@@ -61,7 +61,9 @@ because later rulings and commits refer to them. `M2-P1` to `M2-P4` are rulings 
 - **Why:** owner decisions on audit T12-1 and T7-1 (audit owner decisions 5 and 6). TypeScript infers `authorize`'s
   result only for callbacks written after it.
 - **If wrong:** routes must be reordered, and apps returning class instances must return `{ user: doc.toObject() }`.
-- **Status:** in force; amends M2-D6 and M2-D29.
+- **Status:** in force; amends M2-D6 and M2-D29. Amended by M4-F15 (2026-11-17): the ordering rule is gone; `prefix`,
+  `key` and `onComplete` take `route()`'s second argument and compile in any order. Amended by M4-F18 (2026-11-17):
+  `forbidden()` carries the same brand with `code: "FORBIDDEN"`.
 - **Visible in:** spec §4, `src/server/route.ts`, `src/server/upload.ts`.
 
 ## Controller rulings, before Task 1
