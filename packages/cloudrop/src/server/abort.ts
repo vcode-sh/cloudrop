@@ -1,8 +1,10 @@
 // POST /abort (spec §5.5): the user cancelled, or the client cleans up a failed upload (M3-S15). An expired token
-// still aborts what never finished. Without a store it never deletes a stored file once the token has expired: it
-// cannot tell an upload that landed from one /complete accepted. With a store, the file's row decides (M5 spec §5.6).
+// still aborts what never finished. Without a store it never deletes a stored file once the token has expired, or when
+// the client sends `keep` (M3-U94): it cannot tell an upload that landed from one /complete accepted. With a store, the
+// file's row decides (M5 spec §5.6), `keep` or not.
 
 import { fail, ok, type Result } from "../errors.ts";
+import { invalidInput, isPlainObject } from "../input.ts";
 import type { AbortResponse } from "../protocol/types.ts";
 import type { EndpointConfig, EndpointInput } from "./config.ts";
 import { storageFailure } from "./http.ts";
@@ -46,9 +48,16 @@ export async function handleAbort({ body, config }: EndpointInput): Promise<Resu
   const verified = await readToken(body, config, { allowExpired: true });
   if (verified.error) return verified;
   const token = verified.data;
+  // `keep` can only narrow what the token allows, and only without a row (M3-U94): a pending row proves no completion
+  // committed, so a stored token's row decides as for a plain /abort.
+  const keep = isPlainObject(body) ? body.keep : undefined;
+  if (keep !== undefined && typeof keep !== "boolean") {
+    return fail(invalidInput('keep must be true or false. Send { "token": "...", "keep": true }, or leave keep out.'));
+  }
   // A single PUT may have landed, and a multipart upload may have completed: without a row, this upload's own object
-  // is deleted only while the token is valid.
-  if (!config.store || !token.stored) return abortAndDelete(config, token, nowSeconds() >= token.exp);
+  // is deleted only while the token is valid, and never when the client asked to keep it, since nothing here can tell
+  // whether onComplete ran.
+  if (!config.store || !token.stored) return abortAndDelete(config, token, keep === true || nowSeconds() >= token.exp);
   const ended = await fileCalls(config.store, config.logger, token).end("pending", "aborted");
   if (ended.error) return ended;
   const { changed, record } = ended.data;

@@ -2,8 +2,8 @@
 
 This page covers the browser side, `cloudrop/client`: creating a client, uploading one file or several, following
 progress, pausing, cancelling and retrying, how the client shares connections between uploads, what happens when the
-page goes offline or a request stalls, and what it cleans up. Resuming after a reload has its own page:
-[Resume after reload](resume.md). Error codes: [Errors](errors.md).
+page goes offline or a request stalls, and what it cleans up. Resuming after a reload, and `resumable()`, `resume()`,
+`discard()` and `forget()`, have their own page: [Resume after reload](resume.md). Error codes: [Errors](errors.md).
 
 ## Create a client
 
@@ -340,7 +340,8 @@ Four codes come from the client and never from the server:
 - `UPLOAD_REJECTED`: the bucket refused the bytes as signed (a different size, type or checksum).
 - `ABORTED`: a cancel.
 - `NETWORK_ERROR`: no answer after every attempt. Retryable.
-- `UPLOAD_IN_USE`: `resume()` found the upload held in this browser (see [Resume after reload](resume.md#two-tabs)).
+- `UPLOAD_IN_USE`: `resume()` or `discard()` found the upload held in this browser (see
+  [Resume after reload](resume.md#two-tabs)).
 
 Every other code, and what to do about it: [Errors](errors.md).
 

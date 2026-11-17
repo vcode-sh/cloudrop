@@ -49,9 +49,9 @@ customize the client (base path, persistence, concurrency, plugins); hooks accep
 
 ## 2. Scope
 
-**1.0:** headless client, React bindings, UI components through a shadcn registry, R2 plus generic S3-compatible
-storage, stateless server with a `store` interface reserved for later adapters, four plugins (content checks,
-checksums, limits, images), and an essential server file API.
+**1.0:** headless client, React bindings, examples that build an upload UI on them (no component registry, `M4-E1`), R2
+plus generic S3-compatible storage, stateless server with a `store` interface reserved for later adapters, four plugins
+(content checks, checksums, limits, images), and an essential server file API.
 
 **1.1:** database adapters, starting with Drizzle: a files table, exactly-once `onComplete`, cross-device resume,
 orphan cleanup and built-in quota. (Amended 2026-11-17, M5-T15: the database store and its SQL, Drizzle and Prisma
@@ -105,7 +105,7 @@ Internal modules, each testable on its own and reachable only through its interf
 
 Metadata schemas use Standard Schema, so users bring zod, valibot or arktype and cloudrop depends on none.
 
-Repository: Bun workspaces with `packages/cloudrop`, `packages/registry` (shadcn components), `apps/docs`,
+Repository: Bun workspaces with `packages/cloudrop`, `apps/docs`,
 `examples/{next,hono,workers,vite-react}`. Tests sit next to the source they test; the storage contract suite is
 `packages/cloudrop/src/testing/storage-contract.ts`, with its case groups under `src/testing/storage-contract/`, run by
 one colocated lane file per backend (`src/storage/s3-driver.*.test.ts`). The S3 driver is `src/storage/s3-driver.ts`,
@@ -241,13 +241,19 @@ The server decides; the client cannot.
 ### 5.5 Abandoned uploads
 
 The client calls `/abort` when a user cancels and when a file fails after `/upload` (abort is free on R2; after a
-failure it runs in the background, M3-S15). The client never sends `/abort` after a `/complete` that may have
-succeeded. `/abort` aborts a multipart upload and, while the token is valid, deletes the upload's own object (matched
-by `cloudrop-id`), even after `/complete`. An expired token only
-aborts; it never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed,
-so that upload can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with
-`UNKNOWN_ROUTE`. Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle
-rule; `api.checkBucket()` verifies it exists.
+failure it runs in the background, M3-S15). The client never sends an `/abort` that may delete after a `/complete` that
+may have succeeded (`discard()` sends `keep`, below). `/abort` aborts a multipart upload and, while the token is valid,
+deletes the upload's own object (matched by `cloudrop-id`), even after `/complete`. An expired token only aborts; it
+never deletes a stored file. `/abort` also accepts a token whose route a later deploy removed or renamed, so that upload
+can still be cleaned up and `onAbort` still runs; `/sign` and `/complete` refuse such a token with `UNKNOWN_ROUTE`.
+Everything else is cleaned by the bucket's abort-incomplete multipart lifecycle rule; `api.checkBucket()` verifies it
+exists. `/abort { token, keep: true }` without a store's row never deletes an object that landed, whatever the token's
+age: it aborts an unfinished multipart upload, and runs `onAbort` only when no object of this upload exists, since
+nothing tells the server whether `onComplete` ran. With a row, `keep` changes nothing: a pending row proves no
+completion committed, so the object is deleted, the row ended and the reservation freed as for a plain `/abort`, and a
+completed row is kept as always. `keep` can only narrow what the token allows; anything but a boolean is
+`INVALID_INPUT`. The client sends it only from `discard()`, for an upload a `/complete` may have finished (amended
+2026-11-17, M3-U94).
 
 `/abort` is cleanup, not revocation. The server keeps no state, so until the token expires 24 hours after `/upload`:
 a single-PUT URL signed before the abort stays usable for its 15 minutes, a single-PUT token can still get a new URL
@@ -538,7 +544,7 @@ parallelism cap is tuned for Workers yet.
 | M1 | `storage`: SigV4 signer, `r2` and `s3` drivers, fake, contract suite, Wrangler and RustFS lanes |
 | M2 | `server`: `createCloudrop`, routes, tokens, handler, verification, `api.*` |
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy |
-| M4 | `react`, shadcn registry, examples |
+| M4 | `react`, examples that build an upload UI on the hooks (no shadcn registry, `M4-E1`) |
 | M5 | Database store: `createCloudrop({ store })`, rows before signing, `onComplete` once, hard quota, revocation, sweep; adapters for SQL executors, Drizzle and Prisma ([design](2026-11-17-m5-store-design.md)); moved ahead of the plugins by the owner, 2026-11-17 |
 | M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` |
 | M7 | Docs, 0.x beta, 1.0 |

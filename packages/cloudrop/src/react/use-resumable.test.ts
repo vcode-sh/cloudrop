@@ -10,7 +10,7 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient } from "../client.ts";
+import { createCloudropClient, type ResumableUpload } from "../client.ts";
 import { createUploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
@@ -280,5 +280,40 @@ describe("useResumable", () => {
       listed: ids(result.current.resumable.uploads),
       stored: stored(setup).length,
     }).toEqual({ status: "failed", listed: [setup.upload.id], stored: 2 });
+  });
+});
+
+describe("useResumable's discard() and forget()", () => {
+  it("discard() aborts one listed upload without its file, and the list reads again without it", async () => {
+    const setup = await reloaded(gate(partThree));
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable("files"));
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+    // The waitFor above proved the list holds exactly this upload.
+    const record = result.current.uploads[0] as ResumableUpload<"files">;
+
+    const answer = await act(() => result.current.discard(record));
+
+    expect({
+      answer,
+      listed: result.current.uploads,
+      requests: setup.sent(),
+      pending: setup.fixture.server.fake.pendingUploads(),
+    }).toEqual({ answer: { data: { aborted: true }, error: null }, listed: [], requests: ["POST /abort"], pending: 0 });
+  });
+
+  it("forget() deletes the namespace's records, and the list reads again empty", async () => {
+    const setup = await reloaded(gate(partThree));
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable("files"));
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+
+    const answer = await act(() => result.current.forget());
+
+    expect({ answer, listed: result.current.uploads, stored: stored(setup) }).toEqual({
+      answer: { data: { forgotten: 1 }, error: null },
+      listed: [],
+      stored: [],
+    });
   });
 });

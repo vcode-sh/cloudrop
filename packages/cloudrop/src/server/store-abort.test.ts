@@ -86,6 +86,31 @@ describe("POST /abort with a store", () => {
     expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
   });
 
+  // A pending row proves onComplete has not committed (it commits with the claim, or under a lease, with the
+  // completion), so keep changes nothing here: the landed object is deleted as a plain /abort deletes it (M3-U94).
+  it("with keep: true, treats a pending row as a plain /abort does: object deleted, row aborted, bytes freed", async () => {
+    const reasons: AbortContext["reason"][] = [];
+    const fixture = storeFixture({ owned }, { plugins: [recorder(reasons)] });
+    const ticket = await fixture.single("owned", TEXT);
+    // Landed, and /complete never arrived: the page reloaded before it, or its answer was lost.
+    await fixture.send(ticket.put, hello);
+    const response = await fixture.post("abort", { token: ticket.token, keep: true });
+    expect([response.status, (await fixture.storage.head(ticket.key)).data, reasons]).toEqual([200, null, ["aborted"]]);
+    expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+  });
+
+  it("with keep: true, keeps a completed file and tells no plugin", async () => {
+    const reasons: AbortContext["reason"][] = [];
+    const fixture = storeFixture({ owned }, { plugins: [recorder(reasons)] });
+    const ticket = await fixture.single("owned", TEXT);
+    await fixture.send(ticket.put, hello);
+    await complete(fixture, ticket.token);
+    const response = await fixture.post("abort", { token: ticket.token, keep: true });
+    expect([response.status, (await fixture.storage.head(ticket.key)).data?.size, reasons]).toEqual([200, 5, []]);
+    expect((await fixture.store.raw.files())[0]?.status).toBe("completed");
+  });
+
   it("does nothing for a stored token whose row is missing", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);

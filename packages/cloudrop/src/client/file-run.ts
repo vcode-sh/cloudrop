@@ -17,7 +17,7 @@ import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
  */
 export function drop(context: UploadContext, upload: Upload): Promise<void> {
   upload.dropped = true;
-  const answered = context.endpoints.abort(upload.ticket.token);
+  const answered = context.endpoints.abort(upload.ticket.token).then(() => undefined);
   letGo(context, upload, answered);
   return answered;
 }

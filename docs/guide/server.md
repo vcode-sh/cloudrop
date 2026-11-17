@@ -332,6 +332,11 @@ Then the rules that follow from a stateless token:
 - **`/abort` is cleanup, not revocation.** Until the token expires, whoever holds it can get a new single-`PUT` URL,
   upload and complete, and can delete its own completed file through `/abort`. An expired token still aborts an
   unfinished upload, but never deletes a stored file.
+- **`keep` narrows `/abort` without a store.** `/abort { token, keep: true }` never deletes an object that landed, even
+  with a live token: it only aborts an unfinished multipart upload, since the server cannot tell whether `onComplete`
+  ran. The client's `discard()` sends it, so discarding an upload whose `/complete` may have finished keeps the file.
+  With a [database store](store.md) the row decides as for any `/abort`, and `keep` changes nothing. `keep` must be a
+  boolean when sent (`INVALID_INPUT` otherwise).
 - **A removed route.** `/abort` still cleans up, and runs `onAbort`, after a deploy removed or renamed the token's route.
   `/sign` and `/complete` refuse such a token with `UNKNOWN_ROUTE`.
 

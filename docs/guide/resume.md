@@ -2,7 +2,8 @@
 
 This page covers how a large upload survives a reload or a closed tab: what you write in your page, how the client
 recognises the same file, what it asks the server, what it keeps in the browser and when it deletes it, how two tabs
-share an upload, and what is not supported. For uploads in general, see [Client](client.md).
+share an upload, how to discard one upload without its file, and what is not supported. For uploads in general, see
+[Client](client.md).
 
 ## What resumes
 
@@ -31,6 +32,9 @@ if (upload) {
   const job = client.resume(upload, picked, { signal });
   const { data, error } = await job.done; // an UploadResult of one file, as start(...).done gives
 }
+
+// The user does not want it any more: no file needed.
+if (upload) await client.discard(upload); // { data: { aborted: true }, error: null }
 
 // At sign-out:
 await client.forget();
@@ -117,6 +121,7 @@ the metadata can be read from it.
   expired), with the `/abort` that gives the ticket up;
 - when it is found expired, by `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time
   to start);
+- on `discard()` of its upload, once the server answered its `/abort` (see [Discard one upload](#discard-one-upload));
 - on `forget()`.
 
 Any other failed file keeps its record, such as one the network failed: a failure of `upload()` and `pagehide` give its
@@ -161,6 +166,41 @@ Without `forget()`, a signed-out user's unfinished uploads, tokens included, sta
 hours, and another user signed in on the same profile and namespace could finish them. They stay the first user's files,
 since `authorize` runs only in `/upload`: check the session again in `onComplete` when that matters.
 
+## Discard one upload
+
+`discard(upload)` drops one upload from `resumable()` without its file, for a list with a Discard button per row:
+
+```ts
+const { data, error } = await client.discard(upload);
+if (error) showMessage(error.message); // the upload is still listed: try again later
+```
+
+It takes the upload's Web Lock, as a resume would, sends `/abort` with the token the record keeps and `keep: true`,
+deletes the record and, once the delete has run, lets the lock go. `/abort` aborts the multipart upload, so its parts
+leave the bucket at once; with a [database store](store.md) it also ends the upload's row and frees the bytes it
+reserved against the quota. Without a store, `keep` tells the server never to delete an object that landed: a listed
+upload may be one whose `/complete` finished while the page heard nothing (a reload during the last step, or an answer
+lost), and its file stays. With a store the row decides and `keep` changes nothing: a completed row keeps its file,
+and a pending one proves `onComplete` has not committed, so a landed object is deleted with the row and nothing is
+left outside the quota. The server takes an expired token for `/abort`, so any listed upload can be aborted. A server
+older than this release ignores `keep` and, without a store and while the token is valid, deletes such a finished file:
+update the server with the client.
+
+| What happens | Result | The record |
+| --- | --- | --- |
+| The server aborted the upload | `{ data: { aborted: true }, error: null }` | deleted |
+| The upload had already finished (its `/complete` went through unheard): the file is kept, nothing is aborted. Without a store, a landed object of a `/complete` that never ran is kept too; with a store, it is deleted with its pending row | `{ data: { aborted: true }, error: null }` | deleted |
+| The server refused the token for good (`INVALID_TOKEN`, `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD` and the other codes a new ticket would be needed for), for example after the server's secret changed | `{ data: { aborted: false }, error: null }` | deleted |
+| The record expired and the browser already deleted it, with its token (a minute before `expiresAt`) | `{ data: { aborted: false }, error: null }`, no request | already gone |
+| `/abort` did not get through (no connection, a server error, a timeout) | that error, such as a retryable `NETWORK_ERROR` | kept, for another try |
+| Another tab, or this page, holds the upload | `UPLOAD_IN_USE`, no request | kept |
+| No record of that id in this namespace, and not expired: it finished, or was cancelled or discarded | `NOT_FOUND`, no request | none |
+| Anything but an upload with a string `id` | `INVALID_INPUT` | unchanged |
+
+With `aborted: false`, the bucket's abort-incomplete-multipart rule removes the parts, and a store's sweep ends the row.
+`forget()` deletes every record of the namespace at once but sends no `/abort`: use it at sign-out, and `discard()` when
+the user drops an upload.
+
 ## When persistence is off or unavailable
 
 Resuming needs a **secure context** (HTTPS, or `localhost` in development), where browsers have Web Locks.
@@ -170,6 +210,8 @@ plain HTTP, such as a LAN address), nothing is read or written:
 
 - `resumable()` resolves `[]`;
 - `resume()` ends with `NOT_FOUND`;
+- `discard()` resolves `NOT_FOUND` (or `{ aborted: false }` for an upload within a minute of `expiresAt`), sending
+  nothing;
 - `forget()` resolves `{ forgotten: 0 }`.
 
 The same goes where the browser refuses the lock (a document no longer active, an opaque origin): that upload keeps no
@@ -177,8 +219,8 @@ record, and still uploads.
 
 The client looks for `indexedDB` and Web Locks once, when it is created: create it after any polyfill for them.
 
-`resumable()` and `forget()` never reject. When the browser's storage fails, they resolve `STORAGE_ERROR`. A storage
-failure never fails, pauses or slows an upload.
+`resumable()`, `discard()` and `forget()` never reject. When the browser's storage fails, they resolve `STORAGE_ERROR`.
+A storage failure never fails, pauses or slows an upload.
 
 Records live in the origin's best-effort storage, which a browser may evict under pressure. cloudrop never calls
 `navigator.storage.persist()`, since Firefox would prompt the user for it; call it yourself if you want persistent

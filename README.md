@@ -73,7 +73,7 @@ Pre-release: the API may change before 0.1.
   proxy, and from Chromium through the example on RustFS and on real R2. Wrangler's local R2 runs the storage contract
   and single uploads only: it does not implement `ListParts`, so a multipart upload cannot complete there. The store
   runs its contract on Postgres 18, SQLite and Wrangler's local D1, through every adapter.
-- **Next:** M4b (shadcn registry components, Hono and Vite React examples), then M6 (plugins: content checks, limits,
+- **Next:** M4b (the Next example's upload UI, Hono and Vite React examples), then M6 (plugins: content checks, limits,
   images, checksums).
 
 Where the project stands and what comes next: [docs/superpowers/plans/README.md](docs/superpowers/plans/README.md).

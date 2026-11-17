@@ -3,7 +3,7 @@
 // the effect; StrictMode's second effect reads once more and changes nothing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Result, ResumableUpload } from "../client.ts";
+import type { CloudropClient, Result, ResumableUpload } from "../client.ts";
 import type { UseResumableResult } from "./types.ts";
 import type { HookSource } from "./use-upload.ts";
 
@@ -25,5 +25,20 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     void refresh();
     return source.onChange(() => void refresh());
   }, [source, refresh]);
-  return { uploads, refresh };
+  /** Runs `change` on the client, then reads the list again, whatever it answered: a failed discard keeps its record. */
+  const changeThenRead = useCallback(
+    async <T>(change: (client: CloudropClient) => Promise<Result<T>>): Promise<Result<T>> => {
+      const client = source.client();
+      const answer = client.error ? client : await change(client.data);
+      await refresh();
+      return answer;
+    },
+    [source, refresh],
+  );
+  const discard = useCallback(
+    (upload: ResumableUpload) => changeThenRead((client) => client.discard(upload)),
+    [changeThenRead],
+  );
+  const forget = useCallback(() => changeThenRead((client) => client.forget()), [changeThenRead]);
+  return { uploads, refresh, discard, forget };
 }
