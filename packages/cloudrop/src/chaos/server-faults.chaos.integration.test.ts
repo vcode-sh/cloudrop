@@ -1,14 +1,13 @@
 // Chaos rows 13 and 14 (design spec §4): faults in the server's own storage calls during /complete (M3-K4). The
 // server answers the client a retryable error that says nothing of the storage, logs the storage's error, and the
-// client retries /complete (M3-S9) until the file is done. Run with `bun run test:chaos`.
+// client retries /complete (M3-S9) until the file is done. One more row faults the storage call of /upload (M3-U92).
+// Run with `bun run test:chaos`.
 import { expect, test } from "vitest";
 import type { CloudropError } from "../errors.ts";
+import { SLOW_DOWN } from "../testing/chaos-bodies.ts";
 import { chaosFile, MULTIPART_FILE_SIZE, SINGLE_FILE_SIZE, useChaosFixture } from "../testing/chaos-fixture.ts";
 
 const chaos = useChaosFixture();
-
-const SLOW_DOWN =
-  '<?xml version="1.0" encoding="UTF-8"?><Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>';
 
 /** What the server logged, without the stack: the message and the storage error's classification. */
 const loggedErrors = () =>
@@ -47,6 +46,43 @@ test("a CompleteMultipartUpload the storage answers 503 reaches the client as a 
     "CompleteMultipartUpload 200",
   ]);
   expect(requests.slice(1, 4).toSorted()).toEqual(["PUT part 1 200", "PUT part 2 200", "PUT part 3 200"]);
+  expect(loggedErrors()).toEqual([
+    {
+      message: "cloudrop: a storage request failed.",
+      code: "RATE_LIMITED",
+      retryable: true,
+      status: 503,
+      storageCode: "SlowDown",
+    },
+  ]);
+});
+
+// M3-U92: a ticket the server could not issue reaches the client as that file's retryable refusal inside a 200, and
+// the client asks /upload again for that file alone. Only a multipart ticket calls the storage in /upload: a single
+// PUT's URL is presigned in process, so the proxy cannot fault that path.
+test("a CreateMultipartUpload the storage answers 503 refuses the file retryably, and asking /upload again finishes it", async () => {
+  chaos.proxy.set([
+    {
+      match: { kind: "server", operation: "CreateMultipartUpload" },
+      fault: { kind: "answer", status: 503, body: SLOW_DOWN },
+    },
+  ]);
+  const file = chaosFile(MULTIPART_FILE_SIZE);
+
+  const { data, error } = await chaos.client().upload("files", file);
+
+  expect(error).toBeNull();
+  await chaos.expectStored(data?.file.key ?? "", file);
+  await chaos.expectNoUploadsLeft();
+  expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /upload 200", "POST /complete 200"]);
+  const requests = chaos.bucketRequests();
+  expect([...requests.slice(0, 2), ...requests.slice(5)]).toEqual([
+    "CreateMultipartUpload 503",
+    "CreateMultipartUpload 200",
+    "ListParts 200",
+    "CompleteMultipartUpload 200",
+  ]);
+  expect(requests.slice(2, 5).toSorted()).toEqual(["PUT part 1 200", "PUT part 2 200", "PUT part 3 200"]);
   expect(loggedErrors()).toEqual([
     {
       message: "cloudrop: a storage request failed.",
