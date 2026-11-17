@@ -5,10 +5,9 @@
 
 import type { CloudropStore } from "../../server/store.ts";
 import type { SetupStore, StoreGap } from "../store-contract.ts";
-import type { D1TestDatabase } from "./d1.ts";
 import type { PostgresTestDatabase } from "./postgres.ts";
 import { rawTables } from "./raw-tables.ts";
-import type { TableNames } from "./schema.ts";
+import type { TableNames, TestDatabase } from "./schema.ts";
 import type { SqliteTestDatabase } from "./sqlite.ts";
 
 export const RENAMED: TableNames = { files: "renamed_files", usage: "renamed_usage" };
@@ -46,8 +45,17 @@ async function armSqlite(db: SqliteTestDatabase): Promise<void> {
   }
 }
 
+/**
+ * A SQLite database the target empties before each case, such as D1 (d1.ts). Described here rather than imported, so
+ * the database lane's files do not load Wrangler.
+ */
+interface ResettableSqlite extends TestDatabase {
+  readonly dialect: "sqlite";
+  reset(): Promise<void>;
+}
+
 /** D1 has no user functions, so it cannot arm the trigger and declares "failureInjection" as a gap. */
-function armerFor(db: PostgresTestDatabase | SqliteTestDatabase | D1TestDatabase): (() => Promise<void>) | undefined {
+function armerFor(db: PostgresTestDatabase | SqliteTestDatabase | ResettableSqlite): (() => Promise<void>) | undefined {
   if (db.dialect === "postgres") return () => armPostgres(db);
   return "database" in db ? () => armSqlite(db) : undefined;
 }
@@ -57,7 +65,7 @@ function armerFor(db: PostgresTestDatabase | SqliteTestDatabase | D1TestDatabase
  * gets a new database per case from its fixture, so `useSqliteDatabase()` must be called in an enclosing scope.
  */
 export function sqlStoreTarget(
-  db: PostgresTestDatabase | SqliteTestDatabase | D1TestDatabase,
+  db: PostgresTestDatabase | SqliteTestDatabase | ResettableSqlite,
   storeOver: StoreFactory,
   gaps: Partial<Record<StoreGap, string>> = {},
 ): SetupStore {

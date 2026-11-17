@@ -1,6 +1,8 @@
 {
   // The Drizzle adapter and its tests alone, for type-checking them against another drizzle-orm line
-  // (scripts/check-drizzle-versions.sh); `bun run typecheck` already covers them against the installed one.
+  // (scripts/check-drizzle-versions.sh); `bun run typecheck` already covers them against the installed one. The
+  // Wrangler lane's file is left out: it needs Wrangler and the Workers types, which the check's copy does not install.
   "extends": "./tsconfig.test.json",
-  "include": ["src/adapters/drizzle.ts", "src/adapters/drizzle/*.ts", "src/adapters/drizzle*.test.ts"]
+  "include": ["src/adapters/drizzle.ts", "src/adapters/drizzle/*.ts", "src/adapters/drizzle*.test.ts"],
+  "exclude": ["src/adapters/*.wrangler.integration.test.ts"]
 }
