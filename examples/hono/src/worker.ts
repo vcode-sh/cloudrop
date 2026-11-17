@@ -4,7 +4,7 @@
 //
 // An app with a job queue runs this as a scheduled job instead of a timer: a queue whose schedule fires hourly (off
 // the hour, say "41 * * * *" in UTC) and whose handler runs sweepAll below and throws its error, so the queue retries
-// the job (docs/guide/hono.md "The sweep, as a scheduled job").
+// the job when its template allows more than one attempt (docs/guide/hono.md "The sweep, as a scheduled job").
 import { r2, type SweepReport, s3 } from "cloudrop";
 import { createDatabase } from "./db/client";
 import { readSettings } from "./settings";

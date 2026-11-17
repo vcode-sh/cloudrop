@@ -1,4 +1,5 @@
 import { authClient } from "@/lib/auth-client";
+import { UploadsContext, uploadsFor } from "@/lib/upload";
 import { AuthPanel } from "./components/auth-panel";
 import { AvatarPicker } from "./components/avatar-picker";
 import { DropZone } from "./components/drop-zone";
@@ -8,23 +9,27 @@ import { UnfinishedUploads } from "./components/unfinished-uploads";
 export function App() {
   const session = authClient.useSession();
   const email = session.data?.user.email ?? null;
+  const userId = session.data?.user.id ?? "";
 
+  // Keyed by the user: a new user gets fresh hooks, with none of the last user's uploads in memory.
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">cloudrop with Hono and Vite</h1>
-        {!session.isPending && email && <AuthPanel email={email} />}
-      </header>
-      {!session.isPending && !email && <AuthPanel email={null} />}
-      {/* Shown signed out too: an upload then gets cloudrop's UNAUTHORIZED with the route's message. */}
-      <DropZone />
-      {email && (
-        <>
-          <UnfinishedUploads />
-          <AvatarPicker />
-          <FilesTable />
-        </>
-      )}
-    </main>
+    <UploadsContext key={userId} value={uploadsFor(userId)}>
+      <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold">cloudrop with Hono and Vite</h1>
+          {!session.isPending && email && <AuthPanel email={email} />}
+        </header>
+        {!session.isPending && !email && <AuthPanel email={null} />}
+        {/* Shown signed out too: an upload then gets cloudrop's UNAUTHORIZED with the route's message. */}
+        <DropZone />
+        {email && (
+          <>
+            <UnfinishedUploads />
+            <AvatarPicker />
+            <FilesTable />
+          </>
+        )}
+      </main>
+    </UploadsContext>
   );
 }

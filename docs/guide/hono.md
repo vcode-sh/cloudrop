@@ -72,7 +72,8 @@ The store needs no session state, so it works through PgBouncer in transaction m
 // apps/server/src/app.ts
 const UPLOADS_PATH = "/api/cloudrop";
 
-const browserCors = cors({ origin: webOrigins, credentials: true, allowHeaders: ["Content-Type"] });
+// X-CSRF-Token is oRPC's CSRF header (step 6).
+const browserCors = cors({ origin: webOrigins, credentials: true, allowHeaders: ["Content-Type", "X-CSRF-Token"] });
 app.use((c, next) => (c.req.path.startsWith(`${UPLOADS_PATH}/`) ? next() : browserCors(c, next)));
 
 app.on(["GET", "POST"], "/api/auth/*", (c) => deps.handleAuth(c.req.raw));
@@ -171,18 +172,45 @@ attachments: store.route(
 // apps/web/src/lib/upload.ts
 import { createCloudropClient } from "cloudrop/client";
 import { createUploadHooks } from "cloudrop/react";
-import type { Uploads } from "@app/uploads"; // types only
+import { createContext, useContext } from "react";
+import type { Uploads as Server } from "@app/uploads"; // types only
 
-export const uploadClient = createCloudropClient<Uploads>({ basePath: `${API_ORIGIN}/api/cloudrop` });
-export const { useUpload, useResumable } = createUploadHooks<Uploads>({ client: uploadClient });
+function createUploads(userId: string) {
+  const client = createCloudropClient<Server>({ basePath: `${API_ORIGIN}/api/cloudrop`, namespace: userId });
+  return { client, ...createUploadHooks<Server>({ client }) };
+}
+export type Uploads = ReturnType<typeof createUploads>;
+
+const byUser = new Map<string, Uploads>();
+export function uploadsFor(userId: string): Uploads {
+  const known = byUser.get(userId) ?? createUploads(userId);
+  byUser.set(userId, known);
+  return known;
+}
+export const UploadsContext = createContext(uploadsFor(""));
+export const useUploads = () => useContext(UploadsContext);
+
+// apps/web/src/app.tsx: keyed by the user, so a new user's components mount with that user's hooks.
+const userId = authClient.useSession().data?.user.id ?? "";
+<UploadsContext key={userId} value={uploadsFor(userId)}>{/* the app */}</UploadsContext>;
+
+// In a component:
+const { useUpload } = useUploads();
+const { files, getInputProps } = useUpload("attachments", { multiple: true });
 ```
 
 - `basePath` is absolute: the handler is on the API's origin, not the page's.
 - The client sends cookies with every call to it; the oRPC link and the better-auth client need
   `credentials: "include"` of their own.
-- Call `uploadClient.forget()` before signing out, so the next user of the browser cannot finish the last one's
-  unfinished uploads ([Resume](resume.md#namespace-and-sign-out)). It forgets every unfinished upload of the client,
-  on every route, and aborts none.
+- **One client per user, with the user's id as `namespace`** ([Resume](resume.md#namespace-and-sign-out)). A client
+  lists and resumes only its namespace's records, so the next user of the browser never sees the last one's
+  unfinished uploads, even when that user closed the tab or let the session expire without signing out, and the first
+  user still finds them on their next sign-in. The namespace is fixed when the client is created, which is why the app
+  keys the context by the user: one module-level client, without a namespace, would show every user's records to
+  whoever signs in next. The cost is a context and a component remount when the user changes.
+- Call `useUploads().client.forget()` before signing out as well: the namespace hides the records, `forget()` deletes
+  them and the upload tokens they hold. It forgets every unfinished upload of that user, on every route, and aborts
+  none.
 - To drop one unfinished upload, call `useResumable().discard(upload)`: the server aborts it, which with the store
   ends its row and frees the bytes it reserved, and the browser deletes its record
   ([Discard one upload](resume.md#discard-one-upload)). The example's panel has Discard per row and Discard all, each
@@ -204,7 +232,8 @@ const connection = { host: "127.0.0.1", port: 6379 };
 await new Queue("upload-sweep", { connection }).upsertJobScheduler(
   "hourly",
   { pattern: "41 * * * *", tz: "UTC" },
-  { name: "sweep" },
+  // BullMQ tries a job once unless told otherwise: here a failed sweep is retried after one minute, then after two.
+  { name: "sweep", opts: { attempts: 3, backoff: { type: "exponential", delay: 60_000 } } },
 );
 new Worker("upload-sweep", () => sweepAll(uploads.api), { connection });
 

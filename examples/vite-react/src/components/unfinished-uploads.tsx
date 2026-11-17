@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBytes } from "@/lib/format";
-import { useResumable, useUpload } from "@/lib/upload";
+import { useUploads } from "@/lib/upload";
 import { ATTACHMENTS_INPUT_ID } from "./drop-zone";
 
 type Unfinished = ResumableUpload<"attachments">;
@@ -18,6 +18,7 @@ const discardId = (upload: Unfinished): string => `discard-${upload.id}`;
  * the bytes it reserved count against the quota no more.
  */
 export function UnfinishedUploads() {
+  const { useResumable, useUpload } = useUploads();
   const { uploads, discard } = useResumable("attachments");
   const { resume } = useUpload("attachments");
   // The message of the last discard that failed, such as an unreachable API: its upload stays listed for a retry.

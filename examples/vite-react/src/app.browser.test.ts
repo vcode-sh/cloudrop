@@ -37,9 +37,29 @@ async function signUp(page: Page): Promise<string> {
   return email;
 }
 
-/** The status line of the upload row of `name`. */
+/** Signs an existing user in through the page's form and waits for the signed-in header. */
+async function signIn(page: Page, email: string): Promise<void> {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("correct horse battery");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText(`Signed in as ${email}`)).toBeVisible();
+}
+
+/** Starts a multipart upload of `path` whose part 1 reaches the bucket and whose later parts are held for good. */
+async function uploadPartOneOnly(page: Page, path: string): Promise<void> {
+  await page.route(/[?&]partNumber=[23](&|$)/, () => {});
+  const firstPart = page.waitForResponse((response) => /[?&]partNumber=1(&|$)/.test(response.url()) && response.ok());
+  await page.getByLabel("Choose attachments").setInputFiles(path);
+  await firstPart;
+}
+
+/** The second line of the upload row of `name`: its state, which only the route's status line announces. */
 const rowStatus = (page: Page, name: string) =>
-  page.getByRole("list", { name: "Uploads" }).getByRole("group", { name, exact: true }).getByRole("status");
+  page
+    .getByRole("list", { name: "Uploads" })
+    .getByRole("group", { name, exact: true })
+    .locator('[data-slot="attachment-description"]');
 
 /** The "Your files" table's rows as [name, route, size]. */
 async function listedFiles(page: Page): Promise<string[][]> {
@@ -249,4 +269,29 @@ test("of two unfinished uploads, Discard aborts one in the store and the other s
   await expect(unfinished).toHaveCount(0);
   await expect.poll(() => listedFiles(page)).toEqual([["kept.bin", "attachments", "20.0 MB"]]);
   expect(await storedStatuses(email)).toEqual({ "dropped.bin": "aborted", "kept.bin": "completed" });
+});
+
+test("the next user of the browser never lists the last one's unfinished upload, which that user still can resume", async ({
+  page,
+}, testInfo) => {
+  const theirs = await fileOnDisk(testInfo, "theirs.bin", 10 * MIB);
+  const mine = await fileOnDisk(testInfo, "mine.bin", 10 * MIB);
+  const first = await signUp(page);
+  await uploadPartOneOnly(page, theirs);
+  // The session ends without Sign out, so nothing forgets the record: a closed tab, or a session that expired.
+  await page.context().clearCookies();
+
+  // The second user's own unfinished upload is listed, so the list was read, and the first user's is not in it.
+  await signUp(page);
+  await uploadPartOneOnly(page, mine);
+  await page.reload();
+  // After the reload: the held PUTs died with the old page. Unrouted before it, they could still reach the bucket.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const unfinished = page.getByRole("list", { name: "Unfinished uploads" }).getByRole("listitem");
+  // Exactly one row, which begins with the name and size and goes on with its Resume label.
+  await expect(unfinished).toHaveText([/^mine\.bin, 10\.0 MB/]);
+
+  await page.context().clearCookies();
+  await signIn(page, first);
+  await expect(unfinished).toHaveText([/^theirs\.bin, 10\.0 MB/]);
 });

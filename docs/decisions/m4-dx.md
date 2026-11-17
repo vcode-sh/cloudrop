@@ -1,4 +1,4 @@
-# M4a decisions: audit fixes, developer experience and React hooks
+# M4 decisions: audit fixes, developer experience, React hooks and the examples
 
 Design: [`2026-11-17-m4-dx-and-react-design.md`](../superpowers/specs/2026-11-17-m4-dx-and-react-design.md). Each
 entry: decision, why, what it costs if wrong, status, source, where it is visible. `M4-F<n>` numbers follow the design's
@@ -768,7 +768,20 @@ review amended `M4-B2` to `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/types.ts`, `src/react/use-resumable.test.ts`,
   `docs/guide/react.md#resume-after-a-reload`.
 
-<!-- Task D appends its entries above this line. -->
+### M4-B17: a discard or forget through one `useResumable` reads every hook's list again
+
+- **Decision:** the factory's job tracker gains `changed()`, which tells every `useResumable` of the factory to read
+  its list again (once per burst, as a job's change does). `discard()` and `forget()` of any hook call it after the
+  client answers, then await their own hook's read.
+- **Why:** a panel's `useResumable("attachments")` and a header badge's `useResumable()` list the same records. Before,
+  a Discard in the panel left the badge counting the upload until some job started or ended, and `forget()` from one
+  route's hook left another route's panel listing records that answered `NOT_FOUND`.
+- **If wrong:** the calling hook reads twice per discard (its own awaited read and the fan-out's), one extra read of
+  IndexedDB; the newest read wins either way.
+- **Status:** in force (M4b final fix round).
+- **Source:** M4b final review M2, controller brief 2026-11-18.
+- **Visible in:** `src/react/job-tracker.ts`, `src/react/use-resumable.ts`, `src/react/use-resumable.test.ts` (the
+  two-hook discard row).
 
 ## M4b: decisions and the Next example (task B)
 
@@ -1135,7 +1148,42 @@ its pilot. Task B numbers the `M4-E` series from 1 to 19; these start at 20. Pat
   including ones whose `/abort` would fail, and runs outside a component, so it keeps the client's `forget()`. The
   database is the oracle because the example has no usage endpoint, and the row's status is what `/abort` promises.
 - **If wrong:** move sign-out to the hook's `forget()` inside the auth panel and drop the shared client.
-- **Status:** in force.
+- **Status:** in force; amended by `M4-E29`: the client is now one per user, from `useUploads()`, and sign-out forgets
+  that user's.
 - **Source:** M4b integration brief, item 1.
 - **Visible in:** `examples/vite-react/src/components/unfinished-uploads.tsx`,
   `examples/vite-react/src/components/drop-zone.tsx`, `examples/vite-react/src/app.browser.test.ts`.
+
+### M4-E29: the Vite example keeps each user's unfinished uploads in that user's namespace
+
+- **Decision:** `examples/vite-react/src/lib/upload.ts` creates one client per user id with `namespace: userId` (`""`
+  signed out), and the hooks over it, cached by user id. `src/app.tsx` provides them through `UploadsContext`, keyed by
+  the user, so every component below remounts with the new user's hooks; components read them with `useUploads()`.
+  Sign-out still forgets that user's records first. The Hono guide's step 7 shows the same shape and states the cost.
+  A browser row signs up a user, leaves a multipart upload unfinished, clears the cookies without signing out, and signs
+  up a second user, whose panel lists only that user's own unfinished upload; the first user, signed in again, finds
+  theirs. Without the namespace the row fails: the second user's panel lists both.
+- **Why:** with one module-level client and no namespace, a user who closed the tab or let the session expire without
+  pressing Sign out left records that the next user of the browser profile saw, with tokens that could finish or
+  discard the uploads (final review M1). The resume guide asks for the user's id as `namespace`, and the namespace is
+  fixed when a client is created, hence a client per user.
+- **If wrong:** keep one client, store the last signed-in user id in `localStorage`, and call `forget({ all: true })`
+  when a different user signs in; simpler, but the first user loses their unfinished uploads.
+- **Status:** in force (M4b final fix round).
+- **Source:** M4b final review M1, controller brief 2026-11-18.
+- **Visible in:** `examples/vite-react/src/lib/upload.ts`, `src/app.tsx`, `src/components/*.tsx`,
+  `src/app.browser.test.ts`, `docs/guide/hono.md` step 7.
+
+### M4-E30: the Vite example announces progress as the Next one does
+
+- **Decision:** the Vite upload row's second line loses `role="status"`. The drop zone and the avatar picker each
+  render one visually hidden polite status line with `announcement(totals, isUploading)` from `upload-row.tsx`: files
+  uploaded of the count, failures, and while uploading the progress rounded down to 10 % (`M4-E7`). The browser rows
+  read a row's state from its `attachment-description` slot.
+- **Why:** a polite region fed every progress percent of every file never stops talking; `M4-E7` rejected it for the
+  Next example (final review M4).
+- **If wrong:** announce status changes only, without the 10 % steps.
+- **Status:** in force (M4b final fix round).
+- **Source:** M4b final review M4, controller brief 2026-11-18.
+- **Visible in:** `examples/vite-react/src/components/upload-row.tsx`, `drop-zone.tsx`, `avatar-picker.tsx`,
+  `src/app.browser.test.ts`.

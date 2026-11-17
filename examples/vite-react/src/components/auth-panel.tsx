@@ -4,17 +4,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-import { uploadClient } from "@/lib/upload";
+import { type Uploads, useUploads } from "@/lib/upload";
 
 /** Sign-up and sign-in with email and password (a demo: no email is sent), or the signed-in user with sign-out. */
 export function AuthPanel({ email }: { email: string | null }) {
   const [error, setError] = useState<string | null>(null);
+  const { client } = useUploads();
 
   if (email) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span>Signed in as {email}</span>
-        <Button variant="outline" size="sm" onClick={signOut}>
+        <Button variant="outline" size="sm" onClick={() => void signOut(client)}>
           Sign out
         </Button>
       </div>
@@ -60,11 +61,12 @@ export function AuthPanel({ email }: { email: string | null }) {
 }
 
 /**
- * Sign-out forgets this browser's unfinished uploads first: their records hold upload tokens that the next user of
- * the browser could otherwise finish. The reload drops the uploads the hooks keep in memory and the cached queries.
+ * Sign-out forgets the user's unfinished uploads first: their records hold upload tokens, which need not outlive the
+ * session on a shared browser (the namespace already hides them from the next user). The reload drops the cached
+ * queries.
  */
-async function signOut() {
-  await uploadClient.forget();
+async function signOut(client: Uploads["client"]) {
+  await client.forget();
   await authClient.signOut();
   window.location.reload();
 }

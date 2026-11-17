@@ -3,15 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { orpc } from "@/lib/orpc";
-import { useUpload } from "@/lib/upload";
+import { useUploads } from "@/lib/upload";
 import { cn } from "@/lib/utils";
-import { UploadRow } from "./upload-row";
+import { announcement, UploadRow } from "./upload-row";
 import { useRefreshFilesWhenDone } from "./use-refresh-files";
 
 /** The avatar route: one image of at most 2 MB, sent in one PUT; the server keeps the newest and deletes the last. */
 export function AvatarPicker() {
   const avatar = useQuery(orpc.files.avatar.queryOptions());
-  const { files, totals, getInputProps } = useUpload("avatar", { accept: "image/*" });
+  const { useUpload } = useUploads();
+  const { files, totals, isUploading, getInputProps } = useUpload("avatar", { accept: "image/*" });
   useRefreshFilesWhenDone(totals.done);
   const latest = files.at(-1);
 
@@ -34,6 +35,9 @@ export function AvatarPicker() {
             Choose an image
             <input {...getInputProps()} aria-label="Choose an avatar" className="sr-only" />
           </label>
+          <p role="status" className="sr-only">
+            {announcement(totals, isUploading)}
+          </p>
           {latest && <UploadRow file={latest} />}
         </div>
       </CardContent>

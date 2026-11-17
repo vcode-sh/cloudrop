@@ -1,9 +1,9 @@
 import { IconUpload } from "@tabler/icons-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useUpload } from "@/lib/upload";
+import { useUploads } from "@/lib/upload";
 import { cn } from "@/lib/utils";
-import { UploadRow } from "./upload-row";
+import { announcement, UploadRow } from "./upload-row";
 import { useRefreshFilesWhenDone } from "./use-refresh-files";
 
 /** The drop zone's input, where focus goes when the unfinished-uploads panel it was in disappears. */
@@ -11,7 +11,8 @@ export const ATTACHMENTS_INPUT_ID = "attachments-input";
 
 /** The attachments route: drop or choose several files; each shows its progress, with cancel and retry. */
 export function DropZone() {
-  const { files, totals, isDragOver, getDropProps, getInputProps, clear } = useUpload("attachments", {
+  const { useUpload } = useUploads();
+  const { files, totals, isUploading, isDragOver, getDropProps, getInputProps, clear } = useUpload("attachments", {
     multiple: true,
   });
   useRefreshFilesWhenDone(totals.done);
@@ -37,6 +38,10 @@ export function DropZone() {
             <input {...getInputProps()} id={ATTACHMENTS_INPUT_ID} aria-label="Choose attachments" className="sr-only" />
           </label>
         </div>
+        {/* Rendered before the first file, so that a screen reader is already listening when it changes. */}
+        <p role="status" className="sr-only">
+          {announcement(totals, isUploading)}
+        </p>
         {files.length > 0 && (
           <ul aria-label="Uploads" className="flex flex-col gap-2">
             {files.map((file) => (

@@ -1,5 +1,5 @@
 import { IconFile, IconPhoto, IconRefresh, IconX } from "@tabler/icons-react";
-import type { FileStatus } from "cloudrop/client";
+import type { FileStatus, JobSnapshot } from "cloudrop/client";
 import type { UploadItem } from "cloudrop/react";
 import {
   Attachment,
@@ -50,6 +50,19 @@ function statusLine(file: UploadItem<unknown>): string {
   }
 }
 
+/**
+ * What a screen reader hears from a route's polite status line: the count and the progress in steps of 10 %, so it
+ * speaks a few times per upload rather than on every progress event, as each row's line changes (M4-E7).
+ */
+export function announcement(totals: JobSnapshot<unknown>["totals"], isUploading: boolean): string {
+  if (totals.count === 0) return "";
+  return (
+    `${totals.done} of ${totals.count} files uploaded` +
+    (isUploading ? `, ${Math.floor(totals.progress * 10) * 10}% sent` : "") +
+    (totals.failed > 0 ? `, ${totals.failed} failed` : "")
+  );
+}
+
 /** One upload from `useUpload`: name, state, progress, and cancel or retry. */
 export function UploadRow({ file }: { file: UploadItem<unknown> }) {
   const running = file.status === "queued" || file.status === "uploading" || file.status === "paused";
@@ -58,7 +71,7 @@ export function UploadRow({ file }: { file: UploadItem<unknown> }) {
       <AttachmentMedia>{file.type.startsWith("image/") ? <IconPhoto /> : <IconFile />}</AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>{file.name}</AttachmentTitle>
-        <AttachmentDescription role="status">{statusLine(file)}</AttachmentDescription>
+        <AttachmentDescription>{statusLine(file)}</AttachmentDescription>
         {file.status === "uploading" && <Progress value={file.progress * 100} className="mt-1.5" />}
       </AttachmentContent>
       <AttachmentActions>
