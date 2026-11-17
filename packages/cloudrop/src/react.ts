@@ -10,6 +10,7 @@ import {
 } from "./client.ts";
 import { createJobTracker } from "./react/job-tracker.ts";
 import type { UploadHooks, UploadHooksOptions, UseUploadOptions } from "./react/types.ts";
+import { createUploadStore, type UploadStore } from "./react/upload-store.ts";
 import { useResumableWith } from "./react/use-resumable.ts";
 import { type HookSource, useUploadWith } from "./react/use-upload.ts";
 
@@ -44,11 +45,17 @@ export function createUploadHooks<TCloudrop extends InferableCloudrop = Inferabl
       throw error;
     }
   }
+  const stores = new Map<string, UploadStore<unknown>>();
   const source: HookSource = {
     ...createJobTracker(),
     client() {
       created ??= createClient();
       return created;
+    },
+    storeOf(route) {
+      const store = stores.get(route) ?? createUploadStore();
+      stores.set(route, store);
+      return store;
     },
   };
   // The factory (M4-B1) runs once, at module level where an app defines its hooks, so the hooks it returns never

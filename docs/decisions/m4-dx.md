@@ -427,7 +427,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 `M4-B1` to `M4-B6` are the design's §6 as built; `M4-B7` onwards are task D's execution rulings. Fix round 1 of the
 task D review amended `M4-B1` to `M4-B4`, `M4-B10` and `M4-B12` in place, before the branch merged, and added `M4-B13`
 to `M4-B15`; fix round 2 amended `M4-B1`, `M4-B3`, `M4-B10`, `M4-B12` and `M4-B15`, with `M4-F22` and `M4-F23` in the
-client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again).
+client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3` (the microtask again); the final
+review amended `M4-B2`, `M4-B4`, `M4-B10`, `M4-F14`, `M4-F16`, `M4-F17`, `M4-F22` and `M4-F23` in place.
 
 ### M4-B1: `createUploadHooks<typeof cloudrop>(options?)`, with a lazy client
 
@@ -449,18 +450,29 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 
 ### M4-B2: `useUpload(route, options?)`
 
-- **Decision:** as design §6.1. `files` lists the files of the hook's jobs in start order, each the client's snapshot
-  plus `pause`, `resume`, `abort` and `retry` bound to its handle; `totals` sums the jobs' totals with the client's own
-  rule (failed and aborted files out of the bytes; an all-empty set is finished once its counted files are done);
-  `upload()` takes a `File`, an array or a `FileList` (`M4-B14`) and resolves `null` for none; `clear()` drops the jobs
-  whose every file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed
-  file's ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
+- **Decision:** as design §6.1. Each factory keeps the jobs started through it in one store per route
+  (`HookSource.storeOf`), and every `useUpload(route)` of that factory renders that store: two components on one route
+  share one list, and a component that unmounts and mounts again finds its running and failed files. `files` lists the
+  files of the route's jobs in start order, each the client's snapshot plus `pause`, `resume`, `abort` and `retry` bound
+  to its handle; `totals` sums the jobs' totals with the client's own rule (failed and aborted files out of the bytes;
+  an all-empty set is finished once its counted files are done); `upload()` takes a `File`, an array or a `FileList`
+  (`M4-B14`) and resolves `null` for none; the hook's `pause`, `resume`, `abort` and `retry` act on every job of the
+  route; `resume(upload, file)` adds its job to the hook's route, which is the record's route whenever the record came
+  from `useResumable(route)` of the same route; `clear()` drops, for every component on the route, the jobs whose every
+  file ended done or aborted, and keeps a job with a running or failed file, since the client keeps a failed file's
+  ticket, parts, record and lock for `retry()` (review M2). `metadata`, `multiple` and `accept` are read from the
   latest committed render (assigned in `useInsertionEffect`), so `upload`, `pause`, `resume`, `abort`, `retry` and
   `clear` never change identity, while `getInputProps()` and `getDropProps()` are built per render.
 - **Why:** design §6.1; stable functions keep an effect that lists `upload` in its dependencies from uploading again on
-  every render.
-- **If wrong:** per-render functions would be a breaking change for code that relies on identity.
-- **Status:** in force (`542ae74`, `99f795a`). The final review (M4) renamed the per-file type `UploadFile` to
+  every render. One store per component stranded a failed file: unmounting cancels nothing (`M4-B4`), the failed file
+  keeps its ticket for `retry()`, and `resumable()` leaves out an upload the page holds (`M4-F22`), so after a
+  navigation and back no list showed it and `resume()` was refused with `UPLOAD_IN_USE` until a reload (final review
+  I1, probed). Keyed by route, not by component, because a remounted component has no identity to find its old store
+  by; sharing a route's list between two mounted components follows from that.
+- **If wrong:** per-render functions would be a breaking change for code that relies on identity. A page that wants two
+  separate lists on one route creates a second factory. A factory created inside a component loses the list on every
+  mount; the guide says to create it at module level. The factory holds every job until `clear()` or a reload.
+- **Status:** in force (`542ae74`, `99f795a`); the per-route store is the final review's I1. The final review (M4) renamed the per-file type `UploadFile` to
   `UploadItem` before the first publish: `UploadFile` sat one letter from `UploadedFile`, the stored file a done
   file's `result.file` holds.
 - **Source:** design §6.1; task D review M2.
@@ -494,14 +506,18 @@ client section; fix round 3 amended `M4-F22` (one release per claim) and `M4-B3`
 
 - **Decision:** `useSyncExternalStore` with a module-level server snapshot (`EMPTY_VIEW`), which is also the browser's
   state before any upload. Uploads start only from `upload()`, the input's `onChange`, a drop and `resume()`, never in
-  an effect or during render. The hook's store listens to its jobs only while React listens to it, and rebuilds its view
-  when React subscribes again, so a component hidden by `<Activity>` shows what its jobs did meanwhile; unmounting
-  unsubscribes and cancels nothing, so the jobs finish and their resume records stay. Tested on React 19.3; React 18.3
+  an effect or during render. A route's store (`M4-B2`) listens to its jobs only while React listens to it, and
+  rebuilds its view when React subscribes again, so a component hidden by `<Activity>` shows what its jobs did
+  meanwhile; unmounting unsubscribes and cancels nothing, so the jobs finish, their resume records stay, and the next
+  component on the route lists them, with a failed file's `retry()` working. Giving a failed file's ticket up on
+  unmount is ruled out: React runs the same cleanup under `<Activity>` and in StrictMode's simulated unmount, and a
+  ticket given up cannot be taken back. Tested on React 19.3; React 18.3
   passed the same tests in a one-off run (all but the `<Activity>` row, an API React 18 lacks), and the library source
   type-checks against `@types/react` 18.3.
 - **Why:** design §6.1.
-- **If wrong:** an opt-in cancel on unmount is a non-breaking option; the guide shows `useEffect(() => abort, [abort])`.
-- **Status:** in force (`542ae74`).
+- **If wrong:** an opt-in cancel on unmount is a non-breaking option; the guide shows `useEffect(() => abort, [abort])`,
+  which cancels every upload of the route, other components' included.
+- **Status:** in force (`542ae74`); amended by the final review's I1 (the route's list survives an unmount).
 - **Source:** design §6.1.
 - **Visible in:** `src/react/upload-store.ts`, `src/react/hooks.test.ts`, `src/react/upload-store.test.ts`,
   `docs/guide/react.md`.

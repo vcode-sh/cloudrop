@@ -1,6 +1,7 @@
-// What one useUpload renders, kept outside React for useSyncExternalStore: the files of every job the hook started, in
-// start order, each with its file's controls, and totals across those jobs. It listens to the jobs only while React
-// listens to it, so an unmounted hook holds nothing, and it never cancels a job: the client owns them (M4-B4).
+// What the useUpload hooks of one route render, kept in the factory for useSyncExternalStore: the files of every job
+// started on the route, in start order, each with its file's controls, and totals across those jobs. A component that
+// mounts again finds its jobs here (M4-B2). It listens to the jobs only while React listens to it, so a route no
+// component shows subscribes to nothing, and it never cancels a job: the client owns them (M4-B4).
 
 import type { FileHandle, FileSnapshot, FileStatus, JobSnapshot, UploadJob } from "../client.ts";
 import type { UploadItem } from "./types.ts";

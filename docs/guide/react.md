@@ -33,6 +33,11 @@ it in a separate task, so it reaches the console and your error reporting.
 The type argument gives the hooks your route names, each route's metadata and what each route's `onComplete` returns.
 `useUpload("avatar")` knows the rest from the route name.
 
+The hooks keep their uploads in the factory, one list per route. Every `useUpload("documents")` of these hooks shows the
+same files, and a component that unmounts and mounts again, after a navigation or when a dialog closes and opens again,
+finds its running and failed files there, and a failed file's `retry()` still sends it. That is why the factory is
+created once, at module level: a factory created inside a component would start an empty list on every mount.
+
 ## One file
 
 ```tsx
@@ -95,7 +100,8 @@ export function DocumentUploader({ folderId }: { folderId: string }) {
 }
 ```
 
-- `files` holds every file of the uploads this hook started, in start order. Each is the client's
+- `files` holds every file of the uploads started on this route through these hooks, from any component, in start
+  order. Each is the client's
   [file snapshot](client.md#snapshots-and-react) (`status`, `bytes`, `progress`, `speed`, `eta`, `error`, `result`)
   with that file's `pause`, `resume`, `abort` and `retry`. A file's object changes only when that file changes, so a
   `memo` row renders again only for its own file.
@@ -103,8 +109,10 @@ export function DocumentUploader({ folderId }: { folderId: string }) {
   never hold the bar below 1.
 - `metadata` is read from the latest render: when `folderId` changes, the next upload sends the new one. It is required
   when the route's schema requires it, and TypeScript says so.
-- `clear()` removes the uploads whose every file ended done or cancelled. An upload with a running or failed file
-  stays: a failed file can still be retried, and the client keeps what it needs for that.
+- `clear()` removes the uploads whose every file ended done or cancelled, for every component on the route. An upload
+  with a running or failed file stays: a failed file can still be retried, and the client keeps what it needs for that.
+- `pause()`, `resume()`, `abort()` and `retry()` act on every file in `files`, so on the route's uploads that another
+  component started too.
 
 ## Drag and drop
 
@@ -217,8 +225,8 @@ when it settles, so a record the client deletes, for a file that ends done or is
 is `[]` on the server, before the first read and when the read failed. An upload started on a shared client directly,
 not through the hooks, is not followed: call `refresh()` after it.
 
-`resume(upload, file)` continues a record with the file the user picked again, as one more upload of the hook, so it
-appears in `files`. A browser never gives a page a file back after a reload, so the user has to pick it. What counts as
+`resume(upload, file)` continues a record with the file the user picked again, as one more upload in the hook's
+`files`, which every component on the hook's route shows. A browser never gives a page a file back after a reload, so the user has to pick it. What counts as
 the same file, and what the server is asked first: [Resume after reload](resume.md).
 
 ## What the hooks return
@@ -227,17 +235,17 @@ the same file, and what the server is asked first: [Resume after reload](resume.
 
 | Field | What it is |
 | --- | --- |
-| `files` | Every file of the hook's uploads, in start order, with its own `pause`, `resume`, `abort` and `retry`. |
+| `files` | Every file of the route's uploads, in start order, with its own `pause`, `resume`, `abort` and `retry`. |
 | `totals` | `bytes`, `size`, `progress`, `speed`, `eta`, `done`, `failed`, `aborted` and `count` across those uploads. |
 | `isUploading` | True while a file is queued, uploading or completing. A paused file is not uploading. |
 | `isDragOver` | True while files are dragged over the element that has `getDropProps()`. |
 | `upload(files, { metadata }?)` | Starts one upload; resolves with its `UploadResult`, or `null` for no file. |
 | `getInputProps()` | `type`, `multiple`, `accept` and `onChange` for an `<input>`. |
 | `getDropProps()` | `onDragEnter`, `onDragOver`, `onDragLeave` and `onDrop` for any element. |
-| `pause()`, `resume()`, `abort()` | Pause, resume or cancel every file of the hook, as each file's own control does. |
+| `pause()`, `resume()`, `abort()` | Pause, resume or cancel every file in `files`, as each file's own control does. |
 | `retry()` | Sends every failed file again; resolves once they have settled. |
 | `resume(upload, file)` | Continues a record from `useResumable`; resolves with its `UploadResult`. |
-| `clear()` | Removes the uploads whose every file ended done or cancelled; failed and running ones stay. |
+| `clear()` | Removes the uploads whose every file ended done or cancelled, for every component on the route. |
 
 `useResumable(route?)`: `uploads` and `refresh()`, described above.
 
@@ -249,9 +257,12 @@ the same file, and what the server is asked first: [Resume after reload](resume.
 - **StrictMode.** No upload starts in an effect or during render, only in `upload()`, the input's `onChange`, a drop
   and `resume()`. StrictMode's second render and second effect start nothing; `useResumable` only reads once more.
 - **Unmounting.** A component that unmounts stops listening and cancels nothing. The client owns its uploads: they
-  finish, and a multipart upload's resume record stays. Cancel on unmount yourself when that is what you want:
-  `useEffect(() => abort, [abort])`. Under React 19's `<Activity mode="hidden">` that effect's cleanup runs too, so
-  hiding counts as unmounting; without it, a hidden component shows what its uploads did once it is visible again.
+  finish, and a multipart upload's resume record stays. The route's list stays in the factory, so the next component
+  on the route shows those uploads and can retry a failed file; until the page reloads, `useResumable` does not list
+  them, because this page still holds them. Cancel on unmount yourself when that is what you want:
+  `useEffect(() => abort, [abort])`, which cancels every upload of the route, including other components'. Under
+  React 19's `<Activity mode="hidden">` that effect's cleanup runs too, so hiding counts as unmounting; without it, a
+  hidden component shows what its uploads did once it is visible again.
 
 ## Types
 

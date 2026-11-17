@@ -66,9 +66,12 @@ export interface DropProps {
 }
 
 export interface UseUploadResult<R, TName extends string, TMetadata> {
-  /** Every file of the uploads this hook started, in start order. A file's object changes only when that file does. */
+  /**
+   * Every file of the uploads started on this route through any hook of the factory, in start order, kept across
+   * unmounts. A file's object changes only when that file does.
+   */
   files: readonly UploadItem<R>[];
-  /** As JobSnapshot's totals, across the hook's uploads: failed and aborted files are left out of the bytes. */
+  /** As JobSnapshot's totals, across the uploads in `files`: failed and aborted files are left out of the bytes. */
   totals: JobSnapshot<R>["totals"];
   /** True while a file is queued, uploading or completing; a paused file is not uploading. */
   isUploading: boolean;
@@ -81,17 +84,20 @@ export interface UseUploadResult<R, TName extends string, TMetadata> {
   upload(files: File | ArrayLike<File> | null, options?: { metadata?: TMetadata }): Promise<UploadResult<R> | null>;
   getInputProps(): InputProps;
   getDropProps(): DropProps;
-  /** Pauses every queued or uploading file of the hook. */
+  /** Pauses every queued or uploading file in `files`. */
   pause(): void;
-  /** Resumes every paused file of the hook. */
+  /** Resumes every paused file in `files`. */
   resume(): void;
-  /** Continues an upload useResumable listed, with the file the user picked again, as one more upload of the hook. */
+  /** Continues an upload useResumable listed, with the file the user picked again, as one more upload in `files`. */
   resume(upload: ResumableUpload<TName>, file: File): Promise<UploadResult<R>>;
-  /** Cancels every file of the hook that has not ended done. */
+  /** Cancels every file in `files` that has not ended done. */
   abort(): void;
-  /** Sends every failed file of the hook again; resolves once they have settled. */
+  /** Sends every failed file in `files` again; resolves once they have settled. */
   retry(): Promise<void>;
-  /** Removes from `files` the uploads whose every file has ended (done, failed or aborted). */
+  /**
+   * Removes from `files`, for every component on the route, the uploads whose every file ended done or aborted. One
+   * with a failed file stays: retry() can still send it.
+   */
   clear(): void;
 }
 
@@ -106,7 +112,10 @@ export interface UseResumableResult<TName extends string> {
 }
 
 export interface UploadHooks<TCloudrop extends InferableCloudrop> {
-  /** Uploads to `route`, with the files, progress and controls a page renders. Stays with the client on unmount. */
+  /**
+   * Uploads to `route`, with the files, progress and controls a page renders. Every component on one route shares its
+   * list, and unmounting cancels nothing: a component that mounts again shows its running and failed files.
+   */
   useUpload<TName extends RouteName<TCloudrop>>(
     route: TName,
     ...options: UseUploadArguments<RouteMetadata<TCloudrop, TName>>

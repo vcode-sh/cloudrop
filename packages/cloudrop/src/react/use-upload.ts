@@ -1,5 +1,6 @@
-// useUpload (spec §6.1, M4-B2, M4-B4): the jobs one component starts, rendered through useSyncExternalStore. No upload
-// starts in an effect or during render, so StrictMode's second render and second effect start nothing.
+// useUpload (spec §6.1, M4-B2, M4-B4): the jobs a factory's hooks started on one route, rendered through
+// useSyncExternalStore. No upload starts in an effect or during render, so StrictMode's second render and second effect
+// start nothing.
 
 import { useInsertionEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
@@ -7,10 +8,12 @@ import type { CloudropClient, Result, ResumableUpload, UploadJob, UploadResult }
 import { createDropHandlers } from "./drop.ts";
 import type { JobTracker } from "./job-tracker.ts";
 import type { InputProps, UseUploadOptions, UseUploadResult } from "./types.ts";
-import { createUploadStore, EMPTY_VIEW } from "./upload-store.ts";
+import { EMPTY_VIEW, type UploadStore } from "./upload-store.ts";
 
 /** What createUploadHooks shares with its hooks: the client and the jobs they started. */
 export interface HookSource extends JobTracker {
+  /** The jobs started on `route` through any hook of the factory: they outlive the component that started them. */
+  storeOf(route: string): UploadStore<unknown>;
   /**
    * The client, created on the first call: in a handler or an effect, so never during a server render. A wrong option
    * gives its INVALID_CONFIG error, which upload(), resume() and refresh() resolve with.
@@ -27,15 +30,15 @@ type Hook = UseUploadResult<unknown, string, unknown>;
 
 /** Everything of a hook that keeps its identity across renders: React keeps one per component instance. */
 function createController(source: HookSource, initial: Latest, setDragOver: (isOver: boolean) => void) {
-  const store = createUploadStore<unknown>();
   // Event handlers read the committed render's route and options, so the functions below never change.
-  const controller = { latest: initial, store };
+  const controller = { latest: initial };
+  const jobs = () => source.storeOf(controller.latest.route).jobs();
 
   function start(begin: (client: CloudropClient) => UploadJob<unknown>): Promise<UploadResult<unknown>> {
     const client = source.client();
     if (client.error) return Promise.resolve({ data: null, error: client.error });
     const job = begin(client.data);
-    store.add(job);
+    source.storeOf(controller.latest.route).add(job);
     source.track(job);
     return job.done;
   }
@@ -51,7 +54,7 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   function resume(upload: ResumableUpload, file: File): Promise<UploadResult<unknown>>;
   function resume(...record: [] | [ResumableUpload, File]): Promise<UploadResult<unknown>> | undefined {
     if (record.length === 2) return start((client) => client.resume(...record));
-    for (const job of store.jobs()) job.resume();
+    for (const job of jobs()) job.resume();
   }
   /** Files from a pick or a drop: no caller sees the result, so a wrong client option is thrown in a task (M3-U8). */
   const take = (files: File[]) => {
@@ -75,16 +78,16 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   const actions: Pick<Hook, "upload" | "pause" | "resume" | "abort" | "retry" | "clear"> = {
     upload,
     pause: () => {
-      for (const job of store.jobs()) job.pause();
+      for (const job of jobs()) job.pause();
     },
     resume,
     abort: () => {
-      for (const job of store.jobs()) job.abort();
+      for (const job of jobs()) job.abort();
     },
     retry: async () => {
-      await Promise.all(store.jobs().map((job) => job.retry()));
+      await Promise.all(jobs().map((job) => job.retry()));
     },
-    clear: store.clear,
+    clear: () => source.storeOf(controller.latest.route).clear(),
   };
   return Object.assign(controller, { actions, onChange, dropProps });
 }
@@ -97,7 +100,8 @@ export function useUploadWith(source: HookSource, route: string, options: UseUpl
   useInsertionEffect(() => {
     controller.latest = { route, options };
   });
-  const view = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot, serverView);
+  const store = source.storeOf(route);
+  const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
   const { multiple = false, accept } = options;
   return {
     ...view,
