@@ -33,10 +33,6 @@ what fails, shows progress, and picks up where it left off after a reload.
 npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
 ```
 
-Until 0.1.0 is published, the version on npm (`0.0.0`) only reserves the name. To try cloudrop today, clone this
-repository and run [`examples/next`](examples/next/README.md): it uploads to a local RustFS container and needs no
-credentials.
-
 ## Quick start
 
 A Next.js app with an avatar upload: the server, the route that mounts it, the hooks, a component, and the bucket's

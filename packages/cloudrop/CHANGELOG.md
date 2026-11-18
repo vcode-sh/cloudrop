@@ -6,6 +6,8 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.1.0 - 2026-11-19
+
 The first release. Version `0.0.0` on npm only reserved the name.
 
 ### Added
