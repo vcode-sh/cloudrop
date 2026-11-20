@@ -122,8 +122,8 @@ continue from `M8-Q1`.
     throwing, so the unit lane could not see it.
   - `Map.prototype.getOrInsertComputed` (Chrome 145, Firefox 144, Safari 26.2, Node 26) for `storeOf` in `react.ts`.
   - A shared helper for the controller that both a timeout and the caller's signal abort, used by `endpoints.ts` and
-    `transport.ts`: two copies, and `M3-U16` replaced an earlier signal-combining helper with one listener per file; the simplify rule
-    waits for a third.
+    `transport.ts`: two copies, and `M3-U16` replaced an earlier signal-combining helper with one listener per file; the
+    simplify rule waits for a third.
 - **Why:** each would raise the floor, break React Native or the unit lane on Node 24, or add a concept for two callers.
 - **If wrong:** revisit with the floor. Raising it to Safari 17.4 would allow `AbortSignal.any` and
   `Promise.withResolvers` together and save about fifteen lines.
