@@ -6,6 +6,7 @@ import { type Cloudrop, createCloudrop } from "../server/cloudrop.ts";
 import type { CloudropOptions } from "../server/config.ts";
 import type { Logger } from "../server/plugins.ts";
 import type { Route } from "../server/route.ts";
+import { base64url } from "../server/token.ts";
 import type { FetchLike, StorageDriver } from "../storage/driver.ts";
 import { r2 } from "../storage/presets.ts";
 import { createFakeR2, type FakeR2, type FakeR2Options } from "./fake-r2.ts";
@@ -121,9 +122,5 @@ export function tokenPayload(token: string): Record<string, unknown> {
 export function forgeToken(token: string, changes: Record<string, unknown>): string {
   const [, signature = ""] = token.split(".");
   const json = new TextEncoder().encode(JSON.stringify({ ...tokenPayload(token), ...changes }));
-  const body = btoa(String.fromCharCode(...json))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-  return `${body}.${signature}`;
+  return `${base64url(json)}.${signature}`;
 }
