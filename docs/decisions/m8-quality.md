@@ -83,3 +83,23 @@ continue from `M8-Q1`.
 - **If wrong:** none known; drop the lines once no supported editor ships TypeScript 5.
 - **Status:** in force.
 - **Visible in:** `packages/cloudrop/tsconfig.json`.
+
+### M8-Q7: a multipart file's part workers share one array iterator
+
+- **Decision:** `sendParts` (`src/client/parts.ts`) starts its at most four workers on one `partNumbers.values()`
+  iterator, each running `for (const next of queue)` and returning once a part failed the file, in place of a copied
+  array that every worker emptied with `shift()`.
+- **Why:** the pattern `M8-Q2` adopted for `deleteMany`: one concept fewer, no copy of up to 10,000 part numbers and no
+  `shift()` per part. Each `next()` hands a part to exactly one worker, in ascending order, and an array iterator has no
+  `return()` (Node 24.22.2 answers `undefined` for it), so a worker that returns leaves the rest to the others. A worker
+  that finds the file failed takes one part from the iterator and sends nothing for it, as the `shift()` loop did; the
+  requests, their order and the failure the call returns are unchanged. Covered by `parts.test.ts` and the upload
+  tests: a fault probe that drops the early return still passes them, because `sendPart` refuses to start an attempt
+  once the file failed, so the check is the loop's exit, not a guard against a request.
+- **Support:** `Array.prototype.values` and `for…of` are ES2015: MDN's browser-compat-data 8.1.10 lists Chrome 66,
+  Firefox 60, Safari 9 and Node 10.9, and Hermes lists iteration with `Symbol.iterator`, `for..of` and "all ES6 JS
+  library functions" as supported (`doc/Features.md`).
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/client/parts.ts`.
+

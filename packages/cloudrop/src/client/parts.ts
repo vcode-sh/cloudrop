@@ -124,19 +124,16 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
 
 /** Sends `partNumbers` (ascending), at most PARTS_IN_FLIGHT at a time. The first part that fails for good fails the call. */
 export async function sendParts(sender: PartSender, partNumbers: readonly number[]): Promise<Result<void>> {
-  const run: Run = {
-    sender,
-    partNumbers,
-    batch: null,
-    failure: null,
-    stop: new AbortController(),
-  };
+  const run: Run = { sender, partNumbers, batch: null, failure: null, stop: new AbortController() };
   const cancel = () => run.stop.abort();
   sender.signal.addEventListener("abort", cancel, { once: true });
-  const queue = [...partNumbers];
+  // One iterator for every worker: each part goes to exactly one, in order, and an array iterator has no return(), so a
+  // worker that stops leaves the rest to the others (M8-Q7).
+  const queue = partNumbers.values();
   // The first part that fails for good stops new parts and new attempts; requests already sent finish (spec §6.2).
   const worker = async (): Promise<void> => {
-    for (let next = queue.shift(); next !== undefined && run.failure === null; next = queue.shift()) {
+    for (const next of queue) {
+      if (run.failure) return;
       // Read before `run.failure ??=`: `run.failure ??= await sendPart(…)` would test it before the await and let a
       // later success overwrite another worker's failure with null.
       const error = await sendPart(run, next);
@@ -144,7 +141,7 @@ export async function sendParts(sender: PartSender, partNumbers: readonly number
       if (run.failure) run.stop.abort();
     }
   };
-  await Promise.all(Array.from({ length: Math.min(PARTS_IN_FLIGHT, queue.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(PARTS_IN_FLIGHT, partNumbers.length) }, worker));
   // The caller's signal may outlive this call: drop the listener that holds the run.
   sender.signal.removeEventListener("abort", cancel);
   return run.failure ? fail(run.failure) : ok(undefined);
