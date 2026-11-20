@@ -69,7 +69,7 @@ export function createUploadHooks<TCloudrop extends InferableCloudrop = Inferabl
     return useResumableWith(source, route);
   }
   // The client's own stop, every route's uploads included (M8-L7); a client with a wrong option has nothing to stop.
-  const close: UploadHooks<TCloudrop>["close"] = (options) => source.client().data?.close(options);
+  const close: UploadHooks<TCloudrop>["close"] = (options) => source.client().data?.close(options) ?? Promise.resolve();
   // The hooks run on route names as plain strings: the casts give them the types the server's type carries, as
   // createCloudropClient does.
   return { useUpload, useResumable, close } as UploadHooks<TCloudrop>;

@@ -5,18 +5,22 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
 
 ### M8-L1: `close()` stops a client for good; afterwards uploads answer `CLIENT_CLOSED`
 
-- **Decision:** The client gets `close(options?: { abort: true }): void`. Afterwards `start()`, `upload()` and
+- **Decision:** The client gets `close(options?: { abort: true }): Promise<void>`. Afterwards `start()`, `upload()` and
   `resume()` are refused before any request with the new client-only code `CLIENT_CLOSED`, not retryable,
   whose message says to use the client of the user signed in now; a job created earlier cannot send again, since every
   file of it has ended (`M8-L2`). `resumable()`, `discard()` and `forget()` keep working: sign-out calls `forget()`
-  after `close()`, and `discard()` sends `/abort` with the record's own token. `close()` returns nothing and never
-  throws; each job's `done` and snapshot report how its files stopped.
+  after `close()`, and `discard()` sends `/abort` with the record's own token. `close()` resolves once every file it
+  stopped has ended and each `/abort` it sent was answered (a failed file's `/abort` becomes that file's last run, as a
+  running file's run already waits for its own), and never rejects; a later call resolves with the first one's.
 - **Why:** `M7-P3`: an app had to find and cancel each route's jobs itself, and nothing stopped a file still waiting
   for its ticket from asking `/upload` with the next user's session. `close` names an end, like a tab's: a client is
-  tied to one user's `namespace`, so it is never reopened, and the next user gets a new client. A promise would let a
-  sign-out wait for a `/complete` of up to 120 s for nothing: each `/abort` goes with `keepalive`, no record is saved
-  after `close()`, and `forget()` and the cancelled uploads' own deletes remove the same records in either order.
-- **If wrong:** an app that wants to know when every `/abort` was answered awaits its jobs' `done`.
+  tied to one user's `namespace`, so it is never reopened, and the next user gets a new client. The promise exists for
+  the `headers` option (`M8-L5`): each `/abort` calls the app's function, and a sign-out that ends the session it reads
+  before the `/abort`s left would leave them unsent and the rows open. A React sign-out cannot reach the jobs of every
+  route to await them itself.
+- **If wrong:** a sign-out that awaits `close()` while a `/complete` runs waits for its answer, at most 120 s. Not
+  awaiting it is safe with cookie sessions: each `/abort` goes with `keepalive`, a save queued before `close()` is
+  removed by the cancel after it, and `forget()` and those removals delete the same records in either order.
 - **Status:** in force.
 - **Visible in:** `src/client.ts`, `src/client/close.ts`, `src/client/job.ts`, `src/client/failures.ts`,
   `src/errors.ts`, `docs/guide/client.md#close-the-client`, `docs/guide/errors.md`.
@@ -41,8 +45,10 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
   the lock held, or a new client in the same page would find the upload `UPLOAD_IN_USE`. Sign-out must send them, or
   the rows hold quota until the sweep (`M7-P2`). Reusing `job.abort()` keeps one cancel path: the keep branch is two
   checks in `file-run.ts` (`keptForResume`).
-- **If wrong:** a user-change `close()` leaves a single `PUT` aborted and the other user's rows open until the sweep
-  when that user never signs in again; the bucket's lifecycle rule removes their parts as it removes any tab's.
+- **If wrong:** a user-change `close()` leaves the other user's multipart rows open until the sweep when that user never
+  signs in again; the bucket's lifecycle rule removes their parts as it removes any tab's. The set holds a `start()`
+  job with a failed file, and its `File`s, for the client's life, where before an app that dropped the job let it be
+  collected: `retry()` could still send that file, so `close()` must reach it.
 - **Status:** in force. Regressions: `src/client/close.test.ts` (both modes, three files in three phases, a file
   mid-`/complete`, a failed file holding its ticket) and the Vite example's browser pass "Sign out during a multipart
   upload ends its row as aborted".
@@ -105,7 +111,9 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
 - **If wrong:** for `/complete`, `NETWORK_ERROR` marks the file as one a `/complete` may have finished (`M3-H16`),
   though nothing was sent: a cancel then keeps its parts for the lifecycle rule instead of sending `/abort`. The cost is
   storage until that rule runs, never a lost file. With an async function, the `/abort` a closing page sends for a
-  failed file waits for it and may never leave.
+  failed file waits for it and may never leave, and a function that throws once the user signed out leaves each
+  `/abort` unsent, so the client guide says to await `close()` before sign-out and to return no headers rather than
+  throw: `/abort` needs only the upload token.
 - **Status:** in force.
 - **Visible in:** `src/client/endpoints.ts`, `src/client/failures.ts`, `docs/guide/errors.md`.
 
@@ -132,8 +140,8 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
 ### M8-L8: `useResumable` reports what it is discarding
 
 - **Decision:** `useResumable()` returns `discarding`, a `ReadonlySet` of the ids of the listed uploads whose
-  `discard()` through this hook is running, from the call until the list has been read again, in the same render as
-  that list.
+  `discard()` through this hook is running, from the call until the list has been read again. Calls are counted per
+  id, so a second press, refused `UPLOAD_IN_USE` at once, does not end the first one's hold.
 - **Why:** the gap check of `M7-P3`'s brief: the production app that reported `M7-P2`
   (`apps/web/src/components/files/unfinished-uploads.tsx` there) and `examples/vite-react` each built this state
   themselves, to disable Discard while it runs, since a second `discard()` of one upload finds the first one's lock

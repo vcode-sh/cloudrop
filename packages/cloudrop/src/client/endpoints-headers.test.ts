@@ -1,7 +1,8 @@
 // Contract: the `headers` option (M7-P4, M8-L5, M8-L6). Its headers go with every request to the upload server
 // (/upload, /sign, /complete, /abort) and never with a bucket PUT, which keeps XMLHttpRequest and its byte progress. A
 // function is called before each request, so each carries the value of its moment; its failure fails that request
-// unsent with NETWORK_ERROR. The client's own content-type wins, and a wrong option throws INVALID_CONFIG.
+// unsent with NETWORK_ERROR, and its wait ends at the request's timeout or the caller's cancel. The client's own
+// content-type wins, and a wrong option throws INVALID_CONFIG.
 // Oracle: the headers each request reached the fixture with, the requests XMLHttpRequest sent, literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +10,7 @@ import { type ClientOptions, createCloudropClient } from "../client.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
+import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
 import { gate } from "../testing/persist-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -43,21 +45,35 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("the headers option", () => {
   it("is called before each request to the server, never for a bucket PUT, which keeps XMLHttpRequest", async () => {
-    const { xhr, seen, client } = page();
+    // Part 1's first URL is refused as expired, so the client asks /sign for a new one.
+    const expiredOnce: Fault = (call) =>
+      call.label === "PUT part 1" && call.nth === 1
+        ? errorResponse(403, "ExpiredRequest", "Request has expired")
+        : undefined;
+    const { xhr, seen, client } = page(expiredOnce);
     let issued = 0;
     const tokens = client({ concurrency: 1, headers: async () => ({ authorization: `Bearer ${++issued}` }) });
     const { error } = await tokens.upload("files", twoParts());
 
-    expect({ error, seen, xhr: xhr.sent }).toEqual({
+    // Sorted: part 2 may start while part 1 waits for its new URL.
+    expect({ error, seen: seen.sort(), xhr: [...xhr.sent].sort() }).toEqual({
       error: null,
-      seen: ["POST /upload Bearer 1", "PUT part 1 null", "PUT part 2 null", "POST /complete Bearer 2"],
-      xhr: ["PUT part 1", "PUT part 2"],
+      seen: [
+        "POST /complete Bearer 3",
+        "POST /sign Bearer 2",
+        "POST /upload Bearer 1",
+        "PUT part 1 null",
+        "PUT part 1 null",
+        "PUT part 2 null",
+      ],
+      xhr: ["PUT part 1", "PUT part 1", "PUT part 2"],
     });
   });
 
@@ -82,12 +98,43 @@ describe("the headers option", () => {
     const broken = client({ headers: () => Promise.reject(new Error("The session expired.")) });
     const { error } = await broken.upload("files", note());
 
-    expect({ error: error && [error.code, error.message, error.retryable], requests: fixture.requests }).toEqual({
+    expect({
+      error: error && [error.code, error.message, error.retryable, (error.cause as Error).message],
+      requests: fixture.requests,
+    }).toEqual({
       error: [
         "NETWORK_ERROR",
         "The headers option gave no headers for a request to the upload server, so it was not sent. Check the function passed as headers, then try again.",
         true,
+        "The session expired.",
       ],
+      requests: [],
+    });
+  });
+
+  it("stops waiting for a function that never settles at the request's timeout, and sends nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { fixture, client } = page();
+    const hung = client({ headers: () => new Promise<HeadersInit>(() => {}) });
+    const result = hung.upload("files", note());
+    // Six attempts of 30 s each; the fake clock runs each 0 ms backoff for 1 ms, so one more second covers them.
+    await vi.advanceTimersByTimeAsync(6 * 30_000 + 1000);
+
+    expect({ code: (await result).error?.code, requests: fixture.requests }).toEqual({
+      code: "NETWORK_ERROR",
+      requests: [],
+    });
+  });
+
+  it("answers a cancel while it waits for a function with ABORTED, and sends nothing", async () => {
+    const { fixture, client } = page();
+    const hung = client({ headers: () => new Promise<HeadersInit>(() => {}) });
+    const cancel = new AbortController();
+    const result = hung.upload("files", note(), { signal: cancel.signal });
+    cancel.abort();
+
+    expect({ code: (await result).error?.code, requests: fixture.requests }).toEqual({
+      code: "ABORTED",
       requests: [],
     });
   });

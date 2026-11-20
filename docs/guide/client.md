@@ -59,6 +59,8 @@ On the server, `authorize` reads `request.headers.get("authorization")`.
 - **When the function throws or rejects,** that request is not sent and fails with `NETWORK_ERROR`, which the client
   retries as any network failure. Its time counts against the request's timeout, and a cancel stops the wait.
 - **`content-type` stays the client's.** A `content-type` among the headers is replaced by `application/json`.
+- **At sign-out, await [`close()`](#close-the-client)** before the session the function reads ends: each `/abort`
+  calls the function too. Return no headers rather than throw when signed out: `/abort` needs only the upload token.
 - **At `pagehide`, an async function may be too late.** The `/abort` a closing page sends for a failed file waits for
   it, and a page that is gone sends nothing. The bucket's lifecycle rule and, with a store, the sweep clean up.
 - **From a page on another origin,** the `authorization` header makes the browser send a preflight first. The handler
@@ -343,7 +345,7 @@ cleans up.
 `close()` stops a client for good, which an app with signed-in users needs when the user changes:
 
 ```ts
-client.close({ abort: true }); // at sign-out: cancel every upload, telling the server
+await client.close({ abort: true }); // at sign-out: cancel every upload, telling the server
 await client.forget(); // then delete the user's unfinished uploads
 ```
 
@@ -359,8 +361,10 @@ await client.forget(); // then delete the user's unfinished uploads
   after signing in again, in this page or after a reload. A single `PUT`, which cannot resume, is cancelled, and so is
   every file when persistence is off or unavailable.
 - **A file whose `/complete` may have finished** is kept, never deleted, either way.
-- **The first call decides,** and every later call does nothing. `close()` returns at once; each file's status changes
-  as it stops, and each job's `done` settles.
+- **It resolves** once every file it stopped has ended and each `/abort` it sent was answered; it never rejects. A file
+  in the middle of `/complete` waits for that answer, at most 2 minutes. Await it before a sign-out ends what a
+  `headers` function reads, or that function cannot give the `/abort`s their headers.
+- **The first call decides,** and every later call does nothing but resolve with the first.
 
 In React, the factory returns the same `close()`: [Signed-in users](react.md#signed-in-users).
 

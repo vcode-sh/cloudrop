@@ -65,7 +65,7 @@ function parseJson(text: string): unknown {
 }
 
 /** Rejects when `signal` fires, so a headers function that never settles cannot hold a request past its timeout. */
-const firing = (signal: AbortSignal): Promise<never> =>
+const rejectOnAbort = (signal: AbortSignal): Promise<never> =>
   new Promise((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
     if (signal.aborted) reject(signal.reason);
@@ -110,10 +110,12 @@ export function createEndpoints(basePath: string, fetch: ClientFetch, serverHead
     if (signal?.aborted) stop();
     let headers: Record<string, string> | undefined;
     try {
-      // Inside the timeout and the caller's signal: the function may refresh a token over the network (M8-L6).
+      // A request cancelled before it starts calls no headers function, which may refresh a token over the network.
+      controller.signal.throwIfAborted();
+      // Inside the timeout and the caller's signal (M8-L6).
       headers =
         typeof serverHeaders === "function"
-          ? jsonHeaders(await Promise.race([serverHeaders(), firing(controller.signal)]))
+          ? jsonHeaders(await Promise.race([serverHeaders(), rejectOnAbort(controller.signal)]))
           : fixedHeaders;
       // "include": a page on a trusted origin sends its session cookie, which authorize may read (S8).
       const response = await fetch(`${basePath}/${endpoint}`, {

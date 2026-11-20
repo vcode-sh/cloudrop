@@ -212,7 +212,7 @@ const { files, getInputProps } = useUpload("attachments", { multiple: true });
   user still finds them on their next sign-in. The namespace is fixed when the client is created, which is why the app
   keys the context by the user: one module-level client, without a namespace, would show every user's records to
   whoever signs in next. The cost is a context and a component remount when the user changes.
-- At sign-out, call `useUploads().close({ abort: true })`, which cancels the user's uploads on every route and tells
+- At sign-out, await `useUploads().close({ abort: true })`, which cancels the user's uploads on every route and tells
   the server, so their rows end `aborted`, then `useUploads().client.forget()`: the namespace hides the records,
   `forget()` deletes them and the upload tokens they hold, and aborts none. Closing first keeps a file that would get
   its ticket afterwards from asking for it. `useCloseOtherUsers` in [Signed-in users](react.md#signed-in-users) closes

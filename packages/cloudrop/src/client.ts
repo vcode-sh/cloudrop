@@ -115,9 +115,10 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
    * CLIENT_CLOSED, and every file of every route stops. A file that may have completed is kept. Without options, as
    * when another user signed in in another tab, each multipart upload keeps its record and gets no /abort, so its user
    * can resume it on a new client; `{ abort: true }`, at sign-out, cancels every file as job.abort() does, telling the
-   * server. The first call decides; resumable(), discard() and forget() keep working.
+   * server. The first call decides; resumable(), discard() and forget() keep working. Resolves once every file it
+   * stopped has ended and each /abort it sent was answered, also for every later call; never rejects.
    */
-  close(options?: { abort: true }): void;
+  close(options?: { abort: true }): Promise<void>;
 }
 
 /** A one-file job's result as that file's Result (ruling M3-U5). */

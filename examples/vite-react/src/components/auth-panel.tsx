@@ -63,13 +63,16 @@ export function AuthPanel({ email }: { email: string | null }) {
 /**
  * Sign-out closes the user's client, cancelling every upload of every route, then forgets their unfinished ones: the
  * records hold upload tokens, which need not outlive the session on a shared browser (the namespace already hides them
- * from the next user). Closing first keeps a file that would get its ticket after forget() from asking for it. Each
- * cancel's /abort is sent with keepalive, so the reload, which drops the cached queries, does not stop it, and a file
- * whose /complete may have finished is kept.
+ * from the next user). Closing first keeps a file that would get its ticket after forget() from asking for it; a file
+ * whose /complete may have finished is kept. The reload drops the cached queries, and a closed client, also when the
+ * sign-out failed: that client starts no more uploads.
  */
 async function signOut({ close, client }: Uploads) {
-  close({ abort: true });
-  await client.forget();
-  await authClient.signOut();
-  window.location.reload();
+  try {
+    await close({ abort: true });
+    await client.forget();
+    await authClient.signOut();
+  } finally {
+    window.location.reload();
+  }
 }

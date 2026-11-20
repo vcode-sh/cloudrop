@@ -55,7 +55,8 @@ export function abortFile(context: UploadContext, entry: Entry): void {
   settle(entry, "aborted", withFile(aborted(), entry));
   if (!upload || upload.dropped || keptForResume(context, upload)) return;
   if (upload.mayBeComplete) letGo(context, upload);
-  else void drop(context, upload);
+  // Its /abort is the file's last run, which close() waits for as it waits for a running file's (M8-L1).
+  else entry.run = drop(context, upload);
 }
 
 /** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */

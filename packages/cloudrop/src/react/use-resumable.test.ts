@@ -321,7 +321,7 @@ describe("useResumable's discard() and forget()", () => {
 });
 
 describe("useResumable's discarding", () => {
-  it("holds a listed upload's id from discard() until the list is read again without it", async () => {
+  it("holds a listed upload's id from discard() until the list is read again, through a refused second press", async () => {
     const held = gate((call) => call.label === "POST /abort");
     const setup = await reloaded(gate(partThree), held.fault);
     const { useResumable } = createUploadHooks({ client: setup.client });
@@ -335,13 +335,23 @@ describe("useResumable's discarding", () => {
       answer = result.current.discard(record);
     });
     await act(() => held.reached);
+    // The first discard holds the upload's lock, so a second press is refused at once.
+    const second = await act(() => result.current.discard(record));
     const during = { discarding: [...result.current.discarding], listed: ids(result.current.uploads) };
     held.open();
     await act(() => answer);
 
-    expect({ before, during, after: [...result.current.discarding], listed: result.current.uploads }).toEqual({
+    expect({
+      before,
+      second: second.error?.code,
+      during,
+      after: [...result.current.discarding],
+      listed: result.current.uploads,
+    }).toEqual({
       before: [],
-      during: { discarding: [setup.upload.id], listed: [setup.upload.id] },
+      second: "UPLOAD_IN_USE",
+      // The refused press read the list again, which leaves out the upload the first one claimed (M4-F22).
+      during: { discarding: [setup.upload.id], listed: [] },
       after: [],
       listed: [],
     });

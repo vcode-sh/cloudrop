@@ -144,8 +144,8 @@ export interface UploadHooks<TCloudrop extends InferableCloudrop> {
   /**
    * The client's close(), for every route the hooks upload to: afterwards every upload resolves CLIENT_CLOSED. Without
    * options, as when the user changed in another tab, multipart uploads keep their records for that user's next
-   * client; with `{ abort: true }`, at sign-out, every file is cancelled and the server told. Not a hook: call it from
-   * an event handler or an effect.
+   * client; with `{ abort: true }`, at sign-out, every file is cancelled and the server told. Resolves once every file
+   * stopped and each /abort was answered. Not a hook: call it from an event handler or an effect.
    */
-  close(options?: { abort: true }): void;
+  close(options?: { abort: true }): Promise<void>;
 }

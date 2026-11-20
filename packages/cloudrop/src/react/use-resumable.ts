@@ -11,17 +11,11 @@ import type { HookSource } from "./use-upload.ts";
 const NO_UPLOADS: readonly ResumableUpload[] = [];
 const NO_IDS: ReadonlySet<string> = new Set();
 
-/** `ids` with `id` added or, with `remove`, taken out: a new set, as React state needs. */
-function changed(ids: ReadonlySet<string>, id: string, remove = false): ReadonlySet<string> {
-  const next = new Set(ids);
-  if (remove) next.delete(id);
-  else next.add(id);
-  return next;
-}
-
 export function useResumableWith(source: HookSource, route?: string): UseResumableResult<string> {
   const [uploads, setUploads] = useState(NO_UPLOADS);
   const [discarding, setDiscarding] = useState(NO_IDS);
+  // Calls in flight per id: a second press, refused UPLOAD_IN_USE at once, must not end the first one's hold.
+  const inFlight = useRef(new Map<string, number>());
   const reads = useRef(0);
   const refresh = useCallback(async (): Promise<Result<ResumableUpload[]>> => {
     const read = ++reads.current;
@@ -53,12 +47,17 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     async (upload: ResumableUpload) => {
       // The client refuses a wrong argument at once, so its id is held only until then.
       const id = String(upload?.id);
-      setDiscarding((ids) => changed(ids, id));
+      const count = (step: number) => {
+        const calls = (inFlight.current.get(id) ?? 0) + step;
+        if (calls > 0) inFlight.current.set(id, calls);
+        else inFlight.current.delete(id);
+        setDiscarding(new Set(inFlight.current.keys()));
+      };
+      count(1);
       try {
         return await changeThenRead((client) => client.discard(upload));
       } finally {
-        // In the same render as the list read again (M8-L8).
-        setDiscarding((ids) => changed(ids, id, true));
+        count(-1);
       }
     },
     [changeThenRead],

@@ -143,15 +143,14 @@ describe("close() during /complete", () => {
     });
   });
 
-  it("with abort, keeps the file and sends no /abort for it; forget() then deletes its record", async () => {
-    const { setup, status, sent, key } = await completingWhenClosed(true);
-    const forgotten = await setup.client.forget();
+  it("with abort, keeps the file, sends no /abort for it and deletes its record", async () => {
+    const { setup, status, sent, key, kept } = await completingWhenClosed(true);
 
-    expect({ status, afterClose: sent(), bytes: await setup.storedHash(key), forgotten: forgotten.data }).toEqual({
+    expect({ status, afterClose: sent(), bytes: await setup.storedHash(key), kept }).toEqual({
       status: ["a.bin aborted"],
       afterClose: [],
       bytes: bytesHash(16 * 1024 * 1024 + 5),
-      forgotten: { forgotten: 0 },
+      kept: [],
     });
   });
 });
@@ -159,7 +158,9 @@ describe("close() during /complete", () => {
 describe("close({ abort: true }) at sign-out", () => {
   it("tells the server of every ticket, frees the bucket's uploads, and forget() leaves no record", async () => {
     const setup = await threeFilesRunning("user-1");
-    setup.client.close({ abort: true });
+    await setup.client.close({ abort: true });
+    // Resolved once each /abort was answered: the bucket already holds no open upload.
+    const open = setup.fixture.server.fake.pendingUploads();
     const stopped = { big: await statusesOf(setup.big), small: await statusesOf(setup.small) };
     const forgotten = await setup.client.forget();
     await setup.drained();
@@ -167,7 +168,7 @@ describe("close({ abort: true }) at sign-out", () => {
     expect({
       stopped,
       afterClose: setup.sent(),
-      open: setup.fixture.server.fake.pendingUploads(),
+      open,
       stored: setup.db.stored(),
       forgotten: forgotten.data,
     }).toEqual({
@@ -186,15 +187,22 @@ describe("close() and a failed file that keeps its ticket for retry()", () => {
     call.label === "PUT part 2" ? errorResponse(500, "InternalError", "Try again.") : undefined;
 
   it.for([
-    { name: "close() keeps its record and sends nothing", abort: false, afterClose: [], records: 1, open: 1 },
-    { name: "close({ abort: true }) sends its /abort", abort: true, afterClose: ["POST /abort"], records: 0, open: 0 },
-  ])("$name", async ({ abort, afterClose, records, open }) => {
+    { name: "close() keeps its record and sends nothing", abort: false, afterClose: [], records: 1, uploads: 1 },
+    {
+      name: "close({ abort: true }) sends its /abort",
+      abort: true,
+      afterClose: ["POST /abort"],
+      records: 0,
+      uploads: 0,
+    },
+  ])("$name", async ({ abort, afterClose, records, uploads }) => {
     const setup = persistFixture({ fault: partTwoDown });
     const job = setup.client.start("files", threeParts());
     await job.done;
     await setup.drained();
     const sent = setup.from();
-    setup.client.close(abort ? { abort: true } : undefined);
+    await setup.client.close(abort ? { abort: true } : undefined);
+    const open = setup.fixture.server.fake.pendingUploads();
     await setup.drained();
     const retried = await job.retry();
 
@@ -202,8 +210,38 @@ describe("close() and a failed file that keeps its ticket for retry()", () => {
       status: retried.data?.files.map((file) => file.status),
       afterClose: sent(),
       records: Object.keys(setup.db.stored()).length,
+      open,
+    }).toEqual({ status: ["aborted"], afterClose, records, open: uploads });
+  });
+});
+
+describe("close() and an upload no reload could resume", () => {
+  it.for([
+    { name: "a single PUT", file: () => smallFile("c.txt"), held: "PUT object", options: {} },
+    {
+      name: "a multipart upload with persistence off",
+      file: threeParts,
+      held: "PUT part 2",
+      options: { persist: false },
+    },
+  ])("cancels $name, telling the server", async ({ file, held, options }) => {
+    const put = gate(nth(held, 1));
+    const setup = persistFixture({ fault: put.fault, options: { concurrency: 1, ...options } });
+    const job = setup.client.start("files", file());
+    await put.reached;
+    await setup.drained();
+    const sent = setup.from();
+    await setup.client.close();
+
+    expect({
+      status: await statusesOf(job),
+      afterClose: sent(),
       open: setup.fixture.server.fake.pendingUploads(),
-    }).toEqual({ status: ["aborted"], afterClose, records, open });
+    }).toEqual({
+      status: [`${file().name} aborted`],
+      afterClose: ["POST /abort"],
+      open: 0,
+    });
   });
 });
 

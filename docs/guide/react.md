@@ -306,7 +306,7 @@ Sign out in this order:
 const { close, client } = useUploads();
 
 async function signOut() {
-  close({ abort: true }); // first: cancels every upload of every route, and nothing asks /upload any more
+  await close({ abort: true }); // first: cancels every upload of every route, and nothing asks /upload any more
   await client.forget(); // deletes the user's unfinished uploads and the tokens they hold
   await auth.signOut(); // your auth library's sign-out
 }
@@ -318,8 +318,8 @@ async function signOut() {
 - **`close({ abort: true })` cancels** every file of every route the hooks upload to, as each file's `abort()` does:
   its `/abort` is sent with the file's own upload token, so it reaches the server whoever is signed in by then, and
   with the [store](store.md) the file's row ends `aborted` and its bytes stop counting against the quota. A file whose
-  `/complete` may already have finished is kept, not deleted. `close()` returns at once; the `/abort`s go with
-  `keepalive`, so a reload right after does not stop them.
+  `/complete` may already have finished is kept, not deleted. `close()` resolves once each `/abort` was answered, so a
+  `headers` function still finds the session it reads; they go with `keepalive` too.
 - **`close()` without options** is for a user who changed without signing out here, such as a sign-in in another tab:
   this tab sees it when its session hook does, and `useCloseOtherUsers` then closes the last user's client. Its uploads
   stop without an `/abort`, as when a tab closes, so each unfinished multipart upload keeps its record, and that user
@@ -327,7 +327,8 @@ async function signOut() {
   sent in between, for a queued file or a retry, went with the new user's session, and that file became that user's.
 - **After `close()`** every `upload()` and `resume()` of the hooks resolves `CLIENT_CLOSED` without a request.
   `useResumable()` and `forget()` keep working. The first `close()` decides: a later one, with or without options,
-  changes nothing.
+  changes nothing. A sign-out that fails leaves the page on a closed client, so reload then, as the example's
+  `src/components/auth-panel.tsx` does after every sign-out.
 - **Keep the hooks per user.** A factory keeps its uploads in memory, so `uploadsFor` returns the same one while the
   same user stays signed in, and a component that unmounts finds its files again on its next mount.
 - **Effects, not render.** `close()` is permanent, so call it from an event handler or from an effect that runs again

@@ -7,19 +7,29 @@ import type { Upload, UploadContext } from "./upload.ts";
 
 /** What close() reads and sets, shared by every copy of a client's context, as its claims are. */
 export interface Lifetime {
-  /** Set by the first close(), which decides for every later one (M8-L3). */
-  closed: { abort: boolean } | null;
+  /** Set by the first close(), which decides for every later one (M8-L3); `stopped` is what every call resolves with. */
+  closed: { abort: boolean; stopped: Promise<void> } | null;
   /** The jobs with a file that may still send or be retried: close() stops each (M8-L2). */
   readonly jobs: Set<Job>;
 }
 
 export const createLifetime = (): Lifetime => ({ closed: null, jobs: new Set() });
 
-export function closeClient({ lifetime }: UploadContext, abort: boolean): void {
-  if (lifetime.closed) return;
-  lifetime.closed = { abort };
-  // A job leaves the set once no file of it can send again, also while this loop runs.
-  for (const job of lifetime.jobs) job.abort();
+/**
+ * Stops every job of the client. Resolves once every file it stopped has ended and each /abort it sent was answered (a
+ * cancelled file's run waits for its /abort, M8-L1); never rejects.
+ */
+export function closeClient({ lifetime }: UploadContext, abort: boolean): Promise<void> {
+  if (lifetime.closed) return lifetime.closed.stopped;
+  const closed = { abort, stopped: Promise.resolve() };
+  lifetime.closed = closed;
+  // Read first: a job leaves the set once no file of it can send again, also while the loop below runs.
+  const jobs = [...lifetime.jobs];
+  for (const job of jobs) job.abort();
+  // Read after the cancels, which give a failed file a run of its own: its /abort.
+  const runs = jobs.flatMap((job) => job.entries.map((entry) => entry.run));
+  closed.stopped = Promise.allSettled(runs).then(() => undefined);
+  return closed.stopped;
 }
 
 /**

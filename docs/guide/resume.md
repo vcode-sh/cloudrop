@@ -158,7 +158,7 @@ namespace's records. The namespace is fixed when the client is created, so creat
 At sign-out, close the client, then call `forget()`:
 
 ```ts
-client.close({ abort: true }); // cancels every upload of every route, telling the server
+await client.close({ abort: true }); // cancels every upload of every route, telling the server
 await client.forget(); // deletes the namespace's records
 ```
 
