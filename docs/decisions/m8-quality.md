@@ -176,3 +176,24 @@ continue from `M8-Q1`.
 - **Status:** in force.
 - **Visible in:** `src/server/complete-steps.ts`, `complete.ts`, `store-complete.ts`, `leftovers.ts`, `sweep.ts`,
   `erase.ts`.
+
+### M8-Q32: server and store candidates left as they are
+
+- **Decision:** not taken: (1) the SQL core applying `route` to a store built with `transaction: true`, which would
+  remove `src/adapters/transactional.ts` and one branch in each adapter; (2) `for await` over `request.body` in
+  `readJson` (`src/server/http.ts`) in place of the reader loop; (3) node:sqlite's `isTransaction` guarding the
+  executor's `ROLLBACK`; (4) one generic column type for the Drizzle Postgres and SQLite tables; (5) helpers for the
+  page-limit and `signal` checks that `sweep`, `files` and `eraseOwner` each write, and for the authorize snapshot in
+  `handleUpload`.
+- **Why:** (1) the SQL core may import only the store types and errors (Biome's `noRestrictedImports` rule for
+  `src/store/**`), and `routeFor` is server code. (2) `ReadableStream`'s async iterator is typed only by
+  `DOM.AsyncIterable`, which the package's one `tsconfig.json` leaves out; adding it would let client code use an API
+  Safari lacks, and a cast to reach it is worse than the loop. (3) `SqliteDatabase` is a public structural type: a new
+  required member breaks a caller passing another SQLite binding, and the swallowed `ROLLBACK` is already correct.
+  (4) the column types differ per dialect and per drizzle-orm line (0.45 and 1.0); a four-parameter generic adds more
+  concepts than the two spelled-out lists cost. (5) two or three callers whose messages differ, or an extraction that
+  adds a function without removing a line: each fails the simplify rule's score.
+- **If wrong:** revisit (2) if the client moves to its own tsconfig.
+- **Status:** in force.
+- **Visible in:** `src/adapters/transactional.ts`, `src/server/http.ts`, `src/adapters/sql/sqlite.ts`,
+  `src/adapters/drizzle/*-tables.ts`, `src/server/sweep.ts`, `owner-files.ts`, `erase.ts`, `upload.ts`.
