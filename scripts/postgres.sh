@@ -6,7 +6,8 @@
 # in `docker ps -a --filter label=cloudrop.test`; the dev container carries no such label. The data lives in a tmpfs:
 # `down` deletes it.
 set -euo pipefail
-source "$(dirname "$0")/lib.sh"
+# Resolved through symlinks, so a link to this script elsewhere still finds lib.sh.
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
 NAME="${CLOUDROP_EXAMPLE_POSTGRES_NAME:-cloudrop-example-postgres}"
 PORT="${CLOUDROP_EXAMPLE_POSTGRES_PORT:-19600}"
 # The db lane's exact release (scripts/test-db.sh), so one image serves both.
