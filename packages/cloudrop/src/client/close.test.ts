@@ -213,6 +213,26 @@ describe("close() and a failed file that keeps its ticket for retry()", () => {
       open,
     }).toEqual({ status: ["aborted"], afterClose, records, open: uploads });
   });
+
+  it("waits for an /abort the page sent just before it", async () => {
+    const held = gate((call) => call.label === "POST /abort");
+    const setup = persistFixture({ fault: firstOf(held.fault, partTwoDown) });
+    const job = setup.client.start("files", threeParts());
+    await job.done;
+    // The user cancels the failed file, which ends the job at once, then signs out while the /abort is on its way.
+    job.abort();
+    await held.reached;
+    let stopped = false;
+    const closing = setup.client.close({ abort: true }).then(() => {
+      stopped = true;
+    });
+    await setup.drained();
+    const whileHeld = stopped;
+    held.open();
+    await closing;
+
+    expect({ whileHeld, open: setup.fixture.server.fake.pendingUploads() }).toEqual({ whileHeld: false, open: 0 });
+  });
 });
 
 describe("close() and an upload no reload could resume", () => {

@@ -3,6 +3,7 @@
 // retry()'s new ticket, a resumed file's start over) runs on that file's own signals (M3-U92).
 
 import { CloudropError, fail, type Result } from "../errors.ts";
+import { counted } from "./close.ts";
 import type { Ticket } from "./endpoints.ts";
 import { type Entry, held, settle } from "./entry.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
@@ -40,7 +41,7 @@ async function runEntry(
   // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else.
   if (entry.status === "aborted") {
     const late = answer.error ? undefined : answer.data[index];
-    if (late && !(late instanceof CloudropError)) void job.context.endpoints.abort(late.token);
+    if (late && !(late instanceof CloudropError)) void counted(job.context, job.context.endpoints.abort(late.token));
     return;
   }
   // The error is the job's when /upload asked for every file, and the file's own when a retry asked for some (M3-U3).

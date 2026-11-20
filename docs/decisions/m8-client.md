@@ -10,8 +10,10 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
   whose message says to use the client of the user signed in now; a job created earlier cannot send again, since every
   file of it has ended (`M8-L2`). `resumable()`, `discard()` and `forget()` keep working: sign-out calls `forget()`
   after `close()`, and `discard()` sends `/abort` with the record's own token. `close()` resolves once every file it
-  stopped has ended and each `/abort` it sent was answered (a failed file's `/abort` becomes that file's last run, as a
-  running file's run already waits for its own), and never rejects; a later call resolves with the first one's.
+  stopped has ended and every `/abort` a cancel sent was answered, and never rejects; a later call, also one a status
+  listener makes during the first, resolves with the first one's. The client counts its unanswered `/abort`s (a
+  running file's, a failed file's, one for a ticket that arrived after its file was cancelled, one the page sent just
+  before `close()`), and `close()` waits for them once the stopped files' runs have ended.
 - **Why:** `M7-P3`: an app had to find and cancel each route's jobs itself, and nothing stopped a file still waiting
   for its ticket from asking `/upload` with the next user's session. `close` names an end, like a tab's: a client is
   tied to one user's `namespace`, so it is never reopened, and the next user gets a new client. The promise exists for

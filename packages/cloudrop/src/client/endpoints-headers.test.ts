@@ -128,9 +128,16 @@ describe("the headers option", () => {
 
   it("answers a cancel while it waits for a function with ABORTED, and sends nothing", async () => {
     const { fixture, client } = page();
-    const hung = client({ headers: () => new Promise<HeadersInit>(() => {}) });
+    const called = Promise.withResolvers<void>();
+    const hung = client({
+      headers: () => {
+        called.resolve();
+        return new Promise<HeadersInit>(() => {});
+      },
+    });
     const cancel = new AbortController();
     const result = hung.upload("files", note(), { signal: cancel.signal });
+    await called.promise;
     cancel.abort();
 
     expect({ code: (await result).error?.code, requests: fixture.requests }).toEqual({

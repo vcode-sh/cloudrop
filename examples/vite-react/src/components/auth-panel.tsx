@@ -10,13 +10,23 @@ import { type Uploads, useUploads } from "@/lib/upload";
 export function AuthPanel({ email }: { email: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const uploads = useUploads();
+  // Sign-out waits for the uploads' /aborts, and for a /complete in flight: the button says so meanwhile.
+  const [signingOut, setSigningOut] = useState(false);
 
   if (email) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span>Signed in as {email}</span>
-        <Button variant="outline" size="sm" onClick={() => void signOut(uploads)}>
-          Sign out
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={signingOut}
+          onClick={() => {
+            setSigningOut(true);
+            void signOut(uploads);
+          }}
+        >
+          {signingOut ? "Signing out…" : "Sign out"}
         </Button>
       </div>
     );

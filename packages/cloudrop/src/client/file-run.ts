@@ -5,7 +5,7 @@
 // M4-F1).
 
 import type { CloudropError } from "../errors.ts";
-import { keptForResume } from "./close.ts";
+import { counted, keptForResume } from "./close.ts";
 import { type Entry, held, settle, settled } from "./entry.ts";
 import { aborted, NEEDS_NEW_TICKET, withFile } from "./failures.ts";
 import { letGo } from "./persist.ts";
@@ -18,7 +18,10 @@ import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
  */
 export function drop(context: UploadContext, upload: Upload): Promise<void> {
   upload.dropped = true;
-  const answered = context.endpoints.abort(upload.ticket.token).then(() => undefined);
+  const answered = counted(
+    context,
+    context.endpoints.abort(upload.ticket.token).then(() => undefined),
+  );
   letGo(context, upload, answered);
   return answered;
 }
@@ -55,8 +58,7 @@ export function abortFile(context: UploadContext, entry: Entry): void {
   settle(entry, "aborted", withFile(aborted(), entry));
   if (!upload || upload.dropped || keptForResume(context, upload)) return;
   if (upload.mayBeComplete) letGo(context, upload);
-  // Its /abort is the file's last run, which close() waits for as it waits for a running file's (M8-L1).
-  else entry.run = drop(context, upload);
+  else void drop(context, upload);
 }
 
 /** Ends the file after `error`. A cancel is reported as one, whatever ended the pass. */

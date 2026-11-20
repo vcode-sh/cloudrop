@@ -11,9 +11,18 @@ export interface Lifetime {
   closed: { abort: boolean; stopped: Promise<void> } | null;
   /** The jobs with a file that may still send or be retried: close() stops each (M8-L2). */
   readonly jobs: Set<Job>;
+  /** Every /abort a cancel sent that has not been answered, also one sent before close(), which waits for them. */
+  readonly aborts: Set<Promise<unknown>>;
 }
 
-export const createLifetime = (): Lifetime => ({ closed: null, jobs: new Set() });
+export const createLifetime = (): Lifetime => ({ closed: null, jobs: new Set(), aborts: new Set() });
+
+/** `sent`, an /abort that never rejects, counted in the client's unanswered ones until it is answered. */
+export function counted<T>({ lifetime }: UploadContext, sent: Promise<T>): Promise<T> {
+  lifetime.aborts.add(sent);
+  void sent.finally(() => lifetime.aborts.delete(sent));
+  return sent;
+}
 
 /**
  * Stops every job of the client. Resolves once every file it stopped has ended and each /abort it sent was answered (a
@@ -21,15 +30,25 @@ export const createLifetime = (): Lifetime => ({ closed: null, jobs: new Set() }
  */
 export function closeClient({ lifetime }: UploadContext, abort: boolean): Promise<void> {
   if (lifetime.closed) return lifetime.closed.stopped;
-  const closed = { abort, stopped: Promise.resolve() };
-  lifetime.closed = closed;
+  // Published before the cancels, whose status changes reach listeners that may call close() again. Not
+  // Promise.withResolvers, which would raise the browser floor to Safari 17.4.
+  let resolve!: (stopped: Promise<void>) => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  lifetime.closed = { abort, stopped: promise };
   // Read first: a job leaves the set once no file of it can send again, also while the loop below runs.
   const jobs = [...lifetime.jobs];
   for (const job of jobs) job.abort();
-  // Read after the cancels, which give a failed file a run of its own: its /abort.
   const runs = jobs.flatMap((job) => job.entries.map((entry) => entry.run));
-  closed.stopped = Promise.allSettled(runs).then(() => undefined);
-  return closed.stopped;
+  // Once the runs have ended, every /abort a cancel sent is in the set: a running file's, a failed file's, one for a
+  // ticket that arrived after its file was cancelled, and one sent before close().
+  resolve(
+    Promise.allSettled(runs)
+      .then(() => Promise.allSettled(lifetime.aborts))
+      .then(() => undefined),
+  );
+  return promise;
 }
 
 /**
