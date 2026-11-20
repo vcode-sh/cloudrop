@@ -122,12 +122,16 @@ describe("cloudrop.handler body cap (64 KiB)", () => {
     expect(pulled).toBeLessThanOrEqual(1);
   });
 
-  it("stops reading a stream without a declared length once it passes the cap", async () => {
+  it("stops reading a stream without a declared length once it passes the cap, and cancels it", async () => {
     let pulled = 0;
+    let cancelled = false;
     const endless = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulled += 1;
         controller.enqueue(new Uint8Array(1024));
+      },
+      cancel() {
+        cancelled = true;
       },
     });
     const response = await setup().cloudrop.handler(
@@ -136,7 +140,7 @@ describe("cloudrop.handler body cap (64 KiB)", () => {
       }),
     );
     expect(await outcome(response)).toEqual({ status: 413, code: "BODY_TOO_LARGE" });
-    expect(pulled).toBeLessThan(70);
+    expect([pulled < 70, cancelled]).toEqual([true, true]);
   });
 });
 

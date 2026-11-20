@@ -181,14 +181,11 @@ export async function readJson(request: Request): Promise<Result<unknown>> {
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let length = 0;
   try {
-    const reader = request.body?.getReader();
-    for (let chunk = await reader?.read(); chunk && !chunk.done; chunk = await reader?.read()) {
-      length += chunk.value.length;
-      if (length > MAX_BODY_BYTES) {
-        await reader?.cancel();
-        return fail(bodyTooLarge());
-      }
-      chunks.push(chunk.value);
+    // Leaving the loop early cancels the stream.
+    for await (const chunk of request.body ?? []) {
+      length += chunk.length;
+      if (length > MAX_BODY_BYTES) return fail(bodyTooLarge());
+      chunks.push(chunk);
     }
   } catch {
     return fail(invalidInput("The request body could not be read. Send the request again."));
