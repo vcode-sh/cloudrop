@@ -319,3 +319,31 @@ describe("useResumable's discard() and forget()", () => {
     });
   });
 });
+
+describe("useResumable's discarding", () => {
+  it("holds a listed upload's id from discard() until the list is read again without it", async () => {
+    const held = gate((call) => call.label === "POST /abort");
+    const setup = await reloaded(gate(partThree), held.fault);
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable("files"));
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
+    const before = [...result.current.discarding];
+    const record = result.current.uploads[0] as ResumableUpload<"files">;
+
+    let answer: Promise<unknown> = Promise.resolve();
+    act(() => {
+      answer = result.current.discard(record);
+    });
+    await act(() => held.reached);
+    const during = { discarding: [...result.current.discarding], listed: ids(result.current.uploads) };
+    held.open();
+    await act(() => answer);
+
+    expect({ before, during, after: [...result.current.discarding], listed: result.current.uploads }).toEqual({
+      before: [],
+      during: { discarding: [setup.upload.id], listed: [setup.upload.id] },
+      after: [],
+      listed: [],
+    });
+  });
+});

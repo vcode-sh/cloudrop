@@ -7,11 +7,21 @@ import type { CloudropClient, Result, ResumableUpload } from "../client.ts";
 import type { UseResumableResult } from "./types.ts";
 import type { HookSource } from "./use-upload.ts";
 
-/** One constant, so the server render and the first browser render agree. */
+/** Constants, so the server render and the first browser render agree. */
 const NO_UPLOADS: readonly ResumableUpload[] = [];
+const NO_IDS: ReadonlySet<string> = new Set();
+
+/** `ids` with `id` added or, with `remove`, taken out: a new set, as React state needs. */
+function changed(ids: ReadonlySet<string>, id: string, remove = false): ReadonlySet<string> {
+  const next = new Set(ids);
+  if (remove) next.delete(id);
+  else next.add(id);
+  return next;
+}
 
 export function useResumableWith(source: HookSource, route?: string): UseResumableResult<string> {
   const [uploads, setUploads] = useState(NO_UPLOADS);
+  const [discarding, setDiscarding] = useState(NO_IDS);
   const reads = useRef(0);
   const refresh = useCallback(async (): Promise<Result<ResumableUpload[]>> => {
     const read = ++reads.current;
@@ -40,9 +50,19 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     [source, refresh],
   );
   const discard = useCallback(
-    (upload: ResumableUpload) => changeThenRead((client) => client.discard(upload)),
+    async (upload: ResumableUpload) => {
+      // The client refuses a wrong argument at once, so its id is held only until then.
+      const id = String(upload?.id);
+      setDiscarding((ids) => changed(ids, id));
+      try {
+        return await changeThenRead((client) => client.discard(upload));
+      } finally {
+        // In the same render as the list read again (M8-L8).
+        setDiscarding((ids) => changed(ids, id, true));
+      }
+    },
     [changeThenRead],
   );
   const forget = useCallback(() => changeThenRead((client) => client.forget()), [changeThenRead]);
-  return { uploads, refresh, discard, forget };
+  return { uploads, discarding, refresh, discard, forget };
 }

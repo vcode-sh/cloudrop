@@ -107,6 +107,11 @@ type ResumableOf<TName extends string> = TName extends string ? ResumableUpload<
 export interface UseResumableResult<TName extends string> {
   /** The client's resumable() list, newest first; `[]` on the server, before the first read and when it failed. */
   uploads: readonly ResumableOf<TName>[];
+  /**
+   * The ids of the listed uploads this hook's discard() is dropping, from the call until the list is read again: a
+   * second discard() of one of them would answer UPLOAD_IN_USE, so a page disables its button meanwhile.
+   */
+  discarding: ReadonlySet<string>;
   /** Reads the list again; resolves with the client's answer, whose error says why the list is empty. */
   refresh(): Promise<Result<ResumableOf<TName>[]>>;
   /**
@@ -136,4 +141,11 @@ export interface UploadHooks<TCloudrop extends InferableCloudrop> {
    * after mount and whenever an upload of these hooks may have changed them.
    */
   useResumable<TName extends RouteName<TCloudrop> = RouteName<TCloudrop>>(route?: TName): UseResumableResult<TName>;
+  /**
+   * The client's close(), for every route the hooks upload to: afterwards every upload resolves CLIENT_CLOSED. Without
+   * options, as when the user changed in another tab, multipart uploads keep their records for that user's next
+   * client; with `{ abort: true }`, at sign-out, every file is cancelled and the server told. Not a hook: call it from
+   * an event handler or an effect.
+   */
+  close(options?: { abort: true }): void;
 }
