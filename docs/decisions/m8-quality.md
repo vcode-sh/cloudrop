@@ -142,3 +142,19 @@ continue from `M8-Q1`.
 - **If wrong:** revisit once the peer range starts at React 19.2.
 - **Status:** in force.
 - **Visible in:** `src/react/use-upload.ts`, `src/react/use-resumable.ts`, `src/react/upload-store.ts`.
+
+### M8-Q30: the SQL core reads a row back through one statement builder
+
+- **Decision:** `selectRecord(dialect, files, id)` (`src/store/sql/reads.ts`) builds the statement that reads a file's
+  row as it is now, for `get`, SQLite's transition batches and claim, and the two Postgres re-reads after an update that
+  waited for another transaction's lock. `INSERT_COLUMNS` lives once in `records.ts`, and `GuardedWrites` (the methods
+  each dialect writes itself) is defined in `reads.ts` as the store methods minus the shared ones. The transaction
+  mode's lock-timeout cap (`src/store/sql/store.ts`) no longer checks the dialect: `transaction: true` is refused on
+  SQLite before that code can run, so the check and the "nothing saved" branch it guarded were dead.
+- **Why:** four copies of one statement, two of one column list and two of one type list, each a place for the
+  dialects to drift apart. The SQL text, its parameters and the order of every batch are unchanged; the database lane
+  runs the store contract on both dialects.
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/store/sql/reads.ts`, `records.ts`, `postgres.ts`, `postgres-replace.ts`, `sqlite.ts`,
+  `store.ts`.

@@ -92,18 +92,13 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
           // The cap covers the claim alone: onComplete's own statements through tx then run at whatever lock timeout
           // the session had, restored exactly (a session-level SET included, which DEFAULT would drop). Another
           // /complete holding the row lock past the cap makes the row busy, not broken. The CTE is materialized so the
-          // saved value is read before set_config changes it.
-          const capLockWait = async (): Promise<string | undefined> => {
-            if (dialect !== "postgres") return undefined;
+          // saved value is read before set_config changes it. Transaction mode is Postgres only (checked above).
+          const claim: StoreMethods["claim"] = async (...args) => {
             const [row] = await inner.query(
               `WITH before AS MATERIALIZED (SELECT current_setting('lock_timeout') AS saved)
                SELECT saved, set_config('lock_timeout', '${LOCK_TIMEOUT}', true) FROM before`,
               [],
             );
-            return String(row?.saved);
-          };
-          const claim: StoreMethods["claim"] = async (...args) => {
-            const saved = await capLockWait();
             let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
             try {
               outcome = await methods.claim(...args);
@@ -112,7 +107,7 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
               timedOut = true;
               return { kind: "busy" };
             }
-            if (saved !== undefined) await inner.query("SELECT set_config('lock_timeout', $1::text, true)", [saved]);
+            await inner.query("SELECT set_config('lock_timeout', $1::text, true)", [String(row?.saved)]);
             return outcome;
           };
           const value = await run(tx, { ...methods, claim });

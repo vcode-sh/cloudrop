@@ -7,7 +7,7 @@
 import type { Completion } from "../../server/store.ts";
 import { binder } from "./bind.ts";
 import { runStatement } from "./executor.ts";
-import type { SqlContext } from "./reads.ts";
+import { type SqlContext, selectRecord } from "./reads.ts";
 import { RECORD_COLUMNS, toRecord } from "./records.ts";
 
 /** The record columns qualified with `alias`, for a statement that joins two copies of the files table. */
@@ -67,9 +67,7 @@ export function replacingComplete({ executor, tables }: SqlContext) {
     if (found?.status !== "completing") return { changed: false, record: found ? toRecord(found) : null, replaced: [] };
     // Unchanged, yet still completing: the update waited for another transaction that took the row over, while this
     // statement's snapshot still shows the row as it was. Read it as it is now.
-    const again = binder("postgres");
-    const select = again.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${again.text(id)}`);
-    const [current] = await runStatement(executor, select);
+    const [current] = await runStatement(executor, selectRecord("postgres", files, id));
     return { changed: false, record: current ? toRecord(current) : null, replaced: [] };
   };
 }

@@ -21,7 +21,16 @@ type SingleStatementMethods = Pick<
   "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "list" | "owners"
 >;
 
+/** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
+export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
+
 const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
+
+/** Reads file `id`'s row as it is now. */
+export function selectRecord(dialect: SqlDialect, files: string, id: string): SqlStatement {
+  const b = binder(dialect);
+  return b.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)}`);
+}
 
 /** A keyset page: `limit + 1` rows were asked for, so a row beyond the page means another page follows. */
 function page<T>(rows: T[], limit: number, cursorOf: (last: T) => string) {
@@ -47,8 +56,7 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     },
 
     async get(id) {
-      const b = binder(dialect);
-      const [row] = await run(b.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)}`));
+      const [row] = await run(selectRecord(dialect, files, id));
       return row ? toRecord(row) : null;
     },
 

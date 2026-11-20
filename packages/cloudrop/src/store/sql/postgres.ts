@@ -9,14 +9,10 @@ import { type Binder, binder } from "./bind.ts";
 import { isUniqueViolation, runStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
 import { replacingComplete } from "./postgres-replace.ts";
-import type { SqlContext, StoreMethods } from "./reads.ts";
-import { RECORD_COLUMNS, toSafeInteger } from "./records.ts";
-
-type GuardedWrites = Pick<StoreMethods, "reserve" | "claim" | "complete" | "end" | "revoke" | "reconcile">;
+import { type GuardedWrites, type SqlContext, selectRecord } from "./reads.ts";
+import { INSERT_COLUMNS, RECORD_COLUMNS, toSafeInteger } from "./records.ts";
 
 const INPUT_COLUMNS = "ord integer, id text, route text, key text, name text, type text, size bigint, metadata text";
-const INSERT_COLUMNS =
-  "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at, request_key";
 
 /** The accepted files as one JSON parameter, numbered from 1 in the order the quota checks them. */
 const inputJson = (files: readonly NewFile[]): string =>
@@ -72,11 +68,7 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
     // Unchanged, yet the row still shows the status the update wanted: the update waited for another transaction's
     // lock and found the row changed, while this statement's snapshot still holds it as it was. Read it as it is now.
     if (found.changed || found.record?.status !== from) return found;
-    const again = binder("postgres");
-    const [current] = await runStatement(
-      executor,
-      again.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${again.text(id)}`),
-    );
+    const [current] = await runStatement(executor, selectRecord("postgres", files, id));
     return transition(false, current);
   }
 

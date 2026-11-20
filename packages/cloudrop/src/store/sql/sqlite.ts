@@ -9,29 +9,21 @@ import type { NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
-import type { SqlContext, StoreMethods } from "./reads.ts";
-import { RECORD_COLUMNS, toRecord } from "./records.ts";
-
-type GuardedWrites = Pick<StoreMethods, "reserve" | "claim" | "complete" | "end" | "revoke" | "reconcile">;
-
-const INSERT_COLUMNS =
-  "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at, request_key";
+import { type GuardedWrites, type SqlContext, selectRecord } from "./reads.ts";
+import { INSERT_COLUMNS, RECORD_COLUMNS, toRecord } from "./records.ts";
 
 /** The database's clock in integer milliseconds, as reconcile is given no time. Valid on every SQLite version. */
 const NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 
 export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
   const { files, usage } = tables;
-  const select = (id: string) => {
-    const b = binder("sqlite");
-    return b.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)}`);
-  };
 
   /** `[usage change?, files update returning its id, select]`: a transition's statements. */
-  const completion = (counted: SqlStatement | null, update: SqlStatement, id: string): SqlStatement[] => {
-    const statements = [{ sql: `${update.sql} RETURNING id`, params: update.params }, select(id)];
-    return counted ? [counted, ...statements] : statements;
-  };
+  const completion = (counted: SqlStatement | null, update: SqlStatement, id: string): SqlStatement[] => [
+    ...(counted ? [counted] : []),
+    { sql: `${update.sql} RETURNING id`, params: update.params },
+    selectRecord("sqlite", files, id),
+  ];
 
   /** Runs a transition's statements and reads the transition from the last two. */
   async function transitionBatch(counted: SqlStatement | null, update: SqlStatement, id: string) {
@@ -135,7 +127,7 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
         WHERE id = ${b.text(id)} AND (status = 'pending'
           OR (status = 'completing' AND claimed_at < ${b.time(new Date(now.getTime() - leaseMs))}))
         RETURNING id`);
-      const [claimed, found] = await executor.batch([update, select(id)]);
+      const [claimed, found] = await executor.batch([update, selectRecord("sqlite", files, id)]);
       return claimOutcome((claimed?.length ?? 0) > 0, found?.[0]);
     },
 

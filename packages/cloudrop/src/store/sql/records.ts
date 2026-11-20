@@ -29,6 +29,10 @@ export const FILE_COLUMNS: readonly string[] = [
   "request_key",
 ];
 
+/** The columns a reserve writes, in the order its statements list the values. */
+export const INSERT_COLUMNS =
+  "id, route, key, owner, status, name, type, size, metadata, expires_at, created_at, updated_at, request_key";
+
 /** The files columns a `FileRecord` is read from: every column except `claim`, `updated_at` and `request_key`. */
 export const RECORD_COLUMNS: string = FILE_COLUMNS.filter(
   (column) => column !== "claim" && column !== "updated_at" && column !== "request_key",
