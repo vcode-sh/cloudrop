@@ -140,7 +140,8 @@ describe("cloudrop.handler body cap (64 KiB)", () => {
       }),
     );
     expect(await outcome(response)).toEqual({ status: 413, code: "BODY_TOO_LARGE" });
-    expect([pulled < 70, cancelled]).toEqual([true, true]);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(70);
   });
 });
 
