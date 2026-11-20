@@ -15,6 +15,7 @@ import {
   fourParts,
   gate,
   LAST_MODIFIED,
+  lockOf,
   partThree,
   persistFixture,
   reloaded,
@@ -162,7 +163,7 @@ describe("resume() refuses before any request, leaving the record as it was", ()
 
   it("UPLOAD_IN_USE when another tab holds the upload, taking no lock itself", async () => {
     const outcome = await refusal(fourParts(), (setup) => {
-      setup.locks.holdElsewhere(`cloudrop:upload:${setup.upload.id}`);
+      setup.locks.holdElsewhere(lockOf(setup.upload.id));
       return setup.upload;
     });
     expect(outcome).toEqual({
@@ -323,7 +324,7 @@ describe("retry() of a resume() that a check refused checks again (M3-U90)", () 
 
   it("is UPLOAD_IN_USE again while another tab holds the upload, and the file's retry() resumes once it lets go", async () => {
     const setup = await reloaded(gate(partThree));
-    const letGo = setup.locks.holdElsewhere(`cloudrop:upload:${setup.upload.id}`);
+    const letGo = setup.locks.holdElsewhere(lockOf(setup.upload.id));
     const job = setup.client.resume(setup.upload, fourParts());
     await job.done;
     const [file] = job.files;

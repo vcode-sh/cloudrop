@@ -13,6 +13,7 @@ import type { Fault } from "../testing/client-fixture.ts";
 import {
   bytesHash,
   gate,
+  lockOf,
   partThree,
   persistFixture,
   reloaded,
@@ -113,7 +114,7 @@ describe("discard(upload)", () => {
   it("refuses an upload another tab is sending, before any request, and keeps its record", async () => {
     const held = gate(partThree);
     const { client, upload, sent, locks } = await reloaded(held);
-    const release = locks.holdElsewhere(`cloudrop:upload:${upload.id}`);
+    const release = locks.holdElsewhere(lockOf(upload.id));
 
     const result = await client.discard(upload);
     release();

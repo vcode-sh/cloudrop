@@ -18,6 +18,7 @@ import {
   firstOf,
   fourParts,
   gate,
+  lockOf,
   nth,
   partThree,
   persistFixture,
@@ -243,7 +244,7 @@ describe("useResumable", () => {
 
   it("lists an upload while another tab holds it, and nothing once the refused resume's retry() ends done", async () => {
     const setup = await reloaded(gate(partThree));
-    const otherTabLetsGo = setup.locks.holdElsewhere(`cloudrop:upload:${setup.upload.id}`);
+    const otherTabLetsGo = setup.locks.holdElsewhere(lockOf(setup.upload.id));
     const { useUpload, useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => ({ hook: useUpload("files"), resumable: useResumable("files") }));
     await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
