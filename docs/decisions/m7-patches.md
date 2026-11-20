@@ -38,7 +38,8 @@ report came from an application that integrated 0.1.0 and ran it in production (
   led the reporter to expect no second email or webhook.
 - **If wrong:** the recipe names each route by hand; an app that adds a route and forgets it there leaves that route's
   uploads running at sign-out. `M7-P3` removes that step.
-- **Status:** in force.
+- **Status:** amended by `M8-L7` for 0.2.0: `useStopUploads` and `StopUploadsOnUserChange` gave way to the factory's
+  `close()`; the per-user client, the keyed context and `forget()` at sign-out stay.
 - **Visible in:** `docs/guide/react.md`, `docs/guide/resume.md`, `docs/guide/hono.md`, `packages/cloudrop/README.md`,
   `README.md`, `examples/vite-react/src/lib/upload.ts`, `examples/vite-react/src/components/auth-panel.tsx`.
 
@@ -52,8 +53,9 @@ report came from an application that integrated 0.1.0 and ran it in production (
 - **Why:** the report's integration had to find and stop each route's jobs on its own (`M7-P2`). It is new public API,
   so it waits for a minor version.
 - **If wrong:** none known; the name and the exact behaviour of a job mid-`/complete` are settled in its design.
-- **Status:** decided, not started.
-- **Visible in:** `docs/superpowers/plans/README.md`.
+- **Status:** in force through `M8-L1` to `M8-L4` (`close()`), `M8-L7` (React) and `M8-L8` (`useResumable`'s
+  `discarding`, from the gap check).
+- **Visible in:** `docs/decisions/m8-client.md`, `docs/superpowers/plans/README.md`.
 
 ### M7-P4: request options for the upload server only, for 0.2.0
 
@@ -64,5 +66,5 @@ report came from an application that integrated 0.1.0 and ran it in production (
   ([Send a bearer token](../guide/client.md#send-a-bearer-token)), and passing `fetch` moves bucket `PUT`s off
   `XMLHttpRequest` (`M3-U6`), so progress moves a part at a time.
 - **If wrong:** none known; the option's shape is settled in its design.
-- **Status:** decided, not started.
-- **Visible in:** `docs/superpowers/plans/README.md`.
+- **Status:** in force through `M8-L5` and `M8-L6` (the `headers` option).
+- **Visible in:** `docs/decisions/m8-client.md`, `docs/superpowers/plans/README.md`.

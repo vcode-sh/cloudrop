@@ -155,14 +155,23 @@ its `/abort`, or at once when no `/abort` is sent.
 Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by default). A client sees only its
 namespace's records. The namespace is fixed when the client is created, so create a new client when the user changes.
 
-Call `forget()` at sign-out:
+At sign-out, close the client, then call `forget()`:
 
-- It deletes the namespace's records and resolves `{ data: { forgotten }, error }`, counting the records it deleted,
-  expired ones included.
+```ts
+client.close({ abort: true }); // cancels every upload of every route, telling the server
+await client.forget(); // deletes the namespace's records
+```
+
+- `forget()` deletes the namespace's records and resolves `{ data: { forgotten }, error }`, counting the records it
+  deleted, expired ones included.
 - `forget({ all: true })` deletes every record of this origin. Any other argument is `INVALID_INPUT`.
-- Uploads that are running keep going. Abort their jobs first, then call `forget()`: a file that gets its ticket after
-  `forget()` saves a new record, and a file still waiting for its ticket asks `/upload` with whatever session the
-  browser holds by then. In React: [Signed-in users](react.md#signed-in-users).
+- `forget()` stops nothing: uploads that are running keep going. Close the client first, as above: a file that gets
+  its ticket after `forget()` saves a new record, and a file still waiting for its ticket asks `/upload` with whatever
+  session the browser holds by then. What [`close()`](client.md#close-the-client) does in each phase is in the client
+  guide; in React: [Signed-in users](react.md#signed-in-users).
+- When the user changed without signing out here, such as a sign-in in another tab, call `close()` without options on
+  the last user's client and leave the records: its multipart uploads stop without an `/abort`, as when a tab closes,
+  and that user resumes them on their next sign-in.
 
 Without `forget()`, a signed-out user's unfinished uploads, tokens included, stay on the browser profile for up to 24
 hours, and another user signed in on the same profile and namespace could finish them. They stay the first user's files,

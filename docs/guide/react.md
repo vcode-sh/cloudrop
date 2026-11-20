@@ -27,10 +27,13 @@ the server's module graph, where React exports no `useState` or `useSyncExternal
 
 `createUploadHooks` takes the [client's options](client.md#create-a-client) (`basePath`, `concurrency`, `namespace`
 and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
-client is created at the first upload or the first `useResumable` read in the browser, never while a server renders
-the page. A wrong option never throws from your code: `upload()`, `resume()` and `refresh()` resolve
+client is created at the first upload, the first `useResumable` read or `close()` in the browser, never while a server
+renders the page. A wrong option never throws from your code: `upload()`, `resume()` and `refresh()` resolve
 `{ data: null, error }` with its `INVALID_CONFIG` error, and a pick or a drop, which has no caller to resolve to, throws
 it in a separate task, so it reaches the console and your error reporting.
+
+The factory also returns `close()`, the client's [`close()`](client.md#close-the-client) for every route its hooks
+upload to: see [Signed-in users](#signed-in-users).
 
 The type argument gives the hooks your route names, each route's metadata and what each route's `onComplete` returns.
 `useUpload("avatar")` knows the rest from the route name.
@@ -214,7 +217,7 @@ export function Unfinished() {
 }
 ```
 
-`useResumable(route?)` returns `{ uploads, refresh, discard, forget }`. `uploads` is the client's `resumable()` list, of
+`useResumable(route?)` returns `{ uploads, discarding, refresh, discard, forget }`. `uploads` is the client's `resumable()` list, of
 one route or of every route, newest first. It leaves out the uploads this page holds: a file that is running, paused, or
 failed and kept for `retry()`, and an upload while its resume runs. A failed file is continued with `files[n].retry()`,
 never `resume()`, which would be refused. A listed upload leaves the list as soon as its resume starts.
@@ -239,6 +242,8 @@ the user has to pick it. What counts as the same file, and what the server is as
 `discard(upload)` drops a listed upload without its file: the client's
 [`discard()`](resume.md#discard-one-upload) tells the server to abort it and deletes its record, and the list is read
 again. It resolves `{ data: { aborted }, error }`; on an error, such as no connection, the upload stays listed.
+Meanwhile `discarding` holds the upload's id, until the list is read again: a second `discard()` of it would answer
+`UPLOAD_IN_USE`, so disable its button while `discarding.has(upload.id)`.
 `forget()` is the client's `forget()`: it deletes every record of the client's namespace, of every route, sending no
 `/abort`, and reads the list again; call it at sign-out. Either one also makes every other `useResumable` of the
 factory read its list again, such as a badge that counts every route's uploads. Neither needs the client itself.
@@ -248,14 +253,14 @@ factory read its list again, such as a badge that counts every route's uploads. 
 The module-level factory of [Set up](#set-up) suits an app without accounts. An app where users sign in needs a client
 per user, created with the user's id as its `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client
 for everyone would list one user's unfinished uploads to the next user of the browser. Create each user's client and
-hooks once and provide them in a context keyed by the user:
+hooks once, provide them in a context keyed by the user, and close the other users' clients when the user changes:
 
 ```tsx
 // lib/upload.ts
 "use client";
 import { createCloudropClient } from "cloudrop/client";
 import { createUploadHooks } from "cloudrop/react";
-import { createContext, useCallback, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 import type { cloudrop } from "./cloudrop"; // a type import
 
 function createUploads(userId: string) {
@@ -273,31 +278,24 @@ export function uploadsFor(userId: string): Uploads {
 export const UploadsContext = createContext(uploadsFor(""));
 export const useUploads = () => useContext(UploadsContext);
 
-/** Cancels every upload of the user's routes. Name each route your app uploads to. */
-export function useStopUploads() {
-  const { useUpload } = useUploads();
-  const stopAvatar = useUpload("avatar").abort;
-  const stopDocuments = useUpload("documents").abort;
-  return useCallback(() => {
-    stopAvatar();
-    stopDocuments();
-  }, [stopAvatar, stopDocuments]);
-}
-
-/** Rendered inside the keyed provider: when the user changes, the last user's uploads stop. */
-export function StopUploadsOnUserChange() {
-  const stop = useStopUploads();
-  useEffect(() => stop, [stop]);
-  return null;
+/** Once the page shows `userId`, every other user's uploads stop, and their records stay for that user. */
+export function useCloseOtherUsers(userId: string) {
+  useEffect(() => {
+    for (const [id, uploads] of byUser) {
+      if (id === userId) continue;
+      uploads.close(); // a closed client stays closed: the user's next sign-in gets a new one
+      byUser.delete(id);
+    }
+  }, [userId]);
 }
 ```
 
 ```tsx
 // The app's root: keyed by the user, so a new user's components mount with that user's hooks.
 const userId = useSession().data?.user.id ?? ""; // your auth library's session
+useCloseOtherUsers(userId);
 // React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
 <UploadsContext key={userId} value={uploadsFor(userId)}>
-  <StopUploadsOnUserChange />
   {/* the app */}
 </UploadsContext>;
 ```
@@ -305,29 +303,35 @@ const userId = useSession().data?.user.id ?? ""; // your auth library's session
 Sign out in this order:
 
 ```tsx
-const { client } = useUploads();
-const stopUploads = useStopUploads();
+const { close, client } = useUploads();
 
 async function signOut() {
-  stopUploads(); // first: a file that gets its ticket after forget() saves a new record
+  close({ abort: true }); // first: cancels every upload of every route, and nothing asks /upload any more
   await client.forget(); // deletes the user's unfinished uploads and the tokens they hold
   await auth.signOut(); // your auth library's sign-out
 }
 ```
 
-- **Stop before you forget.** `forget()` deletes records and stops nothing (see
+- **Close before you forget.** `forget()` deletes records and stops nothing (see
   [Resume](resume.md#namespace-and-sign-out)). An upload still waiting for its ticket would ask `/upload` after
   `forget()`, save a new record, and, once the session cookie changed, ask with the next user's session.
-- **`abort()` cancels.** Each file's `/abort` is sent with the file's own upload token, so it reaches the server
-  whoever is signed in by then. A file whose `/complete` may already have finished is kept, not deleted.
-- **Keep the hooks per user.** A factory keeps its uploads in memory, so `uploadsFor` returns the same one when the same
-  user signs in again in this page, and a component that unmounts finds its files again on its next mount.
-- **A user who changes without signing out here,** such as a sign-in in another tab, remounts the keyed provider once
-  this tab's session hook sees the change, and `StopUploadsOnUserChange` stops the last user's uploads then. The cookie
-  changed earlier, when the other tab signed in: an `/upload` this tab sends in between, for a queued file or a retry,
-  goes with the new user's session, and the file becomes that user's.
-- **`useStopUploads` subscribes to each route** it names, so the component that calls it renders again on every
-  progress update of those routes. Keep it in a small component, as the sign-out button above is.
+- **`close({ abort: true })` cancels** every file of every route the hooks upload to, as each file's `abort()` does:
+  its `/abort` is sent with the file's own upload token, so it reaches the server whoever is signed in by then, and
+  with the [store](store.md) the file's row ends `aborted` and its bytes stop counting against the quota. A file whose
+  `/complete` may already have finished is kept, not deleted. `close()` returns at once; the `/abort`s go with
+  `keepalive`, so a reload right after does not stop them.
+- **`close()` without options** is for a user who changed without signing out here, such as a sign-in in another tab:
+  this tab sees it when its session hook does, and `useCloseOtherUsers` then closes the last user's client. Its uploads
+  stop without an `/abort`, as when a tab closes, so each unfinished multipart upload keeps its record, and that user
+  resumes it on their next sign-in. The cookie changed earlier, when the other tab signed in: an `/upload` this tab
+  sent in between, for a queued file or a retry, went with the new user's session, and that file became that user's.
+- **After `close()`** every `upload()` and `resume()` of the hooks resolves `CLIENT_CLOSED` without a request.
+  `useResumable()` and `forget()` keep working. The first `close()` decides: a later one, with or without options,
+  changes nothing.
+- **Keep the hooks per user.** A factory keeps its uploads in memory, so `uploadsFor` returns the same one while the
+  same user stays signed in, and a component that unmounts finds its files again on its next mount.
+- **Effects, not render.** `close()` is permanent, so call it from an event handler or from an effect that runs again
+  harmlessly, as `useCloseOtherUsers` does; never from an effect's cleanup, which StrictMode runs once on mount.
 
 ## Build your upload UI
 
@@ -414,10 +418,11 @@ keep a visually hidden `role="status"` line rendered from the start, and change 
 **Unfinished uploads.** After a reload, `useResumable("files").uploads` lists what can be continued. A browser never
 hands a file back, so each row has a file input; the picked file goes to `resume(upload, file)` and the resumed upload
 joins `files` like any other. A different file is refused before any request and shows as a failed row. Each row's
-Discard calls `discard(upload)`, which needs no file; on an error the upload stays listed, so show the error's message.
+Discard calls `discard(upload)`, which needs no file, and is disabled while it runs; on an error the upload stays
+listed, so show the error's message.
 
 ```tsx
-const { uploads, discard } = useResumable("files");
+const { uploads, discarding, discard } = useResumable("files");
 const { resume } = useUpload("files");
 // For each upload:
 <input
@@ -429,7 +434,14 @@ const { resume } = useUpload("files");
     if (file) void resume(upload, file);
   }}
 />
-<button type="button" aria-label={`Discard ${upload.name}`} onClick={() => void discard(upload)}>…</button>
+<button
+  type="button"
+  aria-label={`Discard ${upload.name}`}
+  disabled={discarding.has(upload.id)}
+  onClick={() => void discard(upload)}
+>
+  …
+</button>
 ```
 
 The example's **Discard all** discards every listed upload the same way, so each is aborted on the server. `forget()`
@@ -462,6 +474,7 @@ give data and functions, and the UI is yours. Why there is no registry: `M4-E1` 
 | Field | What it is |
 | --- | --- |
 | `uploads` | The unfinished uploads this browser can continue, newest first, without those this page holds. |
+| `discarding` | The ids of the listed uploads this hook's `discard()` is dropping: disable their buttons meanwhile. |
 | `refresh()` | Reads the list again; resolves with the client's `Result`. |
 | `discard(upload)` | Aborts one listed upload without its file and deletes its record; resolves `{ aborted }` or the error. |
 | `forget()` | Deletes every record of the client's namespace, of every route, sending no `/abort`. |

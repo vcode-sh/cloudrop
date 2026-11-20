@@ -192,9 +192,9 @@ export const useUploads = () => useContext(UploadsContext);
 
 // apps/web/src/app.tsx: keyed by the user, so a new user's components mount with that user's hooks.
 const userId = authClient.useSession().data?.user.id ?? "";
+useCloseOtherUsers(userId); // from Signed-in users in the React guide
 // React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
 <UploadsContext key={userId} value={uploadsFor(userId)}>
-  <StopUploadsOnUserChange /> {/* from Signed-in users in the React guide */}
   {/* the app */}
 </UploadsContext>;
 
@@ -212,11 +212,13 @@ const { files, getInputProps } = useUpload("attachments", { multiple: true });
   user still finds them on their next sign-in. The namespace is fixed when the client is created, which is why the app
   keys the context by the user: one module-level client, without a namespace, would show every user's records to
   whoever signs in next. The cost is a context and a component remount when the user changes.
-- At sign-out, cancel the user's uploads on every route, then call `useUploads().client.forget()`: the namespace hides
-  the records, `forget()` deletes them and the upload tokens they hold, and aborts none. Cancelling first keeps a file
-  that gets its ticket afterwards from saving a new record. `useStopUploads` in
-  [Signed-in users](react.md#signed-in-users) cancels them, and `StopUploadsOnUserChange` also stops the last user's
-  uploads when the user changes without a sign-out on this page; the example's `src/lib/upload.ts` has both.
+- At sign-out, call `useUploads().close({ abort: true })`, which cancels the user's uploads on every route and tells
+  the server, so their rows end `aborted`, then `useUploads().client.forget()`: the namespace hides the records,
+  `forget()` deletes them and the upload tokens they hold, and aborts none. Closing first keeps a file that would get
+  its ticket afterwards from asking for it. `useCloseOtherUsers` in [Signed-in users](react.md#signed-in-users) closes
+  the last user's client when the user changes without a sign-out on this page, keeping its unfinished uploads for
+  that user's next sign-in; the example's `src/lib/upload.ts` has it, and `src/components/auth-panel.tsx` the
+  sign-out.
 - To drop one unfinished upload, call `useResumable().discard(upload)`: the server aborts it, which with the store
   ends its row and frees the bytes it reserved, and the browser deletes its record
   ([Discard one upload](resume.md#discard-one-upload)). The example's panel has Discard per row and Discard all, each

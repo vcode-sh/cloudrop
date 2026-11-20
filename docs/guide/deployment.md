@@ -82,8 +82,8 @@ cookies. What remains is the cookie itself:
   site either: `http://localhost:3000` and `http://localhost:4000` are different origins of one site.
 - **Different sites.** For a page on `app.example.com` and an API on `api.example.net`, the session cookie must be
   `SameSite=None; Secure`, and so served over HTTPS. Browsers that block third-party cookies may still drop it. If
-  you cannot put the page and the API on one site, send a token instead:
-  [Send a bearer token](client.md#send-a-bearer-token).
+  you cannot put the page and the API on one site, send a token with the client's `headers` option instead, which
+  reaches only your server, never the bucket: [Send a bearer token](client.md#send-a-bearer-token).
 
 With `authorize` that finds no session, every upload ends `UNAUTHORIZED`: check in the browser's DevTools whether the
 `/upload` request carried the cookie.

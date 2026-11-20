@@ -44,8 +44,9 @@ code change, not a retry.
    one of two codes: `RATE_LIMITED` ("The storage service is busy") when the storage was throttling, otherwise
    `STORAGE_ERROR`, retryable when the storage failure was. A browser never sees `STORAGE_DENIED`,
    `STORAGE_UNREACHABLE`, `INVALID_PART` or `CHECKSUM_MISMATCH`.
-3. **Client.** The client adds four codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`, `UPLOAD_IN_USE`) and
-   uses a few shared codes for its own failures, such as `STORAGE_ERROR` when the browser's storage fails.
+3. **Client.** The client adds five codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`, `UPLOAD_IN_USE`,
+   `CLIENT_CLOSED`) and uses a few shared codes for its own failures, such as `STORAGE_ERROR` when the browser's
+   storage fails.
 
 The HTTP status in the tables is what the handler answers with that code.
 
@@ -82,14 +83,15 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 
 ## Client errors
 
-These come from `cloudrop/client`. The first four never come from the server.
+These come from `cloudrop/client`. The first five never come from the server.
 
 | Code | Retryable | What it means | What to do |
 | --- | --- | --- | --- |
-| `NETWORK_ERROR` | Yes | No answer after every attempt: your server could not be reached, or the file could not reach the bucket. A bucket that refuses a `PUT` without CORS headers looks the same to a browser. | Check the connection and retry. If every upload ends this way, check the bucket's CORS rule first (see [Troubleshooting](troubleshooting.md#every-upload-ends-in-network_error)). |
+| `NETWORK_ERROR` | Yes | No answer after every attempt: your server could not be reached, or the file could not reach the bucket. A bucket that refuses a `PUT` without CORS headers looks the same to a browser. Also when the client's `headers` function threw or rejected, so the request was not sent. | Check the connection and retry. If every upload ends this way, check the bucket's CORS rule first (see [Troubleshooting](troubleshooting.md#every-upload-ends-in-network_error)). |
 | `UPLOAD_REJECTED` | No | The bucket refused the bytes as signed: a different size, type or checksum, a link refused even after renewal, or another refusal. | Start a new upload; `retry()` asks for a new ticket. When it keeps happening, check the server's clock and the credentials' permissions. |
 | `ABORTED` | No | The upload was cancelled through `abort()` or the `signal`. | Nothing, unless the user wants to start again. |
 | `UPLOAD_IN_USE` | No | `resume()` or `discard()` found the upload held in this page or another tab. | Finish or cancel it there, then try again. |
+| `CLIENT_CLOSED` | No | `start()`, `upload()` or `resume()` on a client after its [`close()`](client.md#close-the-client), such as the last user's client after a sign-out. | Use the client of the user who is signed in now. |
 | `RATE_LIMITED` | Yes | The bucket answered `429` or `503` to every attempt, or a proxy in front of your server answered `429`. | Try again in a moment. |
 | `STORAGE_ERROR` (from the bucket) | Yes | The bucket answered a `PUT` with `408` or a `5xx` other than `501` on every attempt. A `501` ends the file with `UPLOAD_REJECTED` instead. | Retry the upload. |
 | `STORAGE_ERROR` (from your server) | Yes / No | Your server's call to the storage service failed or was refused, as in the [endpoint table](#upload-endpoint-errors): such as bad credentials, or Wrangler's local R2 refusing a multipart completion. | When retryable, retry. Otherwise check the server log. |

@@ -49,7 +49,8 @@ Uploads work when the page and the API share an origin, but a page on another or
 
 - **The page and the API are on different sites**, such as `app.example.com` and `api.example.net`. The session
   cookie must be `SameSite=None; Secure`, and some browsers still block it as a third-party cookie. Put both on one
-  site, or send a bearer token ([Send a bearer token](client.md#send-a-bearer-token)).
+  site, or send a bearer token with the client's `headers` option
+  ([Send a bearer token](client.md#send-a-bearer-token)).
 - **The cookie is set for the page's host only.** A cookie for `app.example.com` never reaches `api.example.com`. Set
   it from the API's host or with `Domain=example.com`.
 

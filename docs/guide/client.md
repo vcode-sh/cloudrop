@@ -3,7 +3,7 @@
 This page is for developers writing the browser side without React, or wanting to know what the hooks run on. It covers
 `cloudrop/client`: creating a client, uploading one file or several, following progress, pausing, cancelling and
 retrying, how the client shares connections between uploads, what happens when the page goes offline or a request
-stalls, and what it cleans up. Resuming after a reload, and `resumable()`, `resume()`, `discard()` and `forget()`, have
+stalls, what it cleans up, and closing it when the user signs out. Resuming after a reload, and `resumable()`, `resume()`, `discard()` and `forget()`, have
 their own page: [Resume after reload](resume.md). Error codes: [Errors](errors.md).
 
 ## Create a client
@@ -23,6 +23,7 @@ each route's `onComplete` returns.
 | Option | What it does | Default |
 | --- | --- | --- |
 | `basePath` | Where the server's handler is mounted: a path on this page's origin, or an absolute URL such as `"https://api.example.com/api/cloudrop"`. No trailing slash, query or fragment. For a handler on another origin, list the page's origin in the server's `trustedOrigins`, or every call gets `ORIGIN_NOT_ALLOWED`. | `"/api/cloudrop"` |
+| `headers` | Headers for the requests to your server (`/upload`, `/sign`, `/complete`, `/abort`), never for bucket `PUT`s: an object, or a function, possibly async, called before each request (see [Send a bearer token](#send-a-bearer-token)). | none |
 | `fetch` | Replaces the global `fetch`, for tests and runtimes that bring their own. Passing it also sends bucket `PUT`s through it (see [Transports](#transports-xhr-or-fetch)). | global `fetch` |
 | `concurrency` | How many bucket `PUT`s the client sends at once, across all its uploads: `"auto"` or a whole number from 1 to 16 (see [Concurrency and order](#concurrency-and-order)). | `"auto"` |
 | `order` | Which `PUT`s go first when they wait for a connection: `"added"` or `"smallest-first"`. | `"added"` |
@@ -39,30 +40,30 @@ progress.
 ### Send a bearer token
 
 The client sends cookies to your server. An app that keeps its session in a token instead, such as a desktop or mobile
-shell around a web view, or a session handed over by QR code, adds it with a `fetch` of its own:
+shell around a web view, or a session handed over by QR code, adds it with the `headers` option:
 
 ```ts
-const API = "https://api.example.com/api/cloudrop";
-
 const client = createCloudropClient<typeof cloudrop>({
-  basePath: API,
-  fetch: (url, init) => {
-    // Bucket PUTs go through this fetch too. Send the token only to your server: a presigned URL must not carry it.
-    if (!url.startsWith(`${API}/`)) return fetch(url, init);
-    const headers = new Headers(init.headers);
-    headers.set("authorization", `Bearer ${getToken()}`); // your app's token
-    return fetch(url, { ...init, headers });
-  },
+  basePath: "https://api.example.com/api/cloudrop",
+  headers: async () => ({ authorization: `Bearer ${await getToken()}` }), // your app's token, refreshed when needed
 });
 ```
 
 On the server, `authorize` reads `request.headers.get("authorization")`.
 
-- Passing `fetch` also sends bucket `PUT`s through it, so progress moves a part at a time instead of byte by byte (see
-  [Transports](#transports-xhr-or-fetch)).
-- From a page on another origin, the `authorization` header makes the browser send a preflight first. The handler
+- **Only your server gets them.** The headers go with `/upload`, `/sign`, `/complete` and `/abort`, never with a
+  bucket `PUT`: a presigned URL must not carry your token, and bucket `PUT`s keep `XMLHttpRequest` and its byte-by-byte
+  progress (see [Transports](#transports-xhr-or-fetch)).
+- **A function runs before each request,** so each request carries the token of its moment, and a token that expires
+  during a long upload is refreshed for the next `/sign` or `/complete`. An object is sent as it is with every request.
+- **When the function throws or rejects,** that request is not sent and fails with `NETWORK_ERROR`, which the client
+  retries as any network failure. Its time counts against the request's timeout, and a cancel stops the wait.
+- **`content-type` stays the client's.** A `content-type` among the headers is replaced by `application/json`.
+- **At `pagehide`, an async function may be too late.** The `/abort` a closing page sends for a failed file waits for
+  it, and a page that is gone sends nothing. The bucket's lifecycle rule and, with a store, the sweep clean up.
+- **From a page on another origin,** the `authorization` header makes the browser send a preflight first. The handler
   allows the headers a page on a `trustedOrigins` origin asks for.
-- A request without an `Origin` header, as a native app sends, needs no `trustedOrigins` entry (see
+- **A request without an `Origin` header,** as a native app sends, needs no `trustedOrigins` entry (see
   [Origins](server.md#origins)).
 
 ## Upload one file
@@ -314,7 +315,8 @@ cleans up.
 - In a browser, bucket `PUT`s go through `XMLHttpRequest`, which reports bytes while they are sent, so progress moves
   smoothly.
 - Passing the `fetch` option sends everything through it, `PUT`s included. A part's bytes then count only once it is
-  stored, so progress moves a part at a time.
+  stored, so progress moves a part at a time. To add a token or other headers to your server's requests, use the
+  `headers` option instead: it leaves `PUT`s on `XMLHttpRequest`.
 - Outside a browser (Node, Bun, Deno, Workers), `PUT`s use `fetch` the same way.
 
 ## What gets cleaned up
@@ -333,18 +335,48 @@ cleans up.
   resumes. A failed single-`PUT` object kept until expiry stays in the bucket: call `job.abort()` once you will not
   retry.
 - **A file after a `/complete` that may have succeeded** is always kept, never deleted.
+- **[`close()`](#close-the-client)** cancels every file, or, without `abort`, keeps each multipart upload's record for
+  its user's next client.
+
+## Close the client
+
+`close()` stops a client for good, which an app with signed-in users needs when the user changes:
+
+```ts
+client.close({ abort: true }); // at sign-out: cancel every upload, telling the server
+await client.forget(); // then delete the user's unfinished uploads
+```
+
+- **Afterwards** `start()`, `upload()` and `resume()` answer `CLIENT_CLOSED` before any request, and a job's or a
+  file's `retry()` sends nothing. `resumable()`, `discard()` and `forget()` keep working. Create a new client for the
+  next user.
+- **Every file of every route stops,** queued, uploading, paused, failed or waiting for its ticket, in any phase. A file
+  waiting for its ticket ends `aborted` at once, and its `/upload`, if in flight, is cancelled.
+- **`close({ abort: true })`,** at sign-out, cancels each file as `abort()` does: its `/abort` goes with its own
+  upload token and `keepalive`, so a reload right after does not stop it, and the records of those uploads go.
+- **`close()` without options,** when another user signed in in another tab, stops each file as closing the tab would.
+  A multipart upload sends no `/abort` and keeps its record, which the same user [resumes](resume.md) on a new client
+  after signing in again, in this page or after a reload. A single `PUT`, which cannot resume, is cancelled, and so is
+  every file when persistence is off or unavailable.
+- **A file whose `/complete` may have finished** is kept, never deleted, either way.
+- **The first call decides,** and every later call does nothing. `close()` returns at once; each file's status changes
+  as it stops, and each job's `done` settles.
+
+In React, the factory returns the same `close()`: [Signed-in users](react.md#signed-in-users).
 
 ## Errors that only the client produces
 
-Four codes come from the client and never from the server:
+Five codes come from the client and never from the server:
 
 - `UPLOAD_REJECTED`: the bucket refused the bytes as signed (a different size, type or checksum).
 - `ABORTED`: a cancel.
 - `NETWORK_ERROR`: no answer after every attempt. Retryable.
 - `UPLOAD_IN_USE`: `resume()` or `discard()` found the upload held in this browser (see
   [Resume after reload](resume.md#two-tabs)).
+- `CLIENT_CLOSED`: `start()`, `upload()` or `resume()` after [`close()`](#close-the-client).
 
 Every other code, and what to do about it: [Errors](errors.md).
 
-Why the client behaves as it does: the [M3-S decisions](../decisions/m3-slice.md) and the
-[M3-U decisions](../decisions/m3-uploader.md).
+Why the client behaves as it does: the [M3-S decisions](../decisions/m3-slice.md), the
+[M3-U decisions](../decisions/m3-uploader.md) and, for `close()` and `headers`, the
+[M8-L decisions](../decisions/m8-client.md).
