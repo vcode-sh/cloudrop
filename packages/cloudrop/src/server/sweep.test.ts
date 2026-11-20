@@ -66,6 +66,21 @@ describe("api.sweep: expire", () => {
     expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
   });
 
+  it("marks a row cleaned at the time its check started, not when the storage answered", async () => {
+    const fixture = storeFixture({ owned });
+    const landed = await fixture.single("owned", TEXT);
+    await fixture.send(landed.put, hello);
+    vi.setSystemTime(PAST_GRACE);
+    // The storage takes a minute to answer the HEAD: a PUT could have landed in that minute, after the look.
+    const { fetch } = fixture.fake;
+    fixture.fake.fetch = async (input, init) => {
+      if (init?.method === "HEAD") vi.setSystemTime(Date.now() + 60_000);
+      return fetch(input, init);
+    };
+    expect((await fixture.cloudrop.api.sweep()).data?.expired).toBe(1);
+    expect((await statuses(fixture))[landed.id]).toEqual(["expired", PAST_GRACE]);
+  });
+
   it("ends a completion stuck past its lease and deadline as failed, keeps its object and reports it once", async () => {
     const fixture = storeFixture({ owned });
     const stuck = await fixture.single("owned", TEXT);
