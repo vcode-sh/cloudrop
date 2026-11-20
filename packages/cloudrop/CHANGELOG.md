@@ -6,6 +6,56 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+### Added
+
+- **`client.close()`** stops a client: every running and queued upload of every route stops, and `start()`,
+  `upload()` and `resume()` answer the new error code `CLIENT_CLOSED` afterwards. Without options it acts like closing
+  the tab: a multipart upload keeps its record and its parts, so the same user can resume it. `close({ abort: true })`
+  cancels on the server too, for sign-out: `await close({ abort: true })`, then `forget()`, then your auth library's
+  sign-out. A file whose `/complete` may have finished is always kept. `createUploadHooks()` returns the same `close()`
+  (`M8-L1` to `M8-L4`, `M8-L7`).
+- **`headers` client option** for requests to the upload server only (`/upload`, `/sign`, `/complete`, `/abort`),
+  never for bucket `PUT`s: an object, or a function (possibly async) called before each request, so a bearer token is
+  fresh on each. A function that fails or hangs fails that request unsent with `NETWORK_ERROR` (`M8-L5`, `M8-L6`).
+- **`useResumable().discarding`**: the ids being discarded, to disable a second press of Discard (`M8-L8`).
+- **`api.files({ owner, route?, limit?, cursor? })`**: an owner's completed files, newest first, a page at a time
+  (`M8-A1`).
+- **`api.eraseOwner(owner, { graceMs?, signal? })`** removes everything an owner uploaded without needing your key
+  layout: it revokes unfinished uploads, deletes completed files and reports `done` once nothing can still land. Run it
+  until it reports `done` (`M8-A5`).
+- **Route option `replace: true`** (needs a store and `owner`): one file per owner on the route, such as an avatar. The
+  previous file is deleted in the same write that records the next one's completion, and of two completions at once
+  exactly one file survives (`M8-A6`).
+- **`api.sweep({ all: true, signal? })`** runs every page in one call and sums the reports; the store guide has cron
+  recipes for Node and Cloudflare Workers (`M8-A7`).
+- Exported types `FilesOptions`, `FilesPage`, `EraseOptions`, `EraseReport` and `Completion`.
+
+### Changed
+
+- **Type-level breaks:** `CloudropErrorCode` and `ClientErrorCode` gain `CLIENT_CLOSED`, which breaks an exhaustive
+  `switch` over them; `CloudropClient` gains `close()`, which breaks a hand-written mock of it.
+- **A store written by hand** must implement the new `CloudropStore.list()`, and `complete()` takes `{ replace }` and
+  answers `Completion` with `replaced`. Every shipped adapter does (`M8-A3`).
+- `api.deleteFile` deletes the object at once and marks the row cleaned only once a late `PUT` can no longer land
+  (about 1 h 15 min after completion); until then the sweep checks the key again. The sweep stamps `cleaned_at` with
+  the time its check started (`M8-A4`).
+- The React "Signed-in users" recipe, the guides and the Vite example use `close()` instead of each route's `abort`.
+  "Send a bearer token" uses `headers`.
+
+### Fixed
+
+- A bearer token no longer needs a custom `fetch`, which moved bucket `PUT`s off `XMLHttpRequest` and its byte-by-byte
+  progress.
+- A file still waiting for its ticket can no longer ask `/upload` after sign-out.
+
+### Migration
+
+- **Database store:** the owner index becomes `(owner, status, created_at)`, which `api.files` and `eraseOwner` read:
+  `CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at); DROP
+  INDEX "cloudrop_files_owner_status_idx";` (`CONCURRENTLY` on a large Postgres table). Drizzle and Prisma users
+  generate a migration; when drizzle-kit asks whether the new index renames the old one, answer that it is created.
+  Without it the store works, only slower for owners with many files (`M8-A2`).
+
 ## 0.1.1 - 2026-11-20
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-20 for 0.1.1 (the first pilot's report: R2's compressed `HEAD`, the sign-out recipe). This file
+Updated 2026-11-20 for 0.1.1 and the 0.2.0 work on `main` (the first pilot's report and what it built itself). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -94,16 +94,17 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### 0.2.0: the client changes from the pilot
+### 0.2.0: what the pilot asked for, on `main`, not released yet
 
 0.1.0 was published on 2026-11-19 and 0.1.1 on 2026-11-20. The pilot (an app on Bun, Hono, better-auth and Drizzle,
-built on 0.1.0 and run in production) asked for two client changes that are new public API, so they wait for 0.2.0:
+built on 0.1.0 and run in production) asked for the client changes `M7-P3` and `M7-P4` and had written its own owner
+file API around the store. All of it is merged on `main` (2026-11-20), with the changelog under "Unreleased":
 
-- **A client-wide stop** (`M7-P3`): one call that refuses new uploads and cancels every running job of every route,
-  keeping the resume records, with the same stop on the React factory. Its regression covers a user change while
-  `/complete` runs.
-- **Request options for the upload server only** (`M7-P4`): headers or a `fetch` that reach `/upload`, `/sign`,
-  `/complete` and `/abort` and never a bucket `PUT`, so a bearer token keeps `XMLHttpRequest`'s progress.
+- the client: `close()` and `close({ abort: true })`, the `headers` option for the upload server only,
+  `useResumable().discarding` (`M8-L1` to `M8-L9`);
+- the server: `api.files`, `api.eraseOwner`, the route option `replace: true`, `api.sweep({ all: true })`, and a new
+  owner index that existing databases migrate (`M8-A1` to `M8-A8`);
+- a code-quality pass over storage, scripts, tooling, the client and React, and dev dependency updates (`M8-Q`).
 
 A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to a later opt-in
 (`M3-U65`).
