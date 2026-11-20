@@ -180,20 +180,35 @@ continue from `M8-Q1`.
 ### M8-Q32: server and store candidates left as they are
 
 - **Decision:** not taken: (1) the SQL core applying `route` to a store built with `transaction: true`, which would
-  remove `src/adapters/transactional.ts` and one branch in each adapter; (2) `for await` over `request.body` in
-  `readJson` (`src/server/http.ts`) in place of the reader loop; (3) node:sqlite's `isTransaction` guarding the
-  executor's `ROLLBACK`; (4) one generic column type for the Drizzle Postgres and SQLite tables; (5) helpers for the
+  remove `src/adapters/transactional.ts` and one branch in each adapter; (2) node:sqlite's `isTransaction` guarding the
+  executor's `ROLLBACK`; (3) one generic column type for the Drizzle Postgres and SQLite tables; (4) helpers for the
   page-limit and `signal` checks that `sweep`, `files` and `eraseOwner` each write, and for the authorize snapshot in
   `handleUpload`.
 - **Why:** (1) the SQL core may import only the store types and errors (Biome's `noRestrictedImports` rule for
-  `src/store/**`), and `routeFor` is server code. (2) `ReadableStream`'s async iterator is typed only by
-  `DOM.AsyncIterable`, which the package's one `tsconfig.json` leaves out; adding it would let client code use an API
-  Safari lacks, and a cast to reach it is worse than the loop. (3) `SqliteDatabase` is a public structural type: a new
+  `src/store/**`), and `routeFor` is server code. (2) `SqliteDatabase` is a public structural type: a new
   required member breaks a caller passing another SQLite binding, and the swallowed `ROLLBACK` is already correct.
-  (4) the column types differ per dialect and per drizzle-orm line (0.45 and 1.0); a four-parameter generic adds more
-  concepts than the two spelled-out lists cost. (5) two or three callers whose messages differ, or an extraction that
-  adds a function without removing a line: each fails the simplify rule's score.
-- **If wrong:** revisit (2) if the client moves to its own tsconfig.
+  (3) the column types differ per dialect and per drizzle-orm line (0.45 and 1.0); a four-parameter generic adds more
+  concepts than the two spelled-out lists cost. (4) the page-limit check is written twice (`sweep`, `files`) and the
+  `signal` check twice with different examples: a helper for two callers adds a concept to save a line or two, and
+  moving the snapshot out of `handleUpload` adds a function without removing a line. Each fails the simplify rule's
+  score.
+- **If wrong:** none known.
 - **Status:** in force.
-- **Visible in:** `src/adapters/transactional.ts`, `src/server/http.ts`, `src/adapters/sql/sqlite.ts`,
+- **Visible in:** `src/adapters/transactional.ts`, `src/adapters/sql/sqlite.ts`,
   `src/adapters/drizzle/*-tables.ts`, `src/server/sweep.ts`, `owner-files.ts`, `erase.ts`, `upload.ts`.
+
+### M8-Q33: the handler reads a request body with `for await`
+
+- **Decision:** `readJson` (`src/server/http.ts`) reads `request.body` with `for await`, and returning from the loop at
+  the 64 KiB cap cancels the stream, in place of a hand-driven `getReader()` loop with its own `cancel()` call.
+- **Why:** the same read in one concept fewer. Async iteration of `ReadableStream` is on every server runtime of the
+  support matrix: MDN browser-compat-data (`api.ReadableStream.@@asyncIterator`, read 2026-11-20) lists Node 16.5.0,
+  Deno 1.0 and Bun 1.0.0, and `@cloudflare/workers-types` 5.20261119.1 (the workerd the Wrangler lane runs) declares
+  `ReadableStream[Symbol.asyncIterator]`. Measured 2026-11-20 on Node 24.22.2 and Bun 1.4.4: leaving the loop early
+  cancels a request's body stream. TypeScript 7's `DOM` lib already types it (a probe compiled under the package's
+  `tsconfig.json`). Safari has it only from 27, which does not matter here: `src/server` never runs in a browser.
+- **If wrong:** none known. "stops reading a stream without a declared length once it passes the cap, and cancels it"
+  now asserts the cancel: it fails when the loop is given `preventCancel: true`, and passed before only on the read
+  count.
+- **Status:** in force.
+- **Visible in:** `src/server/http.ts`, `src/server/handler.test.ts`.
