@@ -6,6 +6,8 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-20
+
 ### Added
 
 - **`client.close()`** stops a client: every running and queued upload of every route stops, and `start()`,

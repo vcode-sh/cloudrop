@@ -280,9 +280,10 @@ cloudrop is pre-1.0. The server, the browser client, the React hooks and the dat
 against an in-process fake R2, real R2, RustFS behind a fault-injecting proxy, and from Chromium through the examples.
 Until 1.0, a minor version may change the API; every change is in the [changelog](packages/cloudrop/CHANGELOG.md).
 
-1.0 freezes the public API under semantic versioning. Before it come the first release (0.1.0), a pilot in a real app,
-and plugins for content checks, limits, images and checksums. Where the project stands:
-[plans and roadmap](docs/superpowers/plans/README.md).
+1.0 freezes the public API under semantic versioning. 0.1.0 was the first release; 0.2.0 added what the first
+production app asked for (a client-wide `close()`, headers for your API only, listing and erasing an owner's files, one
+file per owner on a route). Before 1.0 come plugins for content checks, limits, images and checksums. Where the project
+stands: [plans and roadmap](docs/superpowers/plans/README.md).
 
 ## Contributing
 

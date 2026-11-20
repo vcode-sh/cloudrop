@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-20 for 0.1.1 and the 0.2.0 work on `main` (the first pilot's report and what it built itself). This file
+Updated 2026-11-20 for 0.2.0 (the first pilot's report and what it built itself). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -94,11 +94,11 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### 0.2.0: what the pilot asked for, on `main`, not released yet
+### 0.2.0: what the pilot asked for, released 2026-11-20
 
 0.1.0 was published on 2026-11-19 and 0.1.1 on 2026-11-20. The pilot (an app on Bun, Hono, better-auth and Drizzle,
 built on 0.1.0 and run in production) asked for the client changes `M7-P3` and `M7-P4` and had written its own owner
-file API around the store. All of it is merged on `main` (2026-11-20), with the changelog under "Unreleased":
+file API around the store. All of it shipped in 0.2.0 (2026-11-20; `packages/cloudrop/CHANGELOG.md`):
 
 - the client: `close()` and `close({ abort: true })`, the `headers` option for the upload server only,
   `useResumable().discarding` (`M8-L1` to `M8-L9`);
