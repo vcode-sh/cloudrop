@@ -6,6 +6,26 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.1.1 - 2026-11-20
+
+### Fixed
+
+- **R2: a text, JSON, HTML or SVG file of 50 bytes or more failed at `/complete` with `502 STORAGE_ERROR`** ("The
+  storage service's response had no content length"), after its bytes had reached the bucket. R2 compresses its answer
+  to the `HEAD` request that reads the stored size when the request offers gzip, as Node's and Bun's `fetch` do, and
+  then sends no `Content-Length`. The driver now asks for an uncompressed answer on every `HEAD`, which also fixes
+  `/abort`, the store's sweep and `api.head` on such files, for `r2()` and for `s3()` pointed at R2. Applications that
+  set `accept-encoding: identity` in a `fetch` of their own can drop it.
+
+### Documentation
+
+- **Signed-in users in React:** the React guide shows a client per user, in a context keyed by the user, and a sign-out
+  that cancels every route's uploads before `forget()`: `forget()` stops nothing, and a file that gets its ticket
+  afterwards saves a new record and, once the session changed, asks `/upload` with the next user's session. The Vite
+  example's sign-out now does the same.
+- **What "`onComplete` once" means:** at least once without a store; with one, once under a lease, and exactly once only
+  for writes through `tx` on Postgres with `transaction: true`. Keep an email or a webhook idempotent.
+
 ## 0.1.0 - 2026-11-19
 
 The first release. Version `0.0.0` on npm only reserved the name.
