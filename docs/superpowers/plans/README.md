@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-17 after M4b (the examples, `discard(upload)` and trusted publishing). This file
+Updated 2026-11-20 for 0.1.1 (the first pilot's report: R2's compressed `HEAD`, the sign-out recipe). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -35,6 +35,7 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M4a (no plan file: tasks A–E in the design's §8), design [`2026-11-17-m4-dx-and-react-design.md`](../specs/2026-11-17-m4-dx-and-react-design.md) | Done, `bfbfca3..` merged to `main` 2026-11-17 | Client audit fixes (resume record kept after a network failure, cancel before a ticket, endpoint timeouts, `resumable()` leaves out held uploads), server and storage fixes (listed keys kept exactly, overlapping completions measured on R2), `route(policy, callbacks)` with options in any order, environment read on the first request, `r2()`/`s3()` env defaults, `forbidden()`, `cloudrop/react` (`createUploadHooks`, `useUpload`, `useResumable`), npm README and LICENSE, the guides; decisions `M4-F1`..`M4-F23` (no `M4-F21`), `M4-B1`..`M4-B15` |
 | Post-M5 follow-ups (no plan file: tasks I and S, then M4-F25) | Done, merged to `main` 2026-11-17 | `POST /upload` takes an optional `idempotencyKey`. The client sends one per ask, and with a store a retry supersedes the lost attempt's pending rows of the same owner (owner-less rows are never superseded, `M5-T105`): `reserve` gains `requestKey`, and `cloudrop_files` gains `request_key` and an index on `(route, request_key)`. `tables.schema` puts both tables in a Postgres schema for every adapter (Drizzle tables in the schema, Prisma `@@schema`) and is refused on SQLite. The build drops JSDoc from the shipped `.js` and keeps it in the `.d.ts`. Decisions `M5-T100`..`M5-T105`, `M5-T120`..`M5-T124`, `M4-F25` |
 | M4b (no plan file: tasks A, B, C and D, an integration round and a final fix round) | Done, merged to `main` 2026-11-18 | The Next example's home page as an upload UI on the headless hooks with shadcn on Base UI and Tabler icons, and the React guide's "Build your upload UI"; `examples/hono` (Bun, Hono, better-auth, a Drizzle store on Postgres, oRPC, a sweep worker) and `examples/vite-react` (the web app on another origin), with the [Hono guide](../../guide/hono.md) and a third browser pass; `client.discard(upload)` and `useResumable().discard/forget`, `/abort { token, keep: true }`; Postgres time columns at `timestamptz(3)`; the workspace on drizzle-orm 1.0.0-rc.5; a release workflow that publishes to npm through trusted publishing ([`docs/releasing.md`](../../releasing.md)) and the package's `CHANGELOG.md`. Decisions `M4-E1`..`M4-E14`, `M4-E20`..`M4-E30`, `M3-U93`..`M3-U95`, `M4-B16`, `M4-B17`, `M5-T130` |
+| 0.1.1 (no plan file: the first pilot's report) | Done, merged to `main` 2026-11-20 | `HEAD` sends `accept-encoding: identity`, unsigned, so R2 no longer answers a compressible file of 50 bytes or more without `content-length` (0.1.0 failed such files at `/complete` with `502`); a contract case on every backend and a fake R2 that compresses as R2 does. The React guide's "Signed-in users" recipe (a client per user, cancel every route before `forget()`), the Vite example's sign-out cancels running uploads, and the READMEs say what `onComplete` "once" means. Decisions `M7-P1`..`M7-P4` |
 
 ## State of `main` after M4b (2026-11-18)
 
@@ -93,19 +94,19 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 
 ## What comes next
 
-### The first release, 0.1.0
+### 0.2.0: the client changes from the pilot
 
-[`docs/releasing.md`](../../releasing.md) is the procedure. The owner's one-time setup comes first, in the order its
-"First release, in order" section gives: make the repository public (provenance and the package's links need it), the
-GitHub environment `npm`, npm two-factor authentication, the release commit (`version` 0.1.0 and the changelog's
-`## 0.1.0 - YYYY-MM-DD` heading) green on `main`, the trusted publisher on npmjs.com (it expires unless used within two
-days), then the tag `v0.1.0`; afterwards disallow tokens and revoke every token.
+0.1.0 was published on 2026-11-19 and 0.1.1 on 2026-11-20. The pilot (an app on Bun, Hono, better-auth and Drizzle,
+built on 0.1.0 and run in production) asked for two client changes that are new public API, so they wait for 0.2.0:
 
-### The pilot
+- **A client-wide stop** (`M7-P3`): one call that refuses new uploads and cancels every running job of every route,
+  keeping the resume records, with the same stop on the React factory. Its regression covers a user change while
+  `/complete` runs.
+- **Request options for the upload server only** (`M7-P4`): headers or a `fetch` that reach `/upload`, `/sign`,
+  `/complete` and `/abort` and never a bucket `PUT`, so a bearer token keeps `XMLHttpRequest`'s progress.
 
-cloudrop in a real app on Bun, Hono, better-auth and Drizzle, following the [Hono guide](../../guide/hono.md) step by
-step; what it finds feeds a 0.x release. A copy of files into the origin-private file system, so a resume needs no new
-pick, stays deferred to a later opt-in (`M3-U65`).
+A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to a later opt-in
+(`M3-U65`).
 
 ### M6: the plugins
 
