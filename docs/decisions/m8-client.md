@@ -156,3 +156,15 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
 - **Status:** in force.
 - **Visible in:** `src/react/use-resumable.ts`, `src/react/types.ts`, `docs/guide/react.md`,
   `examples/vite-react/src/components/unfinished-uploads.tsx`.
+
+### M8-L9: the client reads only `aborted` and the abort event of a signal
+
+- **Decision:** the `headers` wait (`src/client/endpoints.ts`) checks `signal.aborted` and listens for `abort`; it calls
+  no `throwIfAborted()` and reads no `reason`. Its cancel rejects with the client's own error, kept only as a cause.
+- **Why:** older React Native ships the `abort-controller` polyfill, whose signal has only `aborted` and its events, so
+  `throwIfAborted()` threw a `TypeError` and every request with a `headers` function failed unsent with
+  `NETWORK_ERROR` there (found in the `M8-Q` client pass). The regression stands in a signal without both members.
+  The rest of the client already used only `aborted` and the event (`M3-U16`).
+- **If wrong:** none known; a cancelled header wait still answers `ABORTED`, and a timed-out one `NETWORK_ERROR`.
+- **Status:** in force.
+- **Visible in:** `src/client/endpoints.ts`, `src/client/endpoints-headers.test.ts`.

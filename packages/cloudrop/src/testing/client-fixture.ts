@@ -63,16 +63,21 @@ export function clientFixture<TRoutes extends Record<string, Route>>(
         )
       : server.fake.fetch(url, init);
 
+  // Reads only `aborted`, so a test can stand in for older React Native's AbortSignal, which has no throwIfAborted.
+  const stopIfAborted = (signal?: AbortSignal | null) => {
+    if (signal?.aborted) throw new DOMException("This operation was aborted", "AbortError");
+  };
+
   const fetch: ClientFetch = async (url, init) => {
     // A browser starts no request for a cancelled signal, and rejects one cancelled meanwhile with AbortError.
-    init.signal?.throwIfAborted();
+    stopIfAborted(init.signal);
     const label = labelOf(url, init);
     const nth = (counts.get(label) ?? 0) + 1;
     counts.set(label, nth);
     requests.push(label);
     const answer =
       (await fault?.({ label, nth, init, forward: (changed) => send(url, changed) })) ?? (await send(url, init));
-    init.signal?.throwIfAborted();
+    stopIfAborted(init.signal);
     return answer;
   };
 

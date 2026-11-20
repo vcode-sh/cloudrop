@@ -146,6 +146,24 @@ describe("the headers option", () => {
     });
   });
 
+  it("calls a function where AbortSignal has no throwIfAborted or reason, as on older React Native", async () => {
+    // The abort-controller polyfill older React Native ships gives a signal only `aborted` and its events.
+    class PolyfillController extends AbortController {
+      constructor() {
+        super();
+        Object.defineProperties(this.signal, { throwIfAborted: { value: undefined }, reason: { value: undefined } });
+      }
+    }
+    vi.stubGlobal("AbortController", PolyfillController);
+    const { seen, client } = page();
+    const { error } = await client({ headers: async () => ({ authorization: "Bearer rn" }) }).upload("files", note());
+
+    expect({ error, seen }).toEqual({
+      error: null,
+      seen: ["POST /upload Bearer rn", "PUT object null", "POST /complete Bearer rn"],
+    });
+  });
+
   it.for([
     { name: "a number", headers: 42 },
     { name: "a header name a browser refuses", headers: { "bad name": "x" } },

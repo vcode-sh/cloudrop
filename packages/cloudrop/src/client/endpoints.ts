@@ -64,11 +64,14 @@ function parseJson(text: string): unknown {
   }
 }
 
+// Older React Native's AbortSignal polyfill has only `aborted` and the abort event: no throwIfAborted, no reason.
+const cancelled = () => new Error("The request was cancelled or timed out before it was sent.");
+
 /** Rejects when `signal` fires, so a headers function that never settles cannot hold a request past its timeout. */
 const rejectOnAbort = (signal: AbortSignal): Promise<never> =>
   new Promise((_, reject) => {
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-    if (signal.aborted) reject(signal.reason);
+    signal.addEventListener("abort", () => reject(cancelled()), { once: true });
+    if (signal.aborted) reject(cancelled());
   });
 
 /** `given` with names in lower case, as Headers keeps them, and the client's content-type last: it cannot be replaced. */
@@ -111,7 +114,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch, serverHead
     let headers: Record<string, string> | undefined;
     try {
       // A request cancelled before it starts calls no headers function, which may refresh a token over the network.
-      controller.signal.throwIfAborted();
+      if (controller.signal.aborted) throw cancelled();
       // Inside the timeout and the caller's signal (M8-L6).
       headers =
         typeof serverHeaders === "function"
