@@ -5,7 +5,7 @@
 // proxy can sit in front.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type FileChooser } from "@playwright/test";
 import { storage } from "../lib/cloudrop";
 import { fileRows, leaveUnfinished, ORIGIN, routeBucket, signIn, storedKey, unfinishedList } from "./home-page";
 import { onDiskFile } from "./lab-page";
@@ -82,20 +82,27 @@ test("a 20 MiB file dropped on the zone uploads in three parts", async ({ page, 
 test("the same file chosen twice, by click and by Tab and Enter, uploads twice", async ({ page }, testInfo) => {
   // On disk and through the native chooser, where Chromium compares a new selection with the current one.
   const file = await onDiskFile(testInfo, 1);
+  // One listener for the whole test: Playwright intercepts a file chooser only while a listener is attached, and a
+  // one-shot waitForEvent attaches it again through a protocol round trip that the Enter below can beat, leaving the
+  // picker unintercepted and no event (reproduced 1 in 30 runs under load; microsoft/playwright#44143).
+  const choosers: FileChooser[] = [];
+  page.on("filechooser", (chooser) => choosers.push(chooser));
+  const nextChooser = async () => {
+    await expect.poll(() => choosers.length).toBe(1);
+    return choosers.shift() as FileChooser;
+  };
   await signIn(page);
 
-  const chooser = page.waitForEvent("filechooser");
   await page.getByText("Drop files here, or click to choose").click();
-  await (await chooser).setFiles(file.path);
+  await (await nextChooser()).setFiles(file.path);
   const first = await storedKey(fileRows(page, file.name).nth(0), "1.0 MiB", "bin");
   // Tab from the sign-in button reaches the hidden input, and Enter opens the picker. Chromium fires `cancel`, not
   // `change`, for an unchanged selection unless the page clears the input.
   await page.getByRole("button", { name: "Sign in as the demo user" }).focus();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Files to upload")).toBeFocused();
-  const again = page.waitForEvent("filechooser");
   await page.keyboard.press("Enter");
-  await (await again).setFiles(file.path);
+  await (await nextChooser()).setFiles(file.path);
   const second = await storedKey(fileRows(page, file.name).nth(1), "1.0 MiB", "bin");
 
   expect(second).not.toBe(first);
