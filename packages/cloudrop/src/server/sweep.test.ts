@@ -168,19 +168,32 @@ describe("api.sweep: expire", () => {
 });
 
 describe("api.sweep: cleanup", () => {
-  it("removes a late PUT of a revoked upload once 15 minutes have passed, and marks it cleaned", async () => {
+  it("removes a revoked upload's late PUTs until none can land, and only then marks it cleaned", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);
     await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
     await fixture.send(ticket.put, hello);
+    const sweep = async () => (await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned;
+    /** A sweep's count, then what the key holds and the row's status and cleaned_at after it. */
+    const sweepAndLook = async () => [
+      await sweep(),
+      (await fixture.storage.head(ticket.key)).data,
+      (await statuses(fixture))[ticket.id],
+    ];
     vi.setSystemTime(at(15 * 60_000));
-    expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned).toBe(0);
+    expect(await sweep()).toBe(0);
+    // Past the grace after the revoke, but a URL signed just before it could start a PUT until 15 minutes after it,
+    // and that PUT has the grace to land: the check is final 30 minutes after the revoke (M8-A4).
     vi.setSystemTime(at(15 * 60_000 + 1));
-    expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned).toBe(1);
-    expect([(await fixture.storage.head(ticket.key)).data, (await statuses(fixture))[ticket.id]]).toEqual([
-      null,
-      ["aborted", at(15 * 60_000 + 1)],
-    ]);
+    const early = await sweepAndLook();
+    await fixture.storage.put(ticket.key, "late", { type: "text/plain", metadata: { "cloudrop-id": ticket.id } });
+    vi.setSystemTime(at(30 * 60_000));
+    const settled = await sweepAndLook();
+
+    expect({ early, settled }).toEqual({
+      early: [0, null, ["aborted", null]],
+      settled: [1, null, ["aborted", at(30 * 60_000)]],
+    });
   });
 
   it("does nothing the second time, and two sweeps at once end each row once", async () => {

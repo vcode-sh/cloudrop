@@ -5,7 +5,7 @@
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
-import { readGrace, removeLeftovers } from "./leftovers.ts";
+import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
@@ -34,7 +34,7 @@ export interface SweepOptions {
 export interface SweepReport {
   /** Unfinished uploads ended as expired, with what they left removed. */
   expired: number;
-  /** Ended uploads whose late objects and parts were removed. */
+  /** Ended uploads whose late objects and parts were removed, counted once no upload URL can add more (M8-A4). */
   cleaned: number;
   /**
    * Rows that failed this time (a storage or database error, logged with the row's id). Each stays as it was and the
@@ -121,13 +121,20 @@ interface Sweeper {
   config: ServerConfig;
   store: CloudropStore<unknown>;
   report: SweepReport;
+  graceMs: number;
 }
 
-/** removeLeftovers for a sweep step, which stops at the first failure by throwing, then the row marked cleaned. */
-async function removeAndMark({ config, store }: Sweeper, record: FileRecord): Promise<void> {
+/**
+ * removeLeftovers for a sweep step, which stops at the first failure by throwing, then the row marked cleaned, but only
+ * once that check is final (M8-A4): a row that left pending less than 15 minutes before its end still has a URL that
+ * can put an object back, so it stays for the next sweep. Answers whether the row was marked.
+ */
+async function removeAndMark({ config, store, graceMs }: Sweeper, record: FileRecord): Promise<boolean> {
   const checked = await removeLeftovers(config, record);
   if (checked.error) throw checked.error;
+  if (checked.data.getTime() < settledAt(record, graceMs)) return false;
   await store.cleaned(record.id, checked.data);
+  return true;
 }
 
 /**
@@ -148,8 +155,7 @@ async function expire(sweeper: Sweeper, record: FileRecord): Promise<void> {
 }
 
 async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<void> {
-  await removeAndMark(sweeper, record);
-  sweeper.report.cleaned += 1;
+  if (await removeAndMark(sweeper, record)) sweeper.report.cleaned += 1;
 }
 
 /**
@@ -194,7 +200,7 @@ function listingFailed(report: SweepReport, handled: number, error: CloudropErro
 async function sweepOnce(config: ServerConfig, store: CloudropStore<unknown>, run: Run): Promise<Result<SweepReport>> {
   const { limit, graceMs, pass } = run;
   const report: SweepReport = { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null };
-  const sweeper: Sweeper = { config, store, report };
+  const sweeper: Sweeper = { config, store, report, graceMs };
   const now = Date.now();
   let budget = limit;
   let cursor = run.cursor;
