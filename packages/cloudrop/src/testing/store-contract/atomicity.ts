@@ -19,6 +19,10 @@ export function atomicityCases(suite: StoreSuite): void {
         ),
     },
     { method: "complete", act: (store) => store.complete("f-1", "claim-f-1", "{}", at(MINUTE)) },
+    {
+      method: "complete with replace",
+      act: (store) => store.complete("f-1", "claim-f-1", "{}", at(MINUTE), { replace: true }),
+    },
     { method: "end from completed to deleted", act: (store) => store.end("f-2", "completed", "deleted", at(MINUTE)) },
     { method: "revoke", act: (store) => store.revoke("u-1", at(MINUTE)) },
   ])("$method that fails at its usage write changes neither table", async ({ act }, ctx) => {

@@ -90,14 +90,26 @@ export function claimCases(suite: StoreSuite): void {
       updatedAt: at(2 * MINUTE),
     });
     const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = completed;
-    expect(await store.complete("f-1", "claim-a", '{"photoId":7}', at(2 * MINUTE))).toEqual({ changed: true, record });
+    expect(await store.complete("f-1", "claim-a", '{"photoId":7}', at(2 * MINUTE))).toEqual({
+      changed: true,
+      record,
+      replaced: [],
+    });
     expect(await rawFile("f-1")).toEqual(completed);
     const counted = [usageRow("u-1", { reservedBytes: 30, activeBytes: 100, files: 1, updatedAt: at(2 * MINUTE) })];
     expect(await raw.usage()).toEqual(counted);
     // A repeat is a replay: the stored row, and nothing counted twice.
-    expect(await store.complete("f-1", "claim-a", "{}", at(3 * MINUTE))).toEqual({ changed: false, record });
+    expect(await store.complete("f-1", "claim-a", "{}", at(3 * MINUTE))).toEqual({
+      changed: false,
+      record,
+      replaced: [],
+    });
     expect(await raw.usage()).toEqual(counted);
-    expect(await store.complete("missing", "claim-a", null, at(3 * MINUTE))).toEqual({ changed: false, record: null });
+    expect(await store.complete("missing", "claim-a", null, at(3 * MINUTE))).toEqual({
+      changed: false,
+      record: null,
+      replaced: [],
+    });
   });
 
   it("a claim lost to a later /complete can neither complete nor release the row", async () => {
@@ -106,7 +118,7 @@ export function claimCases(suite: StoreSuite): void {
     await store.claim("f-1", "claim-a", at(0), LEASE);
     await store.claim("f-1", "claim-b", at(LEASE + 1), LEASE);
     const lost = await store.complete("f-1", "claim-a", "{}", at(LEASE + 2));
-    expect(lost).toEqual({ changed: false, record: await store.get("f-1") });
+    expect(lost).toEqual({ changed: false, record: await store.get("f-1"), replaced: [] });
     expect(lost.record).toMatchObject({ status: "completing", claimedAt: at(LEASE + 1), result: null });
     expect(await store.release("f-1", "claim-a", at(LEASE + 2))).toBe(false);
     expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 100 })]);

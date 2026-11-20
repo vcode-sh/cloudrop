@@ -3,7 +3,7 @@
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { Logger } from "./plugins.ts";
-import type { ClaimOutcome, CloudropStore, FileRecord, Transition } from "./store.ts";
+import type { ClaimOutcome, CloudropStore, Completion, FileRecord, Transition } from "./store.ts";
 import type { UploadTokenPayload } from "./token.ts";
 
 export const storeUnavailable = (): CloudropError =>
@@ -29,7 +29,7 @@ export interface FileCalls {
   get(): Promise<Result<FileRecord | null>>;
   claim(claim: string, leaseMs: number): Promise<Result<ClaimOutcome>>;
   release(claim: string): Promise<Result<boolean>>;
-  complete(claim: string, result: string | null): Promise<Result<Transition>>;
+  complete(claim: string, result: string | null, replace: boolean): Promise<Result<Completion>>;
   end(from: "pending", to: "aborted" | "rejected"): Promise<Result<Transition>>;
 }
 
@@ -42,8 +42,8 @@ export function fileCalls(store: CloudropStore<unknown>, logger: Logger, token: 
     get: () => call("get", () => store.get(id)),
     claim: (claim: string, leaseMs: number) => call("claim", () => store.claim(id, claim, new Date(), leaseMs)),
     release: (claim: string) => call("release", () => store.release(id, claim, new Date())),
-    complete: (claim: string, result: string | null) =>
-      call("complete", () => store.complete(id, claim, result, new Date())),
+    complete: (claim: string, result: string | null, replace: boolean) =>
+      call("complete", () => store.complete(id, claim, result, new Date(), { replace })),
     end: (from, to) => call("end", () => store.end(id, from, to, new Date())),
   };
 }

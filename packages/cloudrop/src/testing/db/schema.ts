@@ -82,7 +82,7 @@ export function schemaStatements(dialect: Dialect, tables?: Partial<TableNames>)
     index(["status", "expires_at"]),
     index(["status", "claimed_at"]),
     index(["status", "cleaned_at", "ended_at"]),
-    index(["owner", "status"]),
+    index(["owner", "status", "created_at"]),
     index(["key"]),
     index(["route", "request_key"]),
     `CREATE TABLE ${qualified(schema, usage)} (

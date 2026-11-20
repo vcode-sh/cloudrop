@@ -27,7 +27,7 @@ model CloudropFile {
   @@index([status, expiresAt])
   @@index([status, claimedAt])
   @@index([status, cleanedAt, endedAt])
-  @@index([owner, status])
+  @@index([owner, status, createdAt])
   @@index([key])
   @@index([route, requestKey])
   @@map("cloudrop_files")

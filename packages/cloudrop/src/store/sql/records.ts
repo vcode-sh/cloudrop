@@ -102,7 +102,7 @@ export function toUsage(row: SqlRow | undefined): OwnerUsage {
   };
 }
 
-/** A `stale` cursor: the last row's time in milliseconds and its id, so the next page starts strictly after both. */
+/** A `stale` or `list` cursor: the last row's time in milliseconds and its id, so the next page starts strictly after both. */
 export function encodeCursor(time: Date, id: string): string {
   return `${time.getTime()}:${id}`;
 }
@@ -110,7 +110,7 @@ export function encodeCursor(time: Date, id: string): string {
 export function decodeCursor(cursor: string): { time: Date; id: string } {
   const match = /^(\d+):(.*)$/s.exec(cursor);
   if (!match?.[1] || match[2] === undefined) {
-    throw new Error("This sweep cursor was not made by the store. Start the sweep again with cursor null.");
+    throw new Error("This cursor was not made by the store. Start again with cursor null.");
   }
   return { time: new Date(Number(match[1])), id: match[2] };
 }

@@ -8,6 +8,7 @@ import type { FileStatus, NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { isUniqueViolation, runStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
+import { replacingComplete } from "./postgres-replace.ts";
 import type { SqlContext, StoreMethods } from "./reads.ts";
 import { RECORD_COLUMNS, toSafeInteger } from "./records.ts";
 
@@ -49,8 +50,10 @@ function superseding(files: string, key: string | null, who: string, at: string)
   return { cte, freed: "(SELECT coalesce(sum(size), 0) FROM superseded)" };
 }
 
-export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites {
+export function postgresWrites(context: SqlContext): GuardedWrites {
+  const { executor, tables } = context;
   const { files, usage } = tables;
+  const completeReplacing = replacingComplete(context);
 
   /**
    * Files and usage of one guarded transition, then the row: changed, or unchanged as found. `from` is the status the
@@ -165,14 +168,15 @@ export function postgresWrites({ executor, tables }: SqlContext): GuardedWrites 
       return claimOutcome(row?.claimed === true, row);
     },
 
-    async complete(id, claim, result, now) {
+    async complete(id, claim, result, now, options) {
+      if (options?.replace) return completeReplacing(id, claim, result, now);
       const b = binder("postgres");
       const at = b.time(now);
       const update = `UPDATE ${files} SET status = 'completed', result = ${b.text(result)}, completed_at = ${at},
         updated_at = ${at} WHERE id = ${b.text(id)} AND status = 'completing' AND claim = ${b.text(claim)}`;
       const set = `reserved_bytes = reserved_bytes - changed.size, active_bytes = active_bytes + changed.size,
         files = files + 1, updated_at = ${at}`;
-      return transitionRow(update, set, id, "completing", b);
+      return { ...(await transitionRow(update, set, id, "completing", b)), replaced: [] };
     },
 
     async end(id, from, to, now, options) {

@@ -246,7 +246,7 @@ describe("postgres only", () => {
     );
     expect(rows.map((row) => row.def)).toEqual([
       "CREATE INDEX cloudrop_files_key_idx ON cloudrop_files USING btree (key)",
-      "CREATE INDEX cloudrop_files_owner_status_idx ON cloudrop_files USING btree (owner, status)",
+      "CREATE INDEX cloudrop_files_owner_status_created_at_idx ON cloudrop_files USING btree (owner, status, created_at)",
       "CREATE UNIQUE INDEX cloudrop_files_pkey ON cloudrop_files USING btree (id)",
       "CREATE INDEX cloudrop_files_route_request_key_idx ON cloudrop_files USING btree (route, request_key)",
       "CREATE INDEX cloudrop_files_status_claimed_at_idx ON cloudrop_files USING btree (status, claimed_at)",
@@ -318,7 +318,7 @@ describe("sqlite only", () => {
       ORDER BY list.name`);
     expect(rows.map((row) => row.def)).toEqual([
       "cloudrop_files_key_idx (key)",
-      "cloudrop_files_owner_status_idx (owner, status)",
+      "cloudrop_files_owner_status_created_at_idx (owner, status, created_at)",
       "cloudrop_files_route_request_key_idx (route, request_key)",
       "cloudrop_files_status_claimed_at_idx (status, claimed_at)",
       "cloudrop_files_status_cleaned_at_ended_at_idx (status, cleaned_at, ended_at)",

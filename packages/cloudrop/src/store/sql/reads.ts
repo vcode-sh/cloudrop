@@ -18,7 +18,7 @@ export type StoreMethods = Omit<CloudropStore<never>, "transaction">;
 
 type SingleStatementMethods = Pick<
   StoreMethods,
-  "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "owners"
+  "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "list" | "owners"
 >;
 
 const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
@@ -87,6 +87,19 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
       const records = (await run(b.statement(sql))).map(toRecord);
       const timeOf = (record: FileRecord) => (kind === "expire" ? record.expiresAt : (record.endedAt ?? new Date(0)));
       const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(timeOf(last), last.id));
+      return { records: kept, cursor: next };
+    },
+
+    async list({ owner, status, route, limit, cursor }) {
+      const b = binder(dialect);
+      const start = cursor === null ? null : decodeCursor(cursor);
+      // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
+      const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE owner = ${b.text(owner)} AND status = ${b.text(status)}
+        ${route === null ? "" : `AND route = ${b.text(route)}`}
+        ${start ? `AND (created_at, ${byteOrder("id")}) < (${b.time(start.time)}, ${b.text(start.id)})` : ""}
+        ORDER BY created_at DESC, ${byteOrder("id")} DESC LIMIT ${b.integer(limit + 1)}`;
+      const records = (await run(b.statement(sql))).map(toRecord);
+      const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(last.createdAt, last.id));
       return { records: kept, cursor: next };
     },
 

@@ -10,7 +10,7 @@ import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
 import type { SqlContext, StoreMethods } from "./reads.ts";
-import { RECORD_COLUMNS } from "./records.ts";
+import { RECORD_COLUMNS, toRecord } from "./records.ts";
 
 type GuardedWrites = Pick<StoreMethods, "reserve" | "claim" | "complete" | "end" | "revoke" | "reconcile">;
 
@@ -27,11 +27,42 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
     return b.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)}`);
   };
 
-  /** Runs `[usage change?, files update, select]` and reads the transition from the last two. */
-  async function transitionBatch(counted: SqlStatement | null, update: SqlStatement, id: string) {
+  /** `[usage change?, files update returning its id, select]`: a transition's statements. */
+  const completion = (counted: SqlStatement | null, update: SqlStatement, id: string): SqlStatement[] => {
     const statements = [{ sql: `${update.sql} RETURNING id`, params: update.params }, select(id)];
-    const [updated, found] = (await executor.batch(counted ? [counted, ...statements] : statements)).slice(-2);
+    return counted ? [counted, ...statements] : statements;
+  };
+
+  /** Runs a transition's statements and reads the transition from the last two. */
+  async function transitionBatch(counted: SqlStatement | null, update: SqlStatement, id: string) {
+    const [updated, found] = (await executor.batch(completion(counted, update, id))).slice(-2);
     return transition((updated?.length ?? 0) > 0, found?.[0]);
+  }
+
+  /**
+   * complete's `replace`: the owner's other completed files on the route end as deleted, their usage first while they
+   * are still completed. Both statements require the new file to be completing with this claim, as the completion's
+   * own statements after them do, so the batch applies whole or not at all. A file without an owner matches nothing.
+   */
+  function replacedStatements(id: string, claim: string, now: Date): SqlStatement[] {
+    // The other completed files of f's owner on f's route.
+    const others = (what: string) => `(SELECT ${what} FROM ${files} AS o
+      WHERE o.owner = f.owner AND o.route = f.route AND o.status = 'completed' AND o.id <> f.id)`;
+    const counter = binder("sqlite");
+    const count = counter.statement(`UPDATE ${usage}
+      SET active_bytes = active_bytes - ${others("sum(o.size)")}, files = files - ${others("count(*)")},
+        updated_at = ${counter.time(now)}
+      FROM ${files} AS f WHERE f.id = ${counter.text(id)} AND f.status = 'completing' AND f.claim = ${counter.text(claim)}
+        AND ${usage}.owner = f.owner AND EXISTS ${others("1")}`);
+    const b = binder("sqlite");
+    const completing = (column: string) =>
+      `(SELECT ${column} FROM ${files} WHERE id = ${b.text(id)} AND status = 'completing' AND claim = ${b.text(claim)})`;
+    const end = b.statement(`UPDATE ${files} SET status = 'deleted', ended_at = ${b.time(now)},
+        updated_at = ${b.time(now)}
+      WHERE status = 'completed' AND id <> ${b.text(id)} AND owner = ${completing("owner")}
+        AND route = ${completing("route")}
+      RETURNING ${RECORD_COLUMNS}`);
+    return [count, end];
   }
 
   /** The usage `UPDATE` (or none, for `set` null) for the owner of file `id` while it is in `from`; f is that row. */
@@ -108,7 +139,8 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
       return claimOutcome((claimed?.length ?? 0) > 0, found?.[0]);
     },
 
-    async complete(id, claim, result, now) {
+    async complete(id, claim, result, now, options) {
+      const replacing = options?.replace ? replacedStatements(id, claim, now) : [];
       const counted = usageFor(
         "reserved_bytes = reserved_bytes - f.size, active_bytes = active_bytes + f.size, files = files + 1",
         id,
@@ -120,7 +152,11 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
       const update = b.statement(`UPDATE ${files} SET status = 'completed', result = ${b.text(result)},
         completed_at = ${b.time(now)}, updated_at = ${b.time(now)}
         WHERE id = ${b.text(id)} AND status = 'completing' AND claim = ${b.text(claim)}`);
-      return transitionBatch(counted, update, id);
+      if (replacing.length === 0) return { ...(await transitionBatch(counted, update, id)), replaced: [] };
+      const [, replaced = [], ...rest] = await executor.batch([...replacing, ...completion(counted, update, id)]);
+      const [updated, found] = rest.slice(-2);
+      const done = transition((updated?.length ?? 0) > 0, found?.[0]);
+      return { ...done, replaced: done.changed ? replaced.map(toRecord) : [] };
     },
 
     async end(id, from, to, now, options) {

@@ -70,6 +70,9 @@ export type Transition =
   /** Nothing changed: the row as it is now, or null when there is none. */
   | { changed: false; record: FileRecord | null };
 
+/** What `complete` did: the transition, and the files `replace` deleted in the same unit (none without it). */
+export type Completion = Transition & { replaced: FileRecord[] };
+
 /** An owner's counters, kept for every row with an owner whether or not a quota is set. */
 export interface OwnerUsage {
   /** Bytes of the owner's `pending` and `completing` rows. */
@@ -141,8 +144,20 @@ export interface CloudropStore<TTx = never> {
    * by the size, active bytes rise by it and files by one. Unchanged for any other row: a repeat answers the completed
    * row, a lost claim the row another `/complete` holds. `claim` and `claimed_at` stay as they were, recording which
    * claim completed the row.
+   *
+   * With `replace`, and when the row has an owner, the same unit also ends every other `completed` row of that owner on
+   * the row's route as `deleted` (`ended_at = now`, `cleaned_at` left null), releasing their active bytes and files, and
+   * answers them, as they are now, in `replaced`. Two such completions of one owner and route never both keep their
+   * previous files: the second sees the first's row as completed and replaces it. Without `replace`, or when nothing
+   * changed, `replaced` is empty.
    */
-  complete(id: string, claim: string, result: string | null, now: Date): Promise<Transition>;
+  complete(
+    id: string,
+    claim: string,
+    result: string | null,
+    now: Date,
+    options?: { replace?: boolean },
+  ): Promise<Completion>;
   /**
    * Moves a row from exactly `from` to `to` and sets `ended_at = now`; `cleaned: true` also sets `cleaned_at = now`.
    * Usage follows `from`: `pending` or `completing` releases the reserved bytes; `completed` releases the active bytes
@@ -166,6 +181,19 @@ export interface CloudropStore<TTx = never> {
     kind: "expire" | "cleanup";
     before: Date;
     claimedBefore: Date;
+    limit: number;
+    cursor: string | null;
+  }): Promise<{ records: FileRecord[]; cursor: string | null }>;
+  /**
+   * One page of an owner's rows in one status, newest first: by `created_at`, then id, both descending, and on `route`
+   * alone when it is not null. At most `limit` records; `cursor` continues after the previous page (keyset, so rows that
+   * leave the status between pages skip nothing) and is null on the last page. A cursor is `<milliseconds>:<id>`, the
+   * last row's `created_at` and id (the file API refuses any other before calling the store).
+   */
+  list(input: {
+    owner: string;
+    status: FileStatus;
+    route: string | null;
     limit: number;
     cursor: string | null;
   }): Promise<{ records: FileRecord[]; cursor: string | null }>;

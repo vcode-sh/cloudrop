@@ -1,7 +1,8 @@
 // The memory store's methods over its two maps, one per table. Each writing method runs inside `atomic`, which records
 // every row it writes so a failure can undo them (memory-store.ts).
 
-import type { ClaimOutcome, CloudropStore, FileRecord, FileStatus, OwnerUsage, Transition } from "../server/store.ts";
+import type { ClaimOutcome, CloudropStore, Completion, FileStatus, OwnerUsage, Transition } from "../server/store.ts";
+import { readMethods, toRecord } from "./memory-store-reads.ts";
 import type { RawFileRow, RawUsageRow } from "./store-rows.ts";
 
 export interface MemoryTables {
@@ -19,20 +20,6 @@ type Methods = Omit<CloudropStore<never>, "transaction">;
 
 const ZERO: OwnerUsage = { reservedBytes: 0, activeBytes: 0, files: 0 };
 const RESERVING: ReadonlySet<FileStatus> = new Set(["pending", "completing"]);
-const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
-
-function toRecord(row: RawFileRow): FileRecord {
-  const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = structuredClone(row);
-  return record;
-}
-
-/** A keyset page of `rows`, already sorted by `sortKey`: the rows after `cursor`, and the cursor of the next page. */
-function page<T>(rows: T[], sortKey: (row: T) => string, cursor: string | null, limit: number) {
-  const after = cursor === null ? rows : rows.filter((row) => sortKey(row) > cursor);
-  const records = after.slice(0, limit);
-  const last = records.at(-1);
-  return { records, cursor: after.length > limit && last ? sortKey(last) : null };
-}
 
 /** An owner's counters as its rows say they should be. */
 function countRows(rows: Iterable<RawFileRow>, owner: string): OwnerUsage {
@@ -47,9 +34,6 @@ function countRows(rows: Iterable<RawFileRow>, owner: string): OwnerUsage {
   }
   return counted;
 }
-
-// Fixed-width milliseconds, so the cursor's string order is the time order (until the year 2286).
-const timeKey = (time: Date | null, id: string): string => `${String(time?.getTime() ?? 0).padStart(13, "0")}:${id}`;
 
 export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   const { files, usage } = tables;
@@ -84,6 +68,7 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   };
 
   return {
+    ...readMethods(tables),
     reserve: ({ owner, limit, expiresAt, requestKey, files: accepted }, now) =>
       atomic("reserve", (write) => {
         if (accepted.length === 0) return [];
@@ -139,11 +124,6 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         return true;
       }),
 
-    get: async (id) => {
-      const row = files.get(id);
-      return row ? toRecord(row) : null;
-    },
-
     claim: (id, claim, now, leaseMs) =>
       atomic("claim", (write): ClaimOutcome => {
         const row = files.get(id);
@@ -165,14 +145,30 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         return true;
       }),
 
-    complete: (id, claim, result, now) =>
-      atomic("complete", (write): Transition => {
+    complete: (id, claim, result, now, options) =>
+      atomic("complete", (write): Completion => {
         const row = files.get(id);
-        if (row?.status !== "completing" || row.claim !== claim) return unchanged(id);
+        if (row?.status !== "completing" || row.claim !== claim) return { ...unchanged(id), replaced: [] };
+        const replaced =
+          options?.replace && row.owner !== null
+            ? [...files.values()].filter(
+                (other) =>
+                  other.owner === row.owner &&
+                  other.route === row.route &&
+                  other.status === "completed" &&
+                  other.id !== id,
+              )
+            : [];
+        const deleted = replaced.map(
+          (other): RawFileRow => ({ ...other, status: "deleted", endedAt: now, updatedAt: now }),
+        );
+        for (const other of deleted) write.file(other);
         const done: RawFileRow = { ...row, status: "completed", result, completedAt: now, updatedAt: now };
         write.file(done);
-        adjust(write, row.owner, { reservedBytes: -row.size, activeBytes: row.size, files: 1 }, now);
-        return { changed: true, record: toRecord(done) };
+        const freed = replaced.reduce((sum, other) => sum + other.size, 0);
+        const delta = { reservedBytes: -row.size, activeBytes: row.size - freed, files: 1 - replaced.length };
+        adjust(write, row.owner, delta, now);
+        return { changed: true, record: toRecord(done), replaced: deleted.map(toRecord) };
       }),
 
     end: (id, from, to, now, options) =>
@@ -196,22 +192,6 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         return revoked.length;
       }),
 
-    stale: async ({ kind, before, claimedBefore, limit, cursor }) => {
-      const cutoff = before.getTime();
-      const isWork =
-        kind === "expire"
-          ? (row: RawFileRow) =>
-              row.expiresAt.getTime() < cutoff &&
-              (row.status === "pending" ||
-                (row.status === "completing" && (row.claimedAt?.getTime() ?? 0) < claimedBefore.getTime()))
-          : (row: RawFileRow) =>
-              CLEANUP.has(row.status) && row.cleanedAt === null && (row.endedAt?.getTime() ?? 0) < cutoff;
-      const sortKey = (row: RawFileRow) => timeKey(kind === "expire" ? row.expiresAt : row.endedAt, row.id);
-      const rows = [...files.values()].filter(isWork).sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : 1));
-      const found = page(rows, sortKey, cursor, limit);
-      return { records: found.records.map(toRecord), cursor: found.cursor };
-    },
-
     cleaned: (id, now) =>
       atomic("cleaned", (write) => {
         const row = files.get(id);
@@ -229,10 +209,5 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         if (!same) write.usage({ owner, ...counted, updatedAt: new Date() });
         return !same;
       }),
-
-    owners: async (cursor, limit) => {
-      const found = page([...usage.keys()].sort(), (owner) => owner, cursor, limit);
-      return { owners: found.records, cursor: found.cursor };
-    },
   };
 }
