@@ -655,7 +655,8 @@ runs at once are safe.
   may have recorded it; `eraseOwner` removes it.
 - **`signal`** (an `AbortSignal`) stops a run before the next file, with `done: false`.
 - **`done` is about the moment it ran.** It reads the owner's unfinished and completed files in one statement before
-  it checks the ended ones, and again at the end, so a file that changes status while it runs is not missed. An
+  it checks the ended ones, so a file that changes status while it runs is not missed, and at the end it is not done
+  when any upload of the owner started after the run did, even one already cancelled. An
   `/upload` that passed `authorize` before you revoked the owner's access can still reserve a file after the last read;
   a run that sees it answers `waiting`. Revoke access first, and if a request may still be in flight, run it once more
   after it.
@@ -773,7 +774,7 @@ as required.
   `onComplete` again: one more reason to keep it idempotent in this mode.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.
-- **Bundle size.** The store paths add about 6.5 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
+- **Bundle size.** The store paths add about 6.7 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.
 
 ## Turning it on, or off, in a running app

@@ -165,6 +165,33 @@ describe("cloudrop.api.eraseOwner", () => {
     expect((await fixture.store.raw.files()).map((row) => row.status)).toEqual(["pending"]);
   });
 
+  it("is not done when an upload starts and is cancelled while it runs", async () => {
+    const base = memoryStore();
+    let started = false;
+    const fixture: Fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...base,
+          // Just after the run read the aborted files: an upload starts, its PUT lands, and its client cancels it. It
+          // is never live when the run reads the live statuses.
+          list: async (input) => {
+            const page = await base.list(input);
+            if (input.statuses.includes("aborted") && !started) {
+              started = true;
+              const ticket = await upload(fixture, "owned", false);
+              expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
+              await fixture.send(ticket.put, hello);
+            }
+            return page;
+          },
+        },
+      },
+    );
+    expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toMatchObject({ waiting: 1, done: false });
+    expect((await fixture.store.raw.files()).map((row) => row.status)).toEqual(["aborted"]);
+  });
+
   it("counts a file whose key it cannot check as failed, logs it, and is not done", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await upload(fixture, "owned");

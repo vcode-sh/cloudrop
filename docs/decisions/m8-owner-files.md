@@ -86,8 +86,10 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   `expired`, `deleted`) is read: a row is proven when it is not `failed` and its `cleaned_at` is at or after
   `settledAt` (`M8-A4`, with the run's `graceMs`, default 1 hour, at least 15 minutes); any other ended row has its
   leftovers removed (`removeLeftovers`: only the object whose `cloudrop-id` is the row's, and its multipart upload),
-  and is marked cleaned and counted `cleaned` once `settledAt` has passed, or counted `waiting` before. When nothing is
-  waiting by then, the live statuses are read once more. The answer is `{ revoked, deleted, cleaned, failed, waiting,
+  and is marked cleaned and counted `cleaned` once `settledAt` has passed, or counted `waiting` before (the time is
+  taken before the check, so a slow check never counts as one made after the settle time). When nothing is waiting by
+  then, the owner's newest row in any status is read, and counts as `waiting` when it was created at or after the
+  run's start; then the live statuses are read once more. The answer is `{ revoked, deleted, cleaned, failed, waiting,
   done }`, with `done` true when nothing failed, nothing is waiting and the signal did not stop the run. A storage or
   database error on one row is logged with the row's id and counted in `failed`; a failed listing answers the store's
   retryable `SERVER_ERROR`. `signal` is checked before the run, each page and each row.
@@ -102,16 +104,19 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   (only a new `/upload` adds a row), so the ended passes read a set that no longer changes. The first version read the
   eight statuses one at a time, the live ones last, and review reproduced a miss: a lease-mode completion whose
   `onComplete` threw handed its file back to `pending` between the `pending` and the `completing` read, the run said
-  done, and the client's retry then completed the file. The final live read keeps an upload that starts during the
-  ended passes from a `done`.
+  done, and the client's retry then completed the file. Re-review found that a final live read alone misses an upload
+  that starts and is cancelled during the ended passes (never live at a read, ended after its status was read); the
+  newest-row check catches any upload that started during the run, whatever its status. A reserve that began before
+  the run and commits during it is caught by the last live read while it is unfinished; the rest of that race is the
+  residual below.
 - **If wrong:** `done` speaks for the moment of the run: an `/upload` that passed `authorize` before the app revoked
   the owner's access can reserve a file after the last read. The guide says to revoke access first and run it once
   more if a request may still be in flight. Rows and the usage row stay (ended, and at zeros); an app whose erasure
   policy forbids keeping file names deletes them with its own SQL after `done`.
 - **Status:** in force. `src/server/erase.test.ts`, with fault probes: without the `failed` rule the stuck completion's
   object stays; without the live reads an upload started mid-run is missed; without the settle wait a late `PUT`
-  survives a run that said done. The release race and the URL-life boundary were each seen failing on the first
-  version before the fix.
+  survives a run that said done. The release race, the URL-life boundary and the upload cancelled mid-run were each
+  seen failing before their fix.
 - **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
 
 ### M8-A6: `replace: true` keeps one file per owner on a route

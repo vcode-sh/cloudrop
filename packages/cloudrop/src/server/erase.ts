@@ -55,6 +55,7 @@ const PAGE = 100;
 const LIVE: readonly FileStatus[] = ["pending", "completing", "completed"];
 /** Read after the live statuses, one at a time, as ended rows never change status again. */
 const ENDED: readonly FileStatus[] = ["aborted", "rejected", "failed", "expired", "deleted"];
+const EVERY: readonly FileStatus[] = [...LIVE, ...ENDED];
 
 function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSignal | undefined }> {
   const options = given ?? {};
@@ -83,6 +84,8 @@ async function deleteCompleted({ config, store, report }: Eraser, record: FileRe
 async function checkEnded({ config, store, graceMs, report }: Eraser, record: FileRecord): Promise<void> {
   const settled = settledAt(record, graceMs);
   if (record.status !== "failed" && record.cleanedAt !== null && record.cleanedAt.getTime() >= settled) return;
+  // Taken before the check: a check that only finishes after the settle time did not look after it.
+  const checkedAt = Date.now();
   const removed = await removeLeftovers(config, record);
   if (removed.error) {
     config.logger.error(
@@ -92,7 +95,7 @@ async function checkEnded({ config, store, graceMs, report }: Eraser, record: Fi
     report.failed += 1;
     return;
   }
-  if (Date.now() < settled) {
+  if (checkedAt < settled) {
     report.waiting += 1;
     return;
   }
@@ -138,6 +141,36 @@ const wait = async ({ report }: Eraser): Promise<void> => {
   report.waiting += 1;
 };
 
+/** Each pass in turn. False when the signal stopped the run. */
+async function runPasses(
+  eraser: Eraser,
+  passes: readonly (readonly [readonly FileStatus[], Handler])[],
+): Promise<Result<boolean>> {
+  for (const [statuses, handle] of passes) {
+    const finished = await eachRow(eraser, statuses, handle);
+    if (finished.error || !finished.data) return finished;
+  }
+  return ok(true);
+}
+
+/**
+ * The last reads, when nothing is waiting yet. The owner's newest file in any status: one created since the run
+ * started is an upload that began while it went on, even one already cancelled after its status was read. Then the
+ * live statuses once more, for an /upload whose reserve began just before the run and committed during it. One that
+ * starts after these reads is the race the guide describes.
+ */
+async function lastReads(eraser: Eraser, startedAt: number): Promise<Result<boolean>> {
+  const { config, store, owner, report } = eraser;
+  if (report.waiting > 0) return ok(true);
+  const newest = await storeCall(config.logger, `list the newest file of ${owner}`, () =>
+    store.list({ owner, statuses: EVERY, route: null, limit: 1, cursor: null }),
+  );
+  if (newest.error) return newest;
+  if ((newest.data.records[0]?.createdAt.getTime() ?? 0) < startedAt) return eachRow(eraser, LIVE, wait);
+  report.waiting += 1;
+  return ok(true);
+}
+
 export async function eraseOwner(
   config: ServerConfig,
   store: CloudropStore<unknown>,
@@ -149,6 +182,7 @@ export async function eraseOwner(
   if (options.error) return options;
   const report: EraseReport = { revoked: 0, deleted: 0, cleaned: 0, failed: 0, waiting: 0, done: false };
   if (options.data.signal?.aborted) return ok(report);
+  const startedAt = Date.now();
   const revoked = await storeCall(config.logger, `revoke the uploads of ${owner}`, () =>
     store.revoke(owner, new Date()),
   );
@@ -158,22 +192,12 @@ export async function eraseOwner(
   // The proof rests on this order. Once one read finds none of the owner's files live, none can end after it (only a
   // new /upload adds files), so the ended passes see every ended file. Reading the live statuses one at a time would
   // miss a file that moves between two of them, such as a completion that fails and hands its file back.
-  const passes: readonly (readonly [readonly FileStatus[], Handler])[] = [
+  const ran = await runPasses(eraser, [
     [["completed"], deleteCompleted],
     [LIVE, wait],
     ...ENDED.map((status) => [[status], checkEnded] as const),
-  ];
-  for (const [statuses, handle] of passes) {
-    const finished = await eachRow(eraser, statuses, handle);
-    if (finished.error) return finished;
-    if (!finished.data) return ok(report);
-  }
-  // Once more at the end, when nothing is waiting yet: an upload that started during the ended passes keeps the run
-  // from done. One that starts after this read is the race the guide describes.
-  if (report.waiting === 0) {
-    const finished = await eachRow(eraser, LIVE, wait);
-    if (finished.error) return finished;
-    if (!finished.data) return ok(report);
-  }
-  return ok({ ...report, done: report.failed === 0 && report.waiting === 0 });
+  ]);
+  const finished = ran.error || !ran.data ? ran : await lastReads(eraser, startedAt);
+  if (finished.error) return finished;
+  return ok({ ...report, done: finished.data && report.failed === 0 && report.waiting === 0 });
 }

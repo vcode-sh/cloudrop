@@ -62,7 +62,8 @@ export async function removeDeleted(
   store: CloudropStore<unknown>,
   record: FileRecord,
 ): Promise<Result<void>> {
+  const checkedAt = Date.now();
   const removed = await removeLeftovers(config, record);
-  if (removed.error || Date.now() < settledAt(record, DEFAULT_GRACE_MS)) return removed;
+  if (removed.error || checkedAt < settledAt(record, DEFAULT_GRACE_MS)) return removed;
   return storeCall(config.logger, `mark file ${record.id} cleaned`, () => store.cleaned(record.id, new Date()));
 }

@@ -185,7 +185,7 @@ export interface CloudropStore<TTx = never> {
     cursor: string | null;
   }): Promise<{ records: FileRecord[]; cursor: string | null }>;
   /**
-   * One page of an owner's rows in any of `statuses` (at least one), newest first: by `created_at`, then id, both
+   * One page of an owner's rows in any of `statuses` (none: an empty page), newest first: by `created_at`, then id, both
    * descending, and on `route` alone when it is not null. One page is read in one statement, so a row in one of the
    * statuses when it runs is on it or on a later page, whatever status changes happen meanwhile. At most `limit`
    * records; `cursor` continues after the previous page (keyset, so rows that leave the statuses between pages skip

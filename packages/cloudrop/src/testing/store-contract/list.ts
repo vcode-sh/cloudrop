@@ -48,6 +48,8 @@ export function listCases(suite: StoreSuite): void {
     const statuses = ["pending", "completing", "completed"] as const;
     const page = await store.list({ owner: "u-1", statuses, route: null, limit: 10, cursor: null });
     expect(ids(page)).toEqual(["f-open", "f-claimed", "f-done"]);
+    const none = await store.list({ owner: "u-1", statuses: [], route: null, limit: 10, cursor: null });
+    expect(none).toEqual({ records: [], cursor: null });
   });
 
   it("list with a route answers only that route's rows", async () => {

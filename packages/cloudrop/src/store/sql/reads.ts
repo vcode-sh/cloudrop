@@ -91,6 +91,8 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     },
 
     async list({ owner, statuses, route, limit, cursor }) {
+      // `IN ()` is not SQL: no status, no rows.
+      if (statuses.length === 0) return { records: [], cursor: null };
       const b = binder(dialect);
       const start = cursor === null ? null : decodeCursor(cursor);
       // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
