@@ -22,6 +22,9 @@ uses one of these prefixes instead.
 | `M4-E<n>` | M4b: the examples and the guidance for building an upload UI on the hooks (no shadcn registry). `M4-E1` to `M4-E19` are the Next example's home page and the "Build your upload UI" guide; the Hono and Vite React examples number from `M4-E20`; the integration round from `M4-E28`; the final fix round from `M4-E29`. | [m4-dx.md](m4-dx.md) |
 | `M5-T<n>` | M5, the database store: the design's decisions `M5-T1` to `M5-T15` under their own numbers, then execution rulings from 16 upward; after M5, the `/upload` idempotency key from `M5-T100`, `tables.schema` from `M5-T120` and M4b's millisecond timestamps from `M5-T130`. | [m5-store.md](m5-store.md) |
 | `M7-P<n>` | Patch releases after 0.1.0, from what applications built on the published package reported: 0.1.1's R2 `HEAD` fix and sign-out recipe (`M7-P1`, `M7-P2`), and the client changes decided for 0.2.0 (`M7-P3`, `M7-P4`). | [m7-patches.md](m7-patches.md) |
+| `M8-L<n>` | 0.2.0, the client lifecycle: the client-wide stop and the request options for the upload server only (`M7-P3`, `M7-P4`), and the React bindings that follow. | [m8-client.md](m8-client.md) |
+| `M8-A<n>` | 0.2.0, the owner file API: listing an owner's files, erasing an owner, one file per owner on a route, and a sweep of every page in one call. | [m8-owner-files.md](m8-owner-files.md) |
+| `M8-Q<n>` | 0.2.0, the code-quality pass: simplifications and newer platform APIs that change no behaviour. | [m8-quality.md](m8-quality.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 
