@@ -243,6 +243,92 @@ again. It resolves `{ data: { aborted }, error }`; on an error, such as no conne
 `/abort`, and reads the list again; call it at sign-out. Either one also makes every other `useResumable` of the
 factory read its list again, such as a badge that counts every route's uploads. Neither needs the client itself.
 
+## Signed-in users
+
+The module-level factory of [Set up](#set-up) suits an app without accounts. An app where users sign in needs a client
+per user, created with the user's id as its `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client
+for everyone would list one user's unfinished uploads to the next user of the browser. Create each user's client and
+hooks once and provide them in a context keyed by the user:
+
+```tsx
+// lib/upload.ts
+"use client";
+import { createCloudropClient } from "cloudrop/client";
+import { createUploadHooks } from "cloudrop/react";
+import { createContext, useCallback, useContext, useEffect } from "react";
+import type { cloudrop } from "./cloudrop"; // a type import
+
+function createUploads(userId: string) {
+  const client = createCloudropClient<typeof cloudrop>({ namespace: userId });
+  return { client, ...createUploadHooks<typeof cloudrop>({ client }) };
+}
+export type Uploads = ReturnType<typeof createUploads>;
+
+const byUser = new Map<string, Uploads>();
+export function uploadsFor(userId: string): Uploads {
+  const known = byUser.get(userId) ?? createUploads(userId);
+  byUser.set(userId, known);
+  return known;
+}
+export const UploadsContext = createContext(uploadsFor(""));
+export const useUploads = () => useContext(UploadsContext);
+
+/** Cancels every upload of the user's routes. Name each route your app uploads to. */
+export function useStopUploads() {
+  const { useUpload } = useUploads();
+  const stopAvatar = useUpload("avatar").abort;
+  const stopDocuments = useUpload("documents").abort;
+  return useCallback(() => {
+    stopAvatar();
+    stopDocuments();
+  }, [stopAvatar, stopDocuments]);
+}
+
+/** Rendered inside the keyed provider: when the user changes, the last user's uploads stop. */
+export function StopUploadsOnUserChange() {
+  const stop = useStopUploads();
+  useEffect(() => stop, [stop]);
+  return null;
+}
+```
+
+```tsx
+// The app's root: keyed by the user, so a new user's components mount with that user's hooks.
+const userId = useSession().data?.user.id ?? ""; // your auth library's session
+// React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
+<UploadsContext key={userId} value={uploadsFor(userId)}>
+  <StopUploadsOnUserChange />
+  {/* the app */}
+</UploadsContext>;
+```
+
+Sign out in this order:
+
+```tsx
+const { client } = useUploads();
+const stopUploads = useStopUploads();
+
+async function signOut() {
+  stopUploads(); // first: a file that gets its ticket after forget() saves a new record
+  await client.forget(); // deletes the user's unfinished uploads and the tokens they hold
+  await auth.signOut(); // your auth library's sign-out
+}
+```
+
+- **Stop before you forget.** `forget()` deletes records and stops nothing (see
+  [Resume](resume.md#namespace-and-sign-out)). An upload still waiting for its ticket would ask `/upload` after
+  `forget()`, save a new record, and, once the session cookie changed, ask with the next user's session.
+- **`abort()` cancels.** Each file's `/abort` is sent with the file's own upload token, so it reaches the server
+  whoever is signed in by then. A file whose `/complete` may already have finished is kept, not deleted.
+- **Keep the hooks per user.** A factory keeps its uploads in memory, so `uploadsFor` returns the same one when the same
+  user signs in again in this page, and a component that unmounts finds its files again on its next mount.
+- **A user who changes without signing out here,** such as a sign-in in another tab, remounts the keyed provider once
+  this tab's session hook sees the change, and `StopUploadsOnUserChange` stops the last user's uploads then. The cookie
+  changed earlier, when the other tab signed in: an `/upload` this tab sends in between, for a queued file or a retry,
+  goes with the new user's session, and the file becomes that user's.
+- **`useStopUploads` subscribes to each route** it names, so the component that calls it renders again on every
+  progress update of those routes. Keep it in a small component, as the sign-out button above is.
+
 ## Build your upload UI
 
 cloudrop ships no components. A ready-made upload widget would bring its own look and icon set into your app, and the

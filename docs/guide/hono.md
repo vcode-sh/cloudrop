@@ -193,7 +193,10 @@ export const useUploads = () => useContext(UploadsContext);
 // apps/web/src/app.tsx: keyed by the user, so a new user's components mount with that user's hooks.
 const userId = authClient.useSession().data?.user.id ?? "";
 // React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
-<UploadsContext key={userId} value={uploadsFor(userId)}>{/* the app */}</UploadsContext>;
+<UploadsContext key={userId} value={uploadsFor(userId)}>
+  <StopUploadsOnUserChange /> {/* from Signed-in users in the React guide */}
+  {/* the app */}
+</UploadsContext>;
 
 // In a component:
 const { useUpload } = useUploads();
@@ -209,9 +212,11 @@ const { files, getInputProps } = useUpload("attachments", { multiple: true });
   user still finds them on their next sign-in. The namespace is fixed when the client is created, which is why the app
   keys the context by the user: one module-level client, without a namespace, would show every user's records to
   whoever signs in next. The cost is a context and a component remount when the user changes.
-- Call `useUploads().client.forget()` before signing out as well: the namespace hides the records, `forget()` deletes
-  them and the upload tokens they hold. It forgets every unfinished upload of that user, on every route, and aborts
-  none.
+- At sign-out, cancel the user's uploads on every route, then call `useUploads().client.forget()`: the namespace hides
+  the records, `forget()` deletes them and the upload tokens they hold, and aborts none. Cancelling first keeps a file
+  that gets its ticket afterwards from saving a new record. `useStopUploads` in
+  [Signed-in users](react.md#signed-in-users) cancels them, and `StopUploadsOnUserChange` also stops the last user's
+  uploads when the user changes without a sign-out on this page; the example's `src/lib/upload.ts` has both.
 - To drop one unfinished upload, call `useResumable().discard(upload)`: the server aborts it, which with the store
   ends its row and frees the bytes it reserved, and the browser deletes its record
   ([Discard one upload](resume.md#discard-one-upload)). The example's panel has Discard per row and Discard all, each

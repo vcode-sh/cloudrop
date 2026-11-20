@@ -4,18 +4,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-import { type Uploads, useUploads } from "@/lib/upload";
+import { type Uploads, useStopUploads, useUploads } from "@/lib/upload";
 
 /** Sign-up and sign-in with email and password (a demo: no email is sent), or the signed-in user with sign-out. */
 export function AuthPanel({ email }: { email: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const { client } = useUploads();
+  const stopUploads = useStopUploads();
 
   if (email) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span>Signed in as {email}</span>
-        <Button variant="outline" size="sm" onClick={() => void signOut(client)}>
+        <Button variant="outline" size="sm" onClick={() => void signOut(client, stopUploads)}>
           Sign out
         </Button>
       </div>
@@ -61,11 +62,13 @@ export function AuthPanel({ email }: { email: string | null }) {
 }
 
 /**
- * Sign-out forgets the user's unfinished uploads first: their records hold upload tokens, which need not outlive the
- * session on a shared browser (the namespace already hides them from the next user). The reload drops the cached
- * queries.
+ * Sign-out cancels the user's uploads, then forgets their unfinished ones: the records hold upload tokens, which need
+ * not outlive the session on a shared browser (the namespace already hides them from the next user). Cancelling first
+ * keeps a file that gets its ticket after forget() from saving a new record. Each cancel's /abort is sent with
+ * keepalive, so the reload, which drops the cached queries, does not stop it.
  */
-async function signOut(client: Uploads["client"]) {
+async function signOut(client: Uploads["client"], stopUploads: () => void) {
+  stopUploads();
   await client.forget();
   await authClient.signOut();
   window.location.reload();

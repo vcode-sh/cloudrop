@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
 import { queryClientFor } from "@/lib/orpc";
-import { UploadsContext, uploadsFor } from "@/lib/upload";
+import { StopUploadsOnUserChange, UploadsContext, uploadsFor } from "@/lib/upload";
 import { AuthPanel } from "./components/auth-panel";
 import { AvatarPicker } from "./components/avatar-picker";
 import { DropZone } from "./components/drop-zone";
@@ -17,6 +17,7 @@ export function App() {
   // files in memory.
   return (
     <UploadsContext key={userId} value={uploadsFor(userId)}>
+      <StopUploadsOnUserChange />
       <QueryClientProvider client={queryClientFor(userId)}>
         <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
           <header className="flex flex-wrap items-center justify-between gap-4">

@@ -295,3 +295,16 @@ test("the next user of the browser never lists the last one's unfinished upload,
   await signIn(page, first);
   await expect(unfinished).toHaveText([/^theirs\.bin, 10\.0 MB/]);
 });
+
+test("Sign out during a multipart upload ends its row as aborted", async ({ page }, testInfo) => {
+  const path = await fileOnDisk(testInfo, "left.bin", 20 * MIB);
+  const email = await signUp(page);
+  await uploadPartOneOnly(page, path);
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  // After the reload: the held PUTs died with the old page.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  // Forgetting alone would leave the row pending, holding its bytes against the quota until a sweep.
+  await expect.poll(() => storedStatuses(email)).toEqual({ "left.bin": "aborted" });
+});

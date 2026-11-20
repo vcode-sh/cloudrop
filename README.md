@@ -19,8 +19,9 @@ what fails, shows progress, and picks up where it left off after a reload.
   sent again, an expired link is renewed, and after a reload or a closed tab only the missing parts are sent.
 - **R2 first.** Built and tested against real Cloudflare R2, with what R2 actually does recorded in
   [`docs/research`](docs/research/r2-spike-findings.md). Any S3-compatible service works through `s3()`.
-- **An optional database store.** A row per upload before anything is signed, `onComplete` once per file, a quota per
-  user that concurrent uploads cannot overshoot, revocation, and a sweep for abandoned uploads. Adapters for Postgres,
+- **An optional database store.** A row per upload before anything is signed, `onComplete` once per file under a lease
+  (exactly once for its writes through `tx` on Postgres with `transaction: true`), a quota per user that concurrent uploads cannot overshoot,
+  revocation, and a sweep for abandoned uploads. Adapters for Postgres,
   SQLite, Cloudflare D1, Drizzle and Prisma.
 - **Headless React hooks.** `useUpload` and `useResumable` give you state and controls, typed from your server's
   routes; you bring the UI.
@@ -233,8 +234,11 @@ export const cloudrop = createCloudrop({
 ```
 
 With a store, `onComplete` runs once per file, each owner's files count toward a quota, `api.revokeUploads` stops a
-signed-out user's uploads, and `api.sweep` cleans up after abandoned ones. The tables, every adapter and what each mode
-guarantees: [Database store](docs/guide/store.md).
+signed-out user's uploads, and `api.sweep` cleans up after abandoned ones. "Once" has exceptions: a crash, a throw or a
+run longer than `completionLeaseMs` runs it again, and only writes through `tx` on Postgres with `transaction: true`
+commit exactly once. Keep an email or a webhook in `onComplete` idempotent, or send it from `afterComplete`, which runs
+at most once and best effort. The tables, every adapter and what each mode guarantees:
+[Database store](docs/guide/store.md#what-it-guarantees).
 
 ## Examples
 

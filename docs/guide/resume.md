@@ -160,7 +160,9 @@ Call `forget()` at sign-out:
 - It deletes the namespace's records and resolves `{ data: { forgotten }, error }`, counting the records it deleted,
   expired ones included.
 - `forget({ all: true })` deletes every record of this origin. Any other argument is `INVALID_INPUT`.
-- Uploads that are running keep going; abort their jobs to stop them.
+- Uploads that are running keep going. Abort their jobs first, then call `forget()`: a file that gets its ticket after
+  `forget()` saves a new record, and a file still waiting for its ticket asks `/upload` with whatever session the
+  browser holds by then. In React: [Signed-in users](react.md#signed-in-users).
 
 Without `forget()`, a signed-out user's unfinished uploads, tokens included, stay on the browser profile for up to 24
 hours, and another user signed in on the same profile and namespace could finish them. They stay the first user's files,
