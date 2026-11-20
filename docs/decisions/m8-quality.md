@@ -116,12 +116,14 @@ continue from `M8-Q1`.
   - `Uint8Array.prototype.toHex` (Chrome 140, Firefox 133, Safari 18.2, Node 25) for the hex in `client/launch.ts`
     and `client/fingerprint.ts`, as `M8-Q5` found for the server; `crypto.randomUUID` stays out for the reason
     `newRequestKey` gives (no secure context on a LAN page).
-  - `reportError` (Chrome 95, Firefox 93, Safari 15.4) for the listener errors `client/store.ts` and
-    `react/use-upload.ts` rethrow in a task (`M3-U8`): Node has none (`typeof reportError` is `undefined` on 24.22.2),
-    and it reports to the page's error event rather than throwing, so the unit lane could not see it.
+  - `reportError` (Chrome 95, Firefox 93, Safari 15.4) for the errors rethrown in a task: a listener's in
+    `client/store.ts` (`M3-U8`), and a wrong client option after a pick or a drop in `react/use-upload.ts`. Node has
+    none (`typeof reportError` is `undefined` on 24.22.2), and it reports to the page's error event rather than
+    throwing, so the unit lane could not see it.
   - `Map.prototype.getOrInsertComputed` (Chrome 145, Firefox 144, Safari 26.2, Node 26) for `storeOf` in `react.ts`.
   - A shared helper for the controller that both a timeout and the caller's signal abort, used by `endpoints.ts` and
-    `transport.ts`: two copies, and `M3-U16` already removed one such helper; the simplify rule waits for a third.
+    `transport.ts`: two copies, and `M3-U16` replaced an earlier signal-combining helper with one listener per file; the simplify rule
+    waits for a third.
 - **Why:** each would raise the floor, break React Native or the unit lane on Node 24, or add a concept for two callers.
 - **If wrong:** revisit with the floor. Raising it to Safari 17.4 would allow `AbortSignal.any` and
   `Promise.withResolvers` together and save about fifteen lines.
@@ -131,7 +133,7 @@ continue from `M8-Q1`.
 ### M8-Q9: React APIs not adopted
 
 - **Decision:** `cloudrop/react` keeps `useInsertionEffect` for the latest render's route and options
-  (`react/use-upload.ts`, `M4-B`), `useState` for `discarding` (`react/use-resumable.ts`) and the per-handle wrappers
+  (`react/use-upload.ts`, `M4-B2`), `useState` for `discarding` (`react/use-resumable.ts`) and the per-handle wrappers
   in `react/upload-store.ts`.
 - **Why:** the peer range is `react >=18`. `useEffectEvent` is React 19.2 only, and its functions may be called only
   from effects, while the hook's `upload`, `pause` and the rest are event handlers a page calls and keeps by identity.
