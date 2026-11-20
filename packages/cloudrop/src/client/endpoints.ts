@@ -12,13 +12,16 @@ import type {
   UploadRequest,
 } from "../protocol/types.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
-import { aborted, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
+import { aborted, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
 export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export type Ticket = SingleTicket | MultipartTicket;
+
+/** Headers for the upload server only, or a function, possibly async, that gives them before each request (M8-L5). */
+export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 
 export interface Endpoints {
   /**
@@ -61,53 +64,87 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** Rejects when `signal` fires, so a headers function that never settles cannot hold a request past its timeout. */
+const firing = (signal: AbortSignal): Promise<never> =>
+  new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    if (signal.aborted) reject(signal.reason);
+  });
+
+/** `given` with names in lower case, as Headers keeps them, and the client's content-type last: it cannot be replaced. */
+const jsonHeaders = (given?: HeadersInit): Record<string, string> => ({
+  ...Object.fromEntries(new Headers(given)),
+  "content-type": "application/json",
+});
+
 /** A non-2xx answer without cloudrop's error body. A 429 page says the cause is load, not a wrong basePath (S-7). */
 const refusal = (status: number): CloudropError => (status === 429 ? serverBusy() : unreadableAnswer(status));
+
+interface PostOptions {
+  signal?: AbortSignal;
+  keepalive?: boolean;
+  timeoutMs?: number;
+}
 
 // The body's retryable and parts are the error's options.
 const toError = (body: ErrorBody): CloudropError => new CloudropError(body.code, body.message, body);
 
-export function createEndpoints(basePath: string, fetch: ClientFetch): Endpoints {
+export function createEndpoints(basePath: string, fetch: ClientFetch, serverHeaders?: ServerHeaders): Endpoints {
+  // Built once, so without a function no request waits before fetch: pagehide's keepalive /abort is sent within the
+  // event (M3-U33).
+  const fixedHeaders = jsonHeaders(typeof serverHeaders === "function" ? undefined : serverHeaders);
   /**
-   * POSTs `body` as JSON and reads a 2xx answer with `read`. Never rejects. No whole answer within `timeoutMs` is
+   * POSTs `body` as JSON and reads the whole answer within `timeoutMs`. Never rejects: no whole answer in time is
    * NETWORK_ERROR, as no answer is; ABORTED only when `signal` fired.
    */
-  async function post<T>(
+  async function send(
     endpoint: Endpoint,
     body: unknown,
-    {
-      signal,
-      keepalive,
-      timeoutMs = ASK_TIMEOUT_MS,
-    }: { signal?: AbortSignal; keepalive?: boolean; timeoutMs?: number },
-    read: (json: unknown, retryAfterMs: number) => T | null,
-  ): Promise<Result<T>> {
+    { signal, keepalive, timeoutMs = ASK_TIMEOUT_MS }: PostOptions,
+  ): Promise<Result<{ response: Response; text: string }>> {
     // Without AbortSignal.any (ruling M3-U19): one controller that the timeout and the caller's signal both abort.
     const controller = new AbortController();
     const stop = () => controller.abort();
     const timeout = setTimeout(stop, timeoutMs);
     signal?.addEventListener("abort", stop, { once: true });
     if (signal?.aborted) stop();
-    let response: Response;
-    let text: string;
+    let headers: Record<string, string> | undefined;
     try {
+      // Inside the timeout and the caller's signal: the function may refresh a token over the network (M8-L6).
+      headers =
+        typeof serverHeaders === "function"
+          ? jsonHeaders(await Promise.race([serverHeaders(), firing(controller.signal)]))
+          : fixedHeaders;
       // "include": a page on a trusted origin sends its session cookie, which authorize may read (S8).
-      response = await fetch(`${basePath}/${endpoint}`, {
+      const response = await fetch(`${basePath}/${endpoint}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(body),
         credentials: "include",
         signal: controller.signal,
         keepalive,
       });
       // A body cut off on the way counts as no answer: for /complete, the server may have finished.
-      text = await response.text();
-    } catch {
-      return fail(signal?.aborted ? aborted() : serverUnreachable());
+      return ok({ response, text: await response.text() });
+    } catch (cause) {
+      if (signal?.aborted) return fail(aborted());
+      return fail(headers ? serverUnreachable() : headersFailed(cause));
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", stop);
     }
+  }
+
+  /** As send(), then reads a 2xx answer with `read`. Never rejects. */
+  async function post<T>(
+    endpoint: Endpoint,
+    body: unknown,
+    options: PostOptions,
+    read: (json: unknown, retryAfterMs: number) => T | null,
+  ): Promise<Result<T>> {
+    const sent = await send(endpoint, body, options);
+    if (sent.error) return sent;
+    const { response, text } = sent.data;
     const json = parseJson(text);
     const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
     if (!response.ok) {

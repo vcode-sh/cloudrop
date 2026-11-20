@@ -5,6 +5,7 @@
 // M4-F1).
 
 import type { CloudropError } from "../errors.ts";
+import { keptForResume } from "./close.ts";
 import { type Entry, held, settle, settled } from "./entry.ts";
 import { aborted, NEEDS_NEW_TICKET, withFile } from "./failures.ts";
 import { letGo } from "./persist.ts";
@@ -52,7 +53,7 @@ export function abortFile(context: UploadContext, entry: Entry): void {
   }
   context.leftovers.release(entry);
   settle(entry, "aborted", withFile(aborted(), entry));
-  if (!upload || upload.dropped) return;
+  if (!upload || upload.dropped || keptForResume(context, upload)) return;
   if (upload.mayBeComplete) letGo(context, upload);
   else void drop(context, upload);
 }
@@ -79,7 +80,9 @@ async function end(context: UploadContext, upload: Upload, error: CloudropError)
     else giveUp(context, upload);
     return;
   }
-  // A cancel ends the upload. Its /abort is waited for, and `done` with it, so the caller knows the server was told.
+  // A cancel ends the upload, unless close() keeps it for a resume. Its /abort is waited for, and `done` with it, so the
+  // caller knows the server was told.
+  if (keptForResume(context, upload)) return;
   if (mayBeComplete) letGo(context, upload);
   else await drop(context, upload);
 }

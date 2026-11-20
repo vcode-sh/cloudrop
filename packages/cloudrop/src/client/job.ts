@@ -5,6 +5,7 @@
 import { fail, type Result } from "../errors.ts";
 import { type Arguments, readArguments } from "./arguments.ts";
 import { createEntry, type Entry, pauseFile, resumeFile } from "./entry.ts";
+import { clientClosed } from "./failures.ts";
 import { abortFile } from "./file-run.ts";
 import { createJob, firstRun, type Job, resultOf } from "./job-run.ts";
 import { snapshotOf } from "./job-snapshot.ts";
@@ -36,15 +37,16 @@ export function startJob(context: UploadContext, route: unknown, files: unknown,
 
 /**
  * A job over the files of `args` that `run` starts and `retry` retries, as start() and resume() return it. A job
- * refused for its arguments has no files, and a snapshot that says so; its `done` and `retry()` answer with the refusal
- * (ruling M3-U37).
+ * refused for its arguments, or by a closed client (M8-L1), has no files, and a snapshot that says so; its `done` and
+ * `retry()` answer with the refusal (ruling M3-U37).
  */
 export function createUploadJob(
   context: UploadContext,
-  args: Result<Arguments>,
+  given: Result<Arguments>,
   run: (job: Job) => Promise<UploadResult<unknown>>,
   retry: Retry = retryFiles,
 ): UploadJob<unknown> {
+  const args = context.lifetime.closed ? fail(clientClosed()) : given;
   // `changed` is only called once the job runs, after the store below exists.
   const entries = (args.error ? [] : args.data.files).map((file) =>
     createEntry(file, context.nextRank(), (urgent) => store.changed(urgent)),

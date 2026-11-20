@@ -35,10 +35,11 @@ export type CloudropErrorCode =
   | "UPLOAD_REJECTED"
   | "ABORTED"
   | "NETWORK_ERROR"
-  | "UPLOAD_IN_USE";
+  | "UPLOAD_IN_USE"
+  | "CLIENT_CLOSED";
 
 /** Codes only the client produces; the server's status table has no entry for them. */
-export type ClientErrorCode = "UPLOAD_REJECTED" | "ABORTED" | "NETWORK_ERROR" | "UPLOAD_IN_USE";
+export type ClientErrorCode = "UPLOAD_REJECTED" | "ABORTED" | "NETWORK_ERROR" | "UPLOAD_IN_USE" | "CLIENT_CLOSED";
 
 export interface CloudropErrorOptions {
   retryable?: boolean;

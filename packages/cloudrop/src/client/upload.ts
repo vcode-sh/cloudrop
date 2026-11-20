@@ -6,6 +6,7 @@ import { fail, ok, type Result } from "../errors.ts";
 import { sizeOfPart } from "../part-size.ts";
 import type { CompleteResponse, MultipartTicket, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
+import type { Lifetime } from "./close.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import type { Entry } from "./entry.ts";
 import { aborted } from "./failures.ts";
@@ -44,6 +45,8 @@ export interface UploadContext {
    * refusal or its upload's unlock. resumable() leaves out every upload with a claim (M4-F22).
    */
   claims: Set<{ id: string }>;
+  /** Whether close() ran and the jobs it would stop (M8-L1): one object for every copy of the context. */
+  readonly lifetime: Lifetime;
 }
 
 /**

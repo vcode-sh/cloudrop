@@ -1,20 +1,23 @@
 // The cloudrop/client entry: createCloudropClient and the types a browser app annotates with (decision S4).
 
 import { isList } from "./client/arguments.ts";
+import { closeClient, createLifetime } from "./client/close.ts";
 import { discard } from "./client/discard.ts";
 import { type ClientFetch, createEndpoints } from "./client/endpoints.ts";
 import { giveUp } from "./client/file-run.ts";
 import { startJob } from "./client/job.ts";
 import { createLeftovers } from "./client/lifecycle.ts";
+import { type ClientOptions, readOptions } from "./client/options.ts";
 import { createPool } from "./client/pool.ts";
 import { createRecords } from "./client/records.ts";
 import { forget, resumable, resumeJob } from "./client/resume.ts";
 import { createPut } from "./client/transport.ts";
 import type { FileOutcome, ResumableUpload, UploadJob, UploadResult } from "./client/types.ts";
 import type { UploadContext } from "./client/upload.ts";
-import { configError, fail, ok, type Result } from "./errors.ts";
+import { fail, ok, type Result } from "./errors.ts";
 import type { CompleteResponse, InferableCloudrop, RouteMetadata, RouteName, RouteResult } from "./protocol/types.ts";
 
+export type { ClientOptions } from "./client/options.ts";
 export type {
   FileHandle,
   FileOutcome,
@@ -53,30 +56,6 @@ export type {
   UploadRequest,
   UploadResponse,
 } from "./protocol/types.ts";
-
-export interface ClientOptions {
-  /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */
-  basePath?: string;
-  /** Replaces the global fetch, for tests and runtimes that bring their own. */
-  fetch?: ClientFetch;
-  /**
-   * How many bucket PUTs this client sends at once, across all its uploads: 1 to 16, or "auto" (the default), which
-   * starts at 4, adds one while the bytes sent keep rising, up to 8, and halves on a network error or a busy bucket.
-   */
-  concurrency?: number | "auto";
-  /** Which PUTs go first when they wait for a connection: "added" (the default) or "smallest-first" by file size. */
-  order?: "added" | "smallest-first";
-  /**
-   * Keeps each unfinished multipart upload in the browser's IndexedDB, with its upload token, until the file ends, so
-   * that it can resume after a reload. Default true; false keeps nothing on disk.
-   */
-  persist?: boolean;
-  /**
-   * Keeps one signed-in user's unfinished uploads apart from another's in the same browser: pass the user's id. At most
-   * 256 characters; default "".
-   */
-  namespace?: string;
-}
 
 export interface UploadOptions<TMetadata = unknown> {
   /** Validated by the route's schema on the server. */
@@ -131,6 +110,14 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
   discard(upload: ResumableUpload<RouteName<TCloudrop>>): Promise<Result<{ aborted: boolean }>>;
   /** Deletes the namespace's unfinished uploads, which sign-out should do, or every one in this browser with `all`. */
   forget(options?: { all: true }): Promise<Result<{ forgotten: number }>>;
+  /**
+   * Stops the client for good, in any phase and as often as called: start(), upload() and resume() are refused with
+   * CLIENT_CLOSED, and every file of every route stops. A file that may have completed is kept. Without options, as
+   * when another user signed in in another tab, each multipart upload keeps its record and gets no /abort, so its user
+   * can resume it on a new client; `{ abort: true }`, at sign-out, cancels every file as job.abort() does, telling the
+   * server. The first call decides; resumable(), discard() and forget() keep working.
+   */
+  close(options?: { abort: true }): void;
 }
 
 /** A one-file job's result as that file's Result (ruling M3-U5). */
@@ -141,54 +128,16 @@ function oneFile(result: UploadResult<unknown>): Result<CompleteResponse<unknown
   return ok(outcome.result);
 }
 
-/** A path such as /api/cloudrop, or an absolute http(s) URL ending in one; no trailing slash, query or fragment (S17). */
-const BASE_PATH = /^(?:https?:\/\/[^/?#\s]+)?(?:\/[^/?#\s]+)+$/;
-
-/** The options with their defaults; a wrong one throws its configuration error (S17, M3-U41, M3-U42, M3-U79). */
-function readOptions(
-  options: ClientOptions | null,
-): Required<Omit<ClientOptions, "fetch">> & Pick<ClientOptions, "fetch"> {
-  // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
-  const {
-    basePath = "/api/cloudrop",
-    fetch,
-    concurrency = "auto",
-    order = "added",
-    persist = true,
-    namespace = "",
-  } = options ?? {};
-  if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
-    throw configError(
-      'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
-    );
-  }
-  if (fetch !== undefined && typeof fetch !== "function") throw configError("The fetch option must be a function.");
-  if (concurrency !== "auto" && !(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16)) {
-    throw configError('concurrency must be "auto" or a whole number from 1 to 16.');
-  }
-  if (order !== "added" && order !== "smallest-first") {
-    throw configError('order must be "added" or "smallest-first".');
-  }
-  if (typeof persist !== "boolean") throw configError("persist must be true or false.");
-  if (typeof namespace !== "string" || namespace.length > 256) {
-    throw configError("namespace must be a string of at most 256 characters, such as the signed-in user's id.");
-  }
-  if (typeof (fetch ?? globalThis.fetch) !== "function") {
-    throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
-  }
-  return { basePath, fetch, concurrency, order, persist, namespace };
-}
-
 export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: ClientOptions = {},
 ): CloudropClient<TCloudrop> {
-  const { basePath, fetch, concurrency, order, persist, namespace } = readOptions(options);
+  const { basePath, headers, fetch, concurrency, order, persist, namespace } = readOptions(options);
   // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
   // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling M3-U6).
   let rank = 0;
-  const endpoints = createEndpoints(basePath, send);
+  const endpoints = createEndpoints(basePath, send, headers);
   const context: UploadContext = {
     endpoints,
     put: createPut(fetch, send),
@@ -201,6 +150,7 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
     records: createRecords(persist),
     namespace,
     claims: new Set(),
+    lifetime: createLifetime(),
   };
   // The server's types reach the client through `import type` only, so the wire answer cannot be checked against them
   // at run time: the casts below give the route's result type to what the server sent.
@@ -224,5 +174,6 @@ export function createCloudropClient<TCloudrop extends InferableCloudrop = Infer
       resumeJob(context, upload, file, options) as UploadJob<RouteResult<TCloudrop, typeof upload.route>>,
     discard: (upload) => discard(context, upload),
     forget: (options) => forget(context, options),
+    close: (options) => closeClient(context, options?.abort === true),
   };
 }

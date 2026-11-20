@@ -36,6 +36,10 @@ export interface Job {
 
 const settledStatus = ({ status }: Entry) => status === "done" || status === "failed" || status === "aborted";
 
+/** No file can send again: each ended done or aborted, or failed where no retry() can send it again (M3-U29). */
+const ended = (entries: readonly Entry[], keepFailed: boolean) =>
+  entries.every(({ status }) => status === "done" || status === "aborted" || (status === "failed" && !keepFailed));
+
 /** Still sending, or failed and holding a ticket whose /abort the caller's signal would send. */
 const busy = (entry: Entry) =>
   !settledStatus(entry) ||
@@ -49,6 +53,8 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
   // adds the same listener once however often listen() runs, and removing one it does not hold does nothing.
   const idle = () => {
     if (!entries.some(busy)) args.signal.removeEventListener("abort", abort);
+    // close() stops the jobs in this set (M8-L2).
+    if (ended(entries, context.keepFailed)) context.lifetime.jobs.delete(job);
   };
   signal.addEventListener("abort", () => {
     for (const entry of entries) abortFile(context, entry);
@@ -86,6 +92,7 @@ export function createJob(context: UploadContext, args: Arguments, entries: read
     },
     idle,
   };
+  context.lifetime.jobs.add(job);
   return job;
 }
 

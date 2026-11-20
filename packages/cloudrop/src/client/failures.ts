@@ -21,6 +21,13 @@ export const withFile = (error: CloudropError, { id, file }: { id: string; file:
 export const aborted = (): CloudropError =>
   new CloudropError("ABORTED", "The upload was cancelled. Start it again to upload the file.");
 
+/** start(), upload() and resume() after close(), before any request (M8-L1). */
+export const clientClosed = (): CloudropError =>
+  new CloudropError(
+    "CLIENT_CLOSED",
+    "This upload client was closed, so it starts no more uploads. Use a new client, such as the one of the user who is signed in now.",
+  );
+
 // The next three end a resume() before any request (resume design §2.1); storageUnavailable, below, answers
 // resumable(), discard() and forget() when the browser's storage fails, never an upload.
 export const uploadInUse = (): CloudropError =>
@@ -64,6 +71,14 @@ export const serverUnreachable = (): CloudropError =>
   new CloudropError("NETWORK_ERROR", "The upload server could not be reached. Check the connection, then try again.", {
     retryable: true,
   });
+
+/** The headers option threw, rejected, gave what Headers refuses, or took longer than the request may (M8-L6). */
+export const headersFailed = (cause: unknown): CloudropError =>
+  new CloudropError(
+    "NETWORK_ERROR",
+    "The headers option gave no headers for a request to the upload server, so it was not sent. Check the function passed as headers, then try again.",
+    { retryable: true, cause },
+  );
 
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers
 // carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16"). A bucket
