@@ -376,6 +376,7 @@ DROP INDEX "cloudrop_files_owner_status_idx";
 ```
 
 On a large Postgres table, `CREATE INDEX CONCURRENTLY` (outside a transaction) avoids blocking uploads while it builds.
+With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in both statements.
 
 ### Tables in another schema
 
@@ -549,8 +550,13 @@ the row deleted but not cleaned up.
   take turns on a transaction-scoped advisory lock for the owner and route; SQLite and D1 have one writer at a time.
 - **What the hooks see.** `onComplete` runs before the completion is recorded, so the previous file is still
   completed there (`api.files` lists it). `afterComplete` runs after: the previous file's row is deleted and the removal
-  of its object was tried. Neither gets a new field; an app that keeps its own pointer, such as `users.avatar_key`, overwrites it in
-  `onComplete`, through `tx` so it commits with the replacement.
+  of its object was tried. Neither gets a new field.
+- **Read the kept file; do not keep a pointer of your own.** `api.files({ owner, route, limit: 1 })` answers the file
+  that survived. A pointer such as `users.avatar_key` written in `onComplete` can name the file that was deleted: without
+  `transaction: true`, `onComplete` runs before the completion is recorded and outside any lock, so two uploads at once
+  can set the pointer in one order and record their completions in the other. A pointer is safe only on Postgres with
+  `transaction: true`, written through `tx` by a statement that locks the owner's row (an `UPDATE users … WHERE id =`
+  does), so the two completions take turns from that statement on.
 - **It needs a store and `owner`**, and takes one file per `/upload`: `maxFiles` is 1, and `createCloudrop` refuses a
   replacing route without a store, without `owner`, or with another `maxFiles`, with `INVALID_CONFIG`. A file whose
   `owner` answered null replaces nothing.
@@ -724,7 +730,9 @@ failed, reported, cursor }`; pass `cursor` back to continue. It runs two passes:
 - **Cleanup:** an ended upload (`aborted`, `rejected`, `failed`, `expired` or `deleted`) not yet cleaned up, and ended
   more than `graceMs` ago, has its late parts and object removed, again only when the object is its own. This catches
   a `PUT` that landed after an `/abort`, an upload that could not start, and an expired one whose first cleanup
-  failed.
+  failed. The row is marked cleaned up, and counted in `cleaned`, only once no `PUT` can still land: `graceMs` after
+  its last upload URL ran out, which for a row ended within 15 minutes of leaving `pending` is up to 15 minutes later
+  than `graceMs` after its end. Until then each sweep checks its key again.
 
 `graceMs` (default 1 hour) must be at least 15 minutes, the life of an upload URL, so no new `PUT` can start once a
 row may be cleaned up. A failing row is logged, counted in `failed` and left for the next sweep; the rows after it are

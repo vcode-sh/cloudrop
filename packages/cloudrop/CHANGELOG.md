@@ -25,7 +25,7 @@ Every notable change to the `cloudrop` package. The format follows
   until it reports `done` (`M8-A5`).
 - **Route option `replace: true`** (needs a store and `owner`): one file per owner on the route, such as an avatar. The
   previous file is deleted in the same write that records the next one's completion, and of two completions at once
-  exactly one file survives (`M8-A6`).
+  exactly one file survives. Read the kept file with `api.files({ owner, route, limit: 1 })` (`M8-A6`).
 - **`api.sweep({ all: true, signal? })`** runs every page in one call and sums the reports; the store guide has cron
   recipes for Node and Cloudflare Workers (`M8-A7`).
 - Exported types `FilesOptions`, `FilesPage`, `EraseOptions`, `EraseReport` and `Completion`.
@@ -33,12 +33,14 @@ Every notable change to the `cloudrop` package. The format follows
 ### Changed
 
 - **Type-level breaks:** `CloudropErrorCode` and `ClientErrorCode` gain `CLIENT_CLOSED`, which breaks an exhaustive
-  `switch` over them; `CloudropClient` gains `close()`, which breaks a hand-written mock of it.
+  `switch` over them. New members break a hand-written mock: `CloudropClient.close()`, `UploadHooks.close()`,
+  `UseResumable.discarding`, and `FileApi`/`StoreFileApi`'s `files()` and `eraseOwner()`.
 - **A store written by hand** must implement the new `CloudropStore.list()`, and `complete()` takes `{ replace }` and
   answers `Completion` with `replaced`. Every shipped adapter does (`M8-A3`).
 - `api.deleteFile` deletes the object at once and marks the row cleaned only once a late `PUT` can no longer land
-  (about 1 h 15 min after completion); until then the sweep checks the key again. The sweep stamps `cleaned_at` with
-  the time its check started (`M8-A4`).
+  (about 1 h 15 min after completion); until then the sweep checks the key again. The sweep follows the same rule: it
+  marks an ended row cleaned, and counts it in `cleaned`, only once no upload URL of the row can still put an object
+  back, and stamps `cleaned_at` with the time its check started (`M8-A4`).
 - The React "Signed-in users" recipe, the guides and the Vite example use `close()` instead of each route's `abort`.
   "Send a bearer token" uses `headers`.
 
@@ -47,6 +49,11 @@ Every notable change to the `cloudrop` package. The format follows
 - A bearer token no longer needs a custom `fetch`, which moved bucket `PUT`s off `XMLHttpRequest` and its byte-by-byte
   progress.
 - A file still waiting for its ticket can no longer ask `/upload` after sign-out.
+- The sweep could mark a row cleaned up to 15 minutes before its last upload URL ran out when the row ended soon after
+  it left `pending` (an `/abort` or a revoke right after `/upload`), so a slow `PUT` landing then stayed in the bucket
+  (`M8-A4`).
+- Without a store, `/complete` sends `data: null` when `onComplete` returns a value JSON cannot carry (a function, a
+  Symbol); the answer used to have no `data`, which the client refused (`M8-Q34`).
 
 ### Migration
 
@@ -54,7 +61,8 @@ Every notable change to the `cloudrop` package. The format follows
   `CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at); DROP
   INDEX "cloudrop_files_owner_status_idx";` (`CONCURRENTLY` on a large Postgres table). Drizzle and Prisma users
   generate a migration; when drizzle-kit asks whether the new index renames the old one, answer that it is created.
-  Without it the store works, only slower for owners with many files (`M8-A2`).
+  With `tables.schema` or your own table names, use those names. Without the migration the store works, only slower
+  for owners with many files (`M8-A2`).
 
 ## 0.1.1 - 2026-11-20
 

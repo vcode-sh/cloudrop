@@ -73,6 +73,11 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   signs, and `/upload` signs after `reserve` without reading it again, so a URL may be signed a moment after the row
   left `pending`; that moment is a request's length, well inside the grace. The sweep keeps its own rule (`ended_at +
   graceMs`, with a `PUT` still under way after cleanup a documented cost); `eraseOwner` re-checks what it cleaned.
+  **Amended in the final review:** the sweep's cleanup marks a row cleaned only once `settledAt(record, graceMs)` has
+  passed too. Under its old rule a row ended within 15 minutes of leaving `pending` got its last check up to 15 minutes
+  early, so a slow `PUT` landing then survived with its row already cleaned, found only by `eraseOwner`, which also
+  checked every such row again on each run. Until `settledAt` each sweep removes what it finds and leaves `cleaned_at`
+  null, and `cleaned` counts a row once, when it is marked.
 - **If wrong:** a deletion within the hour after completion costs the sweep one more `HEAD`.
 - **Status:** in force. `src/server/store-api.test.ts` ("deleteFile marks a file cleaned once its URLs and the grace
   after them have passed") and the first case of `src/server/erase.test.ts`, at the millisecond on both sides.
@@ -135,7 +140,12 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   ("could not remove the replaced file … The sweep removes it later.") and the sweep's cleanup pass finishes it.
   `onComplete` sees the previous file still completed; `afterComplete` runs after its row is deleted and its object's
   removal was tried; neither context gains a field. Under a quota the owner needs room for both files until the new
-  one completes, since its bytes are reserved while the previous file still counts; the guide says so.
+  one completes, since its bytes are reserved while the previous file still counts; the guide says so. **Amended in
+  the final review:** the guide first told apps to keep their own pointer to the file in `onComplete`. Without
+  `transaction: true` that pointer follows the order the `onComplete` calls ran, while the kept file follows the order
+  the completions were recorded, and the two can differ (a probe left the pointer on the deleted file). The guide now
+  says to read the kept file with `api.files({ owner, route, limit: 1 })`, and that a pointer is safe only when written
+  through `tx` with `transaction: true` by a statement that locks the owner's row, as the Hono example's upsert does.
 - **Why:** one statement cannot do it on Postgres: under READ COMMITTED its snapshot predates the other completion's
   commit, so two completions at once would each keep their file (the contract's concurrency case fails that way when
   the lock is moved after the statement). The advisory lock is taken only by replacing completions, before any row

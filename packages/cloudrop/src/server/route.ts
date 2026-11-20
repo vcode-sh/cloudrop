@@ -105,11 +105,10 @@ export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchem
   /** "public" needs the storage's `publicUrl`. Default: "public" when the storage has one, otherwise "private". */
   visibility?: "public" | "private";
   /**
-   * With a store and `owner`: one file per owner, such as an avatar. When a file completes, the owner's previous
-   * completed files on this route are deleted in the same database write that records the completion, so two uploads
-   * at once leave exactly one; their objects are removed right after, and by the sweep if that fails. `onComplete` still
-   * sees the previous file; `afterComplete` runs once its row is deleted and its object's removal was tried. `maxFiles`
-   * is then 1. Under a quota the owner needs room for both files until the new one completes.
+   * With a store and `owner`: one file per owner, such as an avatar. The completion that records a new file deletes the
+   * owner's previous ones on this route in the same database write, so two uploads at once leave exactly one; their
+   * objects are removed right after, and by the sweep if that fails. Read the kept file with `api.files`, not a pointer
+   * set in `onComplete` (store guide). `maxFiles` is then 1; under a quota the owner needs room for both files.
    */
   replace?: boolean;
   /**
