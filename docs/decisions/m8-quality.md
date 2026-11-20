@@ -128,3 +128,15 @@ continue from `M8-Q1`.
 - **Status:** in force.
 - **Visible in:** the files named above.
 
+### M8-Q9: React APIs not adopted
+
+- **Decision:** `cloudrop/react` keeps `useInsertionEffect` for the latest render's route and options
+  (`react/use-upload.ts`, `M4-B`), `useState` for `discarding` (`react/use-resumable.ts`) and the per-handle wrappers
+  in `react/upload-store.ts`.
+- **Why:** the peer range is `react >=18`. `useEffectEvent` is React 19.2 only, and its functions may be called only
+  from effects, while the hook's `upload`, `pause` and the rest are event handlers a page calls and keeps by identity.
+  `useOptimistic` is React 19 only. The wrappers in `upload-store.ts` (`pause: () => handle.pause()`) stay because
+  `{ client }` may be a caller's own `CloudropClient`, whose handles nothing promises to work without `this`.
+- **If wrong:** revisit once the peer range starts at React 19.2.
+- **Status:** in force.
+- **Visible in:** `src/react/use-upload.ts`, `src/react/use-resumable.ts`, `src/react/upload-store.ts`.
