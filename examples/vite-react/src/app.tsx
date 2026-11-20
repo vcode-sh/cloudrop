@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
 import { queryClientFor } from "@/lib/orpc";
-import { StopUploadsOnUserChange, UploadsContext, uploadsFor } from "@/lib/upload";
+import { UploadsContext, uploadsFor, useCloseOtherUsers } from "@/lib/upload";
 import { AuthPanel } from "./components/auth-panel";
 import { AvatarPicker } from "./components/avatar-picker";
 import { DropZone } from "./components/drop-zone";
@@ -12,12 +12,12 @@ export function App() {
   const session = authClient.useSession();
   const email = session.data?.user.email ?? null;
   const userId = session.data?.user.id ?? "";
+  useCloseOtherUsers(userId);
 
   // Keyed by the user: a new user gets fresh hooks and a fresh query cache, with none of the last user's uploads or
   // files in memory.
   return (
     <UploadsContext key={userId} value={uploadsFor(userId)}>
-      <StopUploadsOnUserChange />
       <QueryClientProvider client={queryClientFor(userId)}>
         <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
           <header className="flex flex-wrap items-center justify-between gap-4">

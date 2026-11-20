@@ -19,12 +19,11 @@ const discardId = (upload: Unfinished): string => `discard-${upload.id}`;
  */
 export function UnfinishedUploads() {
   const { useResumable, useUpload } = useUploads();
-  const { uploads, discard } = useResumable("attachments");
+  // `discarding`: the ids being discarded, whose second press would find the first one's lock (UPLOAD_IN_USE).
+  const { uploads, discarding, discard } = useResumable("attachments");
   const { resume } = useUpload("attachments");
   // The message of the last discard that failed, such as an unreachable API: its upload stays listed for a retry.
   const [problem, setProblem] = useState<string | null>(null);
-  // The ids being discarded: a second press would find the first one's lock and report UPLOAD_IN_USE.
-  const [discarding, setDiscarding] = useState<ReadonlySet<string>>(new Set());
   if (uploads.length === 0) return null;
 
   const discardEach = async (chosen: readonly Unfinished[]) => {
@@ -33,11 +32,8 @@ export function UnfinishedUploads() {
     const at = uploads.indexOf(chosen[0] as Unfinished);
     const stays = chosen.length === 1 ? (uploads[at + 1] ?? uploads[at - 1]) : undefined;
     document.getElementById(stays ? discardId(stays) : ATTACHMENTS_INPUT_ID)?.focus();
-    const ids = chosen.map(({ id }) => id);
     setProblem(null);
-    setDiscarding((now) => new Set([...now, ...ids]));
     const answers = await Promise.all(chosen.map((upload) => discard(upload)));
-    setDiscarding((now) => new Set([...now].filter((id) => !ids.includes(id))));
     setProblem(answers.find((answer) => answer.error)?.error?.message ?? null);
   };
 

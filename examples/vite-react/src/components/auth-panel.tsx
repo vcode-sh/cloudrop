@@ -4,19 +4,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-import { type Uploads, useStopUploads, useUploads } from "@/lib/upload";
+import { type Uploads, useUploads } from "@/lib/upload";
 
 /** Sign-up and sign-in with email and password (a demo: no email is sent), or the signed-in user with sign-out. */
 export function AuthPanel({ email }: { email: string | null }) {
   const [error, setError] = useState<string | null>(null);
-  const { client } = useUploads();
-  const stopUploads = useStopUploads();
+  const uploads = useUploads();
 
   if (email) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span>Signed in as {email}</span>
-        <Button variant="outline" size="sm" onClick={() => void signOut(client, stopUploads)}>
+        <Button variant="outline" size="sm" onClick={() => void signOut(uploads)}>
           Sign out
         </Button>
       </div>
@@ -62,13 +61,14 @@ export function AuthPanel({ email }: { email: string | null }) {
 }
 
 /**
- * Sign-out cancels the user's uploads, then forgets their unfinished ones: the records hold upload tokens, which need
- * not outlive the session on a shared browser (the namespace already hides them from the next user). Cancelling first
- * keeps a file that gets its ticket after forget() from saving a new record. Each cancel's /abort is sent with
- * keepalive, so the reload, which drops the cached queries, does not stop it.
+ * Sign-out closes the user's client, cancelling every upload of every route, then forgets their unfinished ones: the
+ * records hold upload tokens, which need not outlive the session on a shared browser (the namespace already hides them
+ * from the next user). Closing first keeps a file that would get its ticket after forget() from asking for it. Each
+ * cancel's /abort is sent with keepalive, so the reload, which drops the cached queries, does not stop it, and a file
+ * whose /complete may have finished is kept.
  */
-async function signOut(client: Uploads["client"], stopUploads: () => void) {
-  stopUploads();
+async function signOut({ close, client }: Uploads) {
+  close({ abort: true });
   await client.forget();
   await authClient.signOut();
   window.location.reload();

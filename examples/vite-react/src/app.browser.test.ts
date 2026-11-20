@@ -106,7 +106,7 @@ test("cloudrop answers its own preflight through the app's global CORS middlewar
     headers: {
       origin: WEB_ORIGIN,
       "access-control-request-method": "POST",
-      // A header the app's own CORS list leaves out: a bearer token, as a client with its own fetch sends.
+      // A header the app's own CORS list leaves out: a bearer token, as the client's headers option sends.
       "access-control-request-headers": "content-type,authorization",
     },
   });

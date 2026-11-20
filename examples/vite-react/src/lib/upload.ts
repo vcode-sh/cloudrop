@@ -2,7 +2,7 @@ import { createCloudropClient } from "cloudrop/client";
 import { createUploadHooks } from "cloudrop/react";
 // A type import: the server, its database driver and its secrets stay out of the browser bundle.
 import type { Uploads as Server } from "cloudrop-example-hono/types";
-import { createContext, useCallback, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { API_ORIGIN } from "./api";
 
 /** One user's upload client, which sign-out forgets (src/components/auth-panel.tsx), and the hooks over it. */
@@ -29,24 +29,18 @@ export const UploadsContext = createContext(uploadsFor(""));
 
 export const useUploads = (): Uploads => useContext(UploadsContext);
 
-/** Cancels every upload of the user's routes: sign-out calls it before forget() (src/components/auth-panel.tsx). */
-export function useStopUploads(): () => void {
-  const { useUpload } = useUploads();
-  const stopAvatar = useUpload("avatar").abort;
-  const stopAttachments = useUpload("attachments").abort;
-  return useCallback(() => {
-    stopAvatar();
-    stopAttachments();
-  }, [stopAvatar, stopAttachments]);
-}
-
 /**
- * Stops the last user's uploads when the keyed provider in src/app.tsx unmounts, as it does once this tab's session
- * hook sees a user change without a sign-out on this page (a sign-in in another tab). An upload still waiting for its
- * ticket then never asks /upload with the next user's session; one sent before this tab saw the change already did.
+ * Closes every other user's client once the page shows `userId`, as after a sign-in in another tab, which this tab's
+ * session hook sees later: an upload still waiting for its ticket then never asks /upload with the new user's session,
+ * and each unfinished multipart upload keeps its record for its user's next sign-in. A closed client stays closed, so
+ * it is dropped, and that user's next sign-in in this page gets a new one. Run again by StrictMode, it finds nothing.
  */
-export function StopUploadsOnUserChange(): null {
-  const stop = useStopUploads();
-  useEffect(() => stop, [stop]);
-  return null;
+export function useCloseOtherUsers(userId: string): void {
+  useEffect(() => {
+    for (const [id, uploads] of byUser) {
+      if (id === userId) continue;
+      uploads.close();
+      byUser.delete(id);
+    }
+  }, [userId]);
 }
