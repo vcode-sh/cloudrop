@@ -10,16 +10,16 @@ setup step by step.
   `/api/cloudrop/*`, better-auth at `/api/auth/*`, cloudrop at `/api/cloudrop/*` and the oRPC router at `/rpc/*`, with
   oRPC's CSRF plugin (a form posted from another origin of the site is refused).
 - `src/uploads.ts` creates cloudrop (`createUploads(deps)`): `avatar` (one image of at most 2 MB, one PUT; its
-  `onComplete` writes the `avatar` row through the completion's transaction, and `afterComplete` deletes the replaced
-  avatar) and `attachments` (up to 10 files of 100 MB, in parts of 8 MiB above 8 MB), with a quota per user
+  `onComplete` writes the `avatar` row through the completion's transaction, and `replace: true` deletes the previous
+  avatar when the next one completes) and `attachments` (up to 10 files of 100 MB, in parts of 8 MiB above 8 MB), with a quota per user
   (`UPLOAD_QUOTA_MB`, 500 unless set).
 - `src/db/schema/` holds one file per feature: better-auth's tables (`auth.ts`), the app's `avatar` table and cloudrop's
   two tables from `cloudropPgTables()` (`cloudrop.ts`). Every timestamp is `timestamptz(3)`. `drizzle/` holds the
   migration drizzle-kit generated from them.
 - `src/rpc/router.ts` is the oRPC router `files`: `list` reads the user's completed files from cloudrop's table,
   `delete` removes one through `cloudrop.api.deleteFile`, `avatar` signs a short-lived URL of the avatar.
-- `src/worker.ts` is a separate process that sweeps abandoned uploads every hour (`SWEEP_INTERVAL_MINUTES`). Its
-  comment shows the same job as a scheduled queue.
+- `src/worker.ts` is a separate process that sweeps abandoned uploads every hour (`SWEEP_INTERVAL_MINUTES`), every
+  page in one `sweep({ all: true })` call. Its comment shows the same job as a scheduled queue.
 - `src/types.ts` is what the web app imports, types only.
 - `src/settings.ts` reads the environment with a small typed reader. An app with its own env schema reads the same
   settings through it.

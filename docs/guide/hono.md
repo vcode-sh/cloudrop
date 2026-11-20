@@ -125,23 +125,14 @@ API are the same site, so a host-only `SameSite=Lax` cookie on the API's host tr
 
 ```ts
 avatar: store.route(
-  { accept: "image/*", maxSize: "2MB", maxFiles: 1, authorize: signedIn },
+  // replace: one avatar per user; the next completed avatar deletes the previous one.
+  { accept: "image/*", maxSize: "2MB", replace: true, authorize: signedIn },
   {
     prefix: ({ userId }) => `users/${userId}/avatar`,
     owner: ({ userId }) => userId,
     onComplete: async ({ tx, userId, file }) => {
-      // FOR UPDATE: two replacements of one avatar take turns, so each deletes what it replaced.
-      const [previous] = await tx
-        .select({ fileId: avatar.fileId })
-        .from(avatar)
-        .where(eq(avatar.userId, userId))
-        .for("update");
       const row = { key: file.key, fileId: file.id, updatedAt: new Date() };
       await tx.insert(avatar).values({ userId, ...row }).onConflictDoUpdate({ target: avatar.userId, set: row });
-      return { replaced: previous?.fileId ?? null };
-    },
-    afterComplete: async ({ data }) => {
-      if (data.replaced) await uploads.api.deleteFile(data.replaced);
     },
   },
 ),
@@ -152,13 +143,13 @@ attachments: store.route(
 ```
 
 - `store.route` gives `onComplete` Drizzle's transaction as `tx`: the avatar row commits with cloudrop's record of the
-  upload, or neither does. Keep network calls out of it; the old avatar's object is deleted in `afterComplete`, after
-  the commit.
+  upload, or neither does. Keep network calls out of it. `replace: true` deletes the previous avatar's row in that same
+  commit, and its object right after ([One file per owner](store.md#one-file-per-owner-replace)).
 - Files above 64 MiB go in parts (`multipartThreshold` changes it; the example uses 8 MB so a demo file shows parts).
-- To list a user's files, select from `cloudropFiles` with your app's Drizzle, where `owner` is the user and `status`
-  is `completed`: the intended way, since the tables are yours. To delete one, check its owner with
-  `uploads.api.file(id)`, then call `uploads.api.deleteFile(id)`, which removes the object and frees its bytes in the
-  quota. The example's oRPC router `files` (`list`, `delete`, `avatar`) does both.
+- To list a user's files, call `uploads.api.files({ owner: userId })`, a page at a time, or select from
+  `cloudropFiles` with your app's Drizzle where `owner` is the user and `status` is `completed`: the tables are yours.
+  To delete one, check its owner with `uploads.api.file(id)`, then call `uploads.api.deleteFile(id)`, which removes the
+  object and frees its bytes in the quota. The example's oRPC router `files` (`list`, `delete`, `avatar`) does both.
 - Protect the RPC router against cross-site requests. oRPC accepts a `multipart/form-data` body, which a page on
   another origin of the same site can post without a preflight, and the browser sends the `SameSite=Lax` session
   cookie with it. Add oRPC's pair: `SimpleCsrfProtectionHandlerPlugin` from `@orpc/server/plugins` on the
@@ -243,22 +234,22 @@ await new Queue("upload-sweep", { connection }).upsertJobScheduler(
   // BullMQ tries a job once unless told otherwise: here a failed sweep is retried after one minute, then after two.
   { name: "sweep", opts: { attempts: 3, backoff: { type: "exponential", delay: 60_000 } } },
 );
-new Worker("upload-sweep", () => sweepAll(uploads.api), { connection });
-
-async function sweepAll(api: Uploads["api"]) {
-  let cursor: string | undefined;
-  do {
-    const { data, error } = await api.sweep({ cursor });
+new Worker(
+  "upload-sweep",
+  async () => {
+    // Every page in one call; the time limit leaves the rest to the next run.
+    const { data, error } = await uploads.api.sweep({ all: true, signal: AbortSignal.timeout(10 * 60_000) });
     if (error) throw error; // the queue retries the job
     for (const stuck of data.reported) log.warn({ action: "upload_completion_stuck", id: stuck.id });
-    cursor = data.cursor ?? undefined;
-  } while (cursor);
-}
+  },
+  { connection },
+);
 ```
 
 The worker builds its own `createUploads` with the same storage and database; it serves no requests, so its
-`readSession` can answer `null`. Two sweeps at once are safe. `examples/hono/src/worker.ts` runs the same loop on a
-timer.
+`readSession` can answer `null`. Two sweeps at once are safe. `examples/hono/src/worker.ts` runs the same sweep on a
+timer. An account deletion runs `uploads.api.eraseOwner(userId)` from the same job until it reports `done`
+([Erase an owner](store.md#erase-an-owner)).
 
 ## 9. The bucket's CORS rule names the web origin
 

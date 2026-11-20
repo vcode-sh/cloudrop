@@ -1,0 +1,87 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "42e4da01-00e7-4ec9-9025-ffd1709be36a",
+  "prevIds": ["5bd34dbb-d2d8-4655-b0fe-1b10141ceb51"],
+  "footprints": [
+    {
+      "statementType": "drop_index",
+      "statementTarget": ["index", "public", "cloudrop_files", "cloudrop_files_owner_status_idx"],
+      "writes": [
+        "s|idx|public.cloudrop_files_owner_status_idx",
+        "n|idx|public.cloudrop_files_owner_status_idx",
+        "e|idx|public.cloudrop_files_owner_status_idx",
+        "n|rel|public.cloudrop_files_owner_status_idx"
+      ],
+      "reads": [
+        "e|tbl|public.cloudrop_files",
+        "n|sch|public",
+        "e|col|public.cloudrop_files.owner",
+        "e|col|public.cloudrop_files.status"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": ["index", "public", "cloudrop_files", "cloudrop_files_owner_status_created_at_idx"],
+      "writes": [
+        "s|idx|public.cloudrop_files_owner_status_created_at_idx",
+        "n|idx|public.cloudrop_files_owner_status_created_at_idx",
+        "e|idx|public.cloudrop_files_owner_status_created_at_idx",
+        "n|rel|public.cloudrop_files_owner_status_created_at_idx"
+      ],
+      "reads": [
+        "n|tbl|public.cloudrop_files",
+        "n|sch|public",
+        "n|col|public.cloudrop_files.owner",
+        "n|col|public.cloudrop_files.status",
+        "n|col|public.cloudrop_files.created_at"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "cloudrop_files",
+        "name": "cloudrop_files_owner_status_created_at_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "owner",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "status",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"cloudrop_files_owner_status_idx\"]"
+    }
+  ]
+}

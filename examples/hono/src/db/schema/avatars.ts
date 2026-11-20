@@ -9,7 +9,7 @@ export const avatar = pgTable("avatar", {
     .references(() => user.id, { onDelete: "cascade" }),
   /** The object's key in the bucket. */
   key: text("key").notNull(),
-  /** cloudrop's file id, for `cloudrop.api.deleteFile` when the avatar is replaced. */
+  /** cloudrop's file id, for `cloudrop.api.deleteFile` when the user deletes the avatar. */
   fileId: text("file_id").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).notNull(),
 });
