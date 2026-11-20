@@ -1,5 +1,5 @@
 // The steps both /complete paths share once the bucket holds the upload: the file the client is sent, the plugins'
-// afterVerify, onComplete's context and its result as JSON.
+// afterVerify, onComplete's context, and onComplete itself with its result as JSON.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { UploadedFile } from "../protocol/types.ts";
@@ -55,19 +55,30 @@ export function completeContext(request: Request, token: UploadTokenPayload, fil
 }
 
 /**
- * onComplete's result as JSON, undefined for a result JSON leaves out (undefined, a function), or why it cannot be
- * sent: encoded here, not when the answer is sent, so the failure is reported as onComplete's.
+ * The route's onComplete, when it has one, and its result as JSON: `json` is undefined for a result JSON leaves out
+ * (undefined, a function). A throw, or a result JSON cannot encode, is logged and answered as unfinished: encoded here,
+ * not when the answer is sent, so the failure is reported as onComplete's.
  */
-export function encodeResult(logger: Logger, route: string, data: unknown): Result<string | undefined> {
-  let json: string | undefined;
+export async function runOnComplete(
+  logger: Logger,
+  route: RouteConfig,
+  context: CompletionFields,
+): Promise<Result<{ data: unknown; json: string | undefined }>> {
+  const { onComplete } = route.definition;
+  let data: unknown;
   try {
-    json = JSON.stringify(data);
+    data = await onComplete?.(context);
+  } catch (error) {
+    logger.error(`cloudrop: onComplete failed for route "${route.name}".`, error);
+    return fail(unfinished());
+  }
+  try {
+    return ok({ data, json: JSON.stringify(data) });
   } catch (error) {
     logger.error(
-      `cloudrop: onComplete for route "${route}" returned a value JSON cannot encode (a BigInt or a cycle).`,
+      `cloudrop: onComplete for route "${route.name}" returned a value JSON cannot encode (a BigInt or a cycle).`,
       error,
     );
     return fail(unfinished());
   }
-  return ok(json);
 }

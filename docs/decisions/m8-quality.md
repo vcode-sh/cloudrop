@@ -158,3 +158,21 @@ continue from `M8-Q1`.
 - **Status:** in force.
 - **Visible in:** `src/store/sql/reads.ts`, `records.ts`, `postgres.ts`, `postgres-replace.ts`, `sqlite.ts`,
   `store.ts`.
+
+### M8-Q31: one onComplete call for both `/complete` paths, one clock read for every cleanup check
+
+- **Decision:** `runOnComplete` (`src/server/complete-steps.ts`) runs a route's `onComplete`, logs a throw, encodes the
+  result as JSON and logs a result JSON cannot encode, for the stateless `/complete` and the store's alike; it replaces
+  `encodeResult` and the two copies of the call around it. The store path keeps what is its own: the 16 KiB cap and
+  a missing result stored as null. `removeLeftovers` (`src/server/leftovers.ts`) now answers the time its check started,
+  and the sweep, `deleteFile` (and replacing routes) and `eraseOwner` mark `cleaned_at` with that time instead of each
+  reading the clock before calling it.
+- **Why:** the call, its two log messages and its `unfinished` answer were written twice, and the `cleaned_at` rule
+  fixed by `39b5d4a` was written three times, in a different shape each time; a fourth caller could only get it wrong.
+  `onComplete` is still called detached from the route, with the same context; what the client gets, what is stored
+  and every log message are unchanged.
+- **If wrong:** none known. A regression test now pins the `cleaned_at` rule: a fault probe that read the clock after
+  the HEAD stayed green before it.
+- **Status:** in force.
+- **Visible in:** `src/server/complete-steps.ts`, `complete.ts`, `store-complete.ts`, `leftovers.ts`, `sweep.ts`,
+  `erase.ts`.

@@ -4,7 +4,7 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
-import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFile } from "./complete-steps.ts";
+import { checkAfterVerify, completeContext, runOnComplete, uploadedFile } from "./complete-steps.ts";
 import { cleanUpRefused, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput } from "./config.ts";
 import { completeStored } from "./store-complete.ts";
@@ -17,7 +17,6 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   if (verified.error) return verified;
   const { token, route } = verified.data;
   if (config.store && token.stored) return completeStored(input, config.store, token, route);
-  const { logger } = config;
   const stored = await verifyUpload(config, token);
   if (stored.kind === "failed") return fail(stored.error);
   if (stored.kind === "refused") return cleanUpRefused(config, token, stored);
@@ -25,16 +24,6 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   const checked = await checkAfterVerify(request, config, token, file);
   if (checked.kind === "failed") return fail(checked.error);
   if (checked.kind === "refused") return cleanUpRefused(config, token, checked);
-  const { onComplete } = route.definition;
-  if (!onComplete) return ok({ file, data: null });
-  let data: unknown;
-  try {
-    data = await onComplete(completeContext(request, token, file));
-  } catch (error) {
-    logger.error(`cloudrop: onComplete failed for route "${route.name}".`, error);
-    return fail(unfinished());
-  }
-  const encoded = encodeResult(logger, route.name, data);
-  if (encoded.error) return encoded;
-  return ok({ file, data: data === undefined ? null : data });
+  const ran = await runOnComplete(config.logger, route, completeContext(request, token, file));
+  return ran.error ? ran : ok({ file, data: ran.data.data ?? null });
 }

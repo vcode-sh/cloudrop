@@ -84,17 +84,17 @@ async function deleteCompleted({ config, store, report }: Eraser, record: FileRe
 async function checkEnded({ config, store, graceMs, report }: Eraser, record: FileRecord): Promise<void> {
   const settled = settledAt(record, graceMs);
   if (record.status !== "failed" && record.cleanedAt !== null && record.cleanedAt.getTime() >= settled) return;
-  // Taken before the check: a check that only finishes after the settle time did not look after it.
-  const checkedAt = new Date();
-  const removed = await removeLeftovers(config, record);
-  if (removed.error) {
+  const checked = await removeLeftovers(config, record);
+  if (checked.error) {
     config.logger.error(
       `cloudrop: eraseOwner could not remove what file ${record.id} left in the bucket. Run eraseOwner again.`,
-      removed.error,
+      checked.error,
     );
     report.failed += 1;
     return;
   }
+  // The time the check started: a check that only finishes after the settle time did not look after it.
+  const checkedAt = checked.data;
   if (checkedAt.getTime() < settled) {
     report.waiting += 1;
     return;

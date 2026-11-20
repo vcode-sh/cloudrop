@@ -123,15 +123,11 @@ interface Sweeper {
   report: SweepReport;
 }
 
-/**
- * removeLeftovers for a sweep step, which stops at the first failure by throwing, then the row marked cleaned. The mark
- * is the time the check started, so `cleaned_at` never claims a look later than the one the storage got.
- */
+/** removeLeftovers for a sweep step, which stops at the first failure by throwing, then the row marked cleaned. */
 async function removeAndMark({ config, store }: Sweeper, record: FileRecord): Promise<void> {
-  const checkedAt = new Date();
-  const removed = await removeLeftovers(config, record);
-  if (removed.error) throw removed.error;
-  await store.cleaned(record.id, checkedAt);
+  const checked = await removeLeftovers(config, record);
+  if (checked.error) throw checked.error;
+  await store.cleaned(record.id, checked.data);
 }
 
 /**

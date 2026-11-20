@@ -4,7 +4,7 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import type { CompleteResponse, UploadedFile } from "../protocol/types.ts";
-import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFile } from "./complete-steps.ts";
+import { checkAfterVerify, completeContext, runOnComplete, unfinished, uploadedFile } from "./complete-steps.ts";
 import { cleanUpRefused, type Verdict, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput, RouteConfig, ServerConfig } from "./config.ts";
 import { busy } from "./http.ts";
@@ -71,30 +71,22 @@ async function refuse(completion: Completion, refusal: Extract<Verdict, { kind: 
 }
 
 /** onComplete, then its result as the JSON the row keeps; `extra` is the store's `tx`. */
-async function runOnComplete(
+async function resultToStore(
   { request, config, token, route, file }: Completion,
   extra: object,
 ): Promise<Result<{ data: unknown; json: string | null }>> {
-  const { onComplete } = route.definition;
-  let result: unknown = null;
-  try {
-    if (onComplete) result = await onComplete({ ...completeContext(request, token, file), ...extra });
-  } catch (error) {
-    config.logger.error(`cloudrop: onComplete failed for route "${route.name}".`, error);
-    return fail(unfinished());
-  }
-  // No result is stored as null, as the client is sent null (spec §5.4).
-  if (result === undefined || result === null) return ok({ data: null, json: null });
-  const encoded = encodeResult(config.logger, route.name, result);
-  if (encoded.error) return encoded;
-  const json = encoded.data ?? null;
-  if (json !== null && new TextEncoder().encode(json).length > MAX_RESULT_JSON_BYTES) {
+  const ran = await runOnComplete(config.logger, route, { ...completeContext(request, token, file), ...extra });
+  if (ran.error) return ran;
+  const { data, json } = ran.data;
+  // No result, and one JSON leaves out, is stored as null, as the client is sent null (spec §5.4).
+  if (data === undefined || data === null || json === undefined) return ok({ data: null, json: null });
+  if (new TextEncoder().encode(json).length > MAX_RESULT_JSON_BYTES) {
     config.logger.error(
       `cloudrop: onComplete for route "${route.name}" returned more than 16 KiB of JSON. Return ids, not records.`,
     );
     return fail(unfinished());
   }
-  return ok({ data: json === null ? null : JSON.parse(json), json });
+  return ok({ data: JSON.parse(json), json });
 }
 
 /** Without a transaction: claim under a lease, and hand the row back at once when onComplete fails in-process. */
@@ -104,7 +96,7 @@ async function withLease(completion: Completion): Promise<Attempt> {
   const claimed = await calls.claim(claim, config.completionLeaseMs);
   if (claimed.error) return { answer: claimed, recorded: false };
   if (claimed.data.kind !== "claimed") return { answer: claimAnswer(claimed.data, file), recorded: false };
-  const ran = await runOnComplete(completion, {});
+  const ran = await resultToStore(completion, {});
   if (ran.error) {
     // A failed release is logged by the call; the lease then frees the row.
     await calls.release(claim);
@@ -139,7 +131,7 @@ async function inTransaction(
         return;
       }
       // Only a route made by the store's own route() expects tx; a plain route keeps an authorize field of that name.
-      const ran = await runOnComplete(completion, storeOfRoute(completion.route.definition) ? { tx } : {});
+      const ran = await resultToStore(completion, storeOfRoute(completion.route.definition) ? { tx } : {});
       if (ran.error) return rollBack(ran);
       const replace = completion.route.replace;
       const done = await store.complete(token.id, claim, ran.data.json, new Date(), { replace });

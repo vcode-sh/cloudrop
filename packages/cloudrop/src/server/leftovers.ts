@@ -27,18 +27,21 @@ export function readGrace(graceMs: unknown, what: string): Result<number> {
 
 /**
  * Aborts the row's multipart upload (unless the row completed it) and deletes the object at its key only when the
- * object is this row's: a key may hold a later upload's file.
+ * object is this row's: a key may hold a later upload's file. Answers the time the check started, the one to mark the
+ * row cleaned with: `cleaned_at` never claims a look later than the one the storage got.
  */
-export async function removeLeftovers(config: ServerConfig, record: FileRecord): Promise<Result<void>> {
+export async function removeLeftovers(config: ServerConfig, record: FileRecord): Promise<Result<Date>> {
   const { storage } = config;
+  const checkedAt = new Date();
   if (record.uploadId && record.completedAt === null) {
     const aborted = await storage.abortMultipart(record.key, record.uploadId);
     if (aborted.error) return aborted;
   }
   const head = await storage.head(record.key);
   if (head.error) return head;
-  if (head.data?.metadata["cloudrop-id"] !== record.id) return ok(undefined);
-  return storage.delete(record.key);
+  if (head.data?.metadata["cloudrop-id"] !== record.id) return ok(checkedAt);
+  const removed = await storage.delete(record.key);
+  return removed.error ? removed : ok(checkedAt);
 }
 
 /**
@@ -62,8 +65,9 @@ export async function removeDeleted(
   store: CloudropStore<unknown>,
   record: FileRecord,
 ): Promise<Result<void>> {
-  const checkedAt = new Date();
-  const removed = await removeLeftovers(config, record);
-  if (removed.error || checkedAt.getTime() < settledAt(record, DEFAULT_GRACE_MS)) return removed;
+  const checked = await removeLeftovers(config, record);
+  if (checked.error) return checked;
+  const checkedAt = checked.data;
+  if (checkedAt.getTime() < settledAt(record, DEFAULT_GRACE_MS)) return ok(undefined);
   return storeCall(config.logger, `mark file ${record.id} cleaned`, () => store.cleaned(record.id, checkedAt));
 }
