@@ -16,6 +16,7 @@ import {
   FOUR_PARTS,
   fourParts,
   gate,
+  lockOf,
   noSuchUpload,
   nth,
   partThree,
@@ -26,7 +27,6 @@ import {
 import type { UploadRecord } from "./records.ts";
 import { MAX_ATTEMPTS } from "./retry.ts";
 
-const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 /** Every attempt of the probe's /complete, and of its own retries, gets no answer: NETWORK_ERROR. */
 const probeUnreachable = (call: FaultCall) =>
   call.label === "POST /complete" && call.nth <= MAX_ATTEMPTS ? unreachable() : undefined;

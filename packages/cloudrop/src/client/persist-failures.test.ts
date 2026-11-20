@@ -15,10 +15,17 @@ import { allowAnyone, route } from "../server/route.ts";
 import { r2 } from "../storage/presets.ts";
 import type { FaultCall } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
-import { gate, noSuchUpload, persistFixture, smallFile, threeParts, unreachable } from "../testing/persist-fixture.ts";
+import {
+  gate,
+  lockOf,
+  noSuchUpload,
+  persistFixture,
+  smallFile,
+  threeParts,
+  unreachable,
+} from "../testing/persist-fixture.ts";
 import { APP_ORIGIN, recordingLogger } from "../testing/server-fixture.ts";
 
-const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 /** More store requests than any row here makes: every one of them fails. */
 const EVERY_REQUEST = 1000;
 const THREE_PARTS = ["POST /upload", "PUT part 1", "PUT part 2", "PUT part 3", "POST /complete"];

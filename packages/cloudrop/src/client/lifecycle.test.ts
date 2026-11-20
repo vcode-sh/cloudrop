@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type JobSnapshot, type UploadJob } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture } from "../testing/client-fixture.ts";
+import { clientFixture, statuses } from "../testing/client-fixture.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -38,8 +38,6 @@ function until(job: UploadJob<unknown>, test: (snapshot: JobSnapshot<unknown>) =
 
 /** A macrotask, which fake timers leave alone: every microtask queued before it has run. */
 const everyMicrotask = () => new Promise((resolve) => setImmediate(resolve));
-
-const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

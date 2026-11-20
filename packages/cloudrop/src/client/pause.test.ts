@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type JobSnapshot, type UploadJob } from "../client.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, lostPart } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, lostPart, statuses } from "../testing/client-fixture.ts";
 import { fakeXhr } from "../testing/fake-xhr.ts";
 import { firstOf, gate as heldCalls, threeParts } from "../testing/persist-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -60,7 +60,6 @@ function until(job: UploadJob<unknown>, test: (snapshot: JobSnapshot<unknown>) =
 const everyMicrotask = () => new Promise((resolve) => setImmediate(resolve));
 
 const fileAt = (job: UploadJob<unknown>, index: number) => job.getSnapshot().files[index];
-const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

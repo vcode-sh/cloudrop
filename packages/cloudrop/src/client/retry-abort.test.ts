@@ -10,7 +10,7 @@ import { getEventListeners } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type UploadJob } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, storageBusy } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, statuses, storageBusy } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -54,7 +54,6 @@ function setup(fault: Fault = () => undefined) {
 const fileOf = (size: number, name: string) =>
   new File([offsetBytes(size)], name, { type: "application/octet-stream" });
 const storageDown = () => errorResponse(500, "InternalError", "We encountered an internal error. Please try again.");
-const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
 /** Holds every caller of `pass()` until `release()`; `reached` resolves when the first arrives. */
 function gate() {

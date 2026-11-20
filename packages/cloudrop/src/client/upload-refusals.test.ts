@@ -7,9 +7,9 @@
 // requests the fixture saw, the files each /upload asked for, and the outcomes the job reports.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient, type UploadJob } from "../client.ts";
+import { createCloudropClient } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, storageBusy } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, statuses, storageBusy } from "../testing/client-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const files = route({ accept: "application/octet-stream", maxSize: "100MB", authorize: allowAnyone });
@@ -55,8 +55,6 @@ function setup(fault: Fault) {
 }
 
 const fileOf = (name: string, type = "application/octet-stream") => new File([offsetBytes(1000)], name, { type });
-
-const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
 const outcomeOf = ({ status, error }: { status: string; error?: { code: string; retryable: boolean } }) =>
   error ? { status, code: error.code, retryable: error.retryable } : { status };

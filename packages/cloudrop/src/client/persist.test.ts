@@ -17,6 +17,7 @@ import {
   firstOf,
   gate,
   LAST_MODIFIED,
+  lockOf,
   persistFixture,
   smallFile,
   threeParts,
@@ -30,7 +31,6 @@ const NAMESPACE = "user-7".padEnd(256, "-");
 
 /** A part the bucket refuses for good (UPLOAD_REJECTED, not retried). */
 const refused = () => errorResponse(400, "InvalidArgument", "Invalid argument.");
-const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 
 beforeEach(() => {
   // Every backoff wait becomes 0 ms.

@@ -19,6 +19,7 @@ import {
   FOUR_PARTS,
   fourParts,
   gate,
+  lockOf,
   METADATA,
   noSuchUpload,
   nth,
@@ -30,7 +31,6 @@ import {
 } from "../testing/persist-fixture.ts";
 import { MAX_ATTEMPTS } from "./retry.ts";
 
-const lockOf = (id: string | undefined) => `cloudrop:upload:${id}`;
 const FILE_TYPE = "application/octet-stream";
 
 beforeEach(() => {

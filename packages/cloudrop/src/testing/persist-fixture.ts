@@ -14,6 +14,9 @@ import { fakeIndexedDb } from "./fake-indexeddb.ts";
 import { fakeLocks } from "./fake-locks.ts";
 import { offsetBytes } from "./storage-contract.ts";
 
+/** The name of the Web Lock the client takes for upload `id`. */
+export const lockOf = (id: string | undefined): string => `cloudrop:upload:${id}`;
+
 /** Takes any JSON metadata as it is. */
 const anyMetadata: StandardSchema = { "~standard": { version: 1, vendor: "test", validate: (value) => ({ value }) } };
 

@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type UploadJob } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, storageBusy } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, statuses, storageBusy } from "../testing/client-fixture.ts";
 import { type PageEvents, pageEvents } from "../testing/page-events.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
@@ -56,8 +56,6 @@ const fileOf = (name: string, type = "application/octet-stream") => new File([of
 
 /** A macrotask, which fake timers leave alone: the answer to the /upload sent before has been read. */
 const answered = () => new Promise((resolve) => setImmediate(resolve));
-
-const statuses = (job: UploadJob<unknown>) => job.getSnapshot().files.map((file) => file.status);
 
 /** Resolves with the first file's status once it is final. */
 const settled = (job: UploadJob<unknown>) =>

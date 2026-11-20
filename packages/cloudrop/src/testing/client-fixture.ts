@@ -3,6 +3,7 @@
 // fault can answer any request in their place.
 
 import type { ClientFetch } from "../client/endpoints.ts";
+import type { FileStatus, UploadJob } from "../client.ts";
 import type { Route } from "../server/route.ts";
 import { APP_ORIGIN, type ServerFixture, serverFixture } from "./server-fixture.ts";
 
@@ -104,3 +105,6 @@ export const unfinished = (): Response =>
     },
     { status: 500 },
   );
+
+/** Each file's status, in the order the files were passed. */
+export const statuses = (job: UploadJob<unknown>): FileStatus[] => job.getSnapshot().files.map((file) => file.status);
