@@ -134,6 +134,15 @@ platform sets, restart or redeploy as usual. Once they are complete they are kep
 With `NODE_ENV=development` the same settings are checked when the server is created, so a dev server fails as soon as
 the server module loads instead (in `next dev`, on the first request to the cloudrop route).
 
+## Text files fail at /complete with 502 STORAGE_ERROR on R2
+
+The bytes reach the bucket, then `/complete` answers `502 STORAGE_ERROR` and the server log has
+`The storage service's response had no content length.` Images and binary files upload fine. **Update to cloudrop
+0.1.1 or later.** R2 compresses its answer to the `HEAD` request that verifies the stored size when the file has a
+compressible type (`text/plain`, `application/json`, `text/html`, `image/svg+xml` and others) and is 50 bytes or more,
+and then sends no `Content-Length`. Since 0.1.1 the driver asks for an uncompressed answer. On 0.1.0, a `fetch` option
+for `r2()` or `s3()` that sets `accept-encoding: identity` on `HEAD` requests works around it.
+
 ## checkBucket reports unknown
 
 The credentials may not read the bucket's settings (an R2 Object Read & Write token cannot), the storage cannot report

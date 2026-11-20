@@ -26,6 +26,14 @@ export function objectCases(suite: ContractSuite): void {
     expect(text((await driver.getRange(k, 6, 4095)).data)).toBe("world");
   });
 
+  it("reports the stored size of an object R2 would compress", async () => {
+    const { driver } = suite;
+    const k = key("notes.md");
+    // R2 gzips the HEAD answer for compressible types from 50 bytes up and then sends no content-length (M7-P1).
+    expect((await driver.put(k, "#".repeat(56), { type: "text/markdown" })).error).toBeNull();
+    expect((await driver.head(k)).data).toMatchObject({ size: 56, type: "text/markdown" });
+  });
+
   it("streams a Blob body through put", async () => {
     const { driver } = suite;
     const k = key("blob.bin");

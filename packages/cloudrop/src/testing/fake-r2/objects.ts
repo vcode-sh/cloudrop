@@ -50,6 +50,35 @@ function objectHeaders(object: StoredObject): Headers {
   return headers;
 }
 
+// The types R2 compressed in "HEAD and compression" (r2-spike-findings.md). Every other type is left alone, as the
+// measured binary types and text/csv were.
+const COMPRESSED_TYPES = new Set([
+  "text/plain",
+  "text/html",
+  "text/markdown",
+  "application/json",
+  "application/javascript",
+  "application/xml",
+  "image/svg+xml",
+  "font/ttf",
+  "application/wasm",
+]);
+const SMALLEST_COMPRESSED = 50;
+
+/**
+ * R2 answers HEAD of a compressible object of 50 bytes or more with `content-encoding: gzip` and no `content-length`
+ * unless the request asks for `identity`. A request without the header counts as offering gzip, as it reaches R2 from
+ * Node's and Bun's fetch, which add `accept-encoding: gzip, …` when the caller sets none.
+ */
+function compressedHead(object: StoredObject, request: Headers, headers: Headers): Headers {
+  const type = object.headers.type?.split(";")[0]?.trim().toLowerCase() ?? "";
+  const wanted = request.get("accept-encoding")?.trim().toLowerCase();
+  if (!COMPRESSED_TYPES.has(type) || object.body.length < SMALLEST_COMPRESSED || wanted === "identity") return headers;
+  headers.delete("content-length");
+  headers.set("content-encoding", "gzip");
+  return headers;
+}
+
 function bodyResponse(object: StoredObject, rangeHeader: string | null, headers: Headers): Response {
   // Only closed ranges (bytes=a-b) are served. Open-ended and suffix forms are ignored and answer the whole object,
   // which RFC 9110 allows; the driver validates and sends closed ranges only.
@@ -74,7 +103,9 @@ export function getObject(bucket: FakeBucket, { key, method, headers, query }: F
       : errorResponse(404, "NoSuchKey", "The specified key does not exist.");
   }
   const responseHeaders = objectHeaders(object);
-  if (method === "HEAD") return new Response(null, { status: 200, headers: responseHeaders });
+  if (method === "HEAD") {
+    return new Response(null, { status: 200, headers: compressedHead(object, headers, responseHeaders) });
+  }
   // S3's documented GetObject override; real R2 is checked by the contract suite on every backend.
   const disposition = query.get("response-content-disposition");
   if (disposition !== null) responseHeaders.set("content-disposition", disposition);

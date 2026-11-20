@@ -68,8 +68,12 @@ export async function send(
     // A Blob is streamed unread, so its hash is unknown; UNSIGNED-PAYLOAD is SigV4's documented value for that.
     payloadHash: body instanceof Blob ? UNSIGNED_PAYLOAD : body ? await sha256Hex(body) : EMPTY_SHA256,
   });
+  // R2 gzips a HEAD answer for compressible types from 50 bytes up and then sends no content-length, the stored size a
+  // HEAD is read for (r2-spike-findings.md, "HEAD and compression"). Unsigned, so a runtime that rewrites the header
+  // cannot break the signature.
+  const sent = method === "HEAD" ? { ...signed, "accept-encoding": "identity" } : signed;
   try {
-    const response = await http(url, { method, headers: signed, body, signal: AbortSignal.timeout(timeoutMs) });
+    const response = await http(url, { method, headers: sent, body, signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return fail(storageError(response.status, await response.text()));
     // A server that ignores Range answers 200 with the whole object; never read gigabytes for a 4 KiB sniff.
     if (headers.range !== undefined && response.status !== 206) {

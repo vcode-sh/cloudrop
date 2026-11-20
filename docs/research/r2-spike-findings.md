@@ -701,6 +701,39 @@ on the first HEAD that finds nothing. Unmeasured: completions far longer than 0.
 regions or load. Each run deleted its objects (1, 6, 10, 4 and 2) and aborted its uploads, then listed its
 `live-test/cloudrop-<32 hex>/` prefix empty; no bucket setting was read or written.
 
+## HEAD and compression, 2026-11-20
+
+Measured 2026-11-20 on the same test bucket, after a production report from an application on cloudrop 0.1.0: the
+bytes reached R2, then `/complete` answered `502 STORAGE_ERROR` because the driver's `HEAD` found no
+`Content-Length`. Bun 1.4.4 drove cloudrop's own S3 driver (`createS3Driver`, R2 rules) through a
+`fetch` wrapper that recorded `content-length` and `content-encoding` of each `HEAD` answer and, for the second
+request, set `accept-encoding: identity` after signing. The runtime's `fetch` was told nothing else, so the first
+request carried its default `accept-encoding` (gzip offered). Node 24.22.2 repeated the 56-byte rows with the same
+results. Each object was put with the type shown and `a`
+characters as its body: 56 bytes for the first six types, with both requests, and 1,000 bytes for the rest, with the
+default request only.
+
+| Type | Default `accept-encoding` | `accept-encoding: identity` |
+|---|---|---|
+| `text/plain`, `application/json`, `text/html`, `image/svg+xml` (56 bytes) | `content-encoding: gzip`, **no `content-length`** | `content-length: 56`, no encoding |
+| `application/octet-stream`, `image/png` (56 bytes) | `content-length: 56`, no encoding | the same |
+| `text/plain; charset=utf-8`, `text/markdown`, `application/javascript`, `application/xml`, `font/ttf`, `application/wasm` (1,000 bytes) | `content-encoding: gzip`, **no `content-length`** | not sent |
+| `text/csv`, `application/pdf`, `application/x-ndjson` (1,000 bytes) | `content-length: 1000`, no encoding | not sent |
+
+- **The threshold is 50 bytes.** A bisection on `text/plain` found 49 bytes answered with `content-length` and 50
+  compressed; a 1 MiB `text/plain` object was compressed too. That is why the contract suite's 11-byte `text/plain`
+  case never saw it.
+- **Ranged `GET` is not compressed.** `Range: bytes=0-15` on a 1,000-byte `text/plain` object answered `206` with
+  `content-length: 16` and no encoding, so the content sniff (`getRange`) was never affected.
+- **Bun and Node behave alike**, so the cause is R2's answer to a request that offers gzip, not one runtime's `fetch`.
+- `vary: Origin` came back on every answer of the 1,000-byte rows; R2 sent no `vary: Accept-Encoding`.
+
+Ruling (`M7-P1`): the driver sends `accept-encoding: identity` on every `HEAD`, unsigned. The contract suite's
+"reports the stored size of an object R2 would compress" case (56 bytes of `text/markdown`) failed on live R2 before
+the change and passes after it; the fake R2 compresses the same way, so the unit lane catches a regression. Each probe
+deleted its objects (12, 1 and 17) and listed its `live-test/cloudrop-gzipprobe-<uuid>/` prefix empty; no bucket setting
+was read or written.
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in
@@ -730,6 +763,9 @@ regions or load. Each run deleted its objects (1, 6, 10, 4 and 2) and aborted it
   must reconcile with HEAD. A retry that overlaps the first Complete was measured in
   [Overlapping completions](#overlapping-completions-2026-11-17).
 - RustFS/SeaweedFS uneven-part behaviour (open item 7). This spike touched only R2.
+- `accept-encoding: identity` on a `HEAD` sent from a Cloudflare Worker to the R2 S3 endpoint
+  ([HEAD and compression](#head-and-compression-2026-11-20) measured Bun and Node). The header is sent unsigned, so a
+  runtime that replaced it would leave the request valid and the answer as it was before `M7-P1`.
 - The `r2/reference/limits` page from the brief: the R2 limits live at `r2/platform/limits` ([limits]).
 
 ## Cleanup proof
