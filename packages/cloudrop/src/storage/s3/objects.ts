@@ -71,13 +71,10 @@ async function forEachConcurrently<T>(
   limit: number,
   task: (item: T) => Promise<void>,
 ): Promise<void> {
-  let next = 0;
+  // One iterator shared by every worker, so each item is taken exactly once, in order.
+  const queue = items.values();
   const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const item = items[next] as T;
-      next += 1;
-      await task(item);
-    }
+    for (const item of queue) await task(item);
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }

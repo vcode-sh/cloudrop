@@ -92,10 +92,7 @@ export function encodeKeyPath(key: string): string {
 }
 
 function toAmzDate(date: Date): string {
-  return date
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
+  return date.toISOString().replace(/[-:]|\.\d{3}/g, "");
 }
 
 // `URL` leaves `!'()*+` and similar characters raw in the path, but S3 signs the RFC 3986 form of every segment
