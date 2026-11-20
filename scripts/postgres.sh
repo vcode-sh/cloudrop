@@ -6,16 +6,14 @@
 # in `docker ps -a --filter label=cloudrop.test`; the dev container carries no such label. The data lives in a tmpfs:
 # `down` deletes it.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 NAME="${CLOUDROP_EXAMPLE_POSTGRES_NAME:-cloudrop-example-postgres}"
 PORT="${CLOUDROP_EXAMPLE_POSTGRES_PORT:-19600}"
 # The db lane's exact release (scripts/test-db.sh), so one image serves both.
 IMAGE=postgres:18.6
 case "${1:-}" in
   up)
-    if ss -ltnH "sport = :${PORT}" | grep -q .; then
-      echo "Port ${PORT} is in use. Set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port." >&2
-      exit 1
-    fi
+    require_free_port "$PORT" "Set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port."
     labels=()
     [[ "${CLOUDROP_EXAMPLE_POSTGRES_TEST:-}" == 1 ]] && labels=(--label cloudrop.test=postgres)
     docker run -d --rm --name "$NAME" "${labels[@]}" -p "127.0.0.1:${PORT}:5432" --tmpfs /var/lib/postgresql \

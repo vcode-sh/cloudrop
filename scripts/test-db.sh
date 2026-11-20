@@ -5,6 +5,7 @@
 # The trap removes this run's container on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 # An exact 18.x release, so every run and CI use the same server; bump it deliberately.
 IMAGE=postgres:18.6
@@ -13,10 +14,7 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 PORT="${CLOUDROP_POSTGRES_PORT:-19500}"
-if ss -ltnH "sport = :${PORT}" | grep -q .; then
-  echo "Port ${PORT} is in use. Set CLOUDROP_POSTGRES_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port "$PORT" "Set CLOUDROP_POSTGRES_PORT to a free port."
 NAME="cloudrop-test-postgres-$$"
 
 cd packages/cloudrop

@@ -4,14 +4,12 @@
 # stops the Wrangler this run started (by PID) and deletes its state on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib.sh"
 cd "$ROOT/packages/cloudrop"
 PORT="${CLOUDROP_WRANGLER_PORT:-18787}"
 STATE=fixtures/wrangler/.state
 SCRATCH=fixtures/wrangler/.wrangler
-if ss -ltnH "sport = :${PORT}" | grep -q .; then
-  echo "Port ${PORT} is in use. Set CLOUDROP_WRANGLER_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port "$PORT" "Set CLOUDROP_WRANGLER_PORT to a free port."
 rm -rf "$STATE"
 mkdir -p "$STATE"
 # No telemetry, and the log lives in the state directory, which the trap removes.

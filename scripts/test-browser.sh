@@ -8,34 +8,20 @@
 # Playwright stops the servers.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 # Not test-rustfs.sh's 19000, so both RustFS lanes can run at once with their defaults.
 PORT="${CLOUDROP_RUSTFS_PORT:-19100}"
 # The example always serves on 5173: the bucket's CORS rule names that origin.
-if ss -ltnH "sport = :5173" | grep -q .; then
-  echo "Port 5173 is in use. Stop what listens there; the example must serve on it." >&2
-  exit 1
-fi
-if ss -ltnH "sport = :${PORT}" | grep -q .; then
-  echo "Port ${PORT} is in use. Set CLOUDROP_RUSTFS_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port 5173 "Stop what listens there; the example must serve on it."
+require_free_port "$PORT" "Set CLOUDROP_RUSTFS_PORT to a free port."
 # The example's S3 endpoint: presigned URLs name the proxy, so the proxy's port is fixed for the whole run.
 PROXY_PORT="${CLOUDROP_CHAOS_PROXY_PORT:-19110}"
-if ss -ltnH "sport = :${PROXY_PORT}" | grep -q .; then
-  echo "Port ${PROXY_PORT} is in use. Set CLOUDROP_CHAOS_PROXY_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port "$PROXY_PORT" "Set CLOUDROP_CHAOS_PROXY_PORT to a free port."
 # The Hono example's API serves on 5181, which the Vite app calls; its Postgres gets a port of its own.
-if ss -ltnH "sport = :5181" | grep -q .; then
-  echo "Port 5181 is in use. Stop what listens there; the Hono API must serve on it." >&2
-  exit 1
-fi
+require_free_port 5181 "Stop what listens there; the Hono API must serve on it."
 POSTGRES_PORT="${CLOUDROP_EXAMPLE_POSTGRES_PORT:-19610}"
-if ss -ltnH "sport = :${POSTGRES_PORT}" | grep -q .; then
-  echo "Port ${POSTGRES_PORT} is in use. Set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port "$POSTGRES_PORT" "Set CLOUDROP_EXAMPLE_POSTGRES_PORT to a free port."
 export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-browser-rustfs-$$"
 export CLOUDROP_CHAOS_PROXY_PORT="$PROXY_PORT"

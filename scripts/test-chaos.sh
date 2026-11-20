@@ -5,6 +5,7 @@
 # The trap removes this run's container on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 PROJECT=chaos
 if [[ "${1:-}" == "soak" ]]; then
@@ -16,10 +17,7 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 PORT="${CLOUDROP_RUSTFS_PORT:-19300}"
-if ss -ltnH "sport = :${PORT}" | grep -q .; then
-  echo "Port ${PORT} is in use. Set CLOUDROP_RUSTFS_PORT to a free port." >&2
-  exit 1
-fi
+require_free_port "$PORT" "Set CLOUDROP_RUSTFS_PORT to a free port."
 export CLOUDROP_RUSTFS_PORT="$PORT"
 export CLOUDROP_RUSTFS_NAME="cloudrop-chaos-rustfs-$$"
 # Registered before `up` so a container that starts but never becomes ready is still removed; `down` only touches this run's name.
