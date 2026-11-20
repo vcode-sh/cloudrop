@@ -5,13 +5,20 @@
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
-import { URL_LIFETIME_SECONDS } from "./presign.ts";
+import { readGrace, removeLeftovers } from "./leftovers.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
 export interface SweepOptions {
-  /** Rows handled in this call, 1 to 1000. Default 100. */
+  /** Rows handled in this call, 1 to 1000; with `all`, rows per page. Default 100. */
   limit?: number;
+  /**
+   * Sweeps every page in this one call, `limit` rows at a time, until every row has been seen or `signal` aborts, and
+   * answers the pages' reports summed. For a cron job: `sweep({ all: true, signal: AbortSignal.timeout(25_000) })`.
+   */
+  all?: boolean;
+  /** With `all`: checked before each page. Once aborted, the call stops and its `cursor` continues where it stopped. */
+  signal?: AbortSignal;
   /** The `cursor` an earlier sweep returned, to continue where it stopped. */
   cursor?: string;
   /**
@@ -42,18 +49,13 @@ export interface SweepReport {
   /**
    * Pass it to the next sweep to continue; null when every row has been seen, or when a listing failed after this call
    * had handled rows (counted in `failed`). A listing that fails before any row answers the store's error instead.
+   * With `all`, it is null unless the signal stopped the call.
    */
   cursor: string | null;
 }
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
-const DEFAULT_GRACE_MS = 3_600_000;
-/**
- * A signed URL's life: no URL outlives its token's deadline, so with at least this grace no new PUT can start after a
- * row's deadline or end once the sweep may clean it up.
- */
-const MIN_GRACE_MS = URL_LIFETIME_SECONDS * 1000;
 /**
  * The pass, then the store's own cursor: `<milliseconds>:<id>` as `stale` promises, empty for the cleanup pass's
  * start. A cursor that was edited is refused here, before the store sees it.
@@ -62,39 +64,53 @@ const CURSOR = /^(expire|cleanup):((?:\d{1,15}:.+)?)$/s;
 
 type Pass = "expire" | "cleanup";
 
-function readOptions(given: unknown): Result<{ limit: number; graceMs: number; pass: Pass; cursor: string | null }> {
+/** Where a sweep starts: the pass and the store's cursor in it. */
+interface Position {
+  pass: Pass;
+  cursor: string | null;
+}
+
+interface Run extends Position {
+  limit: number;
+  graceMs: number;
+  all: boolean;
+  signal: AbortSignal | undefined;
+}
+
+/** A sweep cursor read back into its position, or null when no sweep made it. */
+function readCursor(cursor: string): Position | null {
+  const match = CURSOR.exec(cursor);
+  return match ? { pass: match[1] as Pass, cursor: match[2] || null } : null;
+}
+
+function readAll(options: Record<string, unknown>): Result<{ all: boolean; signal: AbortSignal | undefined }> {
+  const { all = false, signal } = options;
+  if (typeof all !== "boolean") return fail(invalidInput("all must be true or false."));
+  if (signal !== undefined && !(signal instanceof AbortSignal)) {
+    return fail(invalidInput("signal must be an AbortSignal, such as AbortSignal.timeout(25_000)."));
+  }
+  if (signal !== undefined && !all) {
+    return fail(invalidInput("signal stops a sweep between pages, so it needs all: true. Pass both, or neither."));
+  }
+  return ok({ all, signal });
+}
+
+function readOptions(given: unknown): Result<Run> {
   const options = given ?? {};
   if (!isPlainObject(options)) return fail(invalidInput("sweep takes options such as { limit: 100 }."));
-  const { limit = DEFAULT_LIMIT, graceMs = DEFAULT_GRACE_MS, cursor } = options;
+  const { limit = DEFAULT_LIMIT, cursor } = options;
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  if (typeof graceMs !== "number" || !Number.isSafeInteger(graceMs) || graceMs < MIN_GRACE_MS) {
-    return fail(
-      invalidInput(
-        `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.`,
-      ),
-    );
+  const graceMs = readGrace(options.graceMs);
+  if (graceMs.error) return graceMs;
+  const all = readAll(options);
+  if (all.error) return all;
+  const start = cursor === undefined ? { pass: "expire" as const, cursor: null } : readCursor(String(cursor));
+  if (!start || (cursor !== undefined && typeof cursor !== "string")) {
+    return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
   }
-  const match = cursor === undefined ? ["", "expire", ""] : typeof cursor === "string" ? CURSOR.exec(cursor) : null;
-  if (!match) return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
-  return ok({ limit, graceMs, pass: match[1] as Pass, cursor: match[2] || null });
-}
-
-/**
- * Aborts the row's multipart upload (unless the row completed it) and deletes the object at its key only when the
- * object is this row's: a key may hold a later upload's file.
- */
-export async function removeLeftovers(config: ServerConfig, record: FileRecord): Promise<Result<void>> {
-  const { storage } = config;
-  if (record.uploadId && record.completedAt === null) {
-    const aborted = await storage.abortMultipart(record.key, record.uploadId);
-    if (aborted.error) return aborted;
-  }
-  const head = await storage.head(record.key);
-  if (head.error) return head;
-  if (head.data?.metadata["cloudrop-id"] !== record.id) return ok(undefined);
-  return storage.delete(record.key);
+  return ok({ limit, graceMs: graceMs.data, ...all.data, ...start });
 }
 
 interface Sweeper {
@@ -170,19 +186,14 @@ function listingFailed(report: SweepReport, handled: number, error: CloudropErro
   return stoppedAt({ ...report, failed: report.failed + 1 }, null);
 }
 
-export async function sweep(
-  config: ServerConfig,
-  store: CloudropStore<unknown>,
-  given: SweepOptions | undefined,
-): Promise<Result<SweepReport>> {
-  const options = readOptions(given);
-  if (options.error) return options;
-  const { limit, graceMs, pass } = options.data;
+/** One bounded call: at most `limit` rows, from `run`'s position. */
+async function sweepOnce(config: ServerConfig, store: CloudropStore<unknown>, run: Run): Promise<Result<SweepReport>> {
+  const { limit, graceMs, pass } = run;
   const report: SweepReport = { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null };
   const sweeper: Sweeper = { config, store, report };
   const now = Date.now();
   let budget = limit;
-  let cursor = options.data.cursor;
+  let cursor = run.cursor;
   if (pass === "expire") {
     const page = await sweepPage(sweeper, "expire", { before: now - graceMs, limit, cursor });
     if (page.error) return fail(page.error);
@@ -194,4 +205,34 @@ export async function sweep(
   const page = await sweepPage(sweeper, "cleanup", { before: now - graceMs, limit: budget, cursor });
   if (page.error) return listingFailed(report, limit - budget, page.error);
   return stoppedAt(report, page.data.cursor === null ? null : `cleanup:${page.data.cursor}`);
+}
+
+/**
+ * Every page, one bounded call after another, the reports summed. A failure after the first page is answered like one
+ * within a call: what was done, the listing counted in `failed`, and no cursor.
+ */
+async function sweepAll(config: ServerConfig, store: CloudropStore<unknown>, run: Run): Promise<Result<SweepReport>> {
+  const total: SweepReport = { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null };
+  let position: Position | null = run;
+  for (let pages = 0; position !== null; pages++) {
+    if (run.signal?.aborted) return stoppedAt(total, `${position.pass}:${position.cursor ?? ""}`);
+    const page = await sweepOnce(config, store, { ...run, ...position });
+    if (page.error) return pages === 0 ? page : listingFailed(total, 1, page.error);
+    total.expired += page.data.expired;
+    total.cleaned += page.data.cleaned;
+    total.failed += page.data.failed;
+    total.reported.push(...page.data.reported);
+    position = page.data.cursor === null ? null : readCursor(page.data.cursor);
+  }
+  return ok(total);
+}
+
+export async function sweep(
+  config: ServerConfig,
+  store: CloudropStore<unknown>,
+  given: SweepOptions | undefined,
+): Promise<Result<SweepReport>> {
+  const options = readOptions(given);
+  if (options.error) return options;
+  return options.data.all ? sweepAll(config, store, options.data) : sweepOnce(config, store, options.data);
 }

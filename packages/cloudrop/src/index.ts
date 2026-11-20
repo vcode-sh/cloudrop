@@ -11,6 +11,8 @@ export type { FileApi } from "./server/api.ts";
 export type { BucketCheck, BucketReport } from "./server/bucket-check.ts";
 export { type Cloudrop, createCloudrop } from "./server/cloudrop.ts";
 export type { CloudropOptions } from "./server/config.ts";
+export type { EraseOptions, EraseReport } from "./server/erase.ts";
+export type { FilesOptions, FilesPage } from "./server/owner-files.ts";
 export type {
   AbortContext,
   AfterVerifyContext,
@@ -42,6 +44,7 @@ export type { Size } from "./server/size.ts";
 export type {
   ClaimOutcome,
   CloudropStore,
+  Completion,
   EndedStatus,
   FileRecord,
   FileStatus,

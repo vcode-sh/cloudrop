@@ -35,6 +35,7 @@ keeps one row per upload in two tables of your database.
          {
            accept: "image/*",
            maxSize: "5MB",
+           replace: true, // one avatar per user: the next one deletes this one
            authorize: async ({ request }) => {
              const user = await getUser(request); // your app's session lookup
              return user ? { userId: user.id } : unauthorized();
@@ -228,9 +229,10 @@ Use the tool you query with:
   export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables();
   ```
 
-  On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`. Read them
-  freely (`db.select().from(cloudropFiles)`): the tables are your app's, so listing a user's files is your own query,
-  not a store call. Write to them only through the store, which keeps the usage counters in step with the files.
+  On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`.
+  `api.files({ owner })` lists a user's files; for anything else, read the tables freely
+  (`db.select().from(cloudropFiles)`): they are your app's. Write to them only through the store, which keeps the
+  usage counters in step with the files.
 - **Everyone else:** run the SQL below in a migration. On D1: `wrangler d1 migrations create DB cloudrop`, paste the
   SQLite statements into the new file, then `wrangler d1 migrations apply DB` (it applies to the local database; add
   `--remote` for the deployed one).
@@ -271,7 +273,7 @@ CREATE INDEX "cloudrop_files_status_claimed_at_idx" ON "cloudrop_files" (status,
 
 CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files" (status, cleaned_at, ended_at);
 
-CREATE INDEX "cloudrop_files_owner_status_idx" ON "cloudrop_files" (owner, status);
+CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
 
@@ -319,7 +321,7 @@ CREATE INDEX "cloudrop_files_status_claimed_at_idx" ON "cloudrop_files" (status,
 
 CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files" (status, cleaned_at, ended_at);
 
-CREATE INDEX "cloudrop_files_owner_status_idx" ON "cloudrop_files" (owner, status);
+CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
 
@@ -359,6 +361,21 @@ prisma migrate resolve --applied 0_cloudrop
 ```
 
 On Postgres Prisma finds nothing to change in tables made from the SQL.
+
+### Upgrading from 0.1
+
+0.2.0 replaces the index on `(owner, status)` with one on `(owner, status, created_at)`, so
+[`api.files`](#list-an-owners-files) reads one page of an owner's files without sorting all of them. The store works
+without it, only slower for owners with many files. Drizzle and Prisma users regenerate their migration from the
+updated tables (`drizzle-kit generate` asks whether the new index renames the old one: answer that it is created).
+Everyone else runs, on Postgres or SQLite, in a migration:
+
+```sql
+CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
+DROP INDEX "cloudrop_files_owner_status_idx";
+```
+
+On a large Postgres table, `CREATE INDEX CONCURRENTLY` (outside a transaction) avoids blocking uploads while it builds.
 
 ### Tables in another schema
 
@@ -506,6 +523,40 @@ record skips it, and a throw is logged while the client still gets its answer. T
 short. For work that must happen, write an outbox row through `tx` in `onComplete` and process the outbox elsewhere.
 `afterComplete` needs a store, like `owner`.
 
+## One file per owner: `replace`
+
+```ts
+avatar: store.route(
+  { accept: "image/*", maxSize: "5MB", replace: true, authorize },
+  {
+    owner: ({ userId }) => userId,
+    onComplete: async ({ tx, userId, file }) => {
+      await tx.query("UPDATE users SET avatar_key = $1 WHERE id = $2", [file.key, userId]);
+    },
+  },
+),
+```
+
+With `replace: true`, a route keeps one file per owner, such as an avatar or a profile banner. When a file completes,
+the owner's previous completed files on that route are deleted in the same database write that records the
+completion: their rows become `deleted` and their bytes leave the quota. Then, before `/complete` answers, their
+objects are removed from the bucket; a removal that fails is logged and left to [the sweep](#the-sweep), which finds
+the row deleted but not cleaned up.
+
+- **The previous file goes only after the next one completes.** An upload that is cancelled, refused or never
+  finished deletes nothing, and the previous file stays.
+- **Two uploads completing at once leave exactly one file:** the one recorded last. On Postgres the two completions
+  take turns on a transaction-scoped advisory lock for the owner and route; SQLite and D1 have one writer at a time.
+- **What the hooks see.** `onComplete` runs before the completion is recorded, so the previous file is still
+  completed there (`api.files` lists it). `afterComplete` runs after: the previous file's row is deleted and its object
+  removed. Neither gets a new field; an app that keeps its own pointer, such as `users.avatar_key`, overwrites it in
+  `onComplete`, through `tx` so it commits with the replacement.
+- **It needs a store and `owner`**, and takes one file per `/upload`: `maxFiles` is 1, and `createCloudrop` refuses a
+  replacing route without a store, without `owner`, or with another `maxFiles`, with `INVALID_CONFIG`. A file whose
+  `owner` answered null replaces nothing.
+- Only files of the same owner and route go. Files uploaded before you turned `replace` on are replaced too, by the
+  owner's next completion on the route.
+
 ## What changes for the client
 
 - **`/upload`** refuses a file over the quota with `QUOTA_EXCEEDED`, and answers a retryable `SERVER_ERROR` when the
@@ -549,6 +600,62 @@ Each unfinished upload of that owner that is not already being completed is ende
 next `/sign` or `/complete` is refused with `UPLOAD_EXPIRED`, and its client's `/abort` removes what it had uploaded.
 A completion already under way finishes, and completed files are not touched.
 
+## List an owner's files
+
+```ts
+const { data, error } = await cloudrop.api.files({ owner: userId, route: "attachments", limit: 50 });
+if (error) throw error;
+// data.items: FileRecord[], newest upload first. data.cursor: pass it back for the next page; null on the last one.
+if (data.cursor) {
+  const next = await cloudrop.api.files({ owner: userId, route: "attachments", limit: 50, cursor: data.cursor });
+}
+```
+
+Completed files only, newest upload first (by when `/upload` accepted them), one page of `limit` files (1 to 1,000,
+default 100) at a time. `route` must be one of the server's routes; leave it out for all of them. The cursor is
+opaque: pass back only what a page answered. Files deleted between two pages make the next page skip nothing.
+
+## Erase an owner
+
+For an account deletion or an erasure request: everything an owner uploaded goes, driven by the owner's rows, so it
+needs no knowledge of your key layout.
+
+```ts
+// Stop the owner's access first (delete the account or its sessions), then run it, now and on a schedule, until done.
+const { data, error } = await cloudrop.api.eraseOwner(userId);
+// data: { revoked, deleted, cleaned, failed, waiting, done }
+if (data?.done) await markErased(userId); // your app's record
+```
+
+Each run revokes the owner's unfinished uploads, deletes every completed file (row and object, as `deleteFile` does),
+and checks the key of every ended upload the store cannot already prove clean, removing what is still the upload's
+own. It reports:
+
+| Field | Meaning |
+| --- | --- |
+| `revoked` | Unfinished uploads ended in this run. |
+| `deleted` | Completed files deleted in this run. |
+| `cleaned` | Ended uploads whose key was checked for the last time in this run. |
+| `failed` | Files a storage or database error kept from being handled; each is logged with its id. |
+| `waiting` | Files that cannot be proven yet: a completion still under way, an upload that started while it ran, or an ended upload whose URLs, or the grace after them, have not run out. What they had stored was removed. |
+| `done` | Nothing of the owner was unfinished or completed, and every ended upload had its key checked after its URLs and the grace ran out. |
+
+**Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards, so a key is
+checked for the last time only `graceMs` (default 1 hour, at least 15 minutes, as for the sweep) after the last moment
+one of its URLs could start a `PUT`: the token's deadline, or the moment the upload stopped being unfinished, whichever
+came first. Files completed or ended more than that long ago are proven in the first run; a recent one makes the first
+run answer `waiting` and the run an hour later `done`. Run it again until it reports `done`: it is idempotent, and two
+runs at once are safe.
+
+- **Stuck completions too.** The sweep keeps the object of a completion it ended as `failed`, since its `onComplete`
+  may have recorded it; `eraseOwner` removes it.
+- **`signal`** (an `AbortSignal`) stops a run before the next file, with `done: false`.
+- **`done` is about the moment it ran.** An `/upload` that passed `authorize` before you revoked the owner's access can
+  still reserve a file afterwards; a run that sees it answers `waiting`. Revoke access first, and if a request may
+  still be in flight, run it once more after it.
+- The usage row stays, at zeros. The rows stay too, as `deleted` and the other ended statuses, which name the file
+  (`name`, `key`); delete them with your own SQL once `done` if your erasure policy requires it, never before.
+
 ## File operations
 
 With a store, `cloudrop.api` gains these, each returning `{ data, error }`. Without one they answer `INVALID_CONFIG`.
@@ -556,11 +663,13 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | Call | What it does |
 | --- | --- |
 | `file(id)` | The file's row (`FileRecord`: status, key, owner, size, result, times), or `null`. |
+| `files({ owner, route?, limit?, cursor? })` | An owner's completed files, newest first, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
-| `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Idempotent; `NOT_FOUND` for a file that never completed. |
+| `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. A file completed within the last hour is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
+| `eraseOwner(owner, { graceMs?, signal? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
-| `sweep(options?)` | One bounded round of cleanup (below). |
+| `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |
 
 `api.delete(key)` still deletes an object by key, but leaves the row and the owner's usage as they were: use
 `deleteFile` for uploaded files.
@@ -568,25 +677,37 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 ## The sweep
 
 Uploads that never finish leave rows, reservations and sometimes parts or objects behind. `api.sweep()` cleans them up
-in bounded rounds; run it on a schedule:
+in bounded rounds; run it on a schedule, once an hour is plenty. `all: true` runs every round in one call, `limit` rows
+(default 100) at a time, and answers their reports summed; its `signal` is checked before each round, and once it
+aborts, the answer's `cursor` says where to continue (it is null when every row was seen).
+
+On Cloudflare Workers, a [cron trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+(`[triggers] crons = ["41 * * * *"]` in `wrangler.toml`) calls `scheduled`:
 
 ```ts
-// A Worker's cron trigger, or any scheduled job: once an hour is plenty.
 export default {
-  async scheduled() {
-    let cursor: string | undefined;
-    do {
-      const { data, error } = await cloudrop.api.sweep({ cursor });
-      if (error) throw error; // the next run starts over
-      for (const stuck of data.reported) console.warn(`cloudrop: completion of ${stuck.id} never finished; check it`);
-      cursor = data.cursor ?? undefined;
-    } while (cursor);
+  async scheduled(controller, env, ctx) {
+    const cloudrop = createUploads(env); // your createCloudrop, with the store over env.DB
+    const { data, error } = await cloudrop.api.sweep({ all: true, signal: AbortSignal.timeout(60_000) });
+    if (error) throw error; // shown as a failed run; the next one starts over
+    for (const stuck of data.reported) console.warn(`cloudrop: completion of ${stuck.id} never finished; check it`);
   },
-};
+} satisfies ExportedHandler<Env>;
 ```
 
-Each call handles up to `limit` rows (default 100, at most 1,000) and answers `{ expired, cleaned, failed, reported,
-cursor }`; pass `cursor` back to continue. It runs two passes:
+On Node, from a long-running process (or any job scheduler that runs a script, such as a Kubernetes `CronJob`):
+
+```ts
+async function sweepUploads() {
+  const { data, error } = await cloudrop.api.sweep({ all: true, signal: AbortSignal.timeout(10 * 60_000) });
+  if (error) return console.error(`Sweep stopped: ${error.message} The next run retries.`);
+  for (const stuck of data.reported) console.warn(`cloudrop: completion of ${stuck.id} never finished; check it`);
+}
+setInterval(sweepUploads, 60 * 60_000);
+```
+
+Without `all`, each call handles up to `limit` rows (default 100, at most 1,000) and answers `{ expired, cleaned,
+failed, reported, cursor }`; pass `cursor` back to continue. It runs two passes:
 
 - **Expire:** an unfinished upload past its token's deadline plus `graceMs` is ended as `expired` first, its
   reservation released; then its multipart upload is aborted and its object deleted only when the object's
@@ -639,14 +760,14 @@ as required.
   attempt lost its answer: its last attempt's rows hold their bytes until the sweep, since `retry()` and `resume()` ask
   again with a new key. Plugin reservations of a superseded attempt need their own expiry.
 - **A `PUT` that lands after cleanup stays.** The sweep cleans a row once. A `PUT` already under way that lands after
-  that is left in the bucket; with the default hour of grace this is unlikely.
+  that is left in the bucket; with the default hour of grace this is unlikely. `eraseOwner` checks such keys again.
 - **A completion's record that fails after `onComplete` ran, in lease mode**, keeps the file busy until the lease ends
   (5 minutes by default), longer than the client retries. The client then reports a failure but keeps the file. Once
   the lease has passed, the next `/complete` of it (a `retry()` or a `resume()`) takes the file over and runs
   `onComplete` again: one more reason to keep it idempotent in this mode.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.
-- **Bundle size.** The store paths add about 4.9 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
+- **Bundle size.** The store paths add about 6.5 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.
 
 ## Turning it on, or off, in a running app

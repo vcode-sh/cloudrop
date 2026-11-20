@@ -105,6 +105,13 @@ export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchem
   /** "public" needs the storage's `publicUrl`. Default: "public" when the storage has one, otherwise "private". */
   visibility?: "public" | "private";
   /**
+   * With a store and `owner`: one file per owner, such as an avatar. When a file completes, the owner's previous
+   * completed files on this route are deleted in the same database write that records the completion, so two uploads
+   * at once leave exactly one; their objects are removed right after, and by the sweep if that fails. `onComplete` still
+   * sees the previous file; `afterComplete` runs once it is deleted. `maxFiles` is then 1.
+   */
+  replace?: boolean;
+  /**
    * Required. Return a plain object with the facts later steps need (they are signed into the upload token, which the
    * browser can read: return ids, never secrets), or `unauthorized()` or `forbidden()`. `allowAnyone` makes the route
    * public.
@@ -164,6 +171,7 @@ export interface RouteDefinition {
   maxFiles?: number;
   metadata?: StandardSchema;
   visibility?: "public" | "private";
+  replace?: boolean;
   authorize(context: AuthorizeContext<unknown>): Awaitable<unknown>;
   prefix?(context: KeyContext<object, unknown>): string;
   key?(context: KeyContext<object, unknown>): string;
@@ -181,7 +189,7 @@ export interface Route<TMetadataInput = unknown, TResult = unknown> {
 }
 
 const CALLBACKS = ["prefix", "key", "owner", "onComplete", "afterComplete"] as const;
-const POLICY = ["accept", "maxSize", "maxFiles", "metadata", "visibility", "authorize"] as const;
+const POLICY = ["accept", "maxSize", "maxFiles", "metadata", "visibility", "replace", "authorize"] as const;
 
 /** JavaScript callers get no type error for an option in the wrong argument, and there it would do nothing. */
 function checkPlacement(policy: object, callbacks: object): void {
@@ -194,7 +202,7 @@ function checkPlacement(policy: object, callbacks: object): void {
   const option = POLICY.find((name) => Object.hasOwn(callbacks, name));
   if (option) {
     throw configError(
-      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.`,
+      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility, replace and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.`,
     );
   }
 }

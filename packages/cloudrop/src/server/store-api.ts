@@ -4,20 +4,29 @@
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
+import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
+import { removeDeleted } from "./leftovers.ts";
+import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listFiles } from "./owner-files.ts";
 import type { CloudropStore, FileRecord, OwnerUsage } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
-import { MAX_OWNER_LENGTH } from "./store-upload.ts";
-import { removeLeftovers, type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
+import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 
 export interface StoreFileApi {
   /** A file's row, or null when the store has none. */
   file(id: string): Promise<Result<FileRecord | null>>;
+  /** An owner's completed files, newest first, a page at a time. */
+  files(options: FilesOptions): Promise<Result<FilesPage>>;
   /** An owner's counters, with or without a quota. */
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
   revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
   /** Deletes a completed file: its row becomes `deleted`, its bytes are released and its object removed. Idempotent. */
   deleteFile(id: string): Promise<Result<{ id: string }>>;
+  /**
+   * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
+   * what ended uploads left. Idempotent; run it again, such as with each sweep, until it reports done.
+   */
+  eraseOwner(owner: string, options?: EraseOptions): Promise<Result<EraseReport>>;
   /** Recounts one owner's counters from their rows, or every owner's: for drift after manual database edits. */
   reconcile(options?: { owner?: string }): Promise<Result<{ checked: number; repaired: number }>>;
   /** One bounded round of cleanup; run it on a schedule, such as an hourly cron. */
@@ -26,13 +35,7 @@ export interface StoreFileApi {
 
 const OWNERS_PAGE = 100;
 
-/** An owner or a file id: 1 to 255 characters. */
-const isOwnerOrId = (value: unknown): value is string =>
-  typeof value === "string" && value !== "" && value.length <= MAX_OWNER_LENGTH;
-
 const badId = () => fail(invalidInput("Pass the file id, as returned with the uploaded file."));
-const badOwner = () =>
-  fail(invalidInput(`Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters, as owner() returned it.`));
 
 const notCompleted = (): CloudropError =>
   new CloudropError(
@@ -51,12 +54,11 @@ async function deleteFile(
   if (ended.error) return ended;
   const { changed, record } = ended.data;
   if (record?.status !== "deleted") return fail(notCompleted());
-  // Deleted and cleaned before: nothing is left to do. Deleted but not cleaned: an earlier call stopped in between.
+  // Deleted and cleaned before: nothing is left to do. Deleted but not cleaned: an earlier call stopped in between, or
+  // the file's URLs could still put it back, and the key is checked again.
   if (!changed && record.cleanedAt !== null) return ok({ id });
-  const removed = await removeLeftovers(config, record);
-  if (removed.error) return removed;
-  const marked = await storeCall(config.logger, `mark file ${id} cleaned`, () => store.cleaned(id, new Date()));
-  return marked.error ? marked : ok({ id });
+  const removed = await removeDeleted(config, store, record);
+  return removed.error ? removed : ok({ id });
 }
 
 async function reconcile(
@@ -109,6 +111,7 @@ export function storeApi(
       withStore("file", async (store) =>
         isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
       ),
+    files: (options) => withStore("files", (store) => listFiles(config, store, options)),
     usage: (owner) =>
       withStore("usage", async (store) =>
         isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
@@ -124,6 +127,7 @@ export function storeApi(
       }),
     deleteFile: (id) =>
       withStore("deleteFile", async (store) => (isOwnerOrId(id) ? deleteFile(config, store, id) : badId())),
+    eraseOwner: (owner, options) => withStore("eraseOwner", (store) => eraseOwner(config, store, owner, options)),
     reconcile: (options) => withStore("reconcile", (store) => reconcile(config, store, options)),
     sweep: (options) => withStore("sweep", (store) => sweep(config, store, options)),
   };

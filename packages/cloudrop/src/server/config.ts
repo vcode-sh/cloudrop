@@ -43,6 +43,8 @@ export interface RouteConfig {
   maxSize: number;
   maxFiles: number;
   visibility: "public" | "private";
+  /** Each completion deletes the owner's previous files on the route. */
+  replace: boolean;
 }
 
 export interface ServerConfig extends StoreConfig {

@@ -31,6 +31,12 @@ function readMaxSize(where: string, definition: RouteDefinition, storage: Storag
 }
 
 function readMaxFiles(where: string, definition: RouteDefinition): number {
+  if (definition.replace === true) {
+    if (definition.maxFiles !== undefined && definition.maxFiles !== 1) {
+      throw configError(`${where}: replace keeps one file per owner, so maxFiles must be 1. Leave maxFiles out.`);
+    }
+    return 1;
+  }
   const maxFiles = definition.maxFiles ?? DEFAULT_MAX_FILES;
   if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_FILES_LIMIT) {
     throw configError(`${where}: maxFiles must be a whole number from 1 to ${MAX_FILES_LIMIT}.`);
@@ -74,10 +80,13 @@ export function readRoute(name: string, route: Route, storage: StorageDriver): R
   if (!isFunction(definition.authorize)) {
     throw configError(`${where} needs authorize. Use authorize: allowAnyone for a route anyone may upload to.`);
   }
+  if (definition.replace !== undefined && typeof definition.replace !== "boolean") {
+    throw configError(`${where}: replace must be true or false.`);
+  }
   const accept = readAccept(where, definition);
   const maxSize = readMaxSize(where, definition, storage);
   const maxFiles = readMaxFiles(where, definition);
   checkCallbacks(where, definition);
   const visibility = readVisibility(where, definition, storage);
-  return { name, definition, accept, maxSize, maxFiles, visibility };
+  return { name, definition, accept, maxSize, maxFiles, visibility, replace: definition.replace === true };
 }

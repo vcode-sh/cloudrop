@@ -54,14 +54,14 @@ describe("route() options in the wrong argument", () => {
       // @ts-expect-error: accept belongs in the first argument.
       make: () => route(policy, { accept: "image/*" }),
       message:
-        "route(): accept belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.",
+        "route(): accept belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility, replace and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.",
     },
     {
       name: "authorize in the callbacks",
       // @ts-expect-error: authorize belongs in the first argument.
       make: () => route(policy, { authorize: allowAnyone }),
       message:
-        "route(): authorize belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.",
+        "route(): authorize belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility, replace and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.",
     },
   ])("throws INVALID_CONFIG for $name, naming where it belongs", ({ make, message }) => {
     expect(make).toThrow(expect.objectContaining({ code: "INVALID_CONFIG", message }));

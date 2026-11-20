@@ -8,6 +8,7 @@ import { checkAfterVerify, completeContext, encodeResult, unfinished, uploadedFi
 import { cleanUpRefused, type Verdict, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput, RouteConfig, ServerConfig } from "./config.ts";
 import { busy } from "./http.ts";
+import { removeDeleted } from "./leftovers.ts";
 import { nowSeconds } from "./presign.ts";
 import { storeOfRoute } from "./route.ts";
 import type { ClaimOutcome, CloudropStore, FileRecord } from "./store.ts";
@@ -18,8 +19,8 @@ type Answer = Result<CompleteResponse>;
 
 /** The longest result a row keeps (M5 spec §3): an id or a few fields, not a record. */
 const MAX_RESULT_JSON_BYTES = 16 * 1024;
-/** One completion attempt: its answer, and whether this request recorded the completion. */
-type Attempt = { answer: Answer; recorded: boolean };
+/** One completion attempt: its answer, and the files it replaced when this request recorded the completion. */
+type Attempt = { answer: Answer; recorded: false } | { answer: Answer; recorded: true; replaced: FileRecord[] };
 
 interface Completion {
   request: Request;
@@ -109,10 +110,10 @@ async function withLease(completion: Completion): Promise<Attempt> {
     await calls.release(claim);
     return { answer: ran, recorded: false };
   }
-  const done = await calls.complete(claim, ran.data.json);
+  const done = await calls.complete(claim, ran.data.json, completion.route.replace);
   if (done.error) return { answer: done, recorded: false };
   if (!done.data.changed) return { answer: lostClaim(done.data.record, file), recorded: false };
-  return { answer: ok({ file, data: ran.data.data }), recorded: true };
+  return { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.data.replaced };
 }
 
 /** With a transaction: the claim, onComplete's writes through `tx` and the completion commit or roll back together. */
@@ -140,9 +141,10 @@ async function inTransaction(
       // Only a route made by the store's own route() expects tx; a plain route keeps an authorize field of that name.
       const ran = await runOnComplete(completion, storeOfRoute(completion.route.definition) ? { tx } : {});
       if (ran.error) return rollBack(ran);
-      const done = await store.complete(token.id, claim, ran.data.json, new Date());
+      const replace = completion.route.replace;
+      const done = await store.complete(token.id, claim, ran.data.json, new Date(), { replace });
       if (!done.changed) return rollBack(lostClaim(done.record, file));
-      attempt = { answer: ok({ file, data: ran.data.data }), recorded: true };
+      attempt = { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.replaced };
     });
   } catch (error) {
     if (rolledBack) return attempt;
@@ -150,6 +152,22 @@ async function inTransaction(
     return { answer: fail(storeUnavailable()), recorded: false };
   }
   return attempt;
+}
+
+/**
+ * After a replacing completion is recorded: the replaced files' objects, removed one at a time. A failure is logged and
+ * left to the sweep, whose cleanup pass finds the row deleted and not cleaned.
+ */
+async function removeReplaced({ config }: Completion, store: CloudropStore<unknown>, replaced: readonly FileRecord[]) {
+  for (const record of replaced) {
+    const removed = await removeDeleted(config, store, record);
+    if (removed.error) {
+      config.logger.error(
+        `cloudrop: could not remove the replaced file ${record.id} from the bucket. The sweep removes it later.`,
+        removed.error,
+      );
+    }
+  }
 }
 
 /** Best effort and at most once, after the completion is recorded: a throw is logged and the answer stands. */
@@ -178,9 +196,12 @@ export async function completeStored(
   const checked = stored.kind === "verified" ? await checkAfterVerify(request, config, token, completion.file) : stored;
   if (checked.kind === "failed") return fail(checked.error);
   if (checked.kind === "refused") return refuse(completion, checked);
-  const { answer, recorded } = store.transaction
+  const attempt = store.transaction
     ? await inTransaction(completion, store.transaction.bind(store))
     : await withLease(completion);
-  if (recorded) await runAfterComplete(completion, answer.data?.data);
-  return answer;
+  if (attempt.recorded) {
+    await removeReplaced(completion, store, attempt.replaced);
+    await runAfterComplete(completion, attempt.answer.data?.data);
+  }
+  return attempt.answer;
 }

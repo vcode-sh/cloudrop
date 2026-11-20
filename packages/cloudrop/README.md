@@ -75,7 +75,8 @@ When users sign in, give each user a client of their own and cancel their upload
 
 `onComplete` runs at least once per file: a client that lost the answer to `/complete` asks again, so make it
 idempotent before it sends an email or calls a webhook. To keep a row per upload in your own database, with a quota per
-user, revocation and a sweep for abandoned uploads, pass a store from `cloudrop/adapters/sql`,
+user, revocation, a listing of each user's files, one file per user on routes such as avatars (`replace: true`),
+erasure of a user's files (`api.eraseOwner`) and a sweep for abandoned uploads, pass a store from `cloudrop/adapters/sql`,
 `cloudrop/adapters/drizzle` or `cloudrop/adapters/prisma`. With a store, `onComplete` runs once per file, except after a
 crash, a throw or a run longer than its lease; only its writes through `tx` on Postgres with `transaction: true` commit
 exactly once: [Database store](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#what-it-guarantees).

@@ -50,6 +50,44 @@ describe("createCloudrop with a store: configuration errors", () => {
       message: 'Route "owned": owner needs a database store. Pass store to createCloudrop, or remove owner.',
     },
     {
+      name: "a replacing route and no store",
+      make: create({
+        routes: { avatar: route({ accept: "image/*", maxSize: 1, replace: true, authorize: allowAnyone }) },
+      }),
+      message:
+        'Route "avatar": replace needs a database store, which deletes the previous file when the next one completes. Pass store to createCloudrop, or remove replace.',
+    },
+    {
+      name: "a replacing route without owner",
+      make: create({
+        store,
+        routes: { avatar: route({ accept: "image/*", maxSize: 1, replace: true, authorize: allowAnyone }) },
+      }),
+      message:
+        'Route "avatar": replace keeps one file per owner, so it needs owner. Add owner to the route, or remove replace.',
+    },
+    {
+      name: "a replacing route that takes more than one file per upload",
+      make: create({
+        store,
+        routes: {
+          avatar: route(
+            { accept: "image/*", maxSize: 1, maxFiles: 2, replace: true, authorize: () => ({ userId: "u1" }) },
+            { owner: ({ userId }) => userId },
+          ),
+        },
+      }),
+      message: 'Route "avatar": replace keeps one file per owner, so maxFiles must be 1. Leave maxFiles out.',
+    },
+    {
+      name: "a replace that is not true or false",
+      make: create({
+        store,
+        routes: { avatar: route({ accept: "image/*", maxSize: 1, replace: "yes", authorize: allowAnyone } as never) },
+      }),
+      message: 'Route "avatar": replace must be true or false.',
+    },
+    {
       name: "a route with afterComplete and no store",
       make: create({
         routes: { notify: route({ accept: "*/*", maxSize: 1, authorize: allowAnyone }, { afterComplete: () => {} }) },

@@ -14,7 +14,7 @@ export interface StoreOptions {
   /**
    * A database store, such as `sqlStore(...)` from `cloudrop/adapters/sql`. With one, `/upload` writes a row per file
    * before anything is signed, `onComplete` runs once per file, `/abort` never deletes a completed file, and `api`
-   * gains `file`, `usage`, `revokeUploads`, `deleteFile`, `reconcile` and `sweep`.
+   * gains `file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep`.
    */
   store?: CloudropStore<unknown>;
   /**
@@ -46,6 +46,7 @@ const STORE_METHODS = [
   "end",
   "revoke",
   "stale",
+  "list",
   "cleaned",
   "usage",
   "reconcile",
@@ -67,9 +68,24 @@ function readStoreObject(given: unknown): CloudropStore<unknown> | undefined {
   return given as CloudropStore<unknown>;
 }
 
+/** A replacing route deletes by owner in the store's own write, so it needs both. */
+function checkReplace(name: string, definition: RouteConfig["definition"], store: CloudropStore<unknown> | undefined) {
+  if (!store) {
+    throw configError(
+      `Route "${name}": replace needs a database store, which deletes the previous file when the next one completes. Pass store to createCloudrop, or remove replace.`,
+    );
+  }
+  if (!definition.owner) {
+    throw configError(
+      `Route "${name}": replace keeps one file per owner, so it needs owner. Add owner to the route, or remove replace.`,
+    );
+  }
+}
+
 /** Route callbacks that only a store can serve, and routes made by a store's own route(). */
 function checkRoutes(routes: readonly RouteConfig[], store: CloudropStore<unknown> | undefined): void {
-  for (const { name, definition } of routes) {
+  for (const { name, definition, replace } of routes) {
+    if (replace) checkReplace(name, definition, store);
     const needsStore = (["owner", "afterComplete"] as const).find((callback) => definition[callback]);
     if (needsStore && !store) {
       throw configError(

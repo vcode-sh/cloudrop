@@ -171,6 +171,7 @@ const photo = route(
 | `prefix` | The folder for generated keys. A key is `<prefix>/<ulid><ext>`, such as `users/42/avatars/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. |
 | `key` | The whole key instead of `<prefix>/<ulid><ext>`. Pass `prefix` or `key`, not both. A custom key must be unique (see below). |
 | `visibility` | `"public"` or `"private"`. `"public"` needs the storage's `publicUrl`. Default: `"public"` when the storage has a `publicUrl`, otherwise `"private"`. |
+| `replace` | With a store and `owner`: one file per owner, such as an avatar. A completed file deletes the owner's previous files on the route ([One file per owner](store.md#one-file-per-owner-replace)). |
 | `onComplete` | Runs inside `/complete` once the file is verified. What it returns reaches the client as `data.data`, as JSON. |
 | `owner` | With a store: who the file counts against for `quota` and `api.usage`, such as a user or team id, or `null`. |
 | `afterComplete` | With a store: runs once the completion is recorded, at most once and best effort; the place for emails and webhooks. |
@@ -570,8 +571,9 @@ Same-origin versus cross-origin setups, cookies across sites and which origin th
 | `deletePrefix(prefix)` | Empties a folder prefix ending in `/`, such as `"users/42/"`, then lists it again to prove it is empty. For erasure requests. |
 | `checkBucket({ origins? })` | Reports the bucket's CORS rule, lifecycle rule and public-access conflicts (see below). |
 
-With a store, `api` also has `file`, `usage`, `revokeUploads`, `deleteFile`, `reconcile` and `sweep` (see
-[Database store](store.md#file-operations)).
+With a store, `api` also has `file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and
+`sweep` (see [Database store](store.md#file-operations)). For an erasure request, `eraseOwner` needs no key layout and
+proves when nothing is left; `deletePrefix` empties a folder you name.
 
 `getUrl` signs at the start of an `expiresIn` window and the URL stays valid for two windows, so every viewer in one
 window gets the same, cacheable URL.

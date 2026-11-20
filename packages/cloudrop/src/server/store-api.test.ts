@@ -5,6 +5,8 @@ import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.
 import type { FileApi } from "./api.ts";
 import { route } from "./route.ts";
 
+const HOUR = 3_600_000;
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -31,7 +33,9 @@ describe("cloudrop.api without a store", () => {
     ["file", (api) => api.file("id")],
     ["usage", (api) => api.usage("u1")],
     ["revokeUploads", (api) => api.revokeUploads({ owner: "u1" })],
+    ["files", (api) => api.files({ owner: "u1" })],
     ["deleteFile", (api) => api.deleteFile("id")],
+    ["eraseOwner", (api) => api.eraseOwner("u1")],
     ["reconcile", (api) => api.reconcile()],
     ["sweep", (api) => api.sweep()],
   ];
@@ -70,13 +74,25 @@ describe("cloudrop.api with a store", () => {
     expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
     expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
     const [row] = await fixture.store.raw.files();
+    // Completed a moment ago, so a PUT with one of its URLs could still land: cleaned_at stays null for the sweep.
     expect([row?.status, row?.endedAt, row?.cleanedAt, (await fixture.storage.head(ticket.key)).data]).toEqual([
       "deleted",
       NOW,
-      NOW,
+      null,
       null,
     ]);
     expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+  });
+
+  it("deleteFile marks a file cleaned once its URLs and the grace after them have passed", async () => {
+    const { fixture, ticket } = await completed();
+    // One hour (the sweep's default grace) after the completion's claim, and a millisecond before.
+    vi.setSystemTime(NOW.getTime() + HOUR - 1);
+    await fixture.cloudrop.api.deleteFile(ticket.id);
+    expect((await fixture.store.raw.files())[0]?.cleanedAt).toBeNull();
+    vi.setSystemTime(NOW.getTime() + HOUR);
+    await fixture.cloudrop.api.deleteFile(ticket.id);
+    expect((await fixture.store.raw.files())[0]?.cleanedAt).toEqual(new Date(NOW.getTime() + HOUR));
   });
 
   it("deleteFile finishes a deletion an earlier call left half done", async () => {
@@ -91,10 +107,7 @@ describe("cloudrop.api with a store", () => {
     expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error?.code).toBe("STORAGE_UNREACHABLE");
     expect((await fixture.store.raw.files())[0]?.cleanedAt).toBeNull();
     expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
-    expect([(await fixture.storage.head(ticket.key)).data, (await fixture.store.raw.files())[0]?.cleanedAt]).toEqual([
-      null,
-      NOW,
-    ]);
+    expect((await fixture.storage.head(ticket.key)).data).toBeNull();
   });
 
   it("deleteFile keeps another upload's object stored under the same key since", async () => {
@@ -160,5 +173,48 @@ describe("cloudrop.api with a store", () => {
       data: null,
       error: expect.objectContaining({ code: "INVALID_INPUT" }),
     });
+  });
+});
+
+describe("cloudrop.api.files", () => {
+  const ownedBy = (userId: string) =>
+    route({ accept: "*/*", maxSize: "1GB", authorize: () => ({ userId }) }, { owner: ({ userId }) => userId });
+
+  /** Uploads and completes one file on `routeName`, `minutes` after NOW, and answers its id. */
+  async function uploadAt(fixture: ReturnType<typeof storeFixture>, routeName: string, minutes: number) {
+    vi.setSystemTime(NOW.getTime() + minutes * 60_000);
+    const ticket = await fixture.single(routeName, TEXT);
+    await fixture.send(ticket.put, hello);
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    return ticket.id;
+  }
+
+  it("lists an owner's completed files, newest first, a page at a time", async () => {
+    const fixture = storeFixture({ owned, docs: owned, other: ownedBy("u2") });
+    const first = await uploadAt(fixture, "owned", 1);
+    const second = await uploadAt(fixture, "docs", 2);
+    const third = await uploadAt(fixture, "owned", 3);
+    await uploadAt(fixture, "other", 4);
+    await fixture.single("owned", TEXT);
+    const { api } = fixture.cloudrop;
+    const page = await api.files({ owner: "u1", limit: 2 });
+    expect(page.data?.items.map((file) => file.id)).toEqual([third, second]);
+    expect(page.data?.items[0]).toEqual((await api.file(third)).data);
+    const rest = await api.files({ owner: "u1", limit: 2, cursor: page.data?.cursor ?? undefined });
+    expect(rest).toEqual({ data: { items: [(await api.file(first)).data], cursor: null }, error: null });
+    expect((await api.files({ owner: "u1", route: "owned" })).data?.items.map((file) => file.id)).toEqual([
+      third,
+      first,
+    ]);
+  });
+
+  it.for([
+    { name: "an owner over 255 characters", options: { owner: "x".repeat(256) } },
+    { name: "a route the server does not have", options: { owner: "u1", route: "avatars" } },
+    { name: "a limit over 1000", options: { owner: "u1", limit: 1001 } },
+    { name: "a cursor no listing returned", options: { owner: "u1", cursor: "page-2" } },
+  ])("refuses $name with INVALID_INPUT", async ({ options }) => {
+    const fixture = storeFixture({ owned });
+    expect((await fixture.cloudrop.api.files(options)).error?.code).toBe("INVALID_INPUT");
   });
 });
