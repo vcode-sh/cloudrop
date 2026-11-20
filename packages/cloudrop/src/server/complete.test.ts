@@ -220,4 +220,17 @@ describe("POST /complete: plugins and onComplete", () => {
     ]);
     expect((await fixture.storage.head(ticket.key)).data?.size).toBe(5);
   });
+
+  // JSON.stringify leaves such a value out, which would drop `data` from the answer, and the client refuses that answer.
+  it.for([
+    { name: "a function", result: () => "x" },
+    { name: "an object whose toJSON gives undefined", result: { toJSON: () => undefined } },
+  ])("sends data: null when onComplete returns $name", async ({ result }) => {
+    const odd = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { onComplete: () => result });
+    const fixture = serverFixture({ odd });
+    const ticket = await fixture.single("odd", TEXT);
+    await fixture.send(ticket.put, hello);
+    const answer = await complete(fixture, ticket.token);
+    expect([answer.status, "data" in answer.body ? answer.body.data : "no data"]).toEqual([200, null]);
+  });
 });

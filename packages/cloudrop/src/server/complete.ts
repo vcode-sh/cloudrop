@@ -25,5 +25,8 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   if (checked.kind === "failed") return fail(checked.error);
   if (checked.kind === "refused") return cleanUpRefused(config, token, checked);
   const ran = await runOnComplete(config.logger, route, completeContext(request, token, file));
-  return ran.error ? ran : ok({ file, data: ran.data.data ?? null });
+  if (ran.error) return ran;
+  // A result JSON leaves out (undefined, a function) is sent as null, as the store path stores it: without it the
+  // answer would have no data at all.
+  return ok({ file, data: ran.data.json === undefined ? null : ran.data.data });
 }

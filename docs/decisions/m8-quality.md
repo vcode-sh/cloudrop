@@ -212,3 +212,17 @@ continue from `M8-Q1`.
   count.
 - **Status:** in force.
 - **Visible in:** `src/server/http.ts`, `src/server/handler.test.ts`.
+
+### M8-Q34: a stateless `/complete` sends `data: null` for a result JSON leaves out
+
+- **Decision:** without a store, when `onComplete` returns a value `JSON.stringify` leaves out (a function, a Symbol,
+  an object whose `toJSON` gives undefined), `/complete` answers `data: null`, as the store path already stored and sent
+  it (`src/server/complete.ts`).
+- **Why:** the answer was `{ file, data: value }`, and serialising it dropped `data`; the client's `readCompleted`
+  (`src/client/answers.ts`) requires `data`, so it read a finished upload as a malformed answer. `route.ts` documents
+  `data` as null where `onComplete` gave nothing JSON can carry. Found by this pass's review; it was on `main` before the
+  pass. A behaviour change, but only for results the route's types already exclude.
+- **If wrong:** none known. "sends data: null when onComplete returns a function" and "… an object whose toJSON gives
+  undefined" failed before the fix with no `data` in the answer.
+- **Status:** in force.
+- **Visible in:** `src/server/complete.ts`, `src/server/complete.test.ts`.
