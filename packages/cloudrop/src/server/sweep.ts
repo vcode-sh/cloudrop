@@ -123,17 +123,23 @@ interface Sweeper {
   report: SweepReport;
 }
 
-/** removeLeftovers for a sweep step, which stops at the first failure by throwing. */
-async function removeOrThrow(config: ServerConfig, record: FileRecord): Promise<void> {
+/**
+ * removeLeftovers for a sweep step, which stops at the first failure by throwing, then the row marked cleaned. The mark
+ * is the time the check started, so `cleaned_at` never claims a look later than the one the storage got.
+ */
+async function removeAndMark({ config, store }: Sweeper, record: FileRecord): Promise<void> {
+  const checkedAt = new Date();
   const removed = await removeLeftovers(config, record);
   if (removed.error) throw removed.error;
+  await store.cleaned(record.id, checkedAt);
 }
 
 /**
  * The row is taken first: only a sweep whose `end` changed it may delete, so a /complete that claims it in between
  * keeps its object. A crash after the `end` leaves an expired row without cleaned_at, which the cleanup pass finishes.
  */
-async function expire({ config, store, report }: Sweeper, record: FileRecord): Promise<void> {
+async function expire(sweeper: Sweeper, record: FileRecord): Promise<void> {
+  const { store, report } = sweeper;
   if (record.status === "completing") {
     const ended = await store.end(record.id, "completing", "failed", new Date(), { cleaned: true });
     if (ended.changed) report.reported.push(ended.record);
@@ -141,15 +147,13 @@ async function expire({ config, store, report }: Sweeper, record: FileRecord): P
   }
   const ended = await store.end(record.id, "pending", "expired", new Date());
   if (!ended.changed) return;
-  await removeOrThrow(config, ended.record);
-  await store.cleaned(record.id, new Date());
+  await removeAndMark(sweeper, ended.record);
   report.expired += 1;
 }
 
-async function cleanUp({ config, store, report }: Sweeper, record: FileRecord): Promise<void> {
-  await removeOrThrow(config, record);
-  await store.cleaned(record.id, new Date());
-  report.cleaned += 1;
+async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<void> {
+  await removeAndMark(sweeper, record);
+  sweeper.report.cleaned += 1;
 }
 
 /**

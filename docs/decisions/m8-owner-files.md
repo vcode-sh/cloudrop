@@ -87,7 +87,8 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   `settledAt` (`M8-A4`, with the run's `graceMs`, default 1 hour, at least 15 minutes); any other ended row has its
   leftovers removed (`removeLeftovers`: only the object whose `cloudrop-id` is the row's, and its multipart upload),
   and is marked cleaned and counted `cleaned` once `settledAt` has passed, or counted `waiting` before (the time is
-  taken before the check, so a slow check never counts as one made after the settle time). When nothing is waiting by
+  taken before the check, and is the `cleaned_at` it stamps, so a slow check never counts as one made after the settle
+  time; the sweep stamps its checks the same way). When nothing is waiting by
   then, the owner's newest row in any status is read, and counts as `waiting` when it was created at or after the
   run's start; then the live statuses are read once more. The answer is `{ revoked, deleted, cleaned, failed, waiting,
   done }`, with `done` true when nothing failed, nothing is waiting and the signal did not stop the run. A storage or

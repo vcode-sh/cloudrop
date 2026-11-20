@@ -772,7 +772,8 @@ as required.
   (5 minutes by default), longer than the client retries. The client then reports a failure but keeps the file. Once
   the lease has passed, the next `/complete` of it (a `retry()` or a `resume()`) takes the file over and runs
   `onComplete` again: one more reason to keep it idempotent in this mode.
-- **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. Keep server
+- **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. A server whose
+  clock runs ahead can delay `eraseOwner`'s `done` by that much: a file it wrote looks newer than the run. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.
 - **Bundle size.** The store paths add about 6.7 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.

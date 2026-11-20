@@ -85,7 +85,7 @@ async function checkEnded({ config, store, graceMs, report }: Eraser, record: Fi
   const settled = settledAt(record, graceMs);
   if (record.status !== "failed" && record.cleanedAt !== null && record.cleanedAt.getTime() >= settled) return;
   // Taken before the check: a check that only finishes after the settle time did not look after it.
-  const checkedAt = Date.now();
+  const checkedAt = new Date();
   const removed = await removeLeftovers(config, record);
   if (removed.error) {
     config.logger.error(
@@ -95,13 +95,13 @@ async function checkEnded({ config, store, graceMs, report }: Eraser, record: Fi
     report.failed += 1;
     return;
   }
-  if (checkedAt < settled) {
+  if (checkedAt.getTime() < settled) {
     report.waiting += 1;
     return;
   }
   if (record.cleanedAt === null) {
     const marked = await storeCall(config.logger, `mark file ${record.id} cleaned`, () =>
-      store.cleaned(record.id, new Date()),
+      store.cleaned(record.id, checkedAt),
     );
     if (marked.error) {
       report.failed += 1;
@@ -156,8 +156,8 @@ async function runPasses(
 /**
  * The last reads, when nothing is waiting yet. The owner's newest file in any status: one created since the run
  * started is an upload that began while it went on, even one already cancelled after its status was read. Then the
- * live statuses once more, for an /upload whose reserve began just before the run and committed during it. One that
- * starts after these reads is the race the guide describes.
+ * live statuses once more, for an /upload whose reserve began just before the run, committed during it and is still
+ * unfinished. One cancelled before these reads, and one that starts after them, are the race the guide describes.
  */
 async function lastReads(eraser: Eraser, startedAt: number): Promise<Result<boolean>> {
   const { config, store, owner, report } = eraser;
