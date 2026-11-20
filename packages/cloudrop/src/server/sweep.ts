@@ -49,7 +49,8 @@ export interface SweepReport {
   /**
    * Pass it to the next sweep to continue; null when every row has been seen, or when a listing failed after this call
    * had handled rows (counted in `failed`). A listing that fails before any row answers the store's error instead.
-   * With `all`, it is null unless the signal stopped the call.
+   * With `all`, it is null unless the signal stopped the call; a listing that fails after the first page counts in
+   * `failed` and answers null too.
    */
   cursor: string | null;
 }
@@ -102,7 +103,10 @@ function readOptions(given: unknown): Result<Run> {
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  const graceMs = readGrace(options.graceMs);
+  const graceMs = readGrace(
+    options.graceMs,
+    "the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up",
+  );
   if (graceMs.error) return graceMs;
   const all = readAll(options);
   if (all.error) return all;

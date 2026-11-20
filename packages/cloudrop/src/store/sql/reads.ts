@@ -90,11 +90,12 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
       return { records: kept, cursor: next };
     },
 
-    async list({ owner, status, route, limit, cursor }) {
+    async list({ owner, statuses, route, limit, cursor }) {
       const b = binder(dialect);
       const start = cursor === null ? null : decodeCursor(cursor);
       // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
-      const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE owner = ${b.text(owner)} AND status = ${b.text(status)}
+      const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE owner = ${b.text(owner)}
+        AND status IN (${statuses.map((status) => b.text(status)).join(", ")})
         ${route === null ? "" : `AND route = ${b.text(route)}`}
         ${start ? `AND (created_at, ${byteOrder("id")}) < (${b.time(start.time)}, ${b.text(start.id)})` : ""}
         ORDER BY created_at DESC, ${byteOrder("id")} DESC LIMIT ${b.integer(limit + 1)}`;

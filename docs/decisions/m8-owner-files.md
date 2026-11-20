@@ -10,8 +10,9 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   the owner's `completed` rows, newest upload first (`created_at`, then id, both descending, ids in byte order), at most
   `limit` (1 to 1000, default 100) per page. `route` must name one of the server's routes (`INVALID_INPUT` otherwise,
   listing the names); without it every route is listed. The cursor is the store's `<milliseconds>:<id>` of the last
-  row, refused before the store sees it when it has another shape. The store gains `list({ owner, status, route,
-  limit, cursor })`, one status per call, so every query is served by the owner index (`M8-A2`).
+  row, refused before the store sees it when it has another shape. The store gains `list({ owner, statuses, route,
+  limit, cursor })`; `api.files` asks for `completed` alone, and `eraseOwner` reads several statuses in one statement
+  (`M8-A5`).
 - **Why:** the production integration wrote this query itself against the tables. The items are the `FileRecord`s
   `api.file` already answers, so there is no second public shape. `created_at` never changes, so a page cursor stays
   valid while the caller deletes the files it read (the contract proves it); `completed_at` would serve "newest" as well
@@ -58,34 +59,38 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
 
 ### M8-A4: a key is checked for the last time only once its URLs and the grace have run out
 
-- **Decision:** `settledAt(record, graceMs)` is `min(expiresAt, claimedAt ?? endedAt ?? expiresAt) + graceMs`: the
-  last moment one of the row's URLs could start a `PUT` (URLs are signed only while the row is `pending` and never
-  outlive the token; a row leaves `pending` at its last claim, or at its end), plus the grace the sweep already gives a
-  `PUT` under way. `deleteFile`, and the removal after a replacing completion, still delete the object at once, but
-  mark the row cleaned only when `settledAt` under the default grace (1 hour) has passed; otherwise `cleaned_at` stays
-  null and the sweep's cleanup pass checks the key again an hour after the end.
+- **Decision:** `settledAt(record, graceMs)` is `min(expiresAt, (claimedAt ?? endedAt ?? expiresAt) + 15 minutes) +
+  graceMs`: the last moment one of the row's URLs could start a `PUT` (URLs are signed while the row is `pending`, each
+  works 15 minutes and none outlives the token; a row leaves `pending` at its last claim, or at its end), plus a grace
+  that is only the time a `PUT` under way gets to land. `deleteFile`, and the removal after a replacing completion,
+  still delete the object at once, but mark the row cleaned only once `settledAt` under the default grace (1 hour) has
+  passed; otherwise `cleaned_at` stays null and the sweep's cleanup pass checks the key again an hour after the end.
 - **Why:** in 0.1 `deleteFile` marked a just-completed file cleaned at once, so a duplicate `PUT` with one of its URLs
   (a retry whose answer was lost) could put the object back after the delete, with no row left to find it; the
-  production integration worked around it by hand. `/sign` reads the row and then signs, so a URL may be signed a
-  moment after the row left `pending`: the grace, at least 15 minutes, covers that as it does for the sweep.
+  production integration worked around it by hand. The first version anchored the grace at the moment the row left
+  `pending`, without the URL's 15 minutes: at the minimum grace a `PUT` started a moment before its URL ran out could
+  land after a check called final (found in review, reproduced with `graceMs: 900000`). `/sign` reads the row and then
+  signs, and `/upload` signs after `reserve` without reading it again, so a URL may be signed a moment after the row
+  left `pending`; that moment is a request's length, well inside the grace. The sweep keeps its own rule (`ended_at +
+  graceMs`, with a `PUT` still under way after cleanup a documented cost); `eraseOwner` re-checks what it cleaned.
 - **If wrong:** a deletion within the hour after completion costs the sweep one more `HEAD`.
 - **Status:** in force. `src/server/store-api.test.ts` ("deleteFile marks a file cleaned once its URLs and the grace
-  after them have passed").
+  after them have passed") and the first case of `src/server/erase.test.ts`, at the millisecond on both sides.
 - **Visible in:** `src/server/leftovers.ts`, `src/server/store-api.ts`, `docs/guide/store.md#file-operations`.
 
 ### M8-A5: `api.eraseOwner(owner, { graceMs?, signal? })`, and when it reports done
 
-- **Decision:** One run revokes the owner's `pending` rows (`store.revoke`), then reads the owner's rows status by
-  status through `list`: `completed` rows end as `deleted`; each ended row (`aborted`, `rejected`, `failed`, `expired`,
-  `deleted`, read after `completed` so this run's deletions are checked in the same run) is proven when it is not
-  `failed` and its `cleaned_at` is at or after `settledAt` (`M8-A4`, with the run's `graceMs`, default 1 hour, at least
-  15 minutes); any other ended row has its leftovers removed (`removeLeftovers`: only the object whose `cloudrop-id` is
-  the row's, and its multipart upload), and is marked cleaned and counted `cleaned` once `settledAt` has passed, or
-  counted `waiting` before. Last, any `pending`, `completing` or `completed` row still there counts as `waiting`. The
-  answer is `{ revoked, deleted, cleaned, failed, waiting, done }`, with `done` true when nothing failed, nothing is
-  waiting and the signal did not stop the run. A storage or database error on one row is logged with the row's id and
-  counted in `failed`; a failed listing answers the store's retryable `SERVER_ERROR`. `signal` is checked before each
-  row.
+- **Decision:** One run revokes the owner's `pending` rows (`store.revoke`), ends the owner's `completed` rows as
+  `deleted`, then reads the owner's `pending`, `completing` and `completed` rows together (`list` with three statuses,
+  one statement per page) and counts each as `waiting`. Then each ended status (`aborted`, `rejected`, `failed`,
+  `expired`, `deleted`) is read: a row is proven when it is not `failed` and its `cleaned_at` is at or after
+  `settledAt` (`M8-A4`, with the run's `graceMs`, default 1 hour, at least 15 minutes); any other ended row has its
+  leftovers removed (`removeLeftovers`: only the object whose `cloudrop-id` is the row's, and its multipart upload),
+  and is marked cleaned and counted `cleaned` once `settledAt` has passed, or counted `waiting` before. When nothing is
+  waiting by then, the live statuses are read once more. The answer is `{ revoked, deleted, cleaned, failed, waiting,
+  done }`, with `done` true when nothing failed, nothing is waiting and the signal did not stop the run. A storage or
+  database error on one row is logged with the row's id and counted in `failed`; a failed listing answers the store's
+  retryable `SERVER_ERROR`. `signal` is checked before the run, each page and each row.
 - **Why:** the production integration erased accounts by deleting files through `deleteFile` and then emptying its own
   folders with `deletePrefix`, which needs the app's key layout. The rows already say which objects an owner has, so
   the store's states prove emptiness without it: completed rows still hold an object, completing ones may still
@@ -93,14 +98,20 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   second run an hour later. `failed` rows are always checked: the sweep marks a stuck completion cleaned while it keeps
   the object for the app to check (`M5` sweep), so `cleaned_at` proves nothing there; an erasure removes it. A row
   cleaned early by 0.1's `deleteFile` is checked again in every run, since `cleaned` never stamps a cleaned row again.
-  The live statuses are read last, so an upload that started while the run went on keeps it from `done`.
+  The order is the proof: once one statement finds nothing of the owner live, nothing of theirs can end afterwards
+  (only a new `/upload` adds a row), so the ended passes read a set that no longer changes. The first version read the
+  eight statuses one at a time, the live ones last, and review reproduced a miss: a lease-mode completion whose
+  `onComplete` threw handed its file back to `pending` between the `pending` and the `completing` read, the run said
+  done, and the client's retry then completed the file. The final live read keeps an upload that starts during the
+  ended passes from a `done`.
 - **If wrong:** `done` speaks for the moment of the run: an `/upload` that passed `authorize` before the app revoked
   the owner's access can reserve a file after the last read. The guide says to revoke access first and run it once
   more if a request may still be in flight. Rows and the usage row stay (ended, and at zeros); an app whose erasure
   policy forbids keeping file names deletes them with its own SQL after `done`.
 - **Status:** in force. `src/server/erase.test.ts`, with fault probes: without the `failed` rule the stuck completion's
-  object stays; without the live passes an upload started mid-run is missed; without the settle wait a late `PUT`
-  survives a run that said done.
+  object stays; without the live reads an upload started mid-run is missed; without the settle wait a late `PUT`
+  survives a run that said done. The release race and the URL-life boundary were each seen failing on the first
+  version before the fix.
 - **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
 
 ### M8-A6: `replace: true` keeps one file per owner on a route
@@ -116,8 +127,9 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   then their end, then the completion, each guarded on the new row still being `completing` with this claim. After the
   record, and before `afterComplete`, the server removes each replaced file's object (`M8-A4`); a failure is logged
   ("could not remove the replaced file … The sweep removes it later.") and the sweep's cleanup pass finishes it.
-  `onComplete` sees the previous file still completed; `afterComplete` runs after its row is deleted and its object
-  removed; neither context gains a field.
+  `onComplete` sees the previous file still completed; `afterComplete` runs after its row is deleted and its object's
+  removal was tried; neither context gains a field. Under a quota the owner needs room for both files until the new
+  one completes, since its bytes are reserved while the previous file still counts; the guide says so.
 - **Why:** one statement cannot do it on Postgres: under READ COMMITTED its snapshot predates the other completion's
   commit, so two completions at once would each keep their file (the contract's concurrency case fails that way when
   the lock is moved after the statement). The advisory lock is taken only by replacing completions, before any row
@@ -127,8 +139,9 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   `afterComplete`, as the Hono example did, left both files when two first uploads raced and when `afterComplete` was
   skipped by a crash.
 - **If wrong:** a 64-bit hash collision with another lock only makes two completions take turns.
-- **Status:** in force. Contract cases `complete with replace …` (with eight owners completing two files at once) and
-  the atomicity case on every backend; `src/server/store-replace.test.ts` in both transaction and lease mode.
+- **Status:** in force. Contract cases `complete with replace …`, eight owners completing two files at once (in plain
+  calls, and in transactions where the backend has them), a replacement racing a delete of the replaced file, and the
+  atomicity case, on every backend; `src/server/store-replace.test.ts` in both transaction and lease mode.
 - **Visible in:** `src/server/route.ts`, `src/server/route-config.ts`, `src/server/store-config.ts`,
   `src/server/store-complete.ts`, `src/store/sql/postgres-replace.ts`, `src/store/sql/sqlite.ts`,
   `docs/guide/store.md#one-file-per-owner-replace`.

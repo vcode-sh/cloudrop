@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
 import { memoryStore } from "../testing/memory-store.ts";
-import { gate, hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
+import { gate, hello, leaseStore, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import { route } from "./route.ts";
 
-const HOUR = 3_600_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const at = (ms: number) => vi.setSystemTime(NOW.getTime() + ms);
 
 beforeEach(() => {
@@ -49,11 +50,12 @@ describe("cloudrop.api.eraseOwner", () => {
       await stored(fixture, open.key),
       await stored(fixture, theirs.key),
     ]).toEqual([false, false, true]);
-    // A PUT of the revoked upload, still under way during the first run, lands after it.
+    // A PUT of the revoked upload, started with its URL before the URL ran out, lands after the first run.
     expect((await fixture.send(open.put, hello)).status).toBe(200);
-    at(3 * HOUR - 1);
+    // The URL was signed when the upload was revoked, so it worked for 15 minutes more; then an hour of grace.
+    at(2 * HOUR + 15 * MINUTE + HOUR - 1);
     expect((await api.eraseOwner("u1")).data?.done).toBe(false);
-    at(3 * HOUR);
+    at(2 * HOUR + 15 * MINUTE + HOUR);
     expect(await api.eraseOwner("u1")).toEqual({
       data: { revoked: 0, deleted: 0, cleaned: 1, failed: 0, waiting: 0, done: true },
       error: null,
@@ -100,6 +102,46 @@ describe("cloudrop.api.eraseOwner", () => {
     expect(await stored(fixture, ticket.key)).toBe(false);
   });
 
+  it("is not done when a failed completion hands its file back while it runs", async () => {
+    const paused = gate();
+    const flaky = route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onComplete: async () => {
+          await paused.pass();
+          throw new Error("the app's database is down");
+        },
+      },
+    );
+    const base = leaseStore();
+    let completing: Promise<unknown> | undefined;
+    const fixture = storeFixture(
+      { flaky },
+      {
+        store: {
+          ...base,
+          // Right after the run reads the owner's pending files: the completion fails and hands its file back to
+          // pending, and its client will retry. A run reading one status at a time saw it in neither status.
+          list: async (input) => {
+            const page = await base.list(input);
+            if (completing && input.statuses.includes("pending")) {
+              paused.open();
+              await completing;
+              completing = undefined;
+            }
+            return page;
+          },
+        },
+      },
+    );
+    const ticket = await upload(fixture, "flaky", false);
+    completing = complete(fixture, ticket.token);
+    await paused.arrived;
+    expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toMatchObject({ waiting: 1, done: false });
+    expect((await fixture.store.raw.files())[0]?.status).toBe("pending");
+  });
+
   it("is not done when an upload starts while it runs", async () => {
     const base = memoryStore();
     let started = false;
@@ -110,7 +152,7 @@ describe("cloudrop.api.eraseOwner", () => {
           ...base,
           // The first ended pass: the run has revoked and deleted, and the owner starts another upload.
           list: async (input) => {
-            if (input.status === "aborted" && !started) {
+            if (input.statuses.includes("aborted") && !started) {
               started = true;
               await fixture.single("owned", TEXT);
             }

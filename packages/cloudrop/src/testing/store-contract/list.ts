@@ -29,12 +29,25 @@ export function listCases(suite: StoreSuite): void {
     for (const id of ["f-old", "f-B", "f-a", "f-new", "g-other-owner", "g-no-owner"]) {
       await advance(id, "completed", at(5 * MINUTE));
     }
-    const page = await store.list({ owner: "u-1", status: "completed", route: null, limit: 10, cursor: null });
+    const page = await store.list({ owner: "u-1", statuses: ["completed"], route: null, limit: 10, cursor: null });
     expect(ids(page)).toEqual(["f-new", "f-a", "f-B", "f-old"]);
     expect(page.records[0]).toEqual(await store.get("f-new"));
     expect(page.cursor).toBeNull();
-    const pending = await store.list({ owner: "u-1", status: "pending", route: null, limit: 10, cursor: null });
+    const pending = await store.list({ owner: "u-1", statuses: ["pending"], route: null, limit: 10, cursor: null });
     expect(ids(pending)).toEqual(["f-pending"]);
+  });
+
+  it("list with several statuses answers the rows in any of them, in one newest-first order", async () => {
+    const { store } = suite;
+    await reserveAt("u-1", 1, [newFile("f-done", 1)]);
+    await reserveAt("u-1", 2, [newFile("f-claimed", 1)]);
+    await reserveAt("u-1", 3, [newFile("f-open", 1), newFile("f-ended", 1)]);
+    await advance("f-done", "completed", at(5 * MINUTE));
+    await advance("f-claimed", "completing", at(5 * MINUTE));
+    await advance("f-ended", "aborted", at(5 * MINUTE));
+    const statuses = ["pending", "completing", "completed"] as const;
+    const page = await store.list({ owner: "u-1", statuses, route: null, limit: 10, cursor: null });
+    expect(ids(page)).toEqual(["f-open", "f-claimed", "f-done"]);
   });
 
   it("list with a route answers only that route's rows", async () => {
@@ -42,7 +55,7 @@ export function listCases(suite: StoreSuite): void {
     await reserveAt("u-1", 1, [onRoute("f-avatar", "avatars"), onRoute("f-doc", "docs")]);
     await advance("f-avatar", "completed", at(MINUTE));
     await advance("f-doc", "completed", at(MINUTE));
-    const page = await store.list({ owner: "u-1", status: "completed", route: "docs", limit: 10, cursor: null });
+    const page = await store.list({ owner: "u-1", statuses: ["completed"], route: "docs", limit: 10, cursor: null });
     expect(ids(page)).toEqual(["f-doc"]);
   });
 
@@ -59,7 +72,7 @@ export function listCases(suite: StoreSuite): void {
       await advance(id, "completed", at(10 * MINUTE));
     }
     const read = (cursor: string | null) =>
-      store.list({ owner: "u-1", status: "completed", route: null, limit: 2, cursor });
+      store.list({ owner: "u-1", statuses: ["completed"], route: null, limit: 2, cursor });
     const first = await read(null);
     expect(ids(first)).toEqual(["f-5", "f-4"]);
     // The caller deletes what it read, as an erasure does: the next page starts after the cursor all the same.
@@ -74,7 +87,7 @@ export function listCases(suite: StoreSuite): void {
   it("list answers a null cursor when the last page is exactly full", async () => {
     const { store } = suite;
     await reserveAt("u-1", 1, [newFile("f-1", 1), newFile("f-2", 1)]);
-    const page = await store.list({ owner: "u-1", status: "pending", route: null, limit: 2, cursor: null });
+    const page = await store.list({ owner: "u-1", statuses: ["pending"], route: null, limit: 2, cursor: null });
     expect(ids(page)).toEqual(["f-2", "f-1"]);
     expect(page.cursor).toBeNull();
   });

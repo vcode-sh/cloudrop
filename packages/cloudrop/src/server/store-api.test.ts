@@ -86,13 +86,14 @@ describe("cloudrop.api with a store", () => {
 
   it("deleteFile marks a file cleaned once its URLs and the grace after them have passed", async () => {
     const { fixture, ticket } = await completed();
-    // One hour (the sweep's default grace) after the completion's claim, and a millisecond before.
-    vi.setSystemTime(NOW.getTime() + HOUR - 1);
+    // A URL signed as the completion claimed the file works 15 minutes more; then the default grace, an hour.
+    const settled = NOW.getTime() + 15 * 60_000 + HOUR;
+    vi.setSystemTime(settled - 1);
     await fixture.cloudrop.api.deleteFile(ticket.id);
     expect((await fixture.store.raw.files())[0]?.cleanedAt).toBeNull();
-    vi.setSystemTime(NOW.getTime() + HOUR);
+    vi.setSystemTime(settled);
     await fixture.cloudrop.api.deleteFile(ticket.id);
-    expect((await fixture.store.raw.files())[0]?.cleanedAt).toEqual(new Date(NOW.getTime() + HOUR));
+    expect((await fixture.store.raw.files())[0]?.cleanedAt).toEqual(new Date(settled));
   });
 
   it("deleteFile finishes a deletion an earlier call left half done", async () => {

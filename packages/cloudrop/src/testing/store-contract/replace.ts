@@ -3,7 +3,7 @@
 
 import { expect, it } from "vitest";
 import type { FileRecord, NewFile } from "../../server/store.ts";
-import { at, LEASE, MINUTE, newFile, pendingRow, type StoreSuite, usageRow } from "./suite.ts";
+import { at, LEASE, MINUTE, newFile, pendingRow, provided, type StoreSuite, usageRow } from "./suite.ts";
 
 const byId = (records: readonly FileRecord[]) => records.toSorted((a, b) => (a.id < b.id ? -1 : 1));
 
@@ -11,6 +11,26 @@ const onRoute = (id: string, size: number, route: string): NewFile => ({ ...newF
 
 export function replaceCases(suite: StoreSuite): void {
   const { rawFile, seed, advance, skipWithout } = suite;
+
+  /** Eight owners, each with one older completed file and two uploads `claim` made at once, for a race to replace it. */
+  async function racingOwners(claim: (owner: string) => Promise<void>): Promise<string[]> {
+    const owners = Array.from({ length: 8 }, (_, index) => `u-${index}`);
+    for (const owner of owners) {
+      await seed(owner, [newFile(`${owner}-old`, 1), newFile(`${owner}-a`, 10), newFile(`${owner}-b`, 10)]);
+      await advance(`${owner}-old`, "completed", at(0));
+      await claim(owner);
+    }
+    return owners;
+  }
+
+  /** Each owner kept exactly one completed file, and their counters say so. */
+  async function expectOneFileEach(owners: string[]): Promise<void> {
+    const completed = (await suite.raw.files()).filter((row) => row.status === "completed").map((row) => row.owner);
+    expect(completed.toSorted()).toEqual(owners);
+    expect((await suite.raw.usage()).map(({ owner, activeBytes, files }) => ({ owner, activeBytes, files }))).toEqual(
+      owners.map((owner) => ({ owner, activeBytes: 10, files: 1 })),
+    );
+  }
 
   it("complete with replace deletes the owner's other completed files on the route and answers them", async () => {
     const { store, raw } = suite;
@@ -74,26 +94,49 @@ export function replaceCases(suite: StoreSuite): void {
   });
 
   it("two replacing completions at once leave exactly one completed file per owner", async (ctx) => {
-    const { store, raw } = suite;
+    const { store } = suite;
     skipWithout(ctx, "concurrency");
-    // Eight owners, each with two uploads completing at the same moment and one older file: many chances to interleave.
-    const owners = Array.from({ length: 8 }, (_, index) => `u-${index}`);
-    for (const owner of owners) {
-      await seed(owner, [newFile(`${owner}-old`, 1), newFile(`${owner}-a`, 10), newFile(`${owner}-b`, 10)]);
-      await advance(`${owner}-old`, "completed", at(0));
+    const owners = await racingOwners(async (owner) => {
       await store.claim(`${owner}-a`, "a", at(0), LEASE);
       await store.claim(`${owner}-b`, "b", at(0), LEASE);
-    }
+    });
     await Promise.all(
       owners.flatMap((owner) => [
         store.complete(`${owner}-a`, "a", null, at(MINUTE), { replace: true }),
         store.complete(`${owner}-b`, "b", null, at(MINUTE), { replace: true }),
       ]),
     );
-    const completed = (await raw.files()).filter((row) => row.status === "completed").map((row) => row.owner);
-    expect(completed.toSorted()).toEqual(owners);
-    expect((await raw.usage()).map(({ owner, activeBytes, files }) => ({ owner, activeBytes, files }))).toEqual(
-      owners.map((owner) => ({ owner, activeBytes: 10, files: 1 })),
-    );
+    await expectOneFileEach(owners);
+  });
+
+  it("two replacing completions in transactions at once leave exactly one completed file per owner", async (ctx) => {
+    const { store } = suite;
+    skipWithout(ctx, "transaction");
+    skipWithout(ctx, "concurrency");
+    const transaction = provided(store.transaction, "transaction").bind(store);
+    const owners = await racingOwners(async () => {});
+    // Each completion claims, then completes, inside its own transaction, as the server's transaction mode does.
+    const completeIn = (id: string) =>
+      transaction(async (_tx, inner) => {
+        await inner.claim(id, "c", at(0), LEASE);
+        return inner.complete(id, "c", null, at(MINUTE), { replace: true });
+      });
+    await Promise.all(owners.flatMap((owner) => [completeIn(`${owner}-a`), completeIn(`${owner}-b`)]));
+    await expectOneFileEach(owners);
+  });
+
+  it("a replacing completion racing a delete of the file it replaces releases that file's bytes once", async (ctx) => {
+    const { store, raw } = suite;
+    skipWithout(ctx, "concurrency");
+    await seed("u-1", [newFile("old", 7), newFile("new", 10)]);
+    await advance("old", "completed", at(0));
+    await advance("new", "completing", at(0));
+    const [done] = await Promise.all([
+      store.complete("new", "claim-new", null, at(MINUTE), { replace: true }),
+      store.end("old", "completed", "deleted", at(MINUTE)),
+    ]);
+    expect(done.changed).toBe(true);
+    expect((await rawFile("old"))?.status).toBe("deleted");
+    expect(await raw.usage()).toEqual([usageRow("u-1", { activeBytes: 10, files: 1, updatedAt: at(MINUTE) })]);
   });
 }

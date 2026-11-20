@@ -59,10 +59,12 @@ export function readMethods({ files, usage }: MemoryTables): ReadMethods {
       return { records: found.records.map(toRecord), cursor: found.cursor };
     },
 
-    list: async ({ owner, status, route, limit, cursor }) => {
+    list: async ({ owner, statuses, route, limit, cursor }) => {
       const after = cursor === null ? () => true : listedAfter(cursor);
       const rows = [...files.values()]
-        .filter((row) => row.owner === owner && row.status === status && (route === null || row.route === route))
+        .filter(
+          (row) => row.owner === owner && statuses.includes(row.status) && (route === null || row.route === route),
+        )
         .filter(after)
         .sort(newestFirst);
       const kept = rows.slice(0, limit);

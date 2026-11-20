@@ -91,7 +91,8 @@ describe("a route with replace", () => {
     expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
       `cloudrop: could not remove the replaced file ${first.id} from the bucket. The sweep removes it later.`,
     ]);
-    expect([await stored(fixture, first.key), (await fixture.store.raw.files())[0]?.cleanedAt]).toEqual([true, null]);
+    const previous = (await fixture.store.raw.files()).find((row) => row.id === first.id);
+    expect([await stored(fixture, first.key), previous?.status, previous?.cleanedAt]).toEqual([true, "deleted", null]);
     vi.setSystemTime(NOW.getTime() + 2 * HOUR);
     expect((await fixture.cloudrop.api.sweep()).data?.cleaned).toBe(1);
     expect(await stored(fixture, first.key)).toBe(false);

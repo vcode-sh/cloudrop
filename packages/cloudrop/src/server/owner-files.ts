@@ -72,7 +72,7 @@ export async function listFiles(
   if (options.error) return options;
   const { owner } = options.data;
   const page = await storeCall(config.logger, `list the files of ${owner}`, () =>
-    store.list({ ...options.data, status: "completed" }),
+    store.list({ ...options.data, statuses: ["completed"] }),
   );
   return page.error ? page : ok({ items: page.data.records, cursor: page.data.cursor });
 }

@@ -548,14 +548,17 @@ the row deleted but not cleaned up.
 - **Two uploads completing at once leave exactly one file:** the one recorded last. On Postgres the two completions
   take turns on a transaction-scoped advisory lock for the owner and route; SQLite and D1 have one writer at a time.
 - **What the hooks see.** `onComplete` runs before the completion is recorded, so the previous file is still
-  completed there (`api.files` lists it). `afterComplete` runs after: the previous file's row is deleted and its object
-  removed. Neither gets a new field; an app that keeps its own pointer, such as `users.avatar_key`, overwrites it in
+  completed there (`api.files` lists it). `afterComplete` runs after: the previous file's row is deleted and the removal
+  of its object was tried. Neither gets a new field; an app that keeps its own pointer, such as `users.avatar_key`, overwrites it in
   `onComplete`, through `tx` so it commits with the replacement.
 - **It needs a store and `owner`**, and takes one file per `/upload`: `maxFiles` is 1, and `createCloudrop` refuses a
   replacing route without a store, without `owner`, or with another `maxFiles`, with `INVALID_CONFIG`. A file whose
   `owner` answered null replaces nothing.
 - Only files of the same owner and route go. Files uploaded before you turned `replace` on are replaced too, by the
   owner's next completion on the route.
+- **Under a quota, the owner needs room for both files** until the replacement completes: the new file's bytes are
+  reserved at `/upload` while the previous file still counts. An owner at their limit is refused `QUOTA_EXCEEDED` for a
+  new avatar; give replacing routes room in your `quota`, or keep their files out of it.
 
 ## What changes for the client
 
@@ -635,24 +638,27 @@ own. It reports:
 | --- | --- |
 | `revoked` | Unfinished uploads ended in this run. |
 | `deleted` | Completed files deleted in this run. |
-| `cleaned` | Ended uploads whose key was checked for the last time in this run. |
+| `cleaned` | Ended uploads whose key this run checked once their URLs and the grace had run out. |
 | `failed` | Files a storage or database error kept from being handled; each is logged with its id. |
 | `waiting` | Files that cannot be proven yet: a completion still under way, an upload that started while it ran, or an ended upload whose URLs, or the grace after them, have not run out. What they had stored was removed. |
 | `done` | Nothing of the owner was unfinished or completed, and every ended upload had its key checked after its URLs and the grace ran out. |
 
-**Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards, so a key is
-checked for the last time only `graceMs` (default 1 hour, at least 15 minutes, as for the sweep) after the last moment
-one of its URLs could start a `PUT`: the token's deadline, or the moment the upload stopped being unfinished, whichever
-came first. Files completed or ended more than that long ago are proven in the first run; a recent one makes the first
-run answer `waiting` and the run an hour later `done`. Run it again until it reports `done`: it is idempotent, and two
+**Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards. A URL works for
+15 minutes and never past the upload's token, so the last `PUT` can start 15 minutes after the upload stopped being
+unfinished (it completed, or ended), or at the token's deadline if that comes first; a key is checked for the last
+time `graceMs` after that (default 1 hour, at least 15 minutes), the time a `PUT` already under way gets to land. Files
+completed or ended longer ago than that are proven in the first run; a recent one makes the first run answer
+`waiting`, and a run 1 hour 15 minutes later `done`. Run it again until it reports `done`: it is idempotent, and two
 runs at once are safe.
 
 - **Stuck completions too.** The sweep keeps the object of a completion it ended as `failed`, since its `onComplete`
   may have recorded it; `eraseOwner` removes it.
 - **`signal`** (an `AbortSignal`) stops a run before the next file, with `done: false`.
-- **`done` is about the moment it ran.** An `/upload` that passed `authorize` before you revoked the owner's access can
-  still reserve a file afterwards; a run that sees it answers `waiting`. Revoke access first, and if a request may
-  still be in flight, run it once more after it.
+- **`done` is about the moment it ran.** It reads the owner's unfinished and completed files in one statement before
+  it checks the ended ones, and again at the end, so a file that changes status while it runs is not missed. An
+  `/upload` that passed `authorize` before you revoked the owner's access can still reserve a file after the last read;
+  a run that sees it answers `waiting`. Revoke access first, and if a request may still be in flight, run it once more
+  after it.
 - The usage row stays, at zeros. The rows stay too, as `deleted` and the other ended statuses, which name the file
   (`name`, `key`); delete them with your own SQL once `done` if your erasure policy requires it, never before.
 
@@ -666,7 +672,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `files({ owner, route?, limit?, cursor? })` | An owner's completed files, newest first, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
-| `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. A file completed within the last hour is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
+| `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
 | `eraseOwner(owner, { graceMs?, signal? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |

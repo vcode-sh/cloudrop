@@ -11,20 +11,18 @@ import { storeCall } from "./store-calls.ts";
 
 /** The sweep's default grace, and the one deleteFile and replacing routes use. */
 export const DEFAULT_GRACE_MS = 3_600_000;
+const URL_LIFETIME_MS = URL_LIFETIME_SECONDS * 1000;
 /**
  * A signed URL's life: no URL outlives its token's deadline, so with at least this grace no new PUT can start after a
  * row's deadline or end once the sweep may clean it up.
  */
-export const MIN_GRACE_MS: number = URL_LIFETIME_SECONDS * 1000;
+export const MIN_GRACE_MS: number = URL_LIFETIME_MS;
 
-/** A `graceMs` option: at least the life of an upload URL; the default when left out. */
-export function readGrace(graceMs: unknown = DEFAULT_GRACE_MS): Result<number> {
-  if (typeof graceMs === "number" && Number.isSafeInteger(graceMs) && graceMs >= MIN_GRACE_MS) return ok(graceMs);
-  return fail(
-    invalidInput(
-      `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.`,
-    ),
-  );
+/** A `graceMs` option of at least 15 minutes, `what` naming what it is for; the default when left out. */
+export function readGrace(graceMs: unknown, what: string): Result<number> {
+  const value = graceMs ?? DEFAULT_GRACE_MS;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= MIN_GRACE_MS) return ok(value);
+  return fail(invalidInput(`graceMs must be at least ${MIN_GRACE_MS} (15 minutes), ${what}.`));
 }
 
 /**
@@ -45,13 +43,14 @@ export async function removeLeftovers(config: ServerConfig, record: FileRecord):
 
 /**
  * When a check of the bucket for this row's object becomes final, in milliseconds: `graceMs` after the last moment one
- * of its URLs could start a PUT. URLs are signed only while the row is pending and never outlive its token, so that
- * moment is the earlier of the token's deadline and the row leaving pending: its last claim, or its end. The grace,
- * like the sweep's, leaves a PUT already under way time to land.
+ * of its URLs could start a PUT. URLs are signed while the row is pending (its last claim, or its end, is when it left
+ * pending), each works for 15 minutes, and none outlives the token, so that moment is the earlier of the token's
+ * deadline and 15 minutes after the row left pending. A URL signed a moment after that, by an /upload or /sign that
+ * read the row just before, starts its PUT within the grace all the same. The grace leaves a PUT under way time to land.
  */
 export function settledAt(record: FileRecord, graceMs: number): number {
-  const leftPending = record.claimedAt ?? record.endedAt ?? record.expiresAt;
-  return Math.min(record.expiresAt.getTime(), leftPending.getTime()) + graceMs;
+  const leftPending = (record.claimedAt ?? record.endedAt ?? record.expiresAt).getTime();
+  return Math.min(record.expiresAt.getTime(), leftPending + URL_LIFETIME_MS) + graceMs;
 }
 
 /**

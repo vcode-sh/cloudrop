@@ -185,14 +185,16 @@ export interface CloudropStore<TTx = never> {
     cursor: string | null;
   }): Promise<{ records: FileRecord[]; cursor: string | null }>;
   /**
-   * One page of an owner's rows in one status, newest first: by `created_at`, then id, both descending, and on `route`
-   * alone when it is not null. At most `limit` records; `cursor` continues after the previous page (keyset, so rows that
-   * leave the status between pages skip nothing) and is null on the last page. A cursor is `<milliseconds>:<id>`, the
-   * last row's `created_at` and id (the file API refuses any other before calling the store).
+   * One page of an owner's rows in any of `statuses` (at least one), newest first: by `created_at`, then id, both
+   * descending, and on `route` alone when it is not null. One page is read in one statement, so a row in one of the
+   * statuses when it runs is on it or on a later page, whatever status changes happen meanwhile. At most `limit`
+   * records; `cursor` continues after the previous page (keyset, so rows that leave the statuses between pages skip
+   * nothing) and is null on the last page. A cursor is `<milliseconds>:<id>`, the last row's `created_at` and id (the
+   * file API refuses any other before calling the store).
    */
   list(input: {
     owner: string;
-    status: FileStatus;
+    statuses: readonly FileStatus[];
     route: string | null;
     limit: number;
     cursor: string | null;
