@@ -103,3 +103,28 @@ continue from `M8-Q1`.
 - **Status:** in force.
 - **Visible in:** `src/client/parts.ts`.
 
+### M8-Q8: client platform APIs not adopted
+
+- **Decision:** the client keeps its hand-written code where a newer API exists but misses a target. Checked against
+  MDN's browser-compat-data 8.1.10, the client's floor (`M4-F6`: Chrome 103, Safari 16, Firefox 100), React Native's
+  Hermes and Node 24.22.2, on 2026-11-20:
+  - `AbortSignal.any` (Chrome 116, Firefox 124, Safari 17.4) for the timeout plus caller's signal in
+    `client/endpoints.ts` and `client/transport.ts`: above the floor, as `M3-U16` ruled. Those two comments cited
+    `M3-U19`, a ruling about repairs; they now cite `M3-U16`.
+  - `Promise.withResolvers` (Chrome 119, Firefox 121, Safari 17.4; not listed by Hermes) for the deferreds in
+    `client/close.ts` and `client/locks.ts`.
+  - `Uint8Array.prototype.toHex` (Chrome 140, Firefox 133, Safari 18.2, Node 25) for the hex in `client/launch.ts`
+    and `client/fingerprint.ts`, as `M8-Q5` found for the server; `crypto.randomUUID` stays out for the reason
+    `newRequestKey` gives (no secure context on a LAN page).
+  - `reportError` (Chrome 95, Firefox 93, Safari 15.4) for the listener errors `client/store.ts` and
+    `react/use-upload.ts` rethrow in a task (`M3-U8`): Node has none (`typeof reportError` is `undefined` on 24.22.2),
+    and it reports to the page's error event rather than throwing, so the unit lane could not see it.
+  - `Map.prototype.getOrInsertComputed` (Chrome 145, Firefox 144, Safari 26.2, Node 26) for `storeOf` in `react.ts`.
+  - A shared helper for the controller that both a timeout and the caller's signal abort, used by `endpoints.ts` and
+    `transport.ts`: two copies, and `M3-U16` already removed one such helper; the simplify rule waits for a third.
+- **Why:** each would raise the floor, break React Native or the unit lane on Node 24, or add a concept for two callers.
+- **If wrong:** revisit with the floor. Raising it to Safari 17.4 would allow `AbortSignal.any` and
+  `Promise.withResolvers` together and save about fifteen lines.
+- **Status:** in force.
+- **Visible in:** the files named above.
+

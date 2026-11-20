@@ -74,7 +74,7 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
 export function createPut(fetchOption: ClientFetch | undefined, send: ClientFetch): PutObject {
   if (fetchOption === undefined && typeof globalThis.XMLHttpRequest === "function") return putWithXhr;
   return async (target, body, signal, onBytes) => {
-    // Without AbortSignal.any (ruling M3-U19): one controller that the timeout and the caller's signal both abort.
+    // Without AbortSignal.any (ruling M3-U16): one controller that the timeout and the caller's signal both abort.
     const controller = new AbortController();
     const stop = () => controller.abort();
     const timeout = setTimeout(stop, STALL_MS + body.size / SLOWEST_BYTES_PER_MS);

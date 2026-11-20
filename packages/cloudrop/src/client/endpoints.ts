@@ -102,7 +102,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch, serverHead
     body: unknown,
     { signal, keepalive, timeoutMs = ASK_TIMEOUT_MS }: PostOptions,
   ): Promise<Result<{ response: Response; text: string }>> {
-    // Without AbortSignal.any (ruling M3-U19): one controller that the timeout and the caller's signal both abort.
+    // Without AbortSignal.any (ruling M3-U16): one controller that the timeout and the caller's signal both abort.
     const controller = new AbortController();
     const stop = () => controller.abort();
     const timeout = setTimeout(stop, timeoutMs);
