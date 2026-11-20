@@ -23,7 +23,7 @@ continue from `M8-Q1`.
 - **Why:** the same pool with one concept fewer and no cast. Each `next()` hands an item to exactly one worker, in
   array order, and an array iterator has no `return()`, so a worker that stops cannot close the queue for the others.
   The number of workers, the requests and their order are unchanged; "deletes more keys than one S3 batch holds"
-  (1,001 keys, each deleted once) covers it.
+  covers it: 1,001 DELETE requests, and exactly the 1,001 keys reported deleted.
 - **If wrong:** none known.
 - **Status:** in force.
 - **Visible in:** `src/storage/s3/objects.ts`.
@@ -43,7 +43,10 @@ continue from `M8-Q1`.
   holds both 12.11.1 (Prisma's, built for the Node that installs it) and 13.2.0 (the Drizzle tests'). The db lane
   passes with both (594 tests, Postgres and SQLite).
 - **Status:** in force. `bun run verify`, `scripts/check-drizzle-versions.sh` and `bun run test:db` pass on Node
-  24.22.2.
+  24.22.2. The versions this entry names replace those quoted in `M5-T46` (better-sqlite3 ^12.11.1) and `M5-T84`
+  (workers types 5.20261113.1); their rulings stand. `@types/better-sqlite3` stays at 9.6.0, its latest release. The
+  root `dotenv` resolves to 16.3.1 now, the version Wrangler's `@cloudflare/workers-utils` pins; the packages that ask
+  for 17 (`c12`, `@dotenvx/dotenvx`) keep their own 17.4.2, and nothing in the repository imports it.
 - **Visible in:** `packages/cloudrop/package.json`, `bun.lock`.
 
 ### M8-Q4: updates left out
