@@ -1450,3 +1450,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/store/sql/reads.ts`, `src/store/sql/stale.db.integration.test.ts`,
   `src/testing/store-contract/stale.ts`.
+
+### M11-R67: the store contract covers a failed usage write in a superseding reserve and in `end` from pending, and a newest-first page boundary inside one instant
+
+- **Decision:** the atomicity cases gain "reserve that supersedes an attempt" and "end from pending to aborted": the
+  usage write fails once, and neither table may have changed (the superseded row still pending). The list cases gain
+  three rows of one `created_at` read newest first two at a time, so the cursor sits inside the tie.
+- **Why:** both writes move a row and its owner's bytes in one unit and had no case that failed the second half; a
+  store that ended the lost attempt's rows before the usage write and outside its unit would have passed. The paging
+  cases used distinct times, so a store whose cursor kept only the time passed them and skipped rows that share one.
+  All three pass on the memory store and on every SQL backend as they are.
+- **If wrong:** nothing: cases only.
+- **Status:** in force.
+- **Visible in:** `src/testing/store-contract/atomicity.ts`, `src/testing/store-contract/list.ts`.

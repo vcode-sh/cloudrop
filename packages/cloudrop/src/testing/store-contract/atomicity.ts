@@ -6,6 +6,8 @@ import { expect, it } from "vitest";
 import type { CloudropStore } from "../../server/store.ts";
 import { at, EXPIRES, MINUTE, newFile, type StoreSuite } from "./suite.ts";
 
+const KEY = "request-key-0000000001";
+
 export function atomicityCases(suite: StoreSuite): void {
   const { seed, advance, failNextUsageWrite } = suite;
 
@@ -18,16 +20,30 @@ export function atomicityCases(suite: StoreSuite): void {
           at(MINUTE),
         ),
     },
+    {
+      // The retry of the request that reserved f-3: it ends f-3 and releases its bytes before it reserves f-4.
+      method: "reserve that supersedes an attempt",
+      act: (store) =>
+        store.reserve(
+          { owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: KEY, files: [newFile("f-4", 1)] },
+          at(MINUTE),
+        ),
+    },
     { method: "complete", act: (store) => store.complete("f-1", "claim-f-1", "{}", at(MINUTE)) },
     {
       method: "complete with replace",
       act: (store) => store.complete("f-1", "claim-f-1", "{}", at(MINUTE), { replace: true }),
     },
+    { method: "end from pending to aborted", act: (store) => store.end("f-3", "pending", "aborted", at(MINUTE)) },
     { method: "end from completed to deleted", act: (store) => store.end("f-2", "completed", "deleted", at(MINUTE)) },
     { method: "revoke", act: (store) => store.revoke("u-1", at(MINUTE)) },
   ])("$method that fails at its usage write changes neither table", async ({ act }, ctx) => {
     const { store, raw } = suite;
-    await seed("u-1", [newFile("f-1", 100), newFile("f-2", 30), newFile("f-3", 10)]);
+    await seed("u-1", [newFile("f-1", 100), newFile("f-2", 30)]);
+    await store.reserve(
+      { owner: "u-1", limit: null, expiresAt: EXPIRES, requestKey: KEY, files: [newFile("f-3", 10)] },
+      at(0),
+    );
     await advance("f-1", "completing", at(0));
     await advance("f-2", "completed", at(0));
     const tables = async () => ({ files: await raw.files(), usage: await raw.usage() });

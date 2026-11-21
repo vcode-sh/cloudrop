@@ -125,6 +125,17 @@ export function listCases(suite: StoreSuite): void {
     expect(last).toEqual({ records: [await store.get("f-1")], cursor: null });
   });
 
+  it("list newest first puts a page boundary inside rows of one instant without skipping or repeating one", async () => {
+    const { store } = suite;
+    // One reserve, so one created_at for all three: only the id tells them apart, and the cursor must carry it.
+    await reserveAt("u-1", 1, [newFile("f-a", 1), newFile("f-b", 1), newFile("f-c", 1)]);
+    const read = (cursor: string | null) =>
+      store.list({ owner: "u-1", statuses: ["pending"], route: null, ...UNFILTERED, limit: 2, cursor });
+    const first = await read(null);
+    expect(ids(first)).toEqual(["f-c", "f-b"]);
+    expect(await read(first.cursor)).toEqual({ records: [await store.get("f-a")], cursor: null });
+  });
+
   it("list answers a null cursor when the last page is exactly full", async () => {
     const { store } = suite;
     await reserveAt("u-1", 1, [newFile("f-1", 1), newFile("f-2", 1)]);
