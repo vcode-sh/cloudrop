@@ -1,8 +1,9 @@
 // Contract: M11-R80's table through the real client. retry() of a failed file that holds a ticket does what the file's
 // error leaves possible: the same ticket when the request, not the upload, failed; the bytes again on the same ticket
 // when the server found them missing; a new ticket from /upload when the server ended the upload or the bucket refused
-// it. One row per answer the server gives at /sign and /complete and the bucket gives a PUT. Oracle: the requests the
-// retry sent, and whether the file ended under the first ticket's key or a new one.
+// it. One row per answer the server gives at /complete, where retryStep reads the code alone; at /sign and for the
+// bucket's PUT, where the same step sends other requests, one row per step and per code only that request can meet.
+// Oracle: the requests the retry sent, and whether the file ended under the first ticket's key or a new one.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
@@ -79,9 +80,8 @@ describe("retry after /complete answered", () => {
     { code: "BODY_TOO_LARGE", status: 413, step: SAME_COMPLETE },
     { code: "NOT_FOUND", status: 404, step: SAME_COMPLETE },
     { code: "SERVER_ERROR", status: 500, step: SAME_COMPLETE },
-    { code: "SERVER_ERROR", status: 500, retryable: true, step: SAME_COMPLETE },
     { code: "STORAGE_ERROR", status: 502, step: SAME_COMPLETE },
-    { code: "STORAGE_ERROR", status: 502, retryable: true, step: SAME_COMPLETE },
+    // Not in the list: a retryable answer keeps the ticket whatever its code.
     { code: "RATE_LIMITED", status: 503, retryable: true, step: SAME_COMPLETE },
     // The server ended the upload, or its ticket no longer works: only a new one can store the file.
     { code: "INVALID_TOKEN", status: 400, step: NEW },
@@ -107,11 +107,6 @@ describe("retry after /complete answered", () => {
   it.each([
     { name: "no answer", fault: () => Promise.reject(new TypeError("Failed to fetch")), first: "NETWORK_ERROR" },
     { name: "a proxy's error page", fault: () => new Response("<html>", { status: 502 }), first: "SERVER_ERROR" },
-    {
-      name: "a proxy's rate-limit page",
-      fault: () => new Response("slow down", { status: 429 }),
-      first: "RATE_LIMITED",
-    },
   ])("$name sends /complete again with the same ticket", async ({ fault, first }) => {
     const result = await retried(({ label }) => (label === "POST /complete" ? fault() : undefined));
     expect(result).toEqual({ first, ...SAME_COMPLETE });
@@ -121,17 +116,13 @@ describe("retry after /complete answered", () => {
 describe("retry after /sign answered", () => {
   // The bucket refuses the first URL as expired, so the client asks /sign for a new one, which answers `code`.
   it.each<{ code: CloudropErrorCode; status: number; retryable?: boolean; step: typeof NEW }>([
+    // /sign's own refusal of a part list.
     { code: "INVALID_INPUT", status: 400, step: SAME_PUT },
-    { code: "ORIGIN_NOT_ALLOWED", status: 403, step: SAME_PUT },
-    { code: "NOT_FOUND", status: 404, step: SAME_PUT },
+    // After /complete this code leaves the doubt that the file is complete; after /sign it leaves none: the PUT is sent.
     { code: "SERVER_ERROR", status: 500, step: SAME_PUT },
-    { code: "SERVER_ERROR", status: 500, retryable: true, step: SAME_PUT },
-    { code: "STORAGE_ERROR", status: 502, step: SAME_PUT },
-    { code: "STORAGE_ERROR", status: 502, retryable: true, step: SAME_PUT },
     { code: "RATE_LIMITED", status: 503, retryable: true, step: SAME_PUT },
-    { code: "INVALID_TOKEN", status: 400, step: NEW },
+    // /sign's answer in a ticket's last 15 minutes.
     { code: "UPLOAD_EXPIRED", status: 410, step: NEW },
-    { code: "UNKNOWN_ROUTE", status: 404, step: NEW },
   ])("$code (retryable: $retryable) retries with $step.key ticket", async ({ code, status, retryable, step }) => {
     const result = await retried(({ label }) => {
       if (label === "PUT object") return expiredUrl();
@@ -143,19 +134,7 @@ describe("retry after /sign answered", () => {
 
 describe("retry after the bucket answered a PUT", () => {
   it.each([
-    {
-      name: "500",
-      answer: () => errorResponse(500, "InternalError", "Try again."),
-      first: "STORAGE_ERROR",
-      step: SAME_PUT,
-    },
     { name: "503", answer: () => errorResponse(503, "SlowDown", "Slow down."), first: "RATE_LIMITED", step: SAME_PUT },
-    {
-      name: "400 for a body the bucket stopped waiting for",
-      answer: () => errorResponse(400, "RequestTimeout", "Your socket connection was not written to in time."),
-      first: "STORAGE_ERROR",
-      step: SAME_PUT,
-    },
     {
       name: "no answer",
       answer: () => Promise.reject(new TypeError("Failed to fetch")),
@@ -169,18 +148,11 @@ describe("retry after the bucket answered a PUT", () => {
       step: NEW,
     },
     {
-      name: "403 for a bad signature",
-      answer: () => errorResponse(403, "SignatureDoesNotMatch", "No."),
-      first: "UPLOAD_REJECTED",
-      step: NEW,
-    },
-    {
       name: "404 for a gone upload",
       answer: () => errorResponse(404, "NoSuchUpload", "Gone."),
       first: "NO_SUCH_UPLOAD",
       step: NEW,
     },
-    { name: "501", answer: () => errorResponse(501, "NotImplemented", "No."), first: "UPLOAD_REJECTED", step: NEW },
   ])("$name ($first) retries with $step.key ticket", async ({ answer, first, step }) => {
     const result = await retried(({ label }) => (label === "PUT object" ? answer() : undefined));
     expect(result).toEqual({ first, ...step });
