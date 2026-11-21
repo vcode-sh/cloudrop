@@ -11,6 +11,7 @@ export type { FileApi } from "./server/api.ts";
 export type { BucketCheck, BucketReport } from "./server/bucket-check.ts";
 export { type Cloudrop, createCloudrop } from "./server/cloudrop.ts";
 export type { CloudropOptions } from "./server/config.ts";
+export type { DeleteContext, DeleteReason } from "./server/delete-context.ts";
 export type { EraseOptions, EraseReport } from "./server/erase.ts";
 export type { FilesOptions, FilesPage } from "./server/owner-files.ts";
 export type {
@@ -44,8 +45,6 @@ export type {
   ClaimOutcome,
   CloudropStore,
   Completion,
-  DeleteContext,
-  DeleteReason,
   EndedStatus,
   FileRecord,
   FileStatus,
@@ -54,7 +53,7 @@ export type {
   TransactionalStore,
   Transition,
 } from "./server/store.ts";
-export type { StoreFileApi } from "./server/store-api.ts";
+export type { DeleteFileOptions, StoreFileApi } from "./server/store-api.ts";
 export type { Quota, StoreOptions } from "./server/store-config.ts";
 export type { RouteFunction } from "./server/store-route.ts";
 export type { SweepOptions, SweepReport } from "./server/sweep.ts";

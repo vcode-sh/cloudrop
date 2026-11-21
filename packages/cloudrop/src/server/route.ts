@@ -1,9 +1,9 @@
 import { CloudropError, configError } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
+import type { DeleteContext } from "./delete-context.ts";
 import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
-import type { DeleteContext } from "./store.ts";
 import type { RouteFunction } from "./store-route.ts";
 
 export type Awaitable<T> = T | Promise<T>;
@@ -165,7 +165,8 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
    * With a store: runs when `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes one of the
    * route's completed files; a throw keeps the file (store guide for each caller). With a transaction it runs inside
    * it, and writes through `tx` commit once, with the deletion; the hook itself may run more than once, so keep other
-   * effects idempotent. Without one, at least once, before the deletion.
+   * effects idempotent. Without one, at least once, before the deletion. `context` is what the caller passed to
+   * `api.deleteFile` or `api.eraseOwner`; a replacement gets the replacing upload's `request` instead.
    */
   onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void>;
 }

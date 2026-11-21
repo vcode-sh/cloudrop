@@ -556,7 +556,28 @@ const files = store.route(policy, {
 ```
 
 `file` is the file's row as it was before the deletion (`status: "completed"`, with its `key`, `name`, `size`, `type`
-and `result`); `owner` is its owner, or null. Only completed files run it: an upload that never completed was never
+and `result`); `owner` is its owner, or null. `context` is what the caller passed to `api.deleteFile(id, { context })` or
+`api.eraseOwner(owner, { context })`, as it is, or undefined: who asked and why, for the audit row. A replacement has
+no caller, so its hook gets `request` instead, the `/complete` request of the upload that replaces the file, such as for
+the client's address:
+
+```ts
+// The person deletes one of their files, or an administrator does, with a reason.
+await cloudrop.api.deleteFile(id, { context: { actorId: session.user.id, ip, reason } });
+
+onDelete: async ({ tx, file, owner, reason, context, request }) => {
+  const by = context as { actorId: string; ip: string | null; reason?: string } | undefined;
+  await tx.insert(auditEvents).values({
+    action: "file-deleted",
+    actorId: by?.actorId ?? owner,
+    ip: by?.ip ?? request?.headers.get("cf-connecting-ip") ?? null,
+    fileId: file.id,
+    reason: by?.reason ?? reason,
+  });
+},
+```
+
+cloudrop does not read `context`; check its shape in the hook, as it is whatever your code passed. Only completed files run it: an upload that never completed was never
 yours, so `/abort`, `revokeUploads`, a refusal and the sweep run nothing, and neither does `api.delete(key)`, which
 removes an object and leaves its row. `onDelete` needs a store (`INVALID_CONFIG` otherwise), and a file whose route is
 no longer among your `routes` is deleted without one.
@@ -765,8 +786,8 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
-| `deleteFile(id)` | Deletes a completed file: the route's [`onDelete`](#ondelete) runs, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
-| `eraseOwner(owner, { graceMs?, signal? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)). |
+| `deleteFile(id, { context? })` | Deletes a completed file: the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
+| `eraseOwner(owner, { graceMs?, signal?, context? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)); `context` reaches each file's [`onDelete`](#ondelete). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |
 

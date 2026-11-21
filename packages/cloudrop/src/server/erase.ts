@@ -19,6 +19,8 @@ export interface EraseOptions {
   graceMs?: number;
   /** Stops the run before the next file; the report then says done: false. */
   signal?: AbortSignal;
+  /** Passed to `onDelete` as `context` for each completed file this run deletes, as it is. */
+  context?: unknown;
 }
 
 export interface EraseReport {
@@ -48,6 +50,7 @@ interface Eraser {
   owner: string;
   graceMs: number;
   signal: AbortSignal | undefined;
+  context: unknown;
   report: EraseReport;
 }
 
@@ -60,7 +63,7 @@ const EVERY: readonly FileStatus[] = [...LIVE, ...ENDED];
 /** Every row of the owner's, in the store's default order. */
 const UNFILTERED = { route: null, name: null, type: null, order: "newest" } as const;
 
-function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSignal | undefined }> {
+function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSignal | undefined; context: unknown }> {
   const options = given ?? {};
   if (!isPlainObject(options)) return fail(invalidInput("eraseOwner takes options such as { graceMs: 3600000 }."));
   const { signal } = options;
@@ -68,12 +71,12 @@ function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSig
     return fail(invalidInput("signal must be an AbortSignal, such as AbortSignal.timeout(60_000)."));
   }
   const graceMs = readGrace(options.graceMs, "the time a PUT already under way gets to land after its URL ran out");
-  return graceMs.error ? graceMs : ok({ graceMs: graceMs.data, signal });
+  return graceMs.error ? graceMs : ok({ graceMs: graceMs.data, signal, context: options.context });
 }
 
 /** A completed file: ended as deleted now, after its route's onDelete, so the `deleted` pass removes its object. */
-async function deleteOne({ config, store, report }: Eraser, record: FileRecord): Promise<void> {
-  const ended = await deleteCompleted(config, store, record.id, "erased");
+async function deleteOne({ config, store, context, report }: Eraser, record: FileRecord): Promise<void> {
+  const ended = await deleteCompleted(config, store, record.id, { reason: "erased", context });
   if (ended.error) report.failed += 1;
   else if (ended.data.changed) report.deleted += 1;
 }

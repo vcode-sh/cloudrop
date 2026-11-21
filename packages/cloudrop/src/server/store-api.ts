@@ -22,10 +22,10 @@ export interface StoreFileApi {
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
   revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
   /**
-   * Deletes a completed file: its route's `onDelete` runs, its row becomes `deleted`, its bytes are released and its
-   * object removed. Idempotent.
+   * Deletes a completed file: its route's `onDelete` runs, with `context` if you pass one (such as who asked and why),
+   * its row becomes `deleted`, its bytes are released and its object removed. Idempotent.
    */
-  deleteFile(id: string): Promise<Result<{ id: string }>>;
+  deleteFile(id: string, options?: DeleteFileOptions): Promise<Result<{ id: string }>>;
   /**
    * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
    * what ended uploads left. Idempotent; run it again, such as with each sweep, until it reports done.
@@ -35,6 +35,11 @@ export interface StoreFileApi {
   reconcile(options?: { owner?: string }): Promise<Result<{ checked: number; repaired: number }>>;
   /** One bounded round of cleanup; run it on a schedule, such as an hourly cron. */
   sweep(options?: SweepOptions): Promise<Result<SweepReport>>;
+}
+
+export interface DeleteFileOptions {
+  /** Passed to the route's `onDelete` as `context`, as it is: who asked for the deletion and why, for an audit row. */
+  context?: unknown;
 }
 
 const OWNERS_PAGE = 100;
@@ -51,8 +56,11 @@ async function deleteFile(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   id: string,
+  given: unknown,
 ): Promise<Result<{ id: string }>> {
-  const ended = await deleteCompleted(config, store, id, "deleted");
+  const options = given ?? {};
+  if (!isPlainObject(options)) return fail(invalidInput("deleteFile takes the file id and optionally { context }."));
+  const ended = await deleteCompleted(config, store, id, { reason: "deleted", context: options.context });
   if (ended.error) return ended;
   const { changed, record } = ended.data;
   if (record?.status !== "deleted") return fail(notCompleted());
@@ -127,8 +135,8 @@ export function storeApi(
         );
         return revoked.error ? revoked : ok({ revoked: revoked.data });
       }),
-    deleteFile: (id) =>
-      withStore("deleteFile", async (store) => (isOwnerOrId(id) ? deleteFile(config, store, id) : badId())),
+    deleteFile: (id, options) =>
+      withStore("deleteFile", async (store) => (isOwnerOrId(id) ? deleteFile(config, store, id, options) : badId())),
     eraseOwner: (owner, options) => withStore("eraseOwner", (store) => eraseOwner(config, store, owner, options)),
     reconcile: (options) => withStore("reconcile", (store) => reconcile(config, store, options)),
     sweep: (options) => withStore("sweep", (store) => sweep(config, store, options)),

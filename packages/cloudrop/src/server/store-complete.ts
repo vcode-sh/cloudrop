@@ -115,7 +115,7 @@ async function withLease(completion: Completion, store: CloudropStore<unknown>):
   if (done.error) return { answer: done, recorded: false };
   if (!done.data.changed) return { answer: lostClaim(done.data.record, file), recorded: false };
   // A file that completed while onDelete ran is replaced too: its onDelete runs now, and a throw is only logged.
-  await afterReplacing(config, route, listed.data, done.data.replaced);
+  await afterReplacing(config, route, listed.data, done.data.replaced, completion.request);
   return { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.data.replaced };
 }
 

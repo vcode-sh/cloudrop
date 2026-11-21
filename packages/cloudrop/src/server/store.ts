@@ -15,18 +15,6 @@ export type FileStatus =
   | "expired"
   | "deleted";
 
-/** What deleted a completed file: `api.deleteFile`, a `replace: true` completion, or `api.eraseOwner`. */
-export type DeleteReason = "deleted" | "replaced" | "erased";
-
-/** A route's `onDelete` runs for a stored file outside any request: it sees the file's row, not an authorize result. */
-export interface DeleteContext {
-  /** The file's row as it was before the deletion, so `status` is `"completed"`. */
-  file: FileRecord;
-  /** The file's owner, as `owner()` answered at `/upload`; null for a file without one. */
-  owner: string | null;
-  reason: DeleteReason;
-}
-
 /** The statuses `end` can move a row to. */
 export type EndedStatus = "aborted" | "rejected" | "failed" | "expired" | "deleted";
 

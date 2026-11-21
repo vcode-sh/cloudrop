@@ -7,7 +7,8 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
-import type { CloudropStore, DeleteReason, FileRecord, Transition } from "./store.ts";
+import type { DeleteReason } from "./delete-context.ts";
+import type { CloudropStore, FileRecord, Transition } from "./store.ts";
 import { storeCall, storeUnavailable } from "./store-calls.ts";
 import { storeOfRoute } from "./store-route.ts";
 
@@ -16,6 +17,13 @@ type Store = CloudropStore<unknown>;
 type InTransaction = { tx: unknown } | undefined;
 
 const PAGE = 100;
+
+/** Why a file is deleted, and what reaches its onDelete besides the row. */
+export interface Deletion {
+  reason: DeleteReason;
+  context?: unknown;
+  request?: Request;
+}
 
 const hookFailed = (route: string): CloudropError =>
   new CloudropError(
@@ -34,12 +42,14 @@ function hookedRoute(config: ServerConfig, row: FileRecord | null): RouteConfig 
 async function runOnDelete(
   config: ServerConfig,
   route: RouteConfig,
-  { file, reason }: { file: FileRecord; reason: DeleteReason },
+  file: FileRecord,
+  { reason, context, request }: Deletion,
   transaction: InTransaction,
 ): Promise<boolean> {
   const extra = transaction && storeOfRoute(route.definition) ? transaction : {};
+  const from = request === undefined ? {} : { request };
   try {
-    await route.definition.onDelete?.({ ...extra, file, owner: file.owner, reason });
+    await route.definition.onDelete?.({ ...extra, ...from, file, owner: file.owner, reason, context });
     return true;
   } catch (error) {
     config.logger.error(`cloudrop: onDelete failed for route "${route.name}" while deleting file ${file.id}.`, error);
@@ -65,7 +75,8 @@ async function deleteInTransaction(
   config: ServerConfig,
   store: Store,
   transaction: NonNullable<Store["transaction"]>,
-  { id, reason }: { id: string; reason: DeleteReason },
+  id: string,
+  deletion: Deletion,
 ): Promise<Result<Transition>> {
   let answer: Result<Transition> = fail(storeUnavailable());
   let threw: string | undefined;
@@ -80,7 +91,7 @@ async function deleteInTransaction(
     await transaction(async (tx, scoped) => {
       const row = await scoped.get(id);
       const route = hookedRoute(config, row);
-      if (route && row && !(await runOnDelete(config, route, { file: row, reason }, { tx }))) {
+      if (route && row && !(await runOnDelete(config, route, row, deletion, { tx }))) {
         threw = route.name;
         return rollBack(answer);
       }
@@ -105,17 +116,17 @@ export async function deleteCompleted(
   config: ServerConfig,
   store: Store,
   id: string,
-  reason: DeleteReason,
+  deletion: Deletion,
 ): Promise<Result<Transition>> {
   const end = () =>
     storeCall(config.logger, `delete file ${id}`, () => store.end(id, "completed", "deleted", new Date()));
   if (![...config.routes.values()].some((route) => route.definition.onDelete)) return end();
   // Bound, as a store written as a class reads its own fields in transaction.
-  if (store.transaction) return deleteInTransaction(config, store, store.transaction.bind(store), { id, reason });
+  if (store.transaction) return deleteInTransaction(config, store, store.transaction.bind(store), id, deletion);
   const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
   if (row.error) return row;
   const route = hookedRoute(config, row.data);
-  if (route && row.data && !(await runOnDelete(config, route, { file: row.data, reason }, undefined))) {
+  if (route && row.data && !(await runOnDelete(config, route, row.data, deletion, undefined))) {
     return afterThrow(config, store, id, route.name);
   }
   return end();
@@ -129,7 +140,7 @@ export async function deleteCompleted(
 export async function beforeReplacing(
   config: ServerConfig,
   store: Store | Omit<Store, "transaction">,
-  { route, owner }: { route: RouteConfig; owner: string | null },
+  { route, owner, request }: { route: RouteConfig; owner: string | null; request: Request },
   transaction?: InTransaction,
 ): Promise<Result<Set<string> | null>> {
   if (!route.replace || !route.definition.onDelete) return ok(null);
@@ -145,7 +156,9 @@ export async function beforeReplacing(
     );
     if (page.error) return page;
     for (const file of page.data.records) {
-      if (!(await runOnDelete(config, route, { file, reason: "replaced" }, transaction))) return fail(unfinished());
+      if (!(await runOnDelete(config, route, file, { reason: "replaced", request }, transaction))) {
+        return fail(unfinished());
+      }
       ran.add(file.id);
     }
     cursor = page.data.cursor;
@@ -169,12 +182,13 @@ export async function afterReplacing(
   route: RouteConfig,
   listed: ReadonlySet<string> | null,
   replaced: readonly FileRecord[],
+  request: Request,
 ): Promise<void> {
   if (listed === null) return;
   for (const file of replaced) {
     if (listed.has(file.id)) continue;
     // The row as it was while completed: a deletion changes only its status and `endedAt`.
     const before: FileRecord = { ...file, status: "completed", endedAt: null };
-    await runOnDelete(config, route, { file: before, reason: "replaced" }, undefined);
+    await runOnDelete(config, route, before, { reason: "replaced", request }, undefined);
   }
 }

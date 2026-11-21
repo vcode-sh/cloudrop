@@ -185,3 +185,20 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   Order is seen only within a page, so a page of one file cannot show it.
 - **Status:** in force.
 - **Visible in:** `src/server/owner-files.ts`, `src/server/store-api.test.ts`.
+
+### M10-D12: `onDelete` gets the caller's `context`, and a replacement's `request`
+
+- **Decision:** `api.deleteFile(id, { context })` and `api.eraseOwner(owner, { context })` pass `context`, as it is, to
+  every `onDelete` they run; `DeleteContext` gains `context: unknown` (undefined when none was passed) and, with
+  `reason: "replaced"`, `request`, the `/complete` request of the replacing upload, also for a lease-mode late
+  replacement. `deleteFile` refuses options that are not an object with `INVALID_INPUT`. cloudrop never reads
+  `context`. Released in 0.5.0.
+- **Why:** the pilot's move to 0.4.0 found that `onDelete` could not write the audit row it keeps: the row records who
+  deleted the file (the person, or an administrator with a reason) and from which client, and `api.deleteFile(id)` had
+  no way to say it. A hook that cannot tell an owner's deletion from an administrator's left the pilot its own deletion
+  path, which is what `onDelete` was for. `request` covers the one deletion with no caller, so its audit row keeps the
+  client too.
+- **If wrong:** a typed `context` per route (a generic on `route()`) can replace `unknown` without breaking callers.
+- **Status:** in force; `src/server/store-delete.test.ts`.
+- **Visible in:** `src/server/store-api.ts`, `src/server/erase.ts`, `src/server/store-delete.ts`, `src/server/store.ts`,
+  `docs/guide/store.md`.
