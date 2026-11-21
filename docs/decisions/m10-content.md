@@ -185,12 +185,13 @@ Entries continue from 1.
 
 - **Decision:** a file is a Windows or DOS program when it starts with `MZ`, is at least 28 bytes long, and either (a)
   is at least 64 bytes long and `e_lfanew` (the 32-bit little-endian value at `0x3C`) points inside the bytes read at
-  `PE\0\0`, `NE`, `LE` or `LX`, or past the bytes read at an offset under `09 09 09 09` where four bytes still fit in
-  the file, or (b) its MS-DOS header describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a
-  header of at least two 16-byte paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4).
-  `sniff` takes the file's size for (a); `contentChecks()` passes the size the upload token signed. A file is an
-  ID3-tagged recording when it starts with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision
-  is under `FF`, the low four bits of its flags are clear, and each of the four size bytes is under `80`.
+  `PE\0\0`, `NE`, `LE` or `LX`, or, where the read cuts the header off (past it, or in its last three bytes after a
+  matching start), at an offset under `09 09 09 09` where four bytes still fit in the file, or (b) its MS-DOS header
+  describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a header of at least two 16-byte
+  paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4). `sniff` takes the file's size
+  for (a); `contentChecks()` passes the size the upload token signed. A file is an ID3-tagged recording when it starts
+  with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision is under `FF`, the low four bits of
+  its flags are clear, and each of the four size bytes is under `80`.
 - **Why:** two or three letters are text that people write: a CSV whose first cell is `MZ` (Mozambique's country code)
   was refused as a program, and a note that starts "ID3 tags are" contradicted every text type (review finding,
   2026-11-21). The rules come from the formats' own definitions. Microsoft's PE Format ("MS-DOS Stub" and "Signature"):
@@ -205,15 +206,14 @@ Entries continue from 1.
   control character, and four text bytes at `0x3C` read as an offset of at least `09 09 09 09` (151 MB), which (a) never
   takes past the bytes read, whatever the file's size; no DOS stub is that long.
 - **If wrong:** binary data that starts with `MZ` and happens to form either header reads as a program, as every `MZ`
-  file did before; no such format is known. A program whose header starts in the last three bytes read is judged by
-  those bytes, and one whose DOS fields are broken too is missed. A file under 28 bytes is not a program DOS can load
-  and is not detected. A file with an ID3 header of a future version 5 is not read as MP3 and keeps only its declared
-  type, which `/upload` judged.
+  file did before; no such format is known. A file under 28 bytes is not a program DOS can load and is not detected. A
+  file with an ID3 header of a future version 5 is not read as MP3 and keeps only its declared type, which `/upload`
+  judged.
 - **Status:** in force; `src/plugins/sniff.test.ts` holds a PE header as GNU ld and lld-link write it, a packed one, an
-  NE and an LX one, one past the first 4 KiB and one ending the file there, DOS programs, ID3v2.2, v2.3 and v2.4 tags,
-  and as near misses the CSV, the prose, a 3 GB log that starts with `MZ`, each DOS header field and each ID3 field
-  broken alone, and both headers one byte short; `src/plugins/content-checks.test.ts` refuses a program whose PE header
-  lies past 4 KiB, which needs the file's size.
+  NE and an LX one, one past the first 4 KiB, one ending the file there and one the read cuts off, DOS programs,
+  ID3v2.2, v2.3 and v2.4 tags, and as near misses the CSV, the prose, a 3 GB log that starts with `MZ`, each DOS header
+  field and each ID3 field broken alone, and both headers one byte short; `src/plugins/content-checks.test.ts` refuses a
+  program whose PE header lies past 4 KiB, which needs the file's size.
 - **Visible in:** `src/plugins/sniff.ts`, `src/plugins/content-checks.ts`, `docs/guide/plugins.md`.
 
 ### M10-K11: a `#!` line naming a path stays refused, and once allowed agrees with any text type

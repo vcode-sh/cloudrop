@@ -69,10 +69,17 @@ const NEW_HEADERS = [ascii("PE\0\0"), ascii("NE"), ascii("LE"), ascii("LX")];
  */
 const TEXT_OFFSET = 0x09090909;
 
-/** Whether e_lfanew, `at`, leads to a header: one of NEW_HEADERS, or past the bytes read, room for one in the file. */
+/**
+ * Whether e_lfanew, `at`, leads to one of NEW_HEADERS. One the read cuts off counts when the part read matches and the
+ * rest fits in the file, at an offset text cannot spell.
+ */
 function leadsToHeader(bytes: Uint8Array, at: number, size: number): boolean {
-  if (at >= bytes.length) return at < TEXT_OFFSET && at + 4 <= size;
-  return NEW_HEADERS.some((header) => startsWith(bytes, header, at));
+  const read = bytes.subarray(at, at + 4);
+  return NEW_HEADERS.some((header) => {
+    if (startsWith(read, header)) return true;
+    const part = header.slice(0, read.length);
+    return part.length < header.length && startsWith(read, part) && at < TEXT_OFFSET && at + 4 <= size;
+  });
 }
 
 /**

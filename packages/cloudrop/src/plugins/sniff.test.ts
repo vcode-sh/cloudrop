@@ -86,6 +86,12 @@ describe("sniff: MS-DOS headers and ID3 tags, which text could start like", () =
     // Only the first 4 KiB is read: a header further in is taken on the file's size.
     { name: "a program whose header lies past the bytes read", input: packed(0x1000), size: 0x2000, type: PE },
     { name: "a program whose header ends the file", input: packed(0x1000), size: 0x1004, type: PE },
+    {
+      name: "a program whose header the read cuts off",
+      input: bytes(packed(0xffd), "PE\0"),
+      size: 0x2000,
+      type: PE,
+    },
     { name: "an MS-DOS program", input: dos(), size: 28, type: PE },
     { name: "an MS-DOS program whose header fills its one page", input: dos({ pages: 1 }), size: 28, type: PE },
     // ID3v2.4 §3.1: version 4, revision 0, no flags, a syncsafe size of 1,071 bytes.
