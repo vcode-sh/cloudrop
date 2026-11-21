@@ -321,8 +321,11 @@ What happens in `/upload`:
 4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
    built. A refused file does not stop the others.
-6. Plugins' `beforeUpload` hooks run.
-7. Only then is anything signed.
+6. With a store and `owner`, the owner is read. When the client sent an `x-cloudrop-account` header (its
+   [`account` option](client.md#guard-against-a-changed-account)) and it differs from that owner, the whole request is
+   refused with `ACCOUNT_CHANGED` before anything is reserved. A request without the header is not checked.
+7. Plugins' `beforeUpload` hooks run.
+8. Only then is anything signed.
 
 Then the rules that follow from a stateless token:
 
@@ -426,8 +429,8 @@ content is not the type it was sent as.
 ### Make hooks idempotent
 
 Hooks can run more than once. A retried or replayed request repeats `afterVerify` and `onComplete` (on `/complete`) and
-`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Without a transaction,
-`onDelete` can run twice for one file too. Make their side effects
+`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. `onDelete` can run twice for
+one file too; with a transaction only its writes through `tx` commit once. Make their side effects
 idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate. A
 database store answers a finished upload's retries from its row instead (see
 [what it guarantees](store.md#what-it-guarantees)).

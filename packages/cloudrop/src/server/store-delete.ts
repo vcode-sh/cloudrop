@@ -1,7 +1,8 @@
 // A route's onDelete (M10-D4): run for each completed file that api.deleteFile, a replacing /complete or
 // api.eraseOwner deletes. It runs before cloudrop locks the file, so the app's own locks come first, as in onComplete;
 // only a lease-mode replacement's late arrival runs after (M10-D6). With a transaction it runs inside the deletion's,
-// exactly once; without one, before the deletion is recorded, at least once, as onComplete runs under a lease.
+// and its writes through tx commit once (a racing deletion that finds the file gone rolls back); without one, before
+// the deletion is recorded, at least once, as onComplete runs under a lease.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";

@@ -71,8 +71,9 @@ export function AvatarPicker() {
 Without React, `createCloudropClient` from `cloudrop/client` gives you `upload()`, which resolves to `{ data, error }`.
 
 When users sign in, give each user a client of their own, and at sign-out `await close({ abort: true })` before
-`forget()`: [Signed-in users](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/react.md#signed-in-users). A
-bearer token for your API goes in the client's `headers` option, which never reaches the bucket.
+`forget()`: [Signed-in users](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/react.md#signed-in-users). Pass
+the signed-in user's ID as `account`, and a route with a store refuses an upload that another tab's sign-in moved to
+someone else. A bearer token for your API goes in the client's `headers` option, which never reaches the bucket.
 
 `onComplete` runs at least once per file: a client that lost the answer to `/complete` asks again, so make it
 idempotent before it sends an email or calls a webhook. To keep a row per upload in your own database, with a quota per

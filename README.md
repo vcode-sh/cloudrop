@@ -206,6 +206,7 @@ failure never throws: `error.code` is for your code to branch on (`UNAUTHORIZED`
 | `cloudrop/adapters/drizzle` | `drizzleStore` and the table definitions for Drizzle on Postgres and SQLite (drizzle-orm 0.45 or later) |
 | `cloudrop/adapters/prisma` | `prismaStore` for Prisma 7 |
 | `cloudrop/testing` | `testBucket`, `testClient` and `memoryStore`: your routes and a whole upload in your tests, with no bucket or browser |
+| `cloudrop/plugins` | `contentChecks`: the server reads each file's first bytes and refuses one whose content is not what it claims |
 
 Hono, Bun, Deno and Cloudflare Workers need no adapter: `cloudrop.handler(request)` takes a `Request` and resolves to a
 `Response`.
@@ -270,7 +271,8 @@ Start at the [documentation index](docs/README.md). The guides:
 | [React](docs/guide/react.md) | `useUpload` and `useResumable` for inputs, drop zones, progress lists and resume |
 | [Bucket setup](docs/guide/bucket-setup.md) | CORS and lifecycle rules for R2 and S3, credentials, `checkBucket` |
 | [The cloudrop command](docs/guide/command.md) | `cloudrop doctor` and `cloudrop setup`: check the settings and bucket, add the rules |
-| [Database store](docs/guide/store.md) | Adapters, tables, `owner`, `quota`, `onComplete` once, revocation, the sweep |
+| [Database store](docs/guide/store.md) | Adapters, tables, `owner`, `quota`, `onComplete` once, `onDelete`, revocation, the sweep |
+| [Plugins](docs/guide/plugins.md) | `contentChecks()`: refuse a file whose content is not its declared type, and web pages or programs |
 | [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies, proxies, building without secrets |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |
 | [Hono with better-auth and Drizzle](docs/guide/hono.md) | A Hono API and a Vite SPA on another origin, step by step |
@@ -293,8 +295,9 @@ Until 1.0, a minor version may change the API; every change is in the [changelog
 
 1.0 freezes the public API under semantic versioning. 0.1.0 was the first release; 0.2.0 added what the first
 production app asked for (a client-wide `close()`, headers for your API only, listing and erasing an owner's files, one
-file per owner on a route). Before 1.0 come plugins for content checks, limits, images and checksums. Where the project
-stands: [plans and roadmap](docs/superpowers/plans/README.md).
+file per owner on a route); 0.3.0 added `cloudrop/testing` and the `cloudrop` command; 0.4.0 added content checks,
+`onDelete`, search and sort for an owner's files, and the `account` guard. Before 1.0 come plugins for limits, images
+and checksums. Where the project stands: [plans and roadmap](docs/superpowers/plans/README.md).
 
 ## Contributing
 

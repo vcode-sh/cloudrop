@@ -15,7 +15,7 @@ import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 export interface StoreFileApi {
   /** A file's row, or null when the store has none. */
   file(id: string): Promise<Result<FileRecord | null>>;
-  /** An owner's completed files, newest first, a page at a time. */
+  /** An owner's completed files, newest or oldest first, optionally by route, name and type, a page at a time. */
   files(options: FilesOptions): Promise<Result<FilesPage>>;
   /** An owner's counters, with or without a quota. */
   usage(owner: string): Promise<Result<OwnerUsage>>;

@@ -163,8 +163,9 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
   afterComplete?: (context: AfterCompleteContext<TAuth, TMetadata, TResult>) => Awaitable<void>;
   /**
    * With a store: runs when `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes one of the
-   * route's completed files; a throw keeps the file and fails that call. With a transaction, exactly once inside it,
-   * so writes through `tx` commit with the deletion; otherwise at least once, before the deletion (store guide).
+   * route's completed files; a throw keeps the file (store guide for each caller). With a transaction it runs inside
+   * it, and writes through `tx` commit once, with the deletion; the hook itself may run more than once, so keep other
+   * effects idempotent. Without one, at least once, before the deletion.
    */
   onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void>;
 }
