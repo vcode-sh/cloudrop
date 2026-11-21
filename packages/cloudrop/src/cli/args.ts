@@ -42,11 +42,18 @@ Exit codes: 0 nothing is wrong, 1 a problem was found or a write failed, 2 a usa
 const SETUP_FLAGS = { "--apply": "apply", "--dry-run": "dryRun", "--replace": "replace" } as const;
 const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--jurisdiction"]);
 
+/** What is wrong with an origin, naming the exact origin when the value is a URL that has one (M9-H100). */
 function originProblem(value: string): string | null {
-  const url = URL.canParse(value) ? new URL(value) : null;
-  return url && url.origin === value
-    ? null
-    : `"${value}" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.`;
+  // A browser never sends a pattern, so a rule or a check for one matches no page (URL accepts * in a host).
+  if (value.includes("*")) {
+    return `"${value}" is a pattern, not an origin. Name each origin your pages upload from with its own --origin, such as https://app.example.com.`;
+  }
+  // "null" is the origin of a URL without one (file:, data:), never a page's to name.
+  const origin = URL.canParse(value) ? new URL(value).origin : "null";
+  if (origin !== "null" && origin === value) return null;
+  return origin === "null"
+    ? `"${value}" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.`
+    : `"${value}" is not an origin. Use ${origin}: an origin is the scheme, host and port, with no path.`;
 }
 
 /** Sets one option that takes a value; returns what is wrong with it, if anything. */

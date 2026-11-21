@@ -94,11 +94,91 @@ describe("cloudrop doctor", () => {
     expect(result.lines[4]).toBe("NOT CHECKED  CORS and lifecycle rules: the bucket did not answer.");
   });
 
-  it("reports an unreachable storage service", async () => {
-    const result = await doctor({ fetch: () => Promise.reject(new TypeError("fetch failed")) });
-    expect(result.code).toBe(1);
+  const unreachable = () => Promise.reject(new TypeError("fetch failed"));
+  const answers = (status: number) => () => Promise.resolve(new Response("", { status }));
+  // A wrong account ID gives R2 an endpoint that does not answer; a wrong key gets 401 from R2, a wrong secret 403.
+  it.each([
+    {
+      name: "an unreachable R2 endpoint",
+      argv: [],
+      fetch: unreachable,
+      line: "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The R2 endpoint is built from CLOUDROP_R2_ACCOUNT_ID: check that it is your account ID.",
+    },
+    {
+      name: "an unreachable R2 endpoint in a jurisdiction",
+      argv: ["--jurisdiction", "eu"],
+      fetch: unreachable,
+      line: "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The R2 endpoint is built from CLOUDROP_R2_ACCOUNT_ID and --jurisdiction eu: check that it is your account ID and the bucket's jurisdiction.",
+    },
+    {
+      name: "an access key the service does not know",
+      argv: [],
+      fetch: answers(401),
+      line: "PROBLEM      Bucket: The storage service refused these credentials (HTTP 401). Check CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY, that the token may read and write objects in the bucket named by CLOUDROP_R2_BUCKET, and that the bucket exists. A bucket in a jurisdiction also needs --jurisdiction.",
+    },
+    {
+      name: "a refused request in a jurisdiction",
+      argv: ["--jurisdiction", "eu"],
+      fetch: answers(403),
+      line: "PROBLEM      Bucket: The storage service refused these credentials (HTTP 403). Check CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY, that the token may read and write objects in the bucket named by CLOUDROP_R2_BUCKET, and that the bucket exists in the eu jurisdiction.",
+    },
+  ])("names the settings to check for $name", async ({ argv, fetch, line }) => {
+    const result = await run(["doctor", "--origin", ORIGIN, ...argv], { fetch });
+    expect([result.code, result.lines[3]]).toEqual([1, line]);
+  });
+
+  it("names the settings to check when the secret key is wrong", async () => {
+    const env = { ...ENV, CLOUDROP_R2_SECRET_ACCESS_KEY: "another-secret-access-key" };
+    const result = await doctor({ env, fetch: bucket(READY).fetch });
+    expect(result.lines[3]).toMatch(/^PROBLEM {6}Bucket: The storage service refused these credentials \(HTTP 403\)\./);
+  });
+
+  it("keeps the storage's own advice for a refusal that is not about the credentials", async () => {
+    const skewed = () =>
+      Promise.resolve(new Response("<Error><Code>RequestTimeTooSkewed</Code></Error>", { status: 403 }));
+    const result = await doctor({ fetch: skewed });
     expect(result.lines[3]).toBe(
-      "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry.",
+      "PROBLEM      Bucket: This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+    );
+  });
+
+  it("names the S3 settings that build the request", async () => {
+    const env = {
+      CLOUDROP_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
+      CLOUDROP_S3_REGION: "us-east-1",
+      CLOUDROP_S3_BUCKET: "acme-s3-uploads",
+      CLOUDROP_S3_ACCESS_KEY_ID: "AKIDs3fixture",
+      CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
+      CLOUDROP_SECRET: ENV.CLOUDROP_SECRET,
+    };
+    const [refused, unreached] = await Promise.all([
+      doctor({ env, fetch: answers(403) }),
+      doctor({ env, fetch: unreachable }),
+    ]);
+    expect([refused.lines[3], unreached.lines[3]]).toEqual([
+      "PROBLEM      Bucket: The storage service refused these credentials (HTTP 403). Check CLOUDROP_S3_ACCESS_KEY_ID and CLOUDROP_S3_SECRET_ACCESS_KEY, that they may read and write objects in the bucket named by CLOUDROP_S3_BUCKET, and CLOUDROP_S3_REGION.",
+      "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The endpoint is CLOUDROP_S3_ENDPOINT.",
+    ]);
+  });
+
+  it("suggests the setting a misspelt or lower-case name was meant to be", async () => {
+    const { CLOUDROP_R2_BUCKET, CLOUDROP_SECRET, ...rest } = ENV;
+    const file = `CLOUDROP_R2_BUCKT=${CLOUDROP_R2_BUCKET}\ncloudrop_secret=${CLOUDROP_SECRET}\nCLOUDROP_UPLOADS_PATH=/api\n`;
+    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env"], {
+      env: rest,
+      files: { ".env": file },
+    });
+    expect(result.lines.slice(1, 3)).toEqual([
+      "note         CLOUDROP_R2_BUCKT is not a cloudrop setting. Did you mean CLOUDROP_R2_BUCKET?",
+      "note         cloudrop_secret is not a cloudrop setting. Did you mean CLOUDROP_SECRET?",
+    ]);
+    expect(result.lines).toContain("PROBLEM      CLOUDROP_R2_BUCKET is not set. Set it to the bucket's name.");
+  });
+
+  it("says which service it checks when settings for both are set", async () => {
+    const result = await doctor({ env: { ...ENV, CLOUDROP_S3_BUCKET: "acme-s3-uploads" }, fetch: bucket(READY).fetch });
+    expect(result.lines[1]).toBe(
+      "note         CLOUDROP_R2_* and CLOUDROP_S3_* settings are both set; the command checks R2. Unset the CLOUDROP_R2_* settings to check S3.",
     );
   });
 

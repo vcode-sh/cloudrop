@@ -2,10 +2,11 @@
 // changed. A write replaces every rule, so nothing is written when the current rules cannot be read, unless --replace
 // says that replacing them is intended (M9-C6).
 
-import type { Result } from "../errors.ts";
+import type { CloudropError, Result } from "../errors.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
 import type { CommandOptions } from "./args.ts";
+import { reachBucket } from "./bucket-access.ts";
 import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
 import { readStorage, type Variables } from "./settings.ts";
@@ -36,6 +37,22 @@ interface Setting<Rule> {
   write(rules: Rule[]): Promise<Result<void>>;
 }
 
+const REPLACE = "or pass --replace to replace every rule with cloudrop's alone.";
+
+/**
+ * Why nothing is written when the current rules cannot be read. --replace is offered only where it would act; the
+ * credentials themselves were proven by a listing before this is printed (M9-H102).
+ */
+function unreadable(label: Step["label"], error: CloudropError, refusedRead: boolean, replace: boolean): string {
+  if (error.code === "STORAGE_DENIED" && !replace) {
+    const rules = label === "CORS" ? "CORS rules" : "lifecycle rules";
+    return `${label}: these credentials may not read the bucket's ${rules} (R2 object tokens cannot), and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step, such as an R2 Admin Read & Write token, ${REPLACE}`;
+  }
+  const failed = `${label}: could not read the current rules: ${error.message} A write replaces every rule, so none was written.`;
+  if (replace) return `${failed} --replace applies only when the credentials or the service refuse the read.`;
+  return refusedRead ? `${failed} Use a service that supports it, ${REPLACE}` : failed;
+}
+
 /**
  * A step, or the finding that refuses one: the current rules could not be read, or cloudrop's own rule was edited.
  * --replace covers only a read the credentials or the service refuse (403, 501); any other failure says nothing about
@@ -45,13 +62,7 @@ function plan<Rule extends { id?: string }>(setting: Setting<Rule>, replace: boo
   const { label, ours, describe, read } = setting;
   const refusedRead = read.error?.code === "STORAGE_DENIED" || read.error?.status === 501;
   if (read.error && !(replace && refusedRead)) {
-    const next = replace
-      ? "--replace applies only when the credentials or the service refuse the read."
-      : "Use credentials that may read and change bucket settings, or pass --replace to replace the rules with cloudrop's alone.";
-    return {
-      status: "problem",
-      text: `${label}: could not read the current rules: ${read.error.message} A write replaces every rule, so none was written. ${next}`,
-    };
+    return { status: "problem", text: unreadable(label, read.error, refusedRead, replace) };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
   const { change, kept, reason, added } = merged;
@@ -136,15 +147,20 @@ export async function applySetup(
   const mode = options.dryRun ? "showing what --apply would change" : "adding cloudrop's rules";
   out.write(`cloudrop setup: ${mode} for ${options.origins.join(", ")}.\n`);
   const storage = readStorage(variables, { jurisdiction: options.jurisdiction, fetch });
-  if (!storage.driver) {
+  if (!storage.driver || !storage.service) {
     printFindings(out, [...notes, ...storage.findings]);
     out.write("Nothing was written. Fix the settings above, then run the command again.\n");
     return 1;
   }
-  const steps = await planBoth(storage.driver, options);
+  // The listing runs beside the reads and counts only when a read failed: wrong credentials or no network fail the
+  // reads too, and then the bucket is the problem, not its rules (M9-H102).
+  const [steps, access] = await Promise.all([
+    planBoth(storage.driver, options),
+    reachBucket(storage.driver, storage.service, options.jurisdiction),
+  ]);
   const refused = steps.filter(isFinding);
   if (refused.length > 0) {
-    printFindings(out, [...notes, ...refused]);
+    printFindings(out, [...notes, ...(access.status === "problem" ? [access] : refused)]);
     out.write("Nothing was written.\n");
     return 1;
   }

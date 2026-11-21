@@ -60,7 +60,8 @@ export function bucket(bucketConfig?: { cors?: string; lifecycle?: string }): Bu
 export interface RunOptions {
   env?: Record<string, string | undefined>;
   fetch?: FetchLike;
-  files?: Record<string, string>;
+  /** Files by path: their text, or the error code reading them fails with. A path not listed fails with ENOENT. */
+  files?: Record<string, string | { error: string }>;
 }
 
 export interface RunResult {
@@ -79,9 +80,9 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
     env,
     fetch: fetch ?? (() => Promise.reject(new Error("This test's command must not reach the network."))),
     readFile: (path) => {
-      const text = files[path];
-      if (text === undefined) throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
-      return text;
+      const file = files[path] ?? { error: "ENOENT" };
+      if (typeof file !== "string") throw Object.assign(new Error(`${file.error}: ${path}`), { code: file.error });
+      return file;
     },
     stdout: {
       write: (text) => {
@@ -94,7 +95,8 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
       },
     },
   });
-  const fromFiles = Object.values(files).flatMap((text) => Object.values(parseEnvFile(text)));
+  const texts = Object.values(files).filter((file) => typeof file === "string");
+  const fromFiles = texts.flatMap((text) => Object.values(parseEnvFile(text)));
   const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
     (value): value is string => typeof value === "string" && value.length >= 8,
   );

@@ -14,7 +14,31 @@ describe("cloudrop usage", () => {
       name: "an origin with a path",
       argv: ["doctor", "--origin", "https://app.example.com/upload"],
       message:
-        '"https://app.example.com/upload" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.',
+        '"https://app.example.com/upload" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+    },
+    {
+      name: "an origin with a trailing slash, in upper case",
+      argv: ["doctor", "--origin", "HTTP://LOCALHOST:3530/"],
+      message:
+        '"HTTP://LOCALHOST:3530/" is not an origin. Use http://localhost:3530: an origin is the scheme, host and port, with no path.',
+    },
+    {
+      name: "a wildcard origin",
+      argv: ["setup", "--origin", "https://*.example.com"],
+      message:
+        '"https://*.example.com" is a pattern, not an origin. Name each origin your pages upload from with its own --origin, such as https://app.example.com.',
+    },
+    {
+      name: "the opaque origin null",
+      argv: ["doctor", "--origin", "null"],
+      message:
+        '"null" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.',
+    },
+    {
+      name: "something that is not a URL",
+      argv: ["doctor", "--origin", "localhost:3530"],
+      message:
+        '"localhost:3530" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.',
     },
     {
       name: "an unknown option",
@@ -53,10 +77,19 @@ describe("cloudrop usage", () => {
     ]);
   });
 
-  it("reports an --env-file it cannot read by its path and error code, with exit code 2", async () => {
-    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", "missing.env"]);
-    expect([result.code, result.stderr]).toEqual([2, "Cannot read missing.env (ENOENT). Check the path.\n"]);
-  });
+  it.each([
+    { code: "ENOENT", message: "Cannot read .env.local (ENOENT). Check the path.\n" },
+    { code: "EISDIR", message: "Cannot read .env.local (EISDIR). Name a file, not a directory.\n" },
+    { code: "EACCES", message: "Cannot read .env.local (EACCES). Check that you may read it.\n" },
+  ])(
+    "reports an --env-file it cannot read ($code) by its path and error code, with exit code 2",
+    async ({ code, message }) => {
+      const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env.local"], {
+        files: { ".env.local": { error: code } },
+      });
+      expect([result.code, result.stderr]).toEqual([2, message]);
+    },
+  );
 
   it("accepts --name=value", async () => {
     const result = await run(["setup", `--origin=${ORIGIN}`, "--env-file=.env", "--jurisdiction=eu"], {

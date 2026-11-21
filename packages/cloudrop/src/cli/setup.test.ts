@@ -171,10 +171,30 @@ describe("cloudrop setup --apply", () => {
     const storage = bucket();
     const result = await run(apply(), { fetch: storage.fetch });
     expect([result.code, storage.writes]).toEqual([1, []]);
-    expect(result.lines[1]).toBe(
-      "PROBLEM      CORS: could not read the current rules: The storage service refused the request. Check the access key, its permissions and the bucket name. A write replaces every rule, so none was written. Use credentials that may read and change bucket settings, or pass --replace to replace the rules with cloudrop's alone.",
-    );
-    expect(result.lines.at(-1)).toBe("Nothing was written.");
+    expect(result.lines.slice(1)).toEqual([
+      "PROBLEM      CORS: these credentials may not read the bucket's CORS rules (R2 object tokens cannot), and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step, such as an R2 Admin Read & Write token, or pass --replace to replace every rule with cloudrop's alone.",
+      "PROBLEM      Lifecycle: these credentials may not read the bucket's lifecycle rules (R2 object tokens cannot), and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step, such as an R2 Admin Read & Write token, or pass --replace to replace every rule with cloudrop's alone.",
+      "Nothing was written.",
+    ]);
+  });
+
+  // Wrong credentials are refused the settings reads too; --replace could not help, so the command does not offer it.
+  it.each([
+    {
+      name: "credentials the bucket refuses",
+      env: { ...ENV, CLOUDROP_R2_SECRET_ACCESS_KEY: "another-secret-access-key" },
+      fetch: bucket(FOREIGN).fetch,
+      line: "PROBLEM      Bucket: The storage service refused these credentials (HTTP 403). Check CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY, that the token may read and write objects in the bucket named by CLOUDROP_R2_BUCKET, and that the bucket exists. A bucket in a jurisdiction also needs --jurisdiction.",
+    },
+    {
+      name: "an unreachable service",
+      env: ENV,
+      fetch: () => Promise.reject(new TypeError("fetch failed")),
+      line: "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The R2 endpoint is built from CLOUDROP_R2_ACCOUNT_ID: check that it is your account ID.",
+    },
+  ])("reports $name as a bucket problem, not as rules it could not read", async ({ env, fetch, line }) => {
+    const result = await run(apply("--dry-run"), { env, fetch });
+    expect([result.code, result.lines.slice(1)]).toEqual([1, [line, "Nothing was written."]]);
   });
 
   it("with --replace, writes cloudrop's rules alone when the current rules cannot be read", async () => {
@@ -197,14 +217,18 @@ describe("cloudrop setup --apply", () => {
   it("with --replace, still refuses when the read failed for a reason that may pass", async () => {
     const storage = bucket(FOREIGN);
     const readsFail: FetchLike = (input, init) =>
-      (init?.method ?? "GET") === "GET"
+      /\?(cors|lifecycle)=$/.test(String(input)) && (init?.method ?? "GET") === "GET"
         ? Promise.resolve(new Response("<Error><Code>InternalError</Code></Error>", { status: 500 }))
         : storage.fetch(input, init);
-    const result = await run(apply("--replace"), { fetch: readsFail });
-    expect([result.code, storage.writes]).toEqual([1, []]);
-    expect(result.lines[1]).toBe(
+    const [replacing, plain] = [
+      await run(apply("--replace"), { fetch: readsFail }),
+      await run(apply(), { fetch: readsFail }),
+    ];
+    expect([replacing.code, plain.code, storage.writes]).toEqual([1, 1, []]);
+    expect([replacing.lines[1], plain.lines[1]]).toEqual([
       "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the credentials or the service refuse the read.",
-    );
+      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written.",
+    ]);
   });
 
   it("counts a rule equal to cloudrop's as cloudrop's when the bucket reports no IDs, so a second run adds no copy", async () => {

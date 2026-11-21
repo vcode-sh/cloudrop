@@ -6,6 +6,7 @@ import { checkBucket } from "../server/bucket-check.ts";
 import type { FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
 import type { CommandOptions } from "./args.ts";
+import { reachBucket } from "./bucket-access.ts";
 import { aws, wrangler } from "./instructions.ts";
 import { count, type Finding, type Output, plural, printFindings } from "./report.ts";
 import { readStorage, type Service, secretFinding, serviceOf, type Variables } from "./settings.ts";
@@ -27,15 +28,10 @@ async function bucketFindings(
   service: Service,
   { origins, jurisdiction }: CommandOptions,
 ): Promise<Finding[]> {
-  // A listing, not a HEAD: a HEAD's 404 has no body, so a missing bucket would look like a missing key (M9-C5).
-  const listed = await driver.list("cloudrop-doctor/", { limit: 1 });
-  if (listed.error) {
-    return [
-      { status: "problem", text: `Bucket: ${listed.error.message}` },
-      { status: "unknown", text: "CORS and lifecycle rules: the bucket did not answer." },
-    ];
+  const answered = await reachBucket(driver, service, jurisdiction);
+  if (answered.status === "problem") {
+    return [answered, { status: "unknown", text: "CORS and lifecycle rules: the bucket did not answer." }];
   }
-  const answered: Finding = { status: "ok", text: "The bucket answers, and these credentials may list it." };
   const report = await checkBucket({ storage: driver, routes: new Map(), store: undefined }, origins);
   if (report.error) return [answered, { status: "problem", text: `Bucket rules: ${report.error.message}` }];
   const apply = ` Run: cloudrop setup ${origins.map((origin) => `--origin ${origin}`).join(" ")} --apply`;

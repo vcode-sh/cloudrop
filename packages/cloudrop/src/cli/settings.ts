@@ -12,6 +12,7 @@ export type Service = "R2" | "S3";
 
 const NAMES: Record<Service, string[]> = { R2: Object.values(R2_VARIABLES), S3: Object.values(S3_VARIABLES) };
 const SECRET = "CLOUDROP_SECRET";
+const KNOWN = [...NAMES.R2, ...NAMES.S3, SECRET];
 const MIN_SECRET_LENGTH = 32;
 
 const WHAT_TO_SET: Record<string, string> = {
@@ -26,6 +27,11 @@ const WHAT_TO_SET: Record<string, string> = {
   CLOUDROP_S3_SECRET_ACCESS_KEY: "the secret access key of the service's credentials",
 };
 
+const READ_ADVICE = new Map([
+  ["EISDIR", "Name a file, not a directory."],
+  ["EACCES", "Check that you may read it."],
+]);
+
 /** The file's values, or why it cannot be read, by its path and an error code only. */
 function readEnvFile(
   path: string,
@@ -37,14 +43,16 @@ function readEnvFile(
   } catch (error) {
     // Only the code: a message could quote the file.
     const code = (error as { code?: unknown } | null)?.code;
-    return { error: `Cannot read ${path} (${typeof code === "string" ? code : "unknown error"}). Check the path.` };
+    const known = typeof code === "string" ? code : "unknown error";
+    return { error: `Cannot read ${path} (${known}). ${READ_ADVICE.get(known) ?? "Check the path."}` };
   }
   return { values: parseEnvFile(text) };
 }
 
 /**
- * The environment with an env file under it: a variable set in the environment wins, as with Node's --env-file. A
- * notes entry names each cloudrop variable set in both. The file is reported by its path and error code only.
+ * The environment with an env file under it: a variable set in the environment wins, as with Node's --env-file. Notes
+ * name each cloudrop variable set in both, each name that looks like a misspelt setting, and settings of two services.
+ * The file is reported by its path and error code only.
  */
 export function readVariables(
   env: Readonly<Record<string, string | undefined>>,
@@ -55,15 +63,47 @@ export function readVariables(
   if ("error" in read) return read;
   const file: Record<string, string> = read.values;
   const variables: Variables = (name) => env[name] || file[name] || undefined;
-  const notes = [...NAMES.R2, ...NAMES.S3, SECRET]
-    .filter((name) => env[name] && file[name])
-    .map(
-      (name): Finding => ({
-        status: "note",
-        text: `${name} is set in the environment and in ${envFile}; the environment's value is used.`,
-      }),
-    );
+  const notes = KNOWN.filter((name) => env[name] && file[name]).map(
+    (name): Finding => ({
+      status: "note",
+      text: `${name} is set in the environment and in ${envFile}; the environment's value is used.`,
+    }),
+  );
+  notes.push(...misspelt([...Object.keys(env), ...Object.keys(file)], variables));
+  if (serviceOf(variables) === "R2" && NAMES.S3.some((name) => variables(name))) {
+    const text =
+      "CLOUDROP_R2_* and CLOUDROP_S3_* settings are both set; the command checks R2. Unset the CLOUDROP_R2_* settings to check S3.";
+    notes.push({ status: "note", text });
+  }
   return { variables, notes };
+}
+
+/** Edit distance between two names. */
+function distance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const replace = (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1);
+      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, replace);
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? 0;
+}
+
+/**
+ * A note for each CLOUDROP_* name that is no setting but is one in another case or two typos away from one that is
+ * not set, such as CLOUDROP_R2_BUCKT: otherwise the only clue is "CLOUDROP_R2_BUCKET is not set" (M9-H103).
+ */
+function misspelt(names: readonly string[], variables: Variables): Finding[] {
+  return [...new Set(names)].flatMap((name): Finding[] => {
+    if (!/^cloudrop_/i.test(name) || KNOWN.includes(name)) return [];
+    const scored = KNOWN.map((known) => ({ known, score: distance(name.toUpperCase(), known) }));
+    const best = scored.sort((a, b) => a.score - b.score)[0];
+    if (!best || best.score > 2 || variables(best.known)) return [];
+    return [{ status: "note", text: `${name} is not a cloudrop setting. Did you mean ${best.known}?` }];
+  });
 }
 
 /** R2 when any CLOUDROP_R2_* is set, else S3 when any CLOUDROP_S3_* is, else none. */
