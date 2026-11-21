@@ -63,8 +63,8 @@ describe("cloudrop doctor", () => {
   it("names the variable whose value is invalid", async () => {
     const result = await doctor({ env: { ...ENV, CLOUDROP_R2_ACCOUNT_ID: "not-an-account-id" } });
     expect(result.code).toBe(1);
-    expect(result.lines[1]).toMatch(
-      /^PROBLEM {6}The R2 account ID must be 32 hexadecimal characters .*CLOUDROP_R2_ACCOUNT_ID\.$/,
+    expect(result.lines[1]).toBe(
+      "PROBLEM      The R2 account ID must be 32 hexadecimal characters (0-9, a-f); this one has 17 characters. Copy it from the R2 overview page in the Cloudflare dashboard. Environment variables with an invalid value: CLOUDROP_R2_ACCOUNT_ID.",
     );
   });
 

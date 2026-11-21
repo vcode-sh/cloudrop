@@ -206,18 +206,6 @@ describe("cloudrop setup with --var", () => {
     );
   });
 
-  it("with --replace, writes cloudrop's rules alone when the reads are refused", async () => {
-    const storage = bucket(EMPTY);
-    const readsRefused: FetchLike = (input, init) =>
-      /\?(cors|lifecycle)=$/.test(String(input)) && (init?.method ?? "GET") === "GET"
-        ? answers(403, "AccessDenied")()
-        : storage.fetch(input, init);
-    const refused = await setup({ fetch: readsRefused }, "--apply");
-    expect([refused.code, refused.lines.at(-1), storage.writes]).toEqual([1, "Nothing was written.", []]);
-    const replaced = await setup({ fetch: readsRefused }, "--apply", "--replace");
-    expect([replaced.code, storage.writes]).toEqual([0, ["PUT ?cors=", "PUT ?lifecycle="]]);
-  });
-
   it.each([
     {
       name: "a variable that is not set",

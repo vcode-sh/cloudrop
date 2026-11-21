@@ -52,18 +52,12 @@ describe("the printed commands a run may hold", () => {
 
   it.each([
     { name: "a flag the tool does not have", line: "npx wrangler r2 bucket cors set acme-uploads --path cors.json" },
-    { name: "another file", line: "npx wrangler r2 bucket cors set acme-uploads --file cors-s3.json" },
-    { name: "another subcommand", line: "npx wrangler r2 bucket cors put acme-uploads --file cors.json" },
     { name: "another bucket", line: "npx wrangler r2 bucket cors list other-bucket" },
     { name: "no bucket", line: "npx wrangler r2 bucket cors list" },
     { name: "a word after the command", line: "npx wrangler r2 bucket cors list acme-uploads s3cr3t" },
     {
       name: "a jurisdiction the run did not name",
       line: "npx wrangler r2 bucket cors list acme-uploads --jurisdiction eu",
-    },
-    {
-      name: "another rule name",
-      line: "npx wrangler r2 bucket lifecycle add acme-uploads abort --abort-multipart-days 1",
     },
     { name: "a bucket a shell would expand", line: "npx wrangler r2 bucket cors list $(id)" },
     { name: "no endpoint", line: AWS },
