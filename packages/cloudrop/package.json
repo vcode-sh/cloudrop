@@ -53,6 +53,10 @@
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
     },
+    "./plugins": {
+      "types": "./dist/plugins.d.ts",
+      "default": "./dist/plugins.js"
+    },
     "./adapters/sql": {
       "types": "./dist/adapters/sql.d.ts",
       "default": "./dist/adapters/sql.js"

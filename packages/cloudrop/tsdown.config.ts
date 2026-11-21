@@ -23,30 +23,32 @@ const library = {
   outputOptions: { comments: { legal: true, annotation: true, jsdoc: false } },
 } satisfies UserConfig;
 
-/** The published entries cloudrop/testing builds on, by source file: the path each is imported by from dist/testing.js. */
+/** The published entries the separate builds import, by source file: the path each is imported by from dist/. */
 const PUBLISHED = new Map([
   [join(import.meta.dirname, "src/index.ts"), "./index.js"],
   [join(import.meta.dirname, "src/client.ts"), "./client.js"],
 ]);
 
-// cloudrop/testing is built on its own, so the library's entries are built exactly as without it (M9-T2). It imports
-// cloudrop and cloudrop/client as an app does: their code and classes are shared, never copied into testing.js.
-const testing = {
-  ...library,
-  entry: { testing: "src/testing.ts" },
-  clean: false,
-  plugins: [
-    {
-      name: "cloudrop-published-entries",
-      resolveId(source: string, importer: string | undefined) {
-        if (!importer || !source.startsWith(".")) return null;
-        // The declaration build asks for the .ts sources too.
-        const published = PUBLISHED.get(join(dirname(importer), source));
-        return published ? { id: published, external: true } : null;
+// cloudrop/testing and cloudrop/plugins are each built on their own, so the library's entries are built exactly as
+// without them (M9-T2, M10-K5). They import cloudrop and cloudrop/client as an app does: their code and classes are
+// shared, never copied into testing.js or plugins.js.
+const apart = (name: string) =>
+  ({
+    ...library,
+    entry: { [name]: `src/${name}.ts` },
+    clean: false,
+    plugins: [
+      {
+        name: "cloudrop-published-entries",
+        resolveId(source: string, importer: string | undefined) {
+          if (!importer || !source.startsWith(".")) return null;
+          // The declaration build asks for the .ts sources too.
+          const published = PUBLISHED.get(join(dirname(importer), source));
+          return published ? { id: published, external: true } : null;
+        },
       },
-    },
-  ],
-} satisfies UserConfig;
+    ],
+  }) satisfies UserConfig;
 
 // The cloudrop bin, built on its own so that the code it shares with the library stays inside the library's files (no
 // shared chunk changes their size) and the bin needs no chunk. No types: nothing imports it (M9-C9).
@@ -59,4 +61,4 @@ const cli = {
   outputOptions: { comments: { legal: true, annotation: false, jsdoc: false } },
 } satisfies UserConfig;
 
-export default defineConfig([library, testing, cli]);
+export default defineConfig([library, apart("testing"), apart("plugins"), cli]);
