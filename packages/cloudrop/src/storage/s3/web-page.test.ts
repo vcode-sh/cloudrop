@@ -94,10 +94,11 @@ describe("an endpoint that answers every request with a web page", () => {
   it("deleteMany reports every key as failed, none as deleted", async () => {
     const result = await driverAt(pageHost).deleteMany(["a.txt", "b.txt"]);
     expect(result.data?.deleted).toEqual([]);
-    expect(result.data?.failed.map(({ key, error }) => [key, error.message])).toEqual([
-      ["a.txt", tooLarge],
-      ["b.txt", tooLarge],
-    ]);
+    // By key: the keys are deleted at once, so the list's order is the order the answers came in.
+    expect(Object.fromEntries(result.data?.failed.map(({ key, error }) => [key, error.message]) ?? [])).toEqual({
+      "a.txt": tooLarge,
+      "b.txt": tooLarge,
+    });
   });
 });
 
