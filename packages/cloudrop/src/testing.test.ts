@@ -43,6 +43,22 @@ describe("testClient", () => {
     expect((await client.upload("anyFile", text("a.txt", 3))).error).toBeNull();
   });
 
+  // Testing through the app's own mount (M9-H105): a handler that never reaches cloudrop fails the upload.
+  it("sends the server's requests to the handler it is given, so a wrong mount fails the test", async () => {
+    const bucket = testBucket();
+    const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { anyFile } });
+    const wrongMount = () => Promise.resolve(new Response("Not Found", { status: 404 }));
+    const client = testClient({ ...cloudrop, handler: wrongMount }, { bucket });
+
+    const { error } = await client.upload("anyFile", text("a.txt", 1));
+
+    expect([error?.code, error?.message, bucket.keys()]).toEqual([
+      "SERVER_ERROR",
+      "The upload server sent an answer this client cannot read (HTTP 404). Check that basePath points at the cloudrop handler and that the server runs the same cloudrop version.",
+      [],
+    ]);
+  });
+
   it("cancels a multipart upload: the server aborts it and the bucket keeps nothing", async () => {
     const bucket = testBucket();
     const cloudrop = createCloudrop({

@@ -7,8 +7,8 @@ bucket. Use it to test what is yours: who `authorize` lets in, the metadata your
 
 It works in Vitest, Node's `node:test` and Bun's test runner (mind
 [Bun's `File`](#what-differs-from-a-browser-and-a-real-bucket)); the examples below are Vitest. They are the
-repository's own tests (`packages/cloudrop/src/testing.guide.test.ts`), so they run as written. This page is for testing an app
-that uses cloudrop; for the lanes that test cloudrop itself, see [Testing](testing.md).
+repository's own tests (`packages/cloudrop/src/testing.guide.test.ts`), so they run as written. This page is for
+testing an app that uses cloudrop; for the lanes that test cloudrop itself, see [Testing](testing.md).
 
 ## Set up
 
@@ -281,8 +281,8 @@ cannot see:
   signs, not that R2 accepts it. cloudrop's own test lanes check that against R2.
 - **The clock.** The server and the bucket read the same clock, so `vi.useFakeTimers({ toFake: ["Date"] })` and
   `vi.setSystemTime()` fix the date for both; in `node:test`, `t.mock.timers.enable({ apis: ["Date"], now })`, and in
-  Bun, `setSystemTime(date)` from `bun:test`. Faking every timer works too (`vi.useFakeTimers()`): an upload in
-  process waits on none.
+  Bun, `setSystemTime(date)` from `bun:test`. Faking every timer works too (`vi.useFakeTimers()`): an in-process
+  upload waits on no timer.
 - **Bun's `File`.** Under `bun test`, `new File(parts, name, { type: "text/plain" })` reads back as
   `text/plain;charset=utf-8`, and so does `application/json`, where a browser keeps the type as given. The server
   refuses a type with parameters with `FILE_TYPE_NOT_ALLOWED` ("The file's type is not a valid MIME type"), so test
