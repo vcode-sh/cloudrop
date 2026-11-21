@@ -96,10 +96,12 @@ describe("discard(upload)", () => {
     const setup = persistFixture({ fault: answerLost });
     setup.client.start("files", threeParts());
     await vi.waitFor(() => expect(setup.fixture.requests).toContain("POST /complete"), { interval: 1 });
+    const key = setup.issued[0]?.key ?? "";
+    // Sent is not finished: wait until the server has put the object together, which is what this test is about.
+    await vi.waitFor(async () => expect(await setup.storedHash(key)).toBe(bytesHash(THREE_PARTS)), { interval: 1 });
     await setup.drained();
     const client = setup.reload();
     const [upload] = (await client.resumable()).data ?? [];
-    const key = setup.issued[0]?.key ?? "";
 
     const result = await client.discard(upload as ResumableUpload);
     await setup.db.settled();
