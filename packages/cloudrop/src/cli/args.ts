@@ -113,7 +113,10 @@ function readOptions(options: CommandOptions, args: readonly string[]): string |
 }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
-  if (argv.includes("--help") || argv.includes("-h") || argv[0] === "help") return { show: "help" };
+  // Help wins wherever an option's name can stand, never as an option's value: a file may be named "-h" (M11-R174).
+  if (argv[0] === "help" || splitArgs(argv).some(({ name }) => name === "--help" || name === "-h")) {
+    return { show: "help" };
+  }
   const [command, ...rest] = argv;
   if (command === "--version" || command === "-v") return { show: "version" };
   if (command === undefined) return { error: "Name a command: doctor or setup." };

@@ -101,6 +101,42 @@ describe("cloudrop usage", () => {
     ]);
   });
 
+  it.each([
+    { name: "after the command's options", argv: ["doctor", "--origin", ORIGIN, "-h"] },
+    { name: "with no command", argv: ["-h"] },
+    { name: "after a flag", argv: ["setup", "--apply", "--help"] },
+  ])("prints the usage for a help option $name", async ({ argv }) => {
+    const result = await run(argv);
+    expect([result.code, result.stderr, result.lines[0]]).toEqual([
+      0,
+      "",
+      "Usage: npx cloudrop <doctor|setup> --origin <origin> [options]",
+    ]);
+  });
+
+  // An option's value is a value: a file may be named -h, and what follows --origin is read as an origin.
+  it.each([
+    {
+      name: "--env-file -h",
+      argv: ["doctor", "--origin", ORIGIN, "--env-file", "-h"],
+      stderr: "Cannot read the --env-file (ENOENT). Check its path.\n",
+    },
+    {
+      name: "--env-file=--help",
+      argv: ["doctor", "--origin", ORIGIN, "--env-file=--help"],
+      stderr: "Cannot read the --env-file (ENOENT). Check its path.\n",
+    },
+    {
+      name: "--origin --help",
+      argv: ["doctor", "--origin", "--help"],
+      stderr:
+        '"--help" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.\n\n',
+    },
+  ])("reads $name as the option's value, not as a call for help", async ({ argv, stderr }) => {
+    const result = await run(argv);
+    expect([result.code, result.stdout, result.stderr.slice(0, stderr.length)]).toEqual([2, "", stderr]);
+  });
+
   it.each(["--version", "-v"])("prints the package's version and exits 0 for %s", async (flag) => {
     const result = await run([flag]);
     expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "1.2.3\n"]);

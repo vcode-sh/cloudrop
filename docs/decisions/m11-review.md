@@ -1788,3 +1788,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   the status are unchanged.
 - **Status:** in force. Extends `M11-R116`.
 - **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`, `src/cli/setup.test.ts`.
+
+### M11-R174: `-h` and `--help` are help only where an option's name can stand
+
+- **Decision:** `--help` or `-h` prints the usage and exits 0 as the first argument or wherever an option's name can
+  stand. As the value of an option that takes one (`--env-file -h`, `--origin --help`, `--var -h`) it is that value,
+  and is checked as one.
+- **Why:** the command looked for the two words anywhere in its arguments, so `doctor --origin X --env-file -h`
+  printed the usage and exited 0 without checking anything: a script that names its file so, or passes a value from
+  elsewhere, got success for a run that never happened.
+- **If wrong:** `cloudrop doctor --origin --help`, typed to ask for help, now answers that `"--help"` is not an origin
+  (exit 2) and prints the usage after it, as every usage error does.
+- **Status:** in force.
+- **Visible in:** `src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
