@@ -1675,3 +1675,23 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   not compared: a new rule on one side needs its row in the test.
 - **Status:** in force.
 - **Visible in:** `src/client/bucket.ts`, `src/client/bucket-agreement.test.ts`, `docs/guide/errors.md`.
+
+### M11-R94: the guides say what `retry()` does after each code
+
+- **Decision:** every row of the errors guide's endpoint and client tables says in "What to do" what `retry()` does
+  after that code, as the table of `M11-R80` has it, with `M11-R81` and `M11-R88` to `M11-R93`: the same ticket, the
+  bytes again on the same ticket, a new ticket after the old one was given up, `/upload` asked again for a file that
+  had no ticket yet, the checks of `resume()` again, or nothing. The client guide's "Retry" holds the table in short
+  form, one row per group of codes with the request that answered them; the errors guide points to it.
+- **Why:** the rows were written before `M11-R80`. `NOT_UPLOADED` said "the client does this in order", which is true
+  of a first run and says nothing of the retry that now sends the file again; `ALREADY_EXISTS`, `UNKNOWN_ROUTE`,
+  `FILE_TYPE_NOT_ALLOWED` and `QUOTA_EXCEEDED` said "start a new upload" without saying that `retry()` is that; the
+  handler's six refusals, `SERVER_ERROR` and `STORAGE_ERROR` did not say that a retry keeps the ticket, which is what
+  a person fixing a proxy needs to know. The client guide's table had four rows by kind of error and left out where
+  the answer came from, which decides for `INVALID_INPUT`, `NOT_FOUND` and `STORAGE_ERROR`: each has a row from the
+  server, the bucket, the client's own arguments and `resume()`'s checks, with a different retry.
+- **If wrong:** the rows are prose and no test reads them: a change to `retryStep` needs its row in both guides.
+  `src/client/retry-steps.test.ts` and `src/client/retry-dead-ends.test.ts` hold the behaviour itself.
+- **Status:** in force.
+- **Visible in:** `docs/guide/errors.md` ("Upload endpoint errors", "Client errors"), `docs/guide/client.md`
+  ("Retry").

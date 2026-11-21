@@ -280,14 +280,23 @@ is sent for it.
 - `job.retry()` does that for every failed file and resolves with an `UploadResult` of the job's current outcomes once
   every file has settled. Its `data` is `null` when its `/upload` for every file was refused, as with `done`.
 - A retry reuses the file's ticket when it can, so the parts already stored in the bucket are not sent again and the
-  bytes stay counted. What the file failed with decides:
+  bytes stay counted. What the file failed with, and where, decides:
 
-  | The file failed with | `retry()` |
-  | --- | --- |
-  | A retryable error (`NETWORK_ERROR`, `RATE_LIMITED`, a retryable `STORAGE_ERROR` or `SERVER_ERROR`), or a refusal of the request and not of the upload (`INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `NOT_FOUND` and the handler's other refusals, a `SERVER_ERROR` or `STORAGE_ERROR` for good) | Same ticket: sends the parts not yet stored, then `/complete`. |
-  | `NOT_UPLOADED` or `PARTS_MISSING`: `/complete` found bytes missing that the bucket had acknowledged | Same ticket: sends those bytes again, then `/complete`. |
-  | Any other error: the ticket is over (`UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UNKNOWN_ROUTE`, `NO_SUCH_UPLOAD`), the server ended the upload and removed what was stored (`VERIFICATION_FAILED`, `ALREADY_EXISTS`, `FILE_TYPE_NOT_ALLOWED` or another refusal at `/complete`), or the bucket refused the bytes (`UPLOAD_REJECTED`) | New ticket from `/upload`. |
-  | Nothing yet from the server: `/upload` refused the file, or never answered | New ticket from `/upload`. |
+  | The file failed with | Answered by | `retry()` |
+  | --- | --- | --- |
+  | Any error, or no answer | `/upload`: the file has no ticket yet | Asks `/upload` again. Its answer depends on the session, the quota and the server's rules of that moment, so a refusal for good is repeated until what it names has changed. |
+  | `NETWORK_ERROR`; `RATE_LIMITED`; `STORAGE_ERROR` and `SERVER_ERROR`, retryable or not | `/sign`, `/complete`, or the bucket (`429`, `503`, `408`, another `5xx` except `501`, S3's `RequestTimeout` and `OperationAborted`, no readable answer) | Same ticket: sends the parts not yet stored, then `/complete`. After a `/complete` that may have succeeded, `/complete` alone. |
+  | `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND` | The handler at `/sign` or `/complete`, before it read the token | Same ticket: the request was turned away, not the upload. It passes once the proxy, `basePath` or `trustedOrigins` is fixed. |
+  | `NOT_UPLOADED` | `/complete`, for a file sent in one `PUT` | Same ticket: sends the file again, then `/complete`. |
+  | `PARTS_MISSING` | `/complete`, for a file sent in parts | Same ticket: sends the listed parts again (every part when the answer lists none), then `/complete`. |
+  | `INVALID_TOKEN`, `UPLOAD_EXPIRED`, `UNKNOWN_ROUTE`, `NO_SUCH_UPLOAD` | `/sign` or `/complete`; `NO_SUCH_UPLOAD` also by the bucket (`404 NoSuchUpload`) | New ticket: this one is over. After `UNKNOWN_ROUTE`, `/upload` refuses the same way while the route is missing. |
+  | `VERIFICATION_FAILED`, `ALREADY_EXISTS`, `FILE_TYPE_NOT_ALLOWED`, or any other refusal for good, a code this client does not know included | `/complete` | New ticket: the server ended the upload and removed what was stored. |
+  | `UPLOAD_REJECTED` | The bucket: a `403` for the signature or after a renewed link, `501`, any other `4xx` | New ticket. |
+  | `ABORTED`, or a file that is done | A cancel | Nothing: answers the outcome as it is. |
+  | `INVALID_INPUT`, `CLIENT_CLOSED` | The client, for the arguments of `start()` or a closed client | Nothing: answers the refusal. |
+  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `STORAGE_ERROR` | The checks of [`resume()`](resume.md#checks-before-any-request) | Runs the checks again. |
+
+  [Errors](errors.md) says for each code what to do besides.
 
 - A ticket is also replaced when it expired, when it can no longer sign the parts still to send, and when the page gave
   it up (`pagehide`). `job.retry()` asks for every file that needs a ticket in one `/upload`. On a new ticket the file
