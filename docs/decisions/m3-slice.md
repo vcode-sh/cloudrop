@@ -128,7 +128,8 @@ otherwise.
   2026-11-16"). So the opaque row's message says the storage service may have refused the file, not only that the
   connection failed.
 - **If wrong:** a readable 403 that meant a permission problem costs one extra `/sign` before the file fails.
-- **Status:** in force (`b0690aa`, renewal in `6fd5f14`); owner accepted (M3-O4).
+- **Status:** in force (`b0690aa`, renewal in `6fd5f14`); owner accepted (M3-O4). Amended by `M9-H4`: a 404 with the S3
+  code `NoSuchUpload` is rejected as `NO_SUCH_UPLOAD`.
 - **Visible in:** `client/bucket.ts` (`classifyAnswer`, `putObject`), `client/failures.ts`.
 
 ### M3-S11: URL renewal

@@ -61,6 +61,22 @@ The measurements behind the first range are in
   still holds, with 15 minutes to spare.
 - **Visible in:** `src/server/presign.ts`, spec §5.2.
 
+### M9-H4: a part sent to a gone upload fails as `NO_SUCH_UPLOAD`
+
+- **Decision:** The client classifies a bucket's `404` with the S3 code `NoSuchUpload` as `NO_SUCH_UPLOAD`, not
+  retryable, with the server's message "This upload was aborted or has expired. Start it again.". Every other `404` is
+  still `UPLOAD_REJECTED`.
+- **Why:** measured on R2 2026-11-21 (and from a browser on 2026-11-16, row N1): a part `PUT` to a multipart upload
+  aborted behind the server's back answers a readable `404 NoSuchUpload`, and the following `/complete` answers
+  `410 NO_SUCH_UPLOAD`. The client called the same condition `UPLOAD_REJECTED` with "The storage service refused the
+  file (HTTP 404) … contact the site owner if it keeps failing", which sends the user to the site owner for an upload
+  that was simply cancelled elsewhere or expired, and gives an application two codes to branch on for one cause. Both
+  codes need a new ticket (`NEEDS_NEW_TICKET`), so `retry()` behaves as before.
+- **If wrong:** a storage service that answers `NoSuchUpload` for another reason would get the "aborted or expired"
+  message; its outcome, a new upload, is the same.
+- **Status:** in force.
+- **Visible in:** `src/client/bucket.ts`, `src/client/failures.ts`, `docs/guide/errors.md`.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as

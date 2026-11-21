@@ -10,6 +10,7 @@ import {
   signatureMismatch,
   storageBusy,
   storageDown,
+  uploadGone,
   uploadRejected,
 } from "./failures.ts";
 import { parseRetryAfter } from "./retry.ts";
@@ -29,7 +30,8 @@ const STORAGE_CODE = /<Code>([A-Za-z]{1,64})<\/Code>/;
 
 /**
  * A storage answer that is not a success, from its status, body and Retry-After header, as the server's driver
- * classifies: by status; the body's S3 code only tells a bad signature from an expired URL.
+ * classifies: by status; the body's S3 code only tells a bad signature from an expired URL, and a gone upload from
+ * another 404.
  */
 export function classifyAnswer(status: number, body: string, retryAfter: string | null): BucketOutcome {
   const storageCode = STORAGE_CODE.exec(body)?.[1];
@@ -44,6 +46,8 @@ export function classifyAnswer(status: number, body: string, retryAfter: string 
   if (status === 429 || status === 503) return { kind: "retry", error: storageBusy(), retryAfterMs };
   // 501 Not Implemented: the storage service lacks the feature, so a retry can never succeed.
   if (status === 408 || (status >= 500 && status !== 501)) return { kind: "retry", error: storageDown(), retryAfterMs };
+  // A part of an upload that was aborted (another tab, the sweep, the bucket's lifecycle rule): no new URL revives it.
+  if (status === 404 && storageCode === "NoSuchUpload") return { kind: "rejected", error: uploadGone() };
   return { kind: "rejected", error: uploadRejected(status) };
 }
 

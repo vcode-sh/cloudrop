@@ -124,6 +124,10 @@ export const uploadRejected = (status: number): CloudropError =>
     `The storage service refused the file (HTTP ${status}). Start the upload again, and contact the site owner if it keeps failing.`,
   );
 
+/** A part sent to a multipart upload the bucket no longer has; the server's wording in completedBefore (M9-H4). */
+export const uploadGone = (): CloudropError =>
+  new CloudropError("NO_SUCH_UPLOAD", "This upload was aborted or has expired. Start it again.");
+
 // The next two repeat the server's wording for the same conditions (storageFailure in server/http.ts), which the
 // client cannot import.
 export const storageBusy = (): CloudropError =>

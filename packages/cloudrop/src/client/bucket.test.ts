@@ -15,6 +15,7 @@ const SIGNATURE_MISMATCH =
 const LINK_REFUSED =
   "The storage service refused the upload link, also after it was renewed. Check the server's clock and the storage credentials' permissions, then start the upload again.";
 const BUSY = "The storage service is busy. Try again in a moment.";
+const GONE = "This upload was aborted or has expired. Start it again.";
 const FAILED = "The storage service failed. Try again in a moment.";
 const refused = (status: number) =>
   `The storage service refused the file (HTTP ${status}). Start the upload again, and contact the site owner if it keeps failing.`;
@@ -105,9 +106,17 @@ describe("classifyAnswer", () => {
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", refused(400), false) },
     },
     {
-      name: "fails a part of an aborted upload",
+      // The server's code and wording for the same condition (M9-H4).
+      name: "fails a part of an aborted upload as the server reports it",
       status: 404,
       text: s3Error("NoSuchUpload"),
+      retryAfter: null,
+      expected: { kind: "rejected", error: error("NO_SUCH_UPLOAD", GONE, false) },
+    },
+    {
+      name: "fails any other 404",
+      status: 404,
+      text: s3Error("NoSuchBucket"),
       retryAfter: null,
       expected: { kind: "rejected", error: error("UPLOAD_REJECTED", refused(404), false) },
     },
