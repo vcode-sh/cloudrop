@@ -471,3 +471,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   both as a failed preflight.
 - **Status:** in force.
 - **Visible in:** `src/server/http.ts`, `src/server/handler-cors.test.ts`, `docs/guide/errors.md`.
+
+### M11-R47: `/complete` sends the JSON taken from `onComplete`'s result
+
+- **Decision:** Without a store, `/complete` answers with `JSON.parse` of the JSON `runOnComplete` took when
+  `onComplete` returned, not with the live value. The store path already did (`resultToStore` and the replayed answer
+  both parse the stored text), so both paths now send plain data that encodes the same way every time.
+- **Why:** the answer was encoded a second time from the live value. A `toJSON` that throws on its second call gave a
+  non-retryable `500` after `onComplete` had run, and one that answers differently sent the client other data than the
+  server had measured.
+- **If wrong:** none known; the client receives what `JSON.stringify` gave the first time, as the types
+  (`CompleteData`) already said.
+- **Status:** in force.
+- **Visible in:** `src/server/complete.ts`, `src/server/complete.test.ts`.

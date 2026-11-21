@@ -233,4 +233,27 @@ describe("POST /complete: plugins and onComplete", () => {
     const answer = await complete(fixture, ticket.token);
     expect([answer.status, "data" in answer.body ? answer.body.data : "no data"]).toEqual([200, null]);
   });
+
+  // The answer is the JSON taken when onComplete returned. Encoding the live value again let a toJSON that throws, or
+  // answers differently, the second time turn a finished completion into a 500 that is never retried (M11-R47).
+  it("sends the JSON taken from onComplete's result, never encoding the result a second time", async () => {
+    let encoded = 0;
+    const once = {
+      toJSON: () => {
+        encoded += 1;
+        if (encoded > 1) throw new Error("already encoded");
+        return { saved: true };
+      },
+    };
+    const saving = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { onComplete: () => once });
+    const fixture = serverFixture({ saving });
+    const ticket = await fixture.single("saving", TEXT);
+    await fixture.send(ticket.put, hello);
+    const answer = await complete(fixture, ticket.token);
+    expect({ status: answer.status, data: answer.body.data, logged: fixture.logger.errors }).toEqual({
+      status: 200,
+      data: { saved: true },
+      logged: [],
+    });
+  });
 });

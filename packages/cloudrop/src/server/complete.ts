@@ -26,7 +26,9 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   if (checked.kind === "refused") return cleanUpRefused(config, token, checked);
   const ran = await runOnComplete(config.logger, route, completeContext(request, token, file));
   if (ran.error) return ran;
-  // A result JSON leaves out (undefined, a function) is sent as null, as the store path stores it: without it the
-  // answer would have no data at all.
-  return ok({ file, data: ran.data.json === undefined ? null : ran.data.data });
+  // The JSON taken when onComplete returned is what the client gets, as on the store path: encoding the live result
+  // again would run a toJSON a second time, which may throw or answer differently (M11-R47). A result JSON leaves out
+  // (undefined, a function) is sent as null: without it the answer would have no data at all.
+  const { json } = ran.data;
+  return ok({ file, data: json === undefined ? null : JSON.parse(json) });
 }
