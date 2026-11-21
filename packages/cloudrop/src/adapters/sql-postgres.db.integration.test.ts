@@ -245,13 +245,14 @@ describe("Postgres under lock contention", () => {
         await inner.claim("f-1", "claim-a", NOW, LEASE);
         const client = tx as pg.PoolClient;
         // A client whose 'error' event was thrown may never report its end: wait at most a second for it.
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const closed = new Promise((resolve) => {
           client.once("end", resolve);
-          setTimeout(resolve, 1000);
+          timer = setTimeout(resolve, 1000);
         });
         // The connection dies between two statements, while the client waits for onComplete.
         await db.query("SELECT pg_terminate_backend($1)", [(await client.query(PID)).rows[0]?.pid]);
-        await closed;
+        await closed.finally(() => clearTimeout(timer));
         return inner.complete("f-1", "claim-a", null, NOW);
       });
       await expect(completing).rejects.toThrow("not queryable");

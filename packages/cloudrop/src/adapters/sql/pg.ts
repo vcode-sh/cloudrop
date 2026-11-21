@@ -42,7 +42,9 @@ export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> 
     const onError = () => {
       broken = true;
     };
-    client.on?.("error", onError);
+    // Only a client that can also drop the listener gets one: otherwise each checkout would add another.
+    const listening = typeof client.on === "function" && typeof client.removeListener === "function";
+    if (listening) client.on?.("error", onError);
     try {
       await client.query("BEGIN");
       const result = await work(client);
@@ -55,7 +57,7 @@ export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> 
       });
       throw error;
     } finally {
-      client.removeListener?.("error", onError);
+      if (listening) client.removeListener?.("error", onError);
       client.release(broken);
     }
   }
