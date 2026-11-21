@@ -2624,3 +2624,22 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends the wording of `M11-R171`'s by-hand instruction.
 - **Visible in:** `docs/guide/bucket-setup.md` ("What any bucket needs", "When the bucket has other CORS rules"),
   `docs/guide/command.md#setup`, `src/cli/instructions.ts`, `src/cli/setup-order.test.ts`.
+
+### M11-R233: the errors guide names `allFiles`, both bounds of `graceMs` and the `NOT_FOUND` of a file that completes during the call
+
+- **Decision:** `docs/guide/errors.md` was read against `src/errors.ts`, `src/server/http.ts` and the argument checks
+  of the store calls, and four rows changed. "Database store file API errors" lists `allFiles` among the calls and
+  says it also answers `INVALID_CONFIG` for a store written by hand without `listAll`. Its `NOT_FOUND` row has the
+  file whose completion is recorded while `deleteFile` runs, and what to do (call again), as `docs/guide/store.md`
+  has since `M11-R214`. Its `INVALID_INPUT` row gives `graceMs` both bounds (15 minutes to 30 days, `M11-R63`) and
+  names the checks it left out: NUL and a lone surrogate in an id or owner, the options of `files` and `allFiles`
+  (the `owner` key that is `undefined` among them, `M11-R195`), the sweep's `cursor` and `signal`. The endpoint
+  table's `INVALID_INPUT` row says which case refuses one file and lets the rest of the `/upload` go on (`M11-R196`,
+  `M11-R222`) and names `/abort`'s `keep` (`M11-R201`).
+- **Why:** each is a thing 0.6.0 added or changed that the page did not say, and the page is where a developer reads
+  a code from a log. Every status in the endpoint table was compared with `STATUS` in `src/server/http.ts`, and every
+  code the source constructs with the page: all agree, and what the handler sends a client (`code`, `message`,
+  `retryable`, `parts`, `content`) is stated as `errorBody` does it.
+- **If wrong:** none; the text follows the code.
+- **Status:** in force.
+- **Visible in:** `docs/guide/errors.md` ("Upload endpoint errors", "Database store file API errors").

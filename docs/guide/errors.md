@@ -82,7 +82,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `STORAGE_ERROR` | 502 | Sometimes | The server's call to the storage service failed (retryable), or the storage refused it (not retryable). Your server log has the details. | When retryable, try again. Otherwise check the server log: often credentials, permissions or the bucket name. Either way `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
 | `SERVER_ERROR` | 500 | Sometimes | Something in the server failed: your `authorize`, `owner`, `onComplete` or a plugin threw, or cloudrop hit a bug. Retryable when the file is stored but `onComplete` or a hook did not finish, and while an environment setting is missing. With a database store, also retryable when the store failed ("could not reach its upload records"), when `quota` failed ("could not check your storage limit"), and while another request is completing the same file ("Another request is completing this upload", sent with `Retry-After: 2` and not logged). | Check the server log. When retryable, try again; the client does. Retryable or not, `retry()` keeps the file's ticket and what is stored; after a `/complete` it sends `/complete` alone, since the file may be complete. |
 | `NOT_FOUND` | 404 | No | There is no cloudrop endpoint at the requested path. | Check that `basePath` matches on the server and the client. Once it does, `retry()` goes on where the file stopped, with the same ticket. |
-| `INVALID_INPUT` | 400 | No | The request body is malformed: not a JSON object, no route name, no files, a bad file entry, an `idempotencyKey` that is not 16 to 128 letters, digits, `-` or `_`, wrong part numbers. The Node adapter also answers it for a request it cannot read. | Use the cloudrop client, or fix the request your own client sends. From the cloudrop client it means something on the way changed the request: `retry()` keeps the file's ticket and sends the request again. |
+| `INVALID_INPUT` | 400 | No | The request body is malformed: not a JSON object, no route name, no files, a bad file entry, an `idempotencyKey` that is not 16 to 128 letters, digits, `-` or `_`, wrong part numbers, a `keep` that is not `true` or `false`. The Node adapter also answers it for a request it cannot read. One case refuses a single file and lets the others of the same `/upload` go on: a name with NUL or a lone surrogate, or with a control character the route's own `key` cannot hold ([Server](server.md#the-upload-token-and-what-it-allows)). | Use the cloudrop client, or fix the request your own client sends. From the cloudrop client it means something on the way changed the request: `retry()` keeps the file's ticket and sends the request again. |
 
 With a database store, a [`replace: true`](store.md#one-file-per-owner-replace) route's `onDelete` can
 [refuse the replacement](store.md#refuse-a-deletion): `/complete` then answers the `CloudropError` the hook returned,
@@ -130,14 +130,15 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 
 ## Database store file API errors
 
-With a [database store](store.md), `cloudrop.api.file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`,
-`reconcile` and `sweep` answer these. Without a store each answers `INVALID_CONFIG`: "api.<name> needs a database store.
-Pass store to createCloudrop."
+With a [database store](store.md), `cloudrop.api.file`, `files`, `allFiles`, `usage`, `revokeUploads`, `deleteFile`,
+`eraseOwner`, `reconcile` and `sweep` answer these. Without a store each answers `INVALID_CONFIG`: "api.<name> needs a
+database store. Pass store to createCloudrop." `allFiles` answers `INVALID_CONFIG` too with a store written by hand
+that has no `listAll` method.
 
 | Code | Retryable | What it means | What to do |
 | --- | --- | --- | --- |
-| `NOT_FOUND` | No | `deleteFile` found no completed file with this id: it never completed, or the store has no row for it. | Check the id; it is the `file.id` the upload returned. |
-| `INVALID_INPUT` | No | An id or owner that is not 1 to 255 characters, a sweep `limit` outside 1 to 1,000, or a `graceMs` under 15 minutes. | Fix the argument; the message names it. |
+| `NOT_FOUND` | No | `deleteFile` found no completed file with this id: it never completed, the store has no row for it, or its completion was recorded while the call ran. That last file stays completed, with its object. | Check the id; it is the `file.id` the upload returned. For a file that completed during the call, call `deleteFile` again: the second call deletes it. |
+| `INVALID_INPUT` | No | A bad argument. An id or owner that is not 1 to 255 characters, or has NUL or a lone surrogate. For `files` and `allFiles`: a `route` the server does not have, a `name`, `type`, `order` or `status` that is not one, a `limit` outside 1 to 1,000, a `cursor` no page returned or one of a listing with other options, and for `allFiles` an `owner` key that is there but `undefined`. For `sweep`: a `limit` outside 1 to 1,000, a `cursor` no sweep returned, or a `signal` without `all: true`. For `sweep` and `eraseOwner`: a `graceMs` outside 15 minutes to 30 days. Options that are not an object. | Fix the argument; the message names it. |
 | `SERVER_ERROR` | Yes | The database failed or could not be reached ("The server could not reach its upload records."), or the route's `onDelete` threw in `deleteFile` ("onDelete failed for route …, so the file was kept."). The server log has the error. | Try again. A sweep leaves a failed row for its next run and counts it in `failed`, as `eraseOwner` does. |
 | The code your `onDelete` returned | As you set it | `deleteFile` only: the route's [`onDelete` refused](store.md#refuse-a-deletion) by returning this `CloudropError`. The file was kept and nothing was logged. | Show the message. `eraseOwner` counts such a file in `refused` instead of answering an error. |
 
