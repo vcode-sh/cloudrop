@@ -40,6 +40,16 @@ describe("contentChecks: a container's bytes do not say audio or video (M11-R133
     { name: "an audio MP4 with the major brand dash", input: audioOnly("a.m4a", "audio/mp4", ftyp("dash")) },
     { name: "a Matroska recording", input: audioOnly("a.mka", "audio/x-matroska", ebml("matroska")) },
     { name: "a 3GP recording", input: audioOnly("a.3gp", "audio/3gpp", ftyp("3gp4")) },
+    // shared-mime-info's types for .m4b and .opus, which a Linux desktop sends: audio/x-m4b under either kind of
+    // brand, and a "+ogg" type for each codec.
+    { name: "an audiobook with the major brand M4B", input: audioOnly("a.m4b", "audio/x-m4b", ftyp("M4B ")) },
+    { name: "an audiobook with the major brand isom", input: audioOnly("a.m4b", "audio/x-m4b", ftyp("isom")) },
+    { name: "an Opus recording", input: audioOnly("a.opus", "audio/x-opus+ogg", OGG) },
+    // Apache httpd's mime.types, which mime-db and so most non-browser clients follow, types .f4v so.
+    {
+      name: "an F4V video",
+      input: { accept: "video/*", file: { name: "a.f4v", type: "video/x-f4v" }, body: ftyp("f4v ") },
+    },
     // What deny cannot promise: an Ogg file with a video stream starts with the same bytes.
     { name: "an Ogg file", input: audioOnly("a.ogg", "audio/ogg", OGG) },
     {

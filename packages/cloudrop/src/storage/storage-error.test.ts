@@ -12,6 +12,10 @@ describe("storageError", () => {
     [412, xml("PreconditionFailed"), "ALREADY_EXISTS", false, "PreconditionFailed"],
     [400, xml("InvalidPart"), "INVALID_PART", false, "InvalidPart"],
     [400, xml("EntityTooSmall"), "INVALID_PART", false, "EntityTooSmall"],
+    // AWS S3's answer to a completion whose "list of parts was not in ascending order" (API Reference,
+    // CompleteMultipartUpload, special errors). R2's error list has no such code and R2 completes a descending list
+    // (measured 2026-11-21); the driver sorts the parts either way.
+    [400, xml("InvalidPartOrder"), "INVALID_PART", false, "InvalidPartOrder"],
     [400, xml("BadDigest"), "CHECKSUM_MISMATCH", false, "BadDigest"],
     [403, xml("SignatureDoesNotMatch"), "STORAGE_DENIED", false, "SignatureDoesNotMatch"],
     [403, xml("RequestTimeTooSkewed"), "STORAGE_DENIED", false, "RequestTimeTooSkewed"],

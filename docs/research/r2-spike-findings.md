@@ -915,6 +915,16 @@ copy and the `HEAD` of the copy succeed and the copy's disposition holds the sam
 (`src/storage/s3/copy.r2.integration.test.ts`). Three probe runs, each under its own `live-test/cloudrop-<32 hex>/`
 prefix, each deleted by its teardown.
 
+### A completion whose parts are listed out of order
+
+Measured 2026-11-21 on the test bucket with a scratch probe (not committed): a multipart upload of two parts (5 MiB
+and 1 KiB), completed with a raw `CompleteMultipartUpload` that lists part 2 before part 1. R2 answered `200` and
+stored the object. AWS S3 documents `400 InvalidPartOrder` for that request ("The list of parts was not in ascending
+order", API Reference, CompleteMultipartUpload), and R2's error list
+(https://developers.cloudflare.com/r2/api/error-codes/) has no such code. cloudrop's driver sorts the parts before it
+sends them, so neither answer is reached through it; `storageError` maps the code to `INVALID_PART` for S3. The fake
+R2 (`src/testing/fake-r2/multipart.ts`) answers `InvalidPartOrder` here, which is S3's answer, not R2's.
+
 ## Store, sweep and owner files under real latency, 2026-11-21
 
 Measured 2026-11-21 on a second bucket (`vstack-dev`, EEUR, an object read/write token), for `M9-H50` to `M9-H52`.

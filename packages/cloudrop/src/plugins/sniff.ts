@@ -47,8 +47,9 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   [[...ascii("RIFF"), ...ANY4, ...ascii("WAVE")], kind("audio/wav", "a WAV recording", "audio/x-wav", "audio/wave")],
   // PDF: ISO 32000-2:2020 §7.5.2, File header; WHATWG §7.1.
   [ascii("%PDF-"), kind("application/pdf", "a PDF document")],
-  // Ogg: RFC 3533 §6, the capture pattern "OggS" and stream structure version 0; WHATWG §6.2.
-  [[...ascii("OggS"), 0], container("audio/ogg", "an Ogg file", "audio/opus", "video/ogg", "application/ogg")],
+  // Ogg: RFC 3533 §6, the capture pattern "OggS" and stream structure version 0; WHATWG §6.2. shared-mime-info names
+  // a type per codec, each ending in "+ogg": audio/x-opus+ogg for .opus, audio/x-vorbis+ogg, video/x-theora+ogg.
+  [[...ascii("OggS"), 0], container("audio/ogg", "an Ogg file", "audio/opus", "video/ogg", "application/ogg", "*+ogg")],
   // FLAC: RFC 9639 §8, the stream marker "fLaC".
   [ascii("fLaC"), kind("audio/flac", "a FLAC recording", "audio/x-flac")],
   [[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], OLE],

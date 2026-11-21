@@ -195,11 +195,11 @@ The plugin applies to every route. A type that one route takes and another must 
 | GIF | `image/gif` | `GIF87a`, `GIF89a` | GIF89a specification §17; WHATWG §6.1 |
 | WebP | `image/webp` | `RIFF`, 4 bytes, `WEBPVP` | RFC 9649 §2.5; WHATWG §6.1 |
 | AVIF, HEIC, HEIF | `image/avif`, `image/heic`, `image/heif` | ISO BMFF `ftyp` box, major brand `avif`, `heic` and kin, `mif1` | AVIF §9.1; ISO/IEC 23008-12 |
-| MP4, M4A, MOV, 3GP | `video/mp4` (also `audio/mp4`, `audio/x-m4a`), `audio/mp4`, `video/quicktime`, `video/3gpp` (also `audio/3gpp`) | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
+| MP4, M4A, M4B, F4V, MOV, 3GP | `video/mp4` (also `audio/mp4`, `audio/x-m4a`, `audio/x-m4b`, `video/x-m4v`, `video/x-f4v`), `audio/mp4`, `video/quicktime`, `video/3gpp` (also `audio/3gpp`) | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
 | WebM, Matroska | `video/webm` (also `audio/webm`), `video/x-matroska` (also `audio/x-matroska`) | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
 | MP3, and any file an ID3 tag fronts | `audio/mpeg` (an ID3 tag also `audio/aac`, `audio/vnd.dlna.adts`, `audio/flac`, `audio/mp2`) | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or a Layer III frame header with a second one where its frame ends | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
 | WAV | `audio/wav` | `RIFF`, 4 bytes, `WAVE` | WHATWG §6.2 |
-| Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
+| Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg` and every `+ogg` type, such as `audio/x-opus+ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |
 | PDF | `application/pdf` | `%PDF-` | ISO 32000-2 §7.5.2; WHATWG §7.1 |
 | Old Office file, Outlook message or Windows installer (OLE compound file) | `application/x-ole-storage` | `D0 CF 11 E0 A1 B1 1A E1` | MS-CFB §2.2 |

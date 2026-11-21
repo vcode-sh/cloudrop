@@ -277,6 +277,11 @@ describe("bucket configuration writes", () => {
         rule: { id: "a", enabled: true, abortIncompleteMultipartUploadDays: 1 },
       },
       { name: "a new lifecycle rule without its days", rule: { id: "a", enabled: true, prefix: "" } },
+      // The smallest value S3 takes for DaysAfterInitiation is 1: zero would be written and refused by the storage.
+      {
+        name: "a new lifecycle rule that aborts after zero days",
+        rule: { id: "a", enabled: true, prefix: "", abortIncompleteMultipartUploadDays: 0 },
+      },
       { name: "a lifecycle rule whose XML is not text", rule: { ...abortRule, sourceXml: 5 } },
     ].map(({ name, rule }) => ({
       name,

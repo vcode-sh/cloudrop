@@ -58,7 +58,8 @@ describe("sniff: where a tag ends (M11-R131)", () => {
     { name: "a bra-ket", input: "<b|c> is the overlap of two states" },
     { name: "a comparison", input: "<p=0.05 was taken as significant" },
     { name: "a tag name that goes on after a row's letters", input: "<br2>" },
-    { name: "a root ended by a comma, after a doctype", input: "<!DOCTYPE x><a,b>" },
+    // The root is what stands right after the prolog: a tag further on is not looked for.
+    { name: "a root ended by a comma after a doctype, and a tag further on", input: "<!DOCTYPE x><a,b><script>" },
     // Not whitespace bytes of the standard: a vertical tab and a no-break space are content.
     { name: "a tag after a vertical tab", input: "\x0b<html>" },
     { name: "a tag after a no-break space", input: "\xa0<html>" },

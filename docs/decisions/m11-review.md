@@ -3263,3 +3263,33 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; no behaviour changes.
 - **Status:** in force; corrects one sentence of `M11-R136`.
 - **Visible in:** `src/testing.ts`, `docs/guide/testing-your-app.md`, `docs/guide/plugins.md`.
+
+### M11-R257: three media aliases, and three rows for checks no test held
+
+- **Decision:**
+  - An MP4 file agrees with `audio/x-m4b` (under a general brand and under `M4A `, `M4B ` and `M4P `) and, under a
+    general brand, with `video/x-f4v`. An Ogg file agrees with every type that ends in `+ogg`.
+  - Three rows are added, each seen red under the mutation it guards: a lifecycle rule that aborts after zero days
+    is refused before anything is sent (`days >= 1` in `lifecycleProblem`); `<!DOCTYPE x><a,b><script>` shows no
+    type (the start tag is matched where the prolog ends, not anywhere after it: `START_TAG`'s sticky flag); and
+    `400 InvalidPartOrder` maps to `INVALID_PART`.
+- **Why:** an `.m4b` sent as `audio/x-m4b`, an `.f4v` as `video/x-f4v` and an `.opus` as `audio/x-opus+ogg` were
+  each a `mismatch` (reproduced; the same in 0.5.0). The types come from the tables clients use: shared-mime-info
+  (`freedesktop.org.xml.in`) gives `.m4b` and `.f4b` `audio/x-m4b`, a subclass of `audio/mp4`, and gives Ogg a type
+  per codec, each a subclass of `audio/ogg` or `video/ogg` and each ending in `+ogg` (`audio/x-opus+ogg` for
+  `.opus`, `audio/x-vorbis+ogg`, `audio/x-flac+ogg`, `audio/x-speex+ogg`, `video/x-theora+ogg`,
+  `video/x-ogm+ogg`), so the suffix is matched as `+zip` is. Chromium (`net/base/mime_util.cc`) and Firefox
+  (`nsExternalHelperAppService.cpp`) have `.opus` as `audio/ogg` and no entry for `.m4b` in Chromium or `.f4v` in
+  either, so the platform's type is sent. `video/x-f4v` is Apache httpd's type for `.f4v` (`docs/conf/mime.types`),
+  which mime-db and the clients built on it follow. `InvalidPartOrder` is AWS S3's answer to a completion whose
+  "list of parts was not in ascending order" (API Reference, CompleteMultipartUpload); R2's error list has no such
+  code, and R2 completed a list in descending order with `200` (measured 2026-11-21,
+  `docs/research/r2-spike-findings.md`). The driver sorts the parts, so the row holds the mapping for S3.
+- **If wrong:** `deny: ["video/*"]` does not refuse an MP4 sent as `audio/x-m4b`, as it does not one sent as
+  `audio/mp4` (`M11-R133`). `audio/x-m4r` (a ringtone) and other names outside the three tables are still a
+  `mismatch`.
+- **Status:** in force.
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.ts`,
+  `src/plugins/content-checks-containers.test.ts`, `src/plugins/sniff-text.test.ts`,
+  `src/storage/s3/bucket-settings.test.ts`, `src/storage/storage-error.test.ts`, `docs/guide/plugins.md`,
+  `docs/research/r2-spike-findings.md`.

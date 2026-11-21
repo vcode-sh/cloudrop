@@ -8,7 +8,9 @@ const brands = (sniffed: Sniffed, ...names: string[]) => names.map((name) => [na
 /**
  * ISO BMFF brands (ISO/IEC 14496-12 §4.3, FileTypeBox; brand list at the MP4 Registration Authority, mp4ra.org): AVIF
  * (AV1 Image File Format §9.1), HEIF and HEIC (ISO/IEC 23008-12 §10 and Annex B), MP4 (ISO/IEC 14496-14), Apple's M4A
- * and QuickTime ("qt  ", QuickTime File Format, File type compatibility atom), 3GPP (3GPP TS 26.244 §5.4).
+ * and QuickTime ("qt  ", QuickTime File Format, File type compatibility atom), 3GPP (3GPP TS 26.244 §5.4). Beside
+ * the types Chromium's and Firefox's tables give (net/base/mime_util.cc, nsExternalHelperAppService.cpp), an MP4 file
+ * agrees with audio/x-m4b, shared-mime-info's type for .m4b, and video/x-f4v, Apache httpd's for .f4v (M11-R257).
  */
 const BRANDS: ReadonlyMap<string, Sniffed> = new Map([
   ...brands(kind("image/avif", "an AVIF image"), "avif", "avis"),
@@ -22,11 +24,11 @@ const BRANDS: ReadonlyMap<string, Sniffed> = new Map([
     "msf1",
   ),
   ...brands(
-    container("video/mp4", "an MP4 file", "audio/mp4", "audio/x-m4a", "video/x-m4v"),
+    container("video/mp4", "an MP4 file", "audio/mp4", "audio/x-m4a", "audio/x-m4b", "video/x-m4v", "video/x-f4v"),
     ...["isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9", "mp41", "mp42", "avc1", "dash"],
     ...["M4V ", "f4v "],
   ),
-  ...brands(kind("audio/mp4", "an MP4 recording", "audio/x-m4a"), "M4A ", "M4B ", "M4P "),
+  ...brands(kind("audio/mp4", "an MP4 recording", "audio/x-m4a", "audio/x-m4b"), "M4A ", "M4B ", "M4P "),
   ...brands(kind("video/quicktime", "a QuickTime video"), "qt  "),
   ...brands(container("video/3gpp", "a 3GP file", "audio/3gpp"), "3gp4", "3gp5", "3gp6", "3gp7", "3ge6", "3gg6"),
   ...brands(container("video/3gpp2", "a 3GP file", "audio/3gpp2"), "3g2a", "3g2b", "3g2c"),
