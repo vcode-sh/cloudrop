@@ -967,6 +967,30 @@ No answer was compressed. The fake R2 answers the same way (`416` for a range th
 past the end clamped), so the unit lane covers it; `contentChecks()` reads nothing of an empty file and asks for
 `min(size, 4096)` bytes otherwise.
 
+## Which CORS rule answers when several match, 2026-11-21
+
+Measured on the test bucket with the owner's permission (an admin token, the S3 API; the bucket's own rule was kept in
+place during the run and the configuration restored afterwards, read back identical). Two rules for one made-up
+origin were added after the bucket's rule, in both orders, and then with the first one's origin as `*`:
+
+- rule A: methods `GET`, `PUT`, `HEAD`, headers `*`, exposes `x-rule-a`, max age 111;
+- rule B: methods `GET`, `PUT`, header `content-type`, exposes `ETag` and `x-rule-b`, max age 222.
+
+| Stored order | Preflight `PUT` + `content-type` | Preflight `PUT` + `x-other` | Preflight `HEAD` | `GET` exposes |
+| --- | --- | --- | --- | --- |
+| A, B | A (max age 111) | A | A | `x-rule-a` |
+| B, A | B (max age 222) | A | A | `ETag,x-rule-b` |
+| A (`*`), B | A, `Allow-Origin: *` | A | A | `x-rule-a` |
+| B, A (`*`) | B | A, `Allow-Origin: *` | A | `ETag,x-rule-b` |
+
+Three preflights per configuration answered the same. **R2 answers with the first rule, in stored order, that matches
+the whole request: the origin, the method and every requested header.** A rule that matches the origin but not the
+method or a requested header is passed over, and the next one is tried. The headers of the answer (allowed methods,
+max age, exposed headers) come from that one rule only; rules are never merged. This is what the S3 user guide
+documents for S3 ("uses the first `CORSRule` rule that matches"). So an earlier rule with origin `*` that allows `PUT`
+and any header, but does not expose `ETag`, answers cloudrop's uploads instead of cloudrop's own rule stored after it.
+A changed configuration answered within 35 seconds.
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in
