@@ -3202,8 +3202,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Decision:** `text/*` moves from the `#!` script's `agrees` (the types the content can be) to its `loose` (the
   types it does not contradict). Sent as a text type, an allowed script passes as before (`M11-R134`). Sent
   untyped, the route's text entries no longer stand for types the script could be: it is refused unless `allow`
-  names a script type, and then accepted only where the route's `accept` takes a script type, `*/*` or `text/*`,
-  as in 0.5.0. The route's entries still count for content whose bytes cannot say which type it is: a container
+  names a script type, and then accepted only where the route's `accept` takes a script type, by name or by a
+  wildcard, as in 0.5.0. The route's entries still count for content whose bytes cannot say which type it is: a container
   (`M11-R133`), an Office file (its folder names the application, not the type) and XML (its root names no `+xml`
   type).
 - **Why:** reproduced: with `accept: ["text/html", "application/octet-stream"]` and `allow: ["text/html"]`, an
@@ -3227,7 +3227,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   | XML with a root other than `svg` | `accept` names a `+xml` type and `allow` names an XML type | refused | passes | `M11-R134`, this entry |
 
   Nothing else changed: an untyped OLE file passes on every other shape again (`M11-R254`), and a `#!` script at
-  the start of the file answers as in 0.5.0 on all 625 shapes.
+  the start of the file answers as in 0.5.0 on all 625 shapes. `M11-R259` adds the files 0.6.0 reads as another
+  type.
 - **If wrong:** an app that relied on `allow: ["text/plain"]` or `allow: ["text/html"]` to take untyped scripts
   (possible in no release) names a script type in both lists. The XML row stays looser than 0.5.0: with an XML type
   allowed and a `+xml` type in `accept`, an untyped XML document passes whatever its root is, as the same file sent
@@ -3336,3 +3337,37 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; extends `M11-R220`.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `src/server/accept.ts`,
   `src/server/accept.test.ts`, `docs/guide/plugins.md` (the recognition table, Limits).
+
+### M11-R259: the untyped table for content 0.6.0 reads differently, and the measurements after the final fixes
+
+- **Decision:** no behaviour; the record of three measurements taken after `M11-R250` to `M11-R258`.
+  1. **The rest of the untyped table.** `M11-R255` lists the cells the decision changed. Fifteen more files, each
+     one that 0.6.0's sniffer reads as another type than 0.5.0's, were run through the same 625 shapes. Untyped,
+     each answers as its new type does:
+
+     | Untyped file | 0.5.0 | 0.6.0 | Entry |
+     |---|---|---|---|
+     | Text that opens with `<!--` | passes (no type) | refused, a web page | `M11-R131` |
+     | `<hta:application` as the root | passes (no type) | refused, a web page | `M11-R136` |
+     | A doctype still open after 4 KiB; a doctype whose quoted `]>` hides an `svg` root | passes (no type) | refused, XML or SVG | `M11-R220` |
+     | A doctype, then a comment, blanks or a processing instruction past the read | passes (no type) | refused, XML | `M11-R258` |
+     | `<?p a><script>…` | passes (no type) | refused, a web page | `M11-R258` |
+     | `<a,b> denotes…` | refused, a web page | passes (no type) | `M11-R131` |
+     | One MPEG audio frame header with no second one; `FF FF 00 00` | refused where the route takes no audio | passes (no type) | `M11-R136` |
+     | A Word file whose entries are streamed | judged as a ZIP | judged as a Word file | `M11-R132`, `M11-R212` |
+
+     A refused row passes where `allow` names its kind and the route accepts it, as any file of that type does. A
+     short PHP file (`<?php echo 1; ?>`) and a file with an ID3 tag answer as in 0.5.0 on every shape.
+  2. **Time.** `sniff` on 35 adversarial inputs of 4,096 bytes (blanks; a doctype followed by runs of `] `, `<!-`,
+     `<!--`, quotes, `<?`, `<?>`, `<!---->`; the same without a doctype; a tag name that never ends; a UTF-16
+     doctype; ZIP headers; brands; frame headers), 300 calls each after 300 to warm up, Node 24.22.2: the largest
+     median is 0.13 ms and the largest single call 0.35 ms. The fuzz test (`src/plugins/sniff-fuzz.test.ts`, over
+     20,000 inputs and 2,000 doctypes built from the grammar) passes unchanged.
+  3. **Size.** `cloudrop/plugins` is 6.46 kB (6.27 kB before these fixes, ceiling 7 kB, provisional) and the bundled
+     server 34.48 kB (34.35 kB, ceiling 36 kB, provisional). Neither ceiling moved.
+- **Why:** the owner's bar for 0.6.0 is that nothing which worked in 0.5.0 gets worse unseen; a table of the
+  decision alone would leave out what the sniffer changed underneath it.
+- **If wrong:** the table holds the files and shapes that were run, not every file: a format neither release
+  recognises answers the same in both by construction.
+- **Status:** in force.
+- **Visible in:** `scripts/size-limit.config.ts` (the measured size), this file.
