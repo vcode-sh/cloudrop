@@ -9,14 +9,20 @@ export type { Sniffed } from "./bytes.ts";
 
 const ANY4 = [null, null, null, null];
 const GIF = kind("image/gif", "a GIF image");
-const PROGRAM = ["application/x-msdownload", "application/x-msdos-program", "application/x-dosexec"];
+const PROGRAM = [
+  "application/x-msdownload",
+  "application/x-msdos-program",
+  "application/x-dosexec",
+  "application/x-ms-dos-executable",
+];
 const WINDOWS = kind("application/vnd.microsoft.portable-executable", "a program", ...PROGRAM);
 const LINUX = kind("application/x-executable", "a program", "application/x-elf", "application/x-sharedlib");
 const MAC = kind("application/x-mach-binary", "a program", "application/x-mach-o-executable");
 
 const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
-  // PNG: W3C PNG Specification (Third Edition) §5.2, PNG signature; WHATWG MIME Sniffing §6.1.
-  [[0x89, ...ascii("PNG\r\n\x1a\n")], kind("image/png", "a PNG image")],
+  // PNG: W3C PNG Specification (Third Edition) §5.2, PNG signature; WHATWG MIME Sniffing §6.1. An animated PNG has the
+  // same signature and its own type, image/apng (IANA registration of 2022-11-21, for PNG Third Edition).
+  [[0x89, ...ascii("PNG\r\n\x1a\n")], kind("image/png", "a PNG image", "image/apng")],
   // JPEG: ITU-T T.81 Annex B.1.1.3, the SOI marker (FF D8) and the next marker's FF; WHATWG §6.1.
   [[0xff, 0xd8, 0xff], kind("image/jpeg", "a JPEG image", "image/pjpeg")],
   // GIF: the GIF89a specification §17, Header; WHATWG §6.1.
@@ -102,8 +108,10 @@ function sniffWindows(bytes: Uint8Array, size: number): Sniffed | null {
  * layer other than the reserved 0, a bit rate index other than the invalid 15, a sample rate index other than the
  * reserved 3 (ISO/IEC 11172-3 §2.4.2.3).
  */
-function sniffMp3([sync, flags = 0, rates = 0]: Uint8Array): Sniffed | null {
-  const header = sync === 0xff && (flags & 0xe0) === 0xe0 && (flags & 0x06) !== 0;
+function sniffMp3(bytes: Uint8Array): Sniffed | null {
+  // The header is four bytes (§2.4.1.3); WHATWG reads none from fewer.
+  const [sync, flags = 0, rates = 0] = bytes;
+  const header = bytes.length >= 4 && sync === 0xff && (flags & 0xe0) === 0xe0 && (flags & 0x06) !== 0;
   return header && rates >> 4 !== 15 && ((rates >> 2) & 0x03) !== 3 ? MP3 : null;
 }
 

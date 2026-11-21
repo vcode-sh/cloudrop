@@ -50,6 +50,11 @@ describe("contentChecks: the file's content against its declared type and the ro
       expected: passed,
     },
     {
+      name: "an animated PNG sent as image/apng",
+      input: { accept: "image/*", file: { name: "a.apng", type: "image/apng" }, body: PNG },
+      expected: passed,
+    },
+    {
       name: "a JPEG sent as image/png",
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: JPEG },
       expected: refused(

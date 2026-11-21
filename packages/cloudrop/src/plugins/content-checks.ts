@@ -37,6 +37,7 @@ const REFUSED: ReadonlySet<string> = new Set([
   "application/x-msdownload",
   "application/x-msdos-program",
   "application/x-dosexec",
+  "application/x-ms-dos-executable",
   "application/x-executable",
   "application/x-elf",
   "application/x-sharedlib",

@@ -90,9 +90,12 @@ Both take exact types or a top-level wildcard such as `"image/*"`, in lower case
 `INVALID_CONFIG` when `contentChecks()` is called.
 
 ```ts
-// A site builder that takes HTML pages, but never ZIP archives.
+// A site builder that takes HTML pages, but never plain ZIP archives.
 contentChecks({ allow: ["text/html"], deny: ["application/zip"] });
 ```
+
+A recognised package is its own type, not `application/zip`: `deny: ["application/zip"]` still lets a Word file, an
+OpenDocument file or an EPUB through. Deny their types too when they must not pass.
 
 The plugin applies to every route. A type that one route takes and another must not belongs in each route's `accept`.
 
@@ -100,7 +103,7 @@ The plugin applies to every route. A type that one route takes and another must 
 
 | Content | Type | Recognised by | Defined in |
 | --- | --- | --- | --- |
-| PNG | `image/png` | `89 50 4E 47 0D 0A 1A 0A` | PNG Specification §5.2; WHATWG MIME Sniffing §6.1 |
+| PNG, animated PNG | `image/png` (also agrees with `image/apng`) | `89 50 4E 47 0D 0A 1A 0A` | PNG Specification §5.2; WHATWG MIME Sniffing §6.1 |
 | JPEG | `image/jpeg` | `FF D8 FF` | ITU-T T.81 Annex B; WHATWG §6.1 |
 | GIF | `image/gif` | `GIF87a`, `GIF89a` | GIF89a specification §17; WHATWG §6.1 |
 | WebP | `image/webp` | `RIFF`, 4 bytes, `WEBPVP` | RFC 9649 §2.5; WHATWG §6.1 |
@@ -132,6 +135,12 @@ Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitesp
 - **An XML type a route names may carry scripts.** Naming `image/svg+xml` or another XML type in `accept` takes
   documents a browser runs scripts in; the check does not look inside them. Serve such files from a domain of their
   own, or as downloads.
+- **Serve stored files with `X-Content-Type-Options: nosniff`.** A file with no signature passes as the text type it
+  was sent as: JavaScript sent as `text/plain` to a route that takes `text/plain` is stored. Without `nosniff`, a
+  page may still load such a file with `<script src>` from your origin; the `attachment` disposition cloudrop stores
+  stops a browser opening it as a page, not that. Better still, serve user files from a domain of their own.
+- **Windows batch files and PowerShell scripts have no signature.** A `.bat`, `.cmd` or `.ps1` sent as a text type or
+  as `application/octet-stream` passes; keep those types out of `accept` and do not serve such files to be opened.
 - **Archives are not opened.** A ZIP of programs passes as a ZIP. There is no virus scanning.
 - **`deny` sees what the first bytes show.** A ZIP behind a one-byte prefix, which ZIP readers still open, shows no
   ZIP signature.
@@ -140,7 +149,8 @@ Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitesp
   `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type, such as `text/x-python` or
   `text/plain`, or as `application/x-sh`, `application/x-perl`, `application/x-ruby` or `application/x-php`.
 - **Text that starts like a web page is refused.** A Markdown file that opens with `<p align="center">`, `<div>` or a
-  `<!--` comment reads as HTML, as a browser would read it.
+  `<!--` comment reads as HTML, as a browser would read it. So does an SVG whose comments before the `<svg` root fill
+  the first 4 KiB, even on a route that names `image/svg+xml`.
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An
   empty file is not read: R2 answers any range of an empty object with `416` (measured 2026-11-21).
 

@@ -236,3 +236,24 @@ Entries continue from 1.
   under an `application/` type not listed above is refused as a contradiction.
 - **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/content-checks.test.ts`.
 - **Visible in:** `src/plugins/sniff-text.ts`, `docs/guide/plugins.md`.
+
+### M10-K12: what the review before release added: APNG, one more program type, MP3's four bytes, serving advice
+
+- **Decision:** a PNG agrees with `image/apng` as well as `image/png`. `application/x-ms-dos-executable`
+  (shared-mime-info's type for `.exe`) is refused at `/upload` and agrees with a Windows program. An MPEG audio frame
+  header counts only with all four of its bytes. The guide's Limits tell the app to serve stored files with
+  `X-Content-Type-Options: nosniff` (or from a domain of their own), say that `.bat`, `.cmd` and `.ps1` have no
+  signature, that a recognised package (Word, OpenDocument, EPUB) is not `application/zip` for `deny`, and that an
+  SVG whose leading comments fill the first 4 KiB reads as HTML; the errors guide names the refusal of a file sent as
+  `application/octet-stream` whose content `accept` does not take.
+- **Why:** `image/apng` is registered with IANA (2022-11-21, change controller W3C, for PNG Third Edition) and is what
+  browsers declare for `.apng`, so an animated PNG was refused as a contradiction. A program sent under a type
+  missing from the list passed `/upload` and stayed in the bucket when never completed. WHATWG MIME Sniffing §6.2.3
+  reads a frame header only from four bytes. A text file with no signature, JavaScript among them, passes as the text
+  type a route takes, and `nosniff` is what stops a browser loading it as a script; the `attachment` disposition
+  cloudrop stores stops only a page opening it.
+- **If wrong:** none; each is a narrower refusal or a sentence of the guide.
+- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/content-checks.test.ts`,
+  `src/plugins/content-checks-upload.test.ts`.
+- **Visible in:** `src/plugins/sniff.ts`, `src/plugins/content-checks.ts`, `docs/guide/plugins.md`,
+  `docs/guide/errors.md`.

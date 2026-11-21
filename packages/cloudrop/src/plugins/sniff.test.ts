@@ -48,6 +48,7 @@ describe("sniff: binary signatures", () => {
     { name: "GIF88a, no GIF version", input: bytes("GIF88a") },
     { name: "a RIFF AVI", input: bytes("RIFF", [0x24, 0, 0, 0], "AVI LIST") },
     { name: "an MP3-like header with the reserved bit rate 15", input: bytes([0xff, 0xfb, 0xf0, 0x64]) },
+    { name: "the first two bytes of an MP3 frame header alone", input: bytes([0xff, 0xfb]) },
     { name: "an MP3-like header with the reserved sample rate 3", input: bytes([0xff, 0xfb, 0x9c, 0x64]) },
     { name: "an AAC ADTS header (layer 0)", input: bytes([0xff, 0xf1, 0x50, 0x80]) },
     // FF FE is UTF-16LE's byte order mark, and "h" after it would read as a valid MPEG audio header.
