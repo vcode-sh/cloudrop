@@ -176,13 +176,14 @@ code 9, before any line of the command's own. **The file does not exist, or is a
 the same way when Node is installed, since it starts the command with Node; only Bun itself (`bunx --bun cloudrop`)
 runs the command, which then reports the file by its error code ([The cloudrop command](command.md#settings)).
 
-## ETag is not exposed, although the cloudrop rule is there
+## Retry-After is not exposed, although the cloudrop rule is there
 
-`cloudrop doctor` or `checkBucket` reports that a rule "answers uploads from" your origin "and does not expose ETag",
-while the bucket holds `cloudrop-uploads` with `ETag` in its exposed headers. **An earlier rule answers in its place.**
-The storage service answers a request with the first CORS rule that matches it and never looks at a later one, so a
-rule for every origin (`*`) that allows `PUT` and stands first answers your uploads, with its own exposed headers.
-Uploads still work; the page cannot read `ETag` or `Retry-After`.
+`cloudrop doctor` or `checkBucket` reports `ok` and adds that a rule "answers uploads from" your origin "and does not
+expose Retry-After", while the bucket holds `cloudrop-uploads` with `Retry-After` in its exposed headers. **An earlier
+rule answers in its place.** The storage service answers a request with the first CORS rule that matches it and never
+looks at a later one, so a rule for every origin (`*`) that allows `PUT` and stands first answers your uploads, with
+its own exposed headers. Uploads still work; the page cannot read `Retry-After`, so after a `429` or `503` it retries
+sooner than the bucket asks.
 
 - The finding names the rule that answers, by its ID or by its place (`rule 1 (no ID)`).
 - `npx cloudrop setup --origin <origin> --apply` moves `cloudrop-uploads` before that rule and keeps the others in

@@ -13,8 +13,12 @@ export const UPLOAD_HEADERS: readonly string[] = [
   "x-amz-meta-cloudrop-id",
 ];
 
-/** The answer headers a page reads, or that checkBucket promises it can: a rule that answers uploads exposes them. */
-export const READ_HEADERS: readonly string[] = ["ETag", "Retry-After"];
+/**
+ * The one header of the bucket's answer to a PUT that the client reads (client/bucket.ts, client/transport.ts; the
+ * status and the error body need no exposing). Uploads work without it: a rule that hides it is advice, never a
+ * problem. Nothing in cloudrop reads ETag from a page; the server lists the parts itself at /complete (M11-R205).
+ */
+export const RETRY_AFTER = "Retry-After";
 
 /**
  * The preflights a browser sends before cloudrop's PUTs. A preflight lists the request's headers that are not
@@ -64,13 +68,11 @@ export const answeringRule = (rules: readonly BucketCorsRule[], request: CorsReq
   rules.findIndex((rule) => answers(rule, request));
 
 /**
- * Those of `headers` a page cannot read from an answer of `rule`. A rule that exposes "*" hides none: cloudrop's PUTs
- * carry no credentials, and for such a request the Fetch standard reads "*" as every header.
+ * Whether a page cannot read Retry-After from an answer of `rule`. A rule that exposes "*" hides nothing: cloudrop's
+ * PUTs carry no credentials, and for such a request the Fetch standard reads "*" as every header.
  */
-export function hidden(rule: BucketCorsRule, headers: readonly string[] = READ_HEADERS): string[] {
-  const exposed = new Set(rule.exposeHeaders.map((header) => header.toLowerCase()));
-  return exposed.has("*") ? [] : headers.filter((header) => !exposed.has(header.toLowerCase()));
-}
+export const hidesRetryAfter = (rule: BucketCorsRule): boolean =>
+  !rule.exposeHeaders.some((header) => header === "*" || header.toLowerCase() === "retry-after");
 
 export interface UploadAnswer {
   /** True when a rule answers every preflight of cloudrop's PUTs; otherwise the browser blocks an upload. */

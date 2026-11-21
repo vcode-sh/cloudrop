@@ -17,10 +17,10 @@ const setup = (...extra: string[]) => ["setup", "--origin", ORIGIN, ...extra];
 const ids = async (storage: ReturnType<typeof bucket>) => (await storage.cors())?.map((each) => each.id ?? null);
 const WORKS = { preflight: 204, put: 200, exposed: "ETag,Retry-After" };
 const WHY = (name: string, origins = ORIGIN) =>
-  ` The storage service answers a request with the first rule that matches it, and ${name} matches uploads from ${origins} without exposing ETag and Retry-After.`;
+  ` The storage service answers a request with the first rule that matches it, and ${name} matches uploads from ${origins} without exposing Retry-After.`;
 
 describe("cloudrop setup --apply and the order of CORS rules", () => {
-  it("places its rule before an earlier rule for any origin that exposes no ETag, and a second run changes nothing", async () => {
+  it("places its rule before an earlier rule for any origin that exposes no Retry-After, and a second run changes nothing", async () => {
     const storage = bucket(cors(rule("legacy", "*", ANY_HEADER)));
     expect(await storage.upload(ORIGIN)).toEqual({ preflight: 204, put: 200, exposed: null });
     const dryRun = await run(setup("--dry-run"), { fetch: storage.fetch });
@@ -34,7 +34,7 @@ describe("cloudrop setup --apply and the order of CORS rules", () => {
     expect(await ids(storage)).toEqual(["cloudrop-uploads", "legacy"]);
     expect(await storage.upload(ORIGIN)).toEqual(WORKS);
     const doctor = await run(["doctor", "--origin", ORIGIN], { fetch: storage.fetch });
-    expect(doctor.lines).toContain(`ok           CORS: Browsers on ${ORIGIN} can upload and read ETag.`);
+    expect(doctor.lines).toContain(`ok           CORS: Browsers on ${ORIGIN} can upload and read Retry-After.`);
     const again = await run(setup("--apply"), { fetch: storage.fetch });
     expect([again.lines[1], storage.writes.filter((write) => write === "PUT ?cors=")]).toEqual([
       `ok           CORS: rule "cloudrop-uploads" already allows uploads from ${ORIGIN} as cloudrop's rule does; nothing to change.`,
@@ -136,12 +136,24 @@ describe("cloudrop setup and a bucket that holds several rules with cloudrop's I
 });
 
 describe("cloudrop doctor and the order of CORS rules", () => {
-  it("reports the rule that answers in place of cloudrop's, and the command that fixes it", async () => {
+  // Uploads work, so the finding is ok; what setup --apply would change follows as advice.
+  it("names the rule that answers in place of cloudrop's, and the command that fixes it", async () => {
     const storage = bucket(cors(rule("", "*", ANY_HEADER), rule("cloudrop-uploads", ORIGIN, OURS)));
     const result = await run(["doctor", "--origin", ORIGIN], { fetch: storage.fetch });
-    expect(result.code).toBe(1);
     expect(result.lines).toContain(
-      `PROBLEM      CORS: Rule 1 (no ID) answers uploads from ${ORIGIN} and does not expose ETag or Retry-After, so a page cannot read them. It stands before rule "cloudrop-uploads", which exposes them: the storage service answers a request with the first rule that matches it, never a later one. Add ETag and Retry-After to its exposed headers, or put a rule that exposes them before it. Run: npx cloudrop setup --origin ${ORIGIN} --apply`,
+      `ok           CORS: Browsers on ${ORIGIN} can upload. Rule 1 (no ID) answers uploads from ${ORIGIN} and does not expose Retry-After, so after a 429 or 503 a page cannot wait as long as the bucket asks. It stands before rule "cloudrop-uploads", which exposes it: the storage service answers a request with the first rule that matches it, never a later one. Add Retry-After to its exposed headers, or put a rule that exposes it before it. Run: npx cloudrop setup --origin ${ORIGIN} --apply`,
+    );
+  });
+
+  // 0.5.0 wrote ETag and Retry-After into its rule; a rule that exposes Retry-After alone serves a page as well.
+  it("finds nothing to say about a rule that exposes Retry-After and no ETag", async () => {
+    const withoutEtag = OURS.replace("<ExposeHeader>ETag</ExposeHeader>", "");
+    const storage = bucket(cors(rule("mine", ORIGIN, withoutEtag)));
+    const result = await run(["doctor", "--origin", ORIGIN], { fetch: storage.fetch });
+    expect(result.lines).toContain(`ok           CORS: Browsers on ${ORIGIN} can upload and read Retry-After.`);
+    const applied = await run(setup("--apply"), { fetch: storage.fetch });
+    expect(applied.lines[1]).toBe(
+      `ok           CORS: rule "mine" already allows uploads from ${ORIGIN} as cloudrop's rule does; nothing to change.`,
     );
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BucketCorsRule } from "../storage/driver.ts";
-import { answeringRule, hidden, ruleLabel, uploadAnswer } from "./bucket-cors.ts";
+import { answeringRule, hidesRetryAfter, ruleLabel, uploadAnswer } from "./bucket-cors.ts";
 
 const ORIGIN = "https://app.example.com";
 const rule = (fields: Partial<BucketCorsRule>): BucketCorsRule => ({
@@ -79,14 +79,14 @@ describe("how a bucket answers cloudrop's uploads", () => {
   });
 });
 
-describe("the headers a rule hides from a page", () => {
+describe("whether a rule keeps Retry-After from a page", () => {
   it.each([
-    { name: "nothing exposed", expose: [], lacks: ["ETag", "Retry-After"] },
-    { name: "ETag in another case", expose: ["etag"], lacks: ["Retry-After"] },
-    { name: "both", expose: ["ETag", "Retry-After"], lacks: [] },
-    { name: "every header", expose: ["*"], lacks: [] },
-  ])("$name", ({ expose, lacks }) => {
-    expect(hidden(rule({ exposeHeaders: expose }))).toEqual(lacks);
+    { name: "nothing exposed", expose: [], hides: true },
+    { name: "ETag alone", expose: ["ETag"], hides: true },
+    { name: "Retry-After in another case", expose: ["retry-after"], hides: false },
+    { name: "every header", expose: ["*"], hides: false },
+  ])("$name", ({ expose, hides }) => {
+    expect(hidesRetryAfter(rule({ exposeHeaders: expose }))).toBe(hides);
   });
 });
 

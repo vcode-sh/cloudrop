@@ -4,7 +4,7 @@
 import { fail, ok, type Result } from "../errors.ts";
 import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
-import { answers, hidden, ruleLabel, UPLOAD_HEADERS, uploadAnswer } from "./bucket-cors.ts";
+import { answers, hidesRetryAfter, RETRY_AFTER, ruleLabel, UPLOAD_HEADERS, uploadAnswer } from "./bucket-cors.ts";
 import type { ServerConfig } from "./config.ts";
 
 export interface BucketCheck {
@@ -14,6 +14,8 @@ export interface BucketCheck {
    */
   status: "ok" | "problem" | "unknown";
   message: string;
+  /** With "ok", what would still make the setting better; `message` ends with it. Left out when there is nothing. */
+  advice?: string;
 }
 
 export interface BucketReport {
@@ -23,7 +25,6 @@ export interface BucketReport {
 }
 
 const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
-const them = (headers: readonly string[]): string => (headers.length === 1 ? "it" : "them");
 
 /** A rule that answers the PUT of some origins, by its place among the bucket's rules. */
 interface Answering {
@@ -33,24 +34,19 @@ interface Answering {
 }
 
 /**
- * What an answering rule keeps from a page (`lacks`), and what to do. A later rule that would expose it is named: the
- * service never gets to it.
+ * The advice for an answering rule that keeps Retry-After from a page. A later rule that would expose it is named:
+ * the service never gets to it.
  */
-function hiding(rules: readonly BucketCorsRule[], { rule, index, origins }: Answering, lacks: string[]): string {
-  const cost = lacks.includes("ETag")
-    ? `so a page cannot read ${them(lacks)}`
-    : "so after a 429 or 503 a page cannot wait as long as the bucket asks";
+function hiding(rules: readonly BucketCorsRule[], { rule, index, origins }: Answering): string {
   const later = rules.findIndex(
     (each, at) =>
-      at > index &&
-      hidden(each, lacks).length === 0 &&
-      origins.some((origin) => answers(each, { origin, method: "PUT" })),
+      at > index && !hidesRetryAfter(each) && origins.some((origin) => answers(each, { origin, method: "PUT" })),
   );
   const laterRule = rules[later];
   const passedOver = laterRule
-    ? ` It stands before ${ruleLabel(laterRule, later)}, which exposes ${them(lacks)}: the storage service answers a request with the first rule that matches it, never a later one.`
+    ? ` It stands before ${ruleLabel(laterRule, later)}, which exposes it: the storage service answers a request with the first rule that matches it, never a later one.`
     : "";
-  return `${sentence(ruleLabel(rule, index))} answers uploads from ${origins.join(", ")} and does not expose ${lacks.join(" or ")}, ${cost}.${passedOver} Add ${lacks.join(" and ")} to its exposed headers, or put a rule that exposes ${them(lacks)} before it.`;
+  return `${sentence(ruleLabel(rule, index))} answers uploads from ${origins.join(", ")} and does not expose ${RETRY_AFTER}, so after a 429 or 503 a page cannot wait as long as the bucket asks.${passedOver} Add ${RETRY_AFTER} to its exposed headers, or put a rule that exposes it before it.`;
 }
 
 /** `origins` are exact origins (checked by the caller), so they are safe to echo. */
@@ -69,22 +65,22 @@ function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[])
     if (!allowed || !rule) blocked.push(origin);
     else answering.set(index, { rule, index, origins: [...(answering.get(index)?.origins ?? []), origin] });
   }
-  const problems = blocked.length
-    ? [
-        `The bucket's CORS rules do not let ${blocked.join(", ")} upload. Add a rule that allows PUT from there with the headers ${UPLOAD_HEADERS.join(", ")} and exposes ETag.`,
-      ]
-    : [];
-  const advice: string[] = [];
-  for (const each of answering.values()) {
-    const lacks = hidden(each.rule);
-    if (lacks.length > 0) (lacks.includes("ETag") ? problems : advice).push(hiding(rules, each, lacks));
+  if (blocked.length > 0) {
+    return {
+      status: "problem",
+      message: `The bucket's CORS rules do not let ${blocked.join(", ")} upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers ${UPLOAD_HEADERS.join(", ")}, and expose ${RETRY_AFTER} in it.`,
+    };
   }
-  if (problems.length > 0) return { status: "problem", message: problems.join(" ") };
-  // Uploads work without Retry-After (bucket-setup.md), so a rule that hides only that is advice, never a problem.
-  return {
-    status: "ok",
-    message: [`Browsers on ${origins.join(", ")} can upload and read ETag.`, ...advice].join(" "),
-  };
+  // The preflights are all an upload needs. A rule that hides Retry-After only makes retries after a 429 or 503 come
+  // sooner than the bucket asks (bucket-setup.md), so it is advice in an `ok` message.
+  const advice = [...answering.values()]
+    .filter(({ rule }) => hidesRetryAfter(rule))
+    .map((each) => hiding(rules, each))
+    .join(" ");
+  const browsers = `Browsers on ${origins.join(", ")} can upload`;
+  return advice
+    ? { status: "ok", message: `${browsers}. ${advice}`, advice }
+    : { status: "ok", message: `${browsers} and read ${RETRY_AFTER}.` };
 }
 
 function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean, isR2: boolean): BucketCheck {

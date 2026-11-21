@@ -29,7 +29,7 @@ describe("cloudrop doctor", () => {
       "ok           R2 settings are present and valid (CLOUDROP_R2_*).",
       "ok           CLOUDROP_SECRET is set.",
       "ok           The bucket answers, and these credentials may list it.",
-      `ok           CORS: Browsers on ${ORIGIN} can upload and read ETag.`,
+      `ok           CORS: Browsers on ${ORIGIN} can upload and read Retry-After.`,
       "ok           Lifecycle: Incomplete multipart uploads are aborted after 7 days.",
       "No problems found.",
     ]);
@@ -262,7 +262,7 @@ describe("cloudrop doctor", () => {
     });
     expect(result.code).toBe(1);
     expect(result.lines[4]).toBe(
-      "PROBLEM      CORS: The bucket's CORS rules do not let http://localhost:5173 upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: npx cloudrop setup --origin https://app.example.com --origin http://localhost:5173 --apply",
+      "PROBLEM      CORS: The bucket's CORS rules do not let http://localhost:5173 upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id, and expose Retry-After in it. Run: npx cloudrop setup --origin https://app.example.com --origin http://localhost:5173 --apply",
     );
   });
 

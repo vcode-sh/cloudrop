@@ -298,7 +298,8 @@ playwright install --only-shell chromium`.
 - A lifecycle rule that aborts incomplete multipart uploads, so parts of an upload that never finished do not stay
   in the bucket.
 
-In development the server checks the bucket once and logs a warning when the CORS rule misses the origin, a signed
-header or `ETag`, when the lifecycle rule is missing, or when a private route stores files on a public bucket. It does
-not check `Retry-After`. The exact rules for R2 (in Wrangler's format too) and S3, the commands that set them and the
+In development the server checks the bucket once and logs a warning when the CORS rules block the origin (no rule for
+it, or one that misses a signed header), when the lifecycle rule is missing, or when a private route stores files on
+a public bucket. Uploads work without the exposed headers, so it logs nothing about them; `cloudrop doctor` names a
+rule that keeps `Retry-After` from the page. The exact rules for R2 (in Wrangler's format too) and S3, the commands that set them and the
 token permissions: [Bucket setup](../../docs/guide/bucket-setup.md).

@@ -20,8 +20,8 @@ the page. With the page and the API on different origins, see [Deployment](deplo
 | --- | --- |
 | A CORS rule allowing `PUT` from your page's origin | Browsers upload to the bucket directly, from your page's origin. Without the rule, the browser blocks every upload. |
 | The four headers cloudrop signs, in the rule's allowed headers | `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`. A preflight fails if one is missing. |
-| `ETag` in the exposed headers | Only `checkBucket` needs it: its CORS check reports a problem without it. The client never reads `ETag`; the server gets part ETags from the bucket when it completes an upload. |
-| `Retry-After` in the exposed headers (recommended) | Lets the client wait as long as the bucket asks after a `429` or `503`. |
+| `Retry-After` in the exposed headers (recommended) | The one header of the bucket's answer the client reads. It lets the client wait as long as the bucket asks after a `429` or `503`. Uploads work without it. |
+| `ETag` in the exposed headers (optional) | Nothing in cloudrop reads it from a page: the client never reads `ETag`, and the server gets part ETags from the bucket when it completes an upload. The rules below expose it all the same, see [Why the rule exposes ETag](#why-the-rule-exposes-etag). |
 | That rule before any other rule that allows `PUT` from your origin | The service answers with the first rule that matches, never a later one: see [When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules). |
 | A lifecycle rule that aborts incomplete multipart uploads | Parts of an upload that never finished are removed instead of staying stored. |
 
@@ -37,6 +37,16 @@ its own backoff alone: a random wait up to 0.5 s, then 1 s, 2 s and so on. R2 an
 [findings](../research/r2-spike-findings.md#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16)).
 Uploads work without it, so `checkBucket` reports `ok` either way; it names the rule that answers uploads without
 exposing it, as advice.
+
+### Why the rule exposes ETag
+
+To upload, a bucket needs the first two rows of the table: `PUT` allowed from your origin with the four headers.
+`Retry-After` is advice. `ETag` is neither: of the bucket's answer to a `PUT`, the client reads the status, the error
+body and `Retry-After`, and nothing else. The rule that `cloudrop setup` writes and the examples below still expose
+`ETag`, for two reasons. The rule cloudrop 0.5.0 wrote has it, so a bucket set up then is found complete and left as
+it is. And other code on your page that sends a `PUT` to the bucket and reads the answer, such as your own `fetch` or
+another uploader that completes multipart uploads from the browser, needs it. `checkBucket` and `cloudrop doctor` do
+not look at `ETag`: a rule without it is `ok`.
 
 ### Checksum headers
 
@@ -65,8 +75,8 @@ What a page sends when it uploads with cloudrop:
 
 So a rule that stands before cloudrop's and allows `PUT` from your origin, such as an old rule for every origin
 (`*`), answers the `PUT` in its place. Uploads still work, but the page gets that rule's exposed headers: without
-`ETag` and `Retry-After` there, `checkBucket` reports a problem and retries after a `429` come too fast, whatever
-cloudrop's rule says. **Put cloudrop's rule before any rule that also allows `PUT` from your origins.**
+`Retry-After` there, retries after a `429` come too fast, whatever cloudrop's rule says, and `checkBucket` names that
+rule as advice. **Put cloudrop's rule before any rule that also allows `PUT` from your origins.**
 `cloudrop setup --apply` does that; in a file you write by hand, the order of the rules is the order they are tried in.
 
 cloudrop's server signs no checksum header into an upload, so none is matched here.
@@ -238,15 +248,15 @@ const { data: report, error } = await cloudrop.api.checkBucket({ origins: ["http
 
 | Check | `ok` when | Reported `unknown` when |
 | --- | --- | --- |
-| `cors` | For every origin, a rule answers each preflight of cloudrop's `PUT`s, and the rule that answers the `PUT` itself exposes `ETag`. | The credentials may not read CORS (R2 object tokens), the storage cannot report it (Wrangler's local R2 answers `501`), or no origin was given. |
+| `cors` | For every origin, a rule answers each preflight of cloudrop's `PUT`s: that is all an upload needs. Otherwise it is a `problem`, since the browser blocks every upload from that origin. | The credentials may not read CORS (R2 object tokens), the storage cannot report it (Wrangler's local R2 answers `501`), or no origin was given. |
 | `lifecycle` | An enabled rule for the whole bucket aborts incomplete multipart uploads. | The credentials may not read lifecycle rules, or the storage cannot report them. Origins do not matter here. |
 | `publicAccess` | No private route stores files on a bucket with a `publicUrl`. | Never: this check reads only your configuration. |
 
 It judges the rule the service answers with, the first that matches
-([When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules)), not any rule that would do. When an
-earlier rule answers uploads and does not expose `ETag`, the problem names that rule, by its ID or its place among the
-rules, and the rule after it that would have exposed it. A rule that answers uploads without exposing `Retry-After` is
-named too, as advice: the check stays `ok`, since uploads work without it.
+([When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules)), not any rule that would do. A rule
+that answers uploads without exposing `Retry-After` is named as advice, by its ID or its place among the rules, with
+the rule after it that would have exposed it: the check stays `ok`, since uploads work without it, its `message` ends
+with the advice, and `advice` holds the advice alone. `ETag` is not looked at.
 
 What it does not check:
 

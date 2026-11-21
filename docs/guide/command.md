@@ -145,9 +145,11 @@ setting's own cloudrop name.
    (a redirect, or a `404` that names no missing bucket: a proxy, or an endpoint with a wrong path);
 4. the bucket's CORS rules for each `--origin` and its lifecycle rule, as `cloudrop.api.checkBucket` does. The CORS
    check judges the rule the storage service answers with: the first one that matches a request, never a later one
-   ([When the bucket has other CORS rules](bucket-setup.md#when-the-bucket-has-other-cors-rules)). When an earlier
-   rule answers uploads in place of cloudrop's and does not expose `ETag`, the finding is a `PROBLEM` that names that
-   rule, by its ID or by its place (`rule 1 (no ID)`), and `setup --apply` fixes it.
+   ([When the bucket has other CORS rules](bucket-setup.md#when-the-bucket-has-other-cors-rules)). Origins whose
+   uploads a browser would block are a `PROBLEM`. When a rule answers uploads without exposing `Retry-After`, such as
+   an earlier rule that answers in place of cloudrop's, the finding stays `ok`, since uploads work, and names that
+   rule, by its ID or by its place (`rule 1 (no ID)`), with the `setup --apply` command that fixes it. `ETag` is not
+   looked at: nothing in cloudrop reads it from a page.
 
 Each line is one finding: `ok`, `PROBLEM` with what to do, `NOT CHECKED` with how to check by hand, or a `note`. The
 last line sums them up. Against an R2 bucket with an Object Read & Write token it prints:
@@ -196,12 +198,12 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   they allowed, and the output says how many it merged.
 - **It puts its CORS rule where the service answers with it.** The service answers a request with the first rule that
   matches it. A new `cloudrop-uploads` goes last, and an existing one stays where it stands, unless an earlier rule
-  allows `PUT` from one of your origins without exposing `ETag` and `Retry-After`: then cloudrop's rule goes just
+  allows `PUT` from one of your origins without exposing `Retry-After`: then cloudrop's rule goes just
   before the first such rule, and the output names that rule and says why. The other rules keep their order. From
   those origins cloudrop's rule then answers `GET` and `HEAD` too, in place of the rule it went before. A rule for
   another origin, or one that answers uploads in full, stays in front.
 - When the bucket's other rules already answer everything `cloudrop-uploads` would for your origins (every `PUT`
-  with `ETag` and `Retry-After` exposed, and `GET` and `HEAD`), no rule is added.
+  with `Retry-After` exposed, and `GET` and `HEAD`), no rule is added.
 - When another enabled rule already aborts incomplete multipart uploads across the bucket (R2 creates one by default),
   the lifecycle rules are left as they are. When `cloudrop-abort-incomplete` exists but no longer does that (someone
   disabled it or gave it a prefix), `setup` leaves the lifecycle rules alone, still writes the CORS rule, and reports

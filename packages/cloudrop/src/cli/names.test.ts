@@ -160,7 +160,7 @@ describe("cloudrop doctor with --var", () => {
       "ok           R2 settings are present and valid (R2_BUCKET, CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID, CLOUDROP_R2_SECRET_ACCESS_KEY).",
     );
     expect(result.lines[4]).toBe(
-      `PROBLEM      CORS: The bucket's CORS rules do not let ${ORIGIN} upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: npx cloudrop setup --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET --apply`,
+      `PROBLEM      CORS: The bucket's CORS rules do not let ${ORIGIN} upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id, and expose Retry-After in it. Run: npx cloudrop setup --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET --apply`,
     );
   });
 });

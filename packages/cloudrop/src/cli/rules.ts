@@ -2,7 +2,15 @@
 // cloudrop's ID; every other rule is kept exactly as read, and in its order (M9-C6). The storage service answers a
 // request with the first CORS rule that matches it, so where cloudrop's rule stands is part of the merge (M11-R171).
 
-import { answeringRule, answers, hidden, ruleLabel, UPLOAD_HEADERS, uploadAnswer } from "../server/bucket-cors.ts";
+import {
+  answeringRule,
+  answers,
+  hidesRetryAfter,
+  RETRY_AFTER,
+  ruleLabel,
+  UPLOAD_HEADERS,
+  uploadAnswer,
+} from "../server/bucket-cors.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
 import { plural, ruleName } from "./report.ts";
 
@@ -10,14 +18,18 @@ export const CORS_RULE_ID = "cloudrop-uploads";
 export const LIFECYCLE_RULE_ID = "cloudrop-abort-incomplete";
 export const ABORT_DAYS = 1;
 
-/** The headers the server signs into a PUT (bucket-cors.ts) and the ones the client reads (bucket-setup.md). */
+/**
+ * The headers the server signs into a PUT (bucket-cors.ts), and Retry-After exposed, the one answer header the client
+ * reads. ETag is exposed although nothing in cloudrop reads it from a page: the rule 0.5.0 wrote has it, so a bucket
+ * set up then is left as it is, and other code on the page that sends a PUT and reads its answer needs it (M11-R205).
+ */
 export function corsRule(origins: readonly string[]): BucketCorsRule & { id: string } {
   return {
     id: CORS_RULE_ID,
     allowedOrigins: [...origins],
     allowedMethods: ["PUT", "GET", "HEAD"],
     allowedHeaders: [...UPLOAD_HEADERS],
-    exposeHeaders: ["ETag", "Retry-After"],
+    exposeHeaders: ["ETag", RETRY_AFTER],
     maxAgeSeconds: 3600,
   };
 }
@@ -91,7 +103,7 @@ const alreadyAllows = (names: string, ours: BucketCorsRule): string =>
 
 /**
  * The rules that answer the uploads of every origin of `ours`, when the bucket already answers each request `ours`
- * exists for as `ours` would: every preflight of a PUT, the PUT with ETag and Retry-After exposed, and GET and HEAD.
+ * exists for as `ours` would: every preflight of a PUT, the PUT with Retry-After exposed, and GET and HEAD.
  * Undefined when it does not.
  */
 function serving(current: readonly BucketCorsRule[], ours: BucketCorsRule): BucketCorsRule[] | undefined {
@@ -100,7 +112,7 @@ function serving(current: readonly BucketCorsRule[], ours: BucketCorsRule): Buck
     const { allowed, index } = uploadAnswer(current, origin);
     const rule = current[index];
     const everyMethod = ours.allowedMethods.every((method) => answeringRule(current, { origin, method }) >= 0);
-    if (!allowed || !rule || hidden(rule).length > 0 || !everyMethod) return undefined;
+    if (!allowed || !rule || hidesRetryAfter(rule) || !everyMethod) return undefined;
     rules.add(rule);
   }
   return [...rules];
@@ -108,7 +120,7 @@ function serving(current: readonly BucketCorsRule[], ours: BucketCorsRule): Buck
 
 /**
  * `kept` with `rule` at `position`, or earlier: before the first rule that answers a PUT from one of `origins` and
- * keeps ETag or Retry-After from the page. The service would answer with that rule and never reach cloudrop's. A rule
+ * keeps Retry-After from the page. The service would answer with that rule and never reach cloudrop's. A rule
  * that answers no upload of these origins, or answers it in full, stays in front.
  */
 function place(
@@ -118,11 +130,11 @@ function place(
   { origins, current }: { origins: readonly string[]; current: readonly BucketCorsRule[] },
 ): { rules: BucketCorsRule[]; placement?: Placement } {
   const answered = (each: BucketCorsRule) => origins.filter((origin) => answers(each, { origin, method: "PUT" }));
-  const first = kept.findIndex((each) => hidden(each).length > 0 && answered(each).length > 0);
+  const first = kept.findIndex((each) => hidesRetryAfter(each) && answered(each).length > 0);
   const inFront = kept[first];
   if (!inFront || first >= position) return { rules: [...kept.slice(0, position), rule, ...kept.slice(position)] };
   const before = ruleLabel(inFront, current.indexOf(inFront));
-  const why = `The storage service answers a request with the first rule that matches it, and ${before} matches uploads from ${answered(inFront).join(", ")} without exposing ${hidden(inFront).join(" and ")}.`;
+  const why = `The storage service answers a request with the first rule that matches it, and ${before} matches uploads from ${answered(inFront).join(", ")} without exposing ${RETRY_AFTER}.`;
   return { rules: [...kept.slice(0, first), rule, ...kept.slice(first)], placement: { before, why } };
 }
 

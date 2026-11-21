@@ -29,7 +29,8 @@ function byHand({ service, target, runner }: Checked, jurisdiction: string | und
 }
 
 function ruleFinding(label: string, check: BucketCheck, hint: { fix: string; byHand: string }): Finding {
-  if (check.status === "ok") return { status: "ok", text: `${label}: ${check.message}` };
+  // Advice is what setup --apply would change, so the command follows it as it follows a problem.
+  if (check.status === "ok") return { status: "ok", text: `${label}: ${check.message}${check.advice ? hint.fix : ""}` };
   if (check.status === "unknown") return { status: "unknown", text: `${label}: ${check.message}${hint.byHand}` };
   return { status: "problem", text: `${label}: ${check.message}${hint.fix}` };
 }

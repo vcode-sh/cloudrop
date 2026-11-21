@@ -672,13 +672,14 @@ sends a key exactly as given: `storage.head(key)`, `storage.delete(key)`, `stora
 
 ```ts
 const { data: report, error } = await cloudrop.api.checkBucket({ origins: ["https://app.example.com"] });
-// report.cors, report.lifecycle, report.publicAccess: each { status: "ok" | "problem" | "unknown", message }
+// report.cors, report.lifecycle, report.publicAccess: each { status: "ok" | "problem" | "unknown", message },
+// and `advice` beside an "ok" that could be better
 ```
 
 It checks:
 
-- **`cors`:** whether browsers on `origins` (default: `trustedOrigins`) may `PUT` with the headers cloudrop signs and
-  read `ETag`.
+- **`cors`:** whether browsers on `origins` (default: `trustedOrigins`) may `PUT` with the headers cloudrop signs.
+  A rule that answers those uploads without exposing `Retry-After` is named as advice, and the check stays `ok`.
 - **`lifecycle`:** whether an enabled rule aborts incomplete multipart uploads across the bucket.
 - **`publicAccess`:** whether a private route stores files on a bucket with a public URL.
 

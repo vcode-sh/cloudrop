@@ -38,7 +38,7 @@ describe("api.checkBucket", () => {
       },
     );
     expect((await fixture.cloudrop.api.checkBucket()).data).toEqual({
-      cors: { status: "ok", message: "Browsers on https://app.example.com can upload and read ETag." },
+      cors: { status: "ok", message: "Browsers on https://app.example.com can upload and read Retry-After." },
       lifecycle: { status: "ok", message: "Incomplete multipart uploads are aborted after 7 days." },
       publicAccess: { status: "ok", message: "No private route stores files on a public bucket." },
     });
@@ -73,14 +73,15 @@ describe("api.checkBucket", () => {
     expect((await fixture.cloudrop.api.checkBucket()).data?.lifecycle.status).toBe("problem");
   });
 
-  it("finds a rule that does not expose ETag, a missing abort rule and a private route on a public bucket", async () => {
+  it("finds CORS rules that block an origin, a missing abort rule and a private route on a public bucket", async () => {
     const privateFiles = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone, visibility: "private" });
     const fixture = serverFixture(
       { privateFiles },
       {
         publicUrl: true,
         bucketConfig: {
-          cors: `<CORSConfiguration>${uploadRule("")}</CORSConfiguration>`,
+          // The rule lacks one of the four signed headers, so a browser's preflight fails.
+          cors: `<CORSConfiguration>${uploadRule("").replace("<AllowedHeader>if-none-match</AllowedHeader>", "")}</CORSConfiguration>`,
           lifecycle: "<LifecycleConfiguration></LifecycleConfiguration>",
         },
       },
@@ -89,7 +90,7 @@ describe("api.checkBucket", () => {
       cors: {
         status: "problem",
         message:
-          "Rule 1 (no ID) answers uploads from https://app.example.com and does not expose ETag or Retry-After, so a page cannot read them. Add ETag and Retry-After to its exposed headers, or put a rule that exposes them before it.",
+          "The bucket's CORS rules do not let https://app.example.com upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id, and expose Retry-After in it.",
       },
       lifecycle: {
         status: "problem",
@@ -106,7 +107,7 @@ describe("api.checkBucket", () => {
 
   // Measured on R2, 2026-11-21: the first rule that matches the whole request answers it, never a later one
   // (r2-spike-findings.md, "Which CORS rule answers when several match").
-  it("reports the earlier rule that answers uploads in place of the one that exposes ETag", async () => {
+  it("names the earlier rule that answers uploads in place of the one that exposes Retry-After", async () => {
     const anyOrigin =
       "<CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedHeader>*</AllowedHeader></CORSRule>";
     const ours = uploadRule(
@@ -119,31 +120,40 @@ describe("api.checkBucket", () => {
       );
       return (await fixture.cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })).data?.cors;
     };
+    const advice =
+      'Rule 1 (no ID) answers uploads from https://app.example.com and does not expose Retry-After, so after a 429 or 503 a page cannot wait as long as the bucket asks. It stands before rule "cloudrop-uploads", which exposes it: the storage service answers a request with the first rule that matches it, never a later one. Add Retry-After to its exposed headers, or put a rule that exposes it before it.';
     expect(await check(anyOrigin + ours)).toEqual({
-      status: "problem",
-      message:
-        'Rule 1 (no ID) answers uploads from https://app.example.com and does not expose ETag or Retry-After, so a page cannot read them. It stands before rule "cloudrop-uploads", which exposes them: the storage service answers a request with the first rule that matches it, never a later one. Add ETag and Retry-After to its exposed headers, or put a rule that exposes them before it.',
+      status: "ok",
+      message: `Browsers on https://app.example.com can upload. ${advice}`,
+      advice,
     });
     expect(await check(ours + anyOrigin)).toEqual({
       status: "ok",
-      message: "Browsers on https://app.example.com can upload and read ETag.",
+      message: "Browsers on https://app.example.com can upload and read Retry-After.",
     });
   });
 
-  // Uploads work without Retry-After (bucket-setup.md, "Why expose Retry-After"), so its absence is advice.
-  it("says which rule keeps Retry-After from a page, and still reports ok", async () => {
+  // The client reads one header of the bucket's answer to a PUT, Retry-After, and uploads work without it
+  // (bucket-setup.md, "Why expose Retry-After"), so its absence is advice. ETag is read by nothing (M11-R205).
+  const ADVICE =
+    'Rule "uploads" answers uploads from https://app.example.com and does not expose Retry-After, so after a 429 or 503 a page cannot wait as long as the bucket asks. Add Retry-After to its exposed headers, or put a rule that exposes it before it.';
+  const advised = { message: `Browsers on https://app.example.com can upload. ${ADVICE}`, advice: ADVICE };
+  it.each([
+    { name: "only ETag: advice", expose: "<ExposeHeader>ETag</ExposeHeader>", check: advised },
+    { name: "nothing: advice", expose: "", check: advised },
+    {
+      name: "only Retry-After, in another case: nothing to say",
+      expose: "<ExposeHeader>retry-after</ExposeHeader>",
+      check: { message: "Browsers on https://app.example.com can upload and read Retry-After." },
+    },
+  ])("reports ok for a rule that answers uploads and exposes $name", async ({ expose, check }) => {
     const fixture = serverFixture(
       { files },
-      {
-        bucketConfig: {
-          cors: `<CORSConfiguration>${uploadRule("<ID>uploads</ID><ExposeHeader>ETag</ExposeHeader>")}</CORSConfiguration>`,
-        },
-      },
+      { bucketConfig: { cors: `<CORSConfiguration>${uploadRule(`<ID>uploads</ID>${expose}`)}</CORSConfiguration>` } },
     );
     expect((await fixture.cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })).data?.cors).toEqual({
       status: "ok",
-      message:
-        'Browsers on https://app.example.com can upload and read ETag. Rule "uploads" answers uploads from https://app.example.com and does not expose Retry-After, so after a 429 or 503 a page cannot wait as long as the bucket asks. Add Retry-After to its exposed headers, or put a rule that exposes it before it.',
+      ...check,
     });
   });
 
@@ -264,7 +274,7 @@ describe("development start-up warnings", () => {
     expect([corsReads.mock.calls.length, lifecycleReads.mock.calls.length]).toEqual([1, 1]);
     await vi.waitFor(() =>
       expect(fixture.logger.warnings).toEqual([
-        "cloudrop: The bucket's CORS rules do not let https://app.example.com upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag.",
+        "cloudrop: The bucket's CORS rules do not let https://app.example.com upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id, and expose Retry-After in it.",
         "cloudrop: No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored. Add one (R2 creates a 7-day rule by default).",
       ]),
     );
@@ -285,7 +295,7 @@ describe("development start-up warnings", () => {
     await fixture.post("upload", { route: "files", files: [{ name: "a.txt", size: 1, type: "text/plain" }] });
     await vi.waitFor(() =>
       expect(fixture.logger.warnings).toEqual([
-        "cloudrop: The bucket's CORS rules do not let https://app.example.com upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag.",
+        "cloudrop: The bucket's CORS rules do not let https://app.example.com upload: a browser there blocks every upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id, and expose Retry-After in it.",
       ]),
     );
   });

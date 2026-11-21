@@ -1729,7 +1729,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   bucket whose answering rule exposes `ETag` and not `Retry-After`; code that compares the whole message sees the
   difference, the status is unchanged. R2's answer for an exposed `*` is unmeasured: the Fetch standard reads it as
   every header for a request without credentials, which cloudrop's `PUT`s are.
-- **Status:** in force. Amends `M9-C2` (what the CORS check accepts).
+- **Status:** in force. Amends `M9-C2` (what the CORS check accepts). Amended by `M11-R205`: the check no longer
+  looks at `ETag`; a rule that answers the `PUT` is judged on `Retry-After` alone, as advice.
 - **Visible in:** `src/server/bucket-cors.ts`, `src/server/bucket-cors.test.ts`, `src/server/bucket-check.ts`,
   `src/server/bucket-check.test.ts`, `src/cli/setup-order.test.ts`, `docs/guide/bucket-setup.md`
   ("When the bucket has other CORS rules", "What checkBucket can tell you"), `docs/guide/command.md#doctor`,
@@ -1758,7 +1759,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   guide says so, and the remedy is to add them to `cloudrop-uploads`, which `setup` never trims. A service that drops
   rule IDs gets a second copy if the first is later shadowed, since `setup` cannot tell which rule to move. An origin
   left out of a later run is not looked at: only the origins passed decide the place.
-- **Status:** in force. Amends `M9-C6` (cloudrop's rule may move; no other rule does).
+- **Status:** in force. Amends `M9-C6` (cloudrop's rule may move; no other rule does). Amended by `M11-R205`:
+  the rule cloudrop's goes before is one that does not expose `Retry-After`; `ETag` no longer counts.
 - **Visible in:** `src/cli/rules.ts` (`place`, `serving`, `mergeCors`), `src/cli/setup.ts`, `src/cli/instructions.ts`,
   `src/cli/setup-order.test.ts`, `docs/guide/command.md#setup`, `docs/guide/bucket-setup.md`.
 
@@ -2186,3 +2188,39 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/cli/rules.ts` (`mergeCors`), `src/cli/setup.ts` (`changes`, `describeChange`),
   `src/cli/setup-order.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#setup`.
+
+### M11-R205: uploads need the preflights, `Retry-After` is advice, and `ETag` is not judged
+
+- **Decision:** `api.checkBucket`, `cloudrop doctor` and `cloudrop setup` judge a bucket's CORS rules by what a page
+  that uploads with cloudrop needs, in three grades.
+  - **Required:** a rule answers every preflight of cloudrop's `PUT`s for the origin (`M11-R170`). Without it the
+    check is a `problem`: "The bucket's CORS rules do not let <origin> upload: a browser there blocks every upload.
+    Add a rule that allows PUT from there with the headers …, and expose Retry-After in it."
+  - **Advice:** the rule that answers the `PUT` exposes `Retry-After`. Without it the check stays `ok`, its message
+    names the rule and what to do, and the report carries the same words alone in a new optional field,
+    `BucketCheck.advice`; `doctor` prints the `setup --apply` command after such a finding, as after a problem. With
+    it the message is "Browsers on <origin> can upload and read Retry-After."
+  - **Not judged:** `ETag`. A rule without it is `ok` with nothing said, and `setup` places and keeps its rule by
+    `Retry-After` alone (`hidesRetryAfter` replaces `hidden` and `READ_HEADERS` in `src/server/bucket-cors.ts`).
+  `setup` still writes `exposeHeaders: ["ETag", "Retry-After"]`, and the guide says why.
+- **Why:** established from the client's code: of the bucket's answer to a `PUT` it reads the status, the body of an
+  error and one header, `retry-after` (`src/client/bucket.ts` for `fetch`, `src/client/transport.ts` for XHR); no
+  file under `src/client/**` reads `ETag`, and the server lists the parts and their ETags itself at `/complete`. Yet
+  the check reported a `PROBLEM` for a rule that did not expose `ETag`, and the guide gave as the reason for exposing
+  it that "only `checkBucket` needs it": the check required what nothing used, and said "a page cannot read them" of
+  a header no page of cloudrop's reads. The rule keeps `ETag` for two reasons that are true: the rule 0.5.0 wrote has
+  it, so an unchanged rule means a bucket set up then is found complete and is not rewritten; and other code on the
+  page that sends a `PUT` to the bucket and reads the answer (an app's own `fetch`, an uploader that completes
+  multipart uploads from the browser) needs it. `advice` is a field because `doctor` must know that an `ok` finding
+  has something `setup --apply` would change without reading the sentence.
+- **If wrong:** a bucket whose answering rule exposes neither header went from `problem` to `ok` with advice, so a
+  script that waited for `problem` to notice a shadowed rule no longer does; `doctor`'s exit code for it is 0. In
+  development the server logs problems only, so it no longer warns about such a rule. `BucketCheck.advice` is a new
+  optional field of a public type. A later feature that reads `ETag` in the page would need the grade back.
+- **Status:** in force. Amends `M9-C2`, `M11-R170` ("exposes `ETag`") and `M11-R171` ("without exposing `ETag` and
+  `Retry-After`").
+- **Visible in:** `src/server/bucket-cors.ts`, `src/server/bucket-check.ts`, `src/cli/rules.ts`, `src/cli/doctor.ts`,
+  `src/server/bucket-check.test.ts`, `src/server/bucket-cors.test.ts`, `src/cli/setup-order.test.ts`,
+  `docs/guide/bucket-setup.md` ("What any bucket needs", "Why the rule exposes ETag", "What checkBucket can tell
+  you"), `docs/guide/command.md`, `docs/guide/troubleshooting.md`, `docs/guide/server.md` ("checkBucket"),
+  `examples/next/README.md`.
