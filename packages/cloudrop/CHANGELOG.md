@@ -34,6 +34,19 @@ user's files, and can stop a file from landing on the wrong account after someon
   `CLIENT_CLOSED`, and a Reload button for `ACCOUNT_CHANGED`.
 - Types `DeleteContext` and `DeleteReason`.
 
+### Fixed
+
+Found by the final review before this release:
+
+- `contentChecks()` read a file starting with `MZ`, `ID3` or `#!` as a program, an MP3 or a script, so a CSV whose
+  first cell is `MZ` was refused. A program now needs its MS-DOS header or the PE, NE, LE or LX header its offset at
+  `0x3C` points to, an ID3 tag its whole header, and a script a `#!` followed by a path (`M10-K10`, `M10-K11`).
+- `contentChecks()` refuses `multipart/x-mixed-replace`, whose parts a browser renders, by default (`M10-K3`). With
+  `allow: ["text/x-shellscript"]`, a script sent as a text type or as `application/x-sh`, `x-perl`, `x-ruby` or
+  `x-php` passes; it used to be refused as a contradiction (`M10-K11`).
+- The client guide says the `account` guard is safe only on routes whose `authorize` refuses anonymous sessions
+  (`M10-A5`).
+
 ### Changed
 
 - **Breaking for a store written by hand:** `CloudropStore.list` receives `name`, `type` and `order`. A 0.3 store still
