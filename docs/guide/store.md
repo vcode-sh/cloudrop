@@ -1137,8 +1137,9 @@ the store, a query being one statement or one batch:
   refuses the request reaches no store call, so it supersedes nothing either. Nor does a retry that reaches the store
   before its first attempt does (a first request still being worked on, its `authorize` slow, when the client gives up
   on it): that attempt's rows are written after the retry's and keep their bytes until the sweep. An ask whose every
-  attempt lost its answer: its last attempt's rows hold their bytes until the sweep, since `retry()` and `resume()` ask
-  again with a new key. Plugin reservations of a superseded attempt need their own expiry.
+  attempt lost its answer: its last attempt's rows hold their bytes until the first `retry()` of one of its files, which
+  sends that ask's key once more, so the server ends those rows before it reserves again. A page that never retries
+  (it was closed, or it starts a new upload instead) leaves them to the sweep. Plugin reservations of a superseded attempt need their own expiry.
 - **A `PUT` that lands after cleanup stays.** The sweep cleans a row once. A `PUT` already under way that lands after
   that is left in the bucket; with the default hour of grace this is unlikely. `eraseOwner` checks such keys again.
 - **A completion's record that fails after `onComplete` ran, in lease mode**, keeps the file busy until the lease ends

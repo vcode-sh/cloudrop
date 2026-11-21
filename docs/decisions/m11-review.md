@@ -1639,7 +1639,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `requestKey` keeps the old cost.
 - **Status:** in force. Amends `M5-T101` ("an ask whose every attempt lost its answer") and `M5-T102` ("the next
   `launch()` makes a new one"), and the first row of `M11-R80`'s table: a retry frees the rows a lost answer left.
-  `docs/guide/store.md` ("Known costs") still describes the old cost.
+  `docs/guide/store.md` ("Known costs") says so since `M11-R203`.
 - **Visible in:** `src/client/launch.ts`, `src/client/entry.ts`, `src/client/launch.test.ts`,
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Stalled requests").
 
@@ -2150,3 +2150,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/guide/client.md` ("Sending a file again after it failed"), `docs/guide/resume.md` ("The user
   picks the file again"), `src/client/replaced-ticket.test.ts`.
+
+### M11-R203: the store guide's known costs say what a retry does after a lost ask
+
+- **Decision:** the sentence of `docs/guide/store.md` ("Known costs") about an `/upload` ask whose every attempt lost
+  its answer now reads: its last attempt's rows hold their bytes until the first `retry()` of one of its files, which
+  sends that ask's key once more, so the server ends those rows before it reserves again; a page that never retries
+  leaves them to the sweep.
+- **Why:** the sentence said `retry()` and `resume()` "ask again with a new key", which `M11-R92` changed for
+  `retry()`. `resume()` never applied: an ask that gave no ticket left no record to resume.
+- **If wrong:** nothing: one sentence, and `src/client/launch.test.ts` and `src/client/retry-dead-ends.test.ts` hold
+  the behaviour.
+- **Status:** in force. Completes `M11-R92`.
+- **Visible in:** `docs/guide/store.md` ("Known costs").
