@@ -1560,7 +1560,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   and must be sent typed. A real MP3 shorter than one frame and a header, in free format, or whose first frame is
   followed by junk shows no type and passes as sent; a browser does not sniff it either. Other compound-file formats
   sent under a non-`application/` type are a `mismatch`. `.lnk` has a signature (the 20 bytes shared-mime-info matches for
-  `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected: it is left out to keep the entry inside its 6 kB, and belongs with the next format added.
+  `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected. The reason first
+  written here, "to keep the entry inside its 6 kB", no longer holds; `M11-R256` gives the reason that does.
 - **Status:** in force, except the third bullet's refusal of an untyped compound file, which `M11-R254` takes back
   (the maintainer's decision); `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
   `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
@@ -3234,3 +3235,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   type.
 - **Visible in:** `src/plugins/sniff-text.ts` (`SCRIPT`), `src/plugins/content-checks-allow.test.ts`,
   `docs/guide/plugins.md` (rule 5).
+
+### M11-R256: the test bucket's `cors` option, the reason `.lnk` is not detected, and the two tightenings in the guide's rules
+
+- **Decision:** documentation only, three corrections.
+  1. `TestBucketOptions.cors` (`src/testing.ts`) and `docs/guide/testing-your-app.md` say what the option does
+     since `M11-R172`: `checkBucket` reads it, and `bucket.fetch` answers a preflight `204` with the answering
+     rule's headers or `403` without them, and adds `access-control-allow-origin` and the exposed headers to a
+     signed request whose `Origin` a rule allows. The guide's "Bucket CORS" difference says what a test can assert
+     and that the client's own `PUT`s still carry no `Origin`.
+  2. A Windows shortcut (`.lnk`) stays undetected, for a reason that is true: its signature is known (MS-SHLLINK
+     §2.1, ShellLinkHeader: `HeaderSize` `4C 00 00 00`, then `LinkCLSID` `00021401-0000-0000-C000-000000000046`,
+     20 bytes in all) and would fit (the entry measures about 6.3 kB under a provisional 7 kB ceiling), but
+     refusing it is a fifth kind of file that 0.5.0 took, added after the review that weighed the other four, and
+     the maintainer has just taken one of those back (`M11-R254`). It waits for the maintainer's word, with the
+     next format added. The guide's Limits already name `.lnk` among what passes.
+  3. `docs/guide/plugins.md` states the two tightenings of 0.6.0 in its numbered rules: rule 3, a `#!` line behind
+     a byte order mark or blank lines is a script; rule 5, an untyped container is refused when `deny` names any
+     type it can be (`M11-R136`).
+- **Why:** the JSDoc and the guide said the option was "for tests of `api.checkBucket`", and the guide that "the test
+  bucket answers every request": measured on `testBucket({ cors })`, a preflight from an allowed origin answers
+  `204` with `access-control-allow-origin`, `-methods`, `-headers` and `-max-age`, one from another origin or with
+  a header no rule allows `403` with none, and a signed `GET` with an allowed `Origin` carries
+  `access-control-allow-origin` and `access-control-expose-headers`; without the option every preflight is `403`.
+  `M11-R136` gave the 6 kB ceiling as the reason for `.lnk`, and `M11-R220` raised it. The two tightenings were in
+  the Containers section and the recognition table only, where a reader of the rules does not meet them.
+- **If wrong:** none; no behaviour changes.
+- **Status:** in force; corrects one sentence of `M11-R136`.
+- **Visible in:** `src/testing.ts`, `docs/guide/testing-your-app.md`, `docs/guide/plugins.md`.

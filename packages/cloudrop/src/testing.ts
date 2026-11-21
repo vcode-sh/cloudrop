@@ -23,8 +23,12 @@ export interface TestBucketOptions {
   /** Where the bucket is served publicly, such as "https://cdn.example.com", as in `r2({ publicUrl })`. Default none. */
   publicUrl?: string;
   /**
-   * The bucket's CORS configuration as S3 XML, for tests of `api.checkBucket`. Once `cors` or `lifecycle` is given, the
-   * other one reads as not configured; with neither, both read as refused, as with an R2 object token (M9-T6).
+   * The bucket's CORS configuration as S3 XML. `api.checkBucket` reads it, and the bucket answers a browser's requests
+   * by it, as R2 does (M11-R172): `fetch` answers an `OPTIONS` preflight with 204 and the answering rule's
+   * `access-control-*` headers, or with 403 and none when no rule allows the origin, the method and every header
+   * asked for; a signed request that names an `Origin` a rule allows gets `access-control-allow-origin` and the
+   * rule's exposed headers. Without `cors` every preflight is refused. Once `cors` or `lifecycle` is given, the other
+   * one reads as not configured; with neither, both read as refused, as with an R2 object token (M9-T6).
    */
   cors?: string;
   /** The bucket's lifecycle configuration as S3 XML, for tests of `api.checkBucket`. */

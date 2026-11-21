@@ -301,8 +301,15 @@ cannot see:
   `request.headers` every header the client sent, `cookie` and `origin` included. happy-dom's own `Request` drops those
   two, so code in front of the handler that copies the request (`new Request(request)`, `request.clone()`) loses them
   there; read the session before the copy, or run such tests in the Node environment.
-- **Bucket CORS.** The test bucket answers every request; a real bucket refuses a browser's `PUT` that its CORS rule
-  does not allow. Check the rule on the real bucket with [`checkBucket`](bucket-setup.md).
+- **Bucket CORS.** The client's `PUT`s are not a browser's: they carry no `Origin` and no preflight goes before them,
+  so the test bucket stores them whatever its rules say, where a real bucket's rules decide whether a browser may
+  upload at all. With the `cors` option the bucket does answer a browser's requests by its rules, as R2 does, so a
+  test can send the preflight itself: `bucket.fetch(url, { method: "OPTIONS", headers: { origin,
+  "access-control-request-method": "PUT", "access-control-request-headers": "content-type" } })` answers `204` with
+  `access-control-allow-origin`, the rule's methods and the headers asked for, or `403` without them when no rule
+  allows that origin, method and every header; a signed request sent with an `Origin` a rule allows carries
+  `access-control-allow-origin` and `access-control-expose-headers`. Check the rule on the real bucket with
+  [`checkBucket`](bucket-setup.md).
 - **Upload progress.** Bucket `PUT`s go through `fetch`, not `XMLHttpRequest`, so progress moves a whole part at a
   time, as in a browser client created with a `fetch` option. This also keeps a jsdom or happy-dom environment, which
   has an `XMLHttpRequest` of its own, from sending the bytes anywhere.
@@ -326,7 +333,7 @@ cannot see:
 | Option | What it does |
 | --- | --- |
 | `publicUrl` | Where the bucket is served publicly, such as `"https://cdn.example.com"`, as in `r2({ publicUrl })`. Files on public routes get `file.url` under it. |
-| `cors`, `lifecycle` | The bucket's CORS and lifecycle configuration as S3 XML, for tests of `cloudrop.api.checkBucket()`. Once either is given, the other reads as not configured. With neither, both read as refused, as with an R2 token that cannot read them. |
+| `cors`, `lifecycle` | The bucket's CORS and lifecycle configuration as S3 XML, which `cloudrop.api.checkBucket()` reads. With `cors`, `bucket.fetch` also answers preflights and adds CORS headers by those rules (see "Bucket CORS" above); without it every preflight is `403`. Once either is given, the other reads as not configured. With neither, both read as refused, as with an R2 token that cannot read them. |
 
 | Member | What it is |
 | --- | --- |

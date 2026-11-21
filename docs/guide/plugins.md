@@ -45,7 +45,9 @@ A refusal at `/upload` refuses the whole request, as any `beforeUpload` refusal 
 At `/complete`, a file whose **first bytes show**:
 
 3. **A web page, a program, a script, or XML the route does not name**, whatever the file was sent as. The declared
-   type is judged again here, for an upload signed before the plugin was installed or its lists changed.
+   type is judged again here, for an upload signed before the plugin was installed or its lists changed. A script
+   is a file whose text opens with a `#!` line; since 0.6.0 that line also counts behind a byte order mark or blank
+   lines, where such a file showed no type before.
 4. **A type that contradicts the declared type.** A JPEG sent as `image/png`, a PDF sent as `text/plain`, a ZIP sent as
    an image. A content type agrees with its common aliases: `audio/x-wav` with a WAV, `image/heif` with a HEIC, a
    Word template or a macro-enabled document with a Word file, a WebM, MP4, 3GP, Matroska or Ogg file with its
@@ -59,7 +61,9 @@ At `/complete`, a file whose **first bytes show**:
    container, an Office file or XML, a type the route names counts when the content can be that type. A script's own
    types are the script types: a route that takes `text/plain` or `text/html` does not take an untyped script, with
    or without `allow`. An OLE compound file has no type of its own to ask for (see [Containers](#containers)) and
-   passes as sent.
+   passes as sent. Since 0.6.0 an untyped container (WebM, Matroska, MP4, 3GP, Ogg, a ZIP that names no package) is
+   also refused when `deny` names any type it can be: nobody said which one it is, so `deny: ["video/*"]` refuses an
+   untyped WebM file that 0.5.0 took as audio.
 
 A file whose first bytes match none of the formats below passes as the type it was sent as, which the route accepted
 and rule 1 and 2 let through. Plain text, CSV, JSON and most text formats have no signature, so they pass this way.
