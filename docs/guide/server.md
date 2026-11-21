@@ -597,17 +597,20 @@ asks for; an `OPTIONS` from an allowed origin that is not a preflight for `POST`
 ### What an origin is
 
 An entry of `trustedOrigins` is compared, character for character, with the `Origin` header the browser sends, so it
-must be exactly that text. `createCloudrop` throws `INVALID_CONFIG` for anything a browser cannot send, and
-`api.checkBucket({ origins })` refuses the same values:
+must be exactly that text. `createCloudrop` throws `INVALID_CONFIG` for anything a browser cannot send as a page's
+origin, and `api.checkBucket({ origins })` and the command's `--origin` refuse the same values, by the same rule:
 
 | You write | A browser sends | So |
 | --- | --- | --- |
 | `"https://app.example.com/"`, `"https://app.example.com:443"`, `"https://App.Example.com"` | `https://app.example.com` | Refused; the message names the origin to use: scheme, host and a non-default port, lowercase, no path. |
-| `"https://*.example.com"`, `"*"` | never a pattern | Refused. List each origin; there are no wildcards. |
+| `"https://*.example.com"`, `"*"` | never a pattern | Refused as "a pattern, not an origin". List each origin; there are no wildcards. |
 | `"https://bücher.example"` | `https://xn--bcher-kva.example` | Refused; the message names the punycode form, which is what to list. |
 | `"null"`, `"file://"`, `"data:..."` | `null`, which every sandboxed frame and local file shares | Refused: trusting `null` would trust them all. |
-| `"ws://app.example.com"`, `"wss://..."`, `"ftp://..."` | never: no page is loaded over these | Refused. Name the origin of the page that uploads. |
-| `"capacitor://localhost"`, `"tauri://localhost"`, `"chrome-extension://<id>"` | the same text | Accepted (below). |
+| `"ws://app.example.com"`, `"wss://..."`, `"ftp://..."` | never: no page is loaded over these | Refused: a page is loaded over `http` or `https`, or over an app's own scheme. Name the origin of the page that uploads. |
+| `"https://a.example$(id)"`, `"https://shop&co.example"`, `"https://a..example"` | never: no browser loads a page from such a host | Refused. A host is an address (`127.0.0.1`, `[::1]`), or a name of letters, digits, `-` and `_` in parts joined by single dots, with or without a last dot. The URL parser accepts more punctuation than that (`$ ( ) & ' " ! ; = + , ~`), so the check is cloudrop's own. |
+| `"https://user:secret@app.example.com"` | `https://app.example.com` | Refused: an origin holds no user name or password. The message names the origin to use and does not repeat what you wrote, since it may hold a password. |
+| `"capacitor://localhost"`, `"tauri://localhost"`, `"chrome-extension://<id>"` | the same text | Accepted: an app's own scheme, in lowercase (below). |
+| `"https://app.example.com"`, `"http://localhost:5173"`, `"https://my_app.example.com"`, `"http://127.0.0.1:3000"` | the same text | Accepted. |
 
 **Webviews and extensions.** A page inside an app shell or a browser extension has an origin with the app's own
 scheme, and the webview sends it as it is:

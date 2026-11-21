@@ -1843,8 +1843,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** Firefox and WebKit were not measured (their Playwright builds were not installed); a browser that
   loads a page from such a host would have its origin refused at start-up (`INVALID_CONFIG`) and by the command
   (exit 2). An origin with an app's own scheme was already held to letters, digits, `.` and `-` (`M11-R41`).
-- **Status:** in force. Extends `M11-R111`. The table in `docs/guide/server.md` ("What an origin is") has no row for
-  this yet.
+- **Status:** in force. Extends `M11-R111`. The table in `docs/guide/server.md` ("What an origin is") has its row
+  since `M11-R207`.
 - **Visible in:** `src/server/origins.ts`, `src/server/origins.test.ts`, `src/cli/run.test.ts`,
   `src/cli/commands.test.ts`, `docs/guide/command.md`.
 
@@ -2237,3 +2237,17 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   bucket set up before keeps the old name until the script runs again.
 - **Status:** in force. Completes `M11-R175`.
 - **Visible in:** `examples/next/scripts/setup-rustfs.ts`, `examples/hono/scripts/setup-rustfs.ts`.
+
+### M11-R207: the server guide's origin table has a row for each thing the rule refuses and accepts
+
+- **Decision:** "What an origin is" in `docs/guide/server.md` says that `trustedOrigins`, `api.checkBucket` and the
+  command's `--origin` share one rule, and its table gains three rows: a host no browser loads a page from
+  (punctuation such as `$ ( ) &`, or an empty part), refused; a URL with a user name or password, refused without
+  the value repeated; and plain origins that are accepted, an underscore and an address among them. The rows for a
+  pattern, for `ws`, `wss` and `ftp`, and for an app's own scheme now carry the reason the message gives.
+- **Why:** `M11-R176` (the host), `M11-R115` (the `@`) and `M11-R111` (one rule for all three callers) changed
+  `src/server/origins.ts` and left the guide's table as it was. Each row was written from what `originProblem`
+  answers for that value, run on 2026-11-21.
+- **If wrong:** nothing: the table is prose, and `src/server/origins.test.ts` holds the rule.
+- **Status:** in force. Completes `M11-R176`.
+- **Visible in:** `docs/guide/server.md` ("What an origin is").
