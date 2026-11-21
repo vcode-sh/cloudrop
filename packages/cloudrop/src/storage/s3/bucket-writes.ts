@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../../errors.ts";
 import { invalidInput } from "../../input.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../driver.ts";
 import { escapeXml } from "../xml.ts";
+import { configurationReadError } from "./bucket-settings.ts";
 import type { S3Context } from "./context.ts";
 import { send } from "./transport.ts";
 
@@ -68,9 +69,10 @@ async function keptLifecycleHeaders(ctx: S3Context): Promise<Result<Record<strin
   const kept: Record<string, string> = {};
   const current = await send(ctx, "GET", new URL(`${ctx.bucketUrl}?lifecycle=`));
   if (current.error) {
-    const { storageCode, code, status } = current.error;
-    const nothingToKeep = storageCode === "NoSuchLifecycleConfiguration" || code === "STORAGE_DENIED" || status === 501;
-    return nothingToKeep ? ok(kept) : current;
+    if (current.error.code === "STORAGE_DENIED" || current.error.status === 501) return ok(kept);
+    // As the rule read reports it: no configuration means nothing to keep, a bare 404 a wrong endpoint.
+    const read = configurationReadError(current.error, "NoSuchLifecycleConfiguration", "lifecycle");
+    return read.error ? read : ok(kept);
   }
   const value = current.data.headers.get(TRANSITION_DEFAULT);
   if (value) kept[TRANSITION_DEFAULT] = value;

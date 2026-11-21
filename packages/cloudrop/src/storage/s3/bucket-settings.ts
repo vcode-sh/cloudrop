@@ -11,7 +11,7 @@ import { sendForXml } from "./transport.ts";
  * path cannot fix that, so it is not retryable. R2's own code for a bucket without the setting is unmeasured (the test
  * token gets 403), so this follows S3.
  */
-function configurationReadError(error: CloudropError, missingCode: string, setting: string): Result<never[]> {
+export function configurationReadError(error: CloudropError, missingCode: string, setting: string): Result<never[]> {
   if (error.status === 404 && error.storageCode === missingCode) return ok([]);
   if (error.code !== "NOT_FOUND") return fail(error);
   return fail(

@@ -195,6 +195,33 @@ describe("bucket configuration writes", () => {
     expect(sent.map(({ checksum, body }) => body.length > 0 && checksum === sha256(body))).toEqual([true, true]);
   });
 
+  it.each([
+    {
+      name: "a bucket without lifecycle rules sends no transition default",
+      answer: { status: 404, body: "<Error><Code>NoSuchLifecycleConfiguration</Code></Error>" },
+      outcome: { error: null, sent: [null] },
+    },
+    {
+      name: "a bare 404 to the read of the transition default fails the write as a wrong endpoint",
+      answer: { status: 404, body: "<html>Not found</html>" },
+      outcome: {
+        error:
+          "The storage service answered 404 without saying that the bucket has no lifecycle configuration. Check the endpoint, then retry.",
+        sent: [],
+      },
+    },
+  ])("$name", async ({ answer, outcome }) => {
+    const sent: (string | null)[] = [];
+    const stub: FetchLike = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method !== "PUT") return new Response(answer.body, { status: answer.status });
+      sent.push(request.headers.get("x-amz-transition-default-minimum-object-size"));
+      return new Response(null);
+    };
+    const written = await writable(stub).putBucketLifecycle([abortRule]);
+    expect({ error: written.error?.message ?? null, sent }).toEqual(outcome);
+  });
+
   it("sends back the bucket's transition default with a lifecycle write, so the write changes only the rules", async () => {
     const header = "x-amz-transition-default-minimum-object-size";
     const sent: (string | null)[] = [];
