@@ -8,6 +8,8 @@ import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.
 // Oracle: the object in the fake bucket, which a run that says done must have removed.
 
 const MINUTE = 60_000;
+/** eraseOwner's default grace: how far apart the store's times allow two servers' clocks to be. */
+const GRACE = 60 * MINUTE;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -52,11 +54,11 @@ async function eraseWhileAnotherServerUploads(skewMs: number) {
 }
 
 describe("cloudrop.api.eraseOwner beside a server whose clock differs", () => {
+  // A clock that agrees is erase.test.ts's "an upload starts and is cancelled while it runs"; one that runs ahead
+  // stamps a later time still, which the same comparison reads the same way.
   it.for([
     { name: "lags by two minutes", skewMs: -2 * MINUTE },
-    { name: "lags by a second", skewMs: -1000 },
-    { name: "agrees", skewMs: 0 },
-    { name: "runs ahead by two minutes", skewMs: 2 * MINUTE },
+    { name: "lags by exactly the grace, the most that is allowed for", skewMs: -GRACE },
   ])("is not done when an upload starts and is cancelled on a server whose clock $name", async ({ skewMs }) => {
     // The cancelled upload's object is still in the bucket: a run that said done would have left it there.
     expect(await eraseWhileAnotherServerUploads(skewMs)).toEqual({ done: false, waiting: 1, left: 5 });
