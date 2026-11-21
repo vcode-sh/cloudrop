@@ -324,3 +324,15 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/testing/fake-r2.ts`, `src/testing/fake-r2/bucket.ts`, `src/testing/fake-r2/objects.ts`,
   `src/testing/fake-r2/signature.ts`, `src/testing/fake-r2.test.ts`, `src/testing/fake-r2/signature.test.ts`.
+
+### M11-R100: the bundled server budget is provisional until the owner sets it
+
+- **Decision:** `scripts/size-limit.config.ts` holds the "cloudrop (bundled)" ceiling at 36 kB while 0.6.0 is built.
+  The owner sets the final number before the release, from the size measured once every fix is merged.
+- **Why:** the ceiling was 32 kB (`M10-D10`) with 0.68 kB of room. `api.deleteFile`'s answer and `onDelete` refusals,
+  the `content` field, `api.allFiles` and the review's fixes (bounded response bodies, refused web-page answers,
+  redirects never followed) each add honest code that every server needs; measured 32.47 kB with the storage fixes
+  merged. Cutting a fix to fit a budget would trade correctness for a number nothing depends on.
+- **If wrong:** the owner sets another ceiling, or asks for the store paths behind their own entry (`M5-T69`).
+- **Status:** provisional.
+- **Visible in:** `scripts/size-limit.config.ts`.
