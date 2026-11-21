@@ -316,9 +316,10 @@ describe("cloudrop setup --apply", () => {
     const storage = bucket();
     const result = await run(apply("--dry-run", "--replace"), { fetch: storage.fetch });
     expect([result.code, storage.writes]).toEqual([0, []]);
-    expect(result.lines[1]).toBe(
-      `dry run      CORS: would replace every rule with "cloudrop-uploads" for ${ORIGIN} (--replace: the current rules could not be read).`,
-    );
+    expect(result.lines.slice(1, 3)).toEqual([
+      `dry run      CORS: would replace every rule with "cloudrop-uploads" for ${ORIGIN}, as --replace asks: the current rules could not be read.`,
+      'dry run      Lifecycle: would replace every rule with "cloudrop-abort-incomplete" (aborts incomplete multipart uploads after 1 day, whole bucket), as --replace asks: the current rules could not be read.',
+    ]);
   });
 
   it("prints a rule ID's control characters as escapes", async () => {

@@ -100,6 +100,41 @@ describe("cloudrop setup --apply and the order of CORS rules", () => {
   });
 });
 
+describe("cloudrop setup and a bucket that holds several rules with cloudrop's ID (M11-R204)", () => {
+  const twice = () => bucket(cors(rule("cloudrop-uploads", ORIGIN, OURS), rule("cloudrop-uploads", LOCAL, OURS)));
+  const origins = async (storage: ReturnType<typeof bucket>) =>
+    (await storage.cors())?.map((each) => each.allowedOrigins);
+
+  it("says that it merged them into one, in a dry run and when it writes", async () => {
+    const storage = twice();
+    const dryRun = await run(setup("--dry-run"), { fetch: storage.fetch });
+    expect(dryRun.lines[1]).toBe(
+      'dry run      CORS: would merge the 2 rules named "cloudrop-uploads" into one, which allows everything they allow.',
+    );
+    const applied = await run(setup("--apply"), { fetch: storage.fetch });
+    expect(applied.lines[1]).toBe(
+      'ok           CORS: merged the 2 rules named "cloudrop-uploads" into one, which allows everything they allowed.',
+    );
+    expect(await origins(storage)).toEqual([[ORIGIN, LOCAL]]);
+  });
+
+  it("names the merge beside what it adds and where the rule moves", async () => {
+    const storage = bucket(
+      cors(
+        rule("legacy", "*", ANY_HEADER),
+        rule("cloudrop-uploads", ORIGIN, OURS),
+        rule("cloudrop-uploads", LOCAL, OURS),
+      ),
+    );
+    const staging = "https://staging.example.com";
+    const applied = await run(["setup", "--origin", staging, "--apply"], { fetch: storage.fetch });
+    expect(applied.lines[1]).toBe(
+      `ok           CORS: merged the 2 rules named "cloudrop-uploads" into one, which allows everything they allowed, added origins ${staging} to it, moved it before rule "legacy" and kept 1 other rule ("legacy").${WHY('rule "legacy"', staging)}`,
+    );
+    expect(await origins(storage)).toEqual([[ORIGIN, LOCAL, staging], ["*"]]);
+  });
+});
+
 describe("cloudrop doctor and the order of CORS rules", () => {
   it("reports the rule that answers in place of cloudrop's, and the command that fixes it", async () => {
     const storage = bucket(cors(rule("", "*", ANY_HEADER), rule("cloudrop-uploads", ORIGIN, OURS)));

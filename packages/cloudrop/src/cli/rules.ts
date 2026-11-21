@@ -41,8 +41,10 @@ export interface Merged<Rule> {
   kept: Rule[];
   /** Why nothing changes, or why setup will not change it. */
   reason?: string;
-  /** For an update: what cloudrop's rule gains, such as "origins http://localhost:5173"; "" when it only moves. */
+  /** For an update: what cloudrop's rule gains, such as "origins http://localhost:5173"; "" when it gains nothing. */
   added?: string;
+  /** How many rules carried cloudrop's ID, when there were several: `rules` holds them as one. */
+  merged?: number;
   /** Set when cloudrop's rule had to go before another rule, which would have answered its uploads in its place. */
   placement?: Placement;
 }
@@ -155,8 +157,7 @@ export function mergeCors(current: readonly BucketCorsRule[], ours: BucketCorsRu
       reason: alreadyAllows(`${ruleName(first)} already allows`, ours),
     };
   }
-  const folding = others.length > 0 ? "its copies folded into one" : "";
-  return { ...placed, change: "update", kept, added: added || folding };
+  return { ...placed, change: "update", kept, added, merged: others.length > 0 ? others.length + 1 : undefined };
 }
 
 const abortsEverywhere = (rule: BucketLifecycleRule): boolean =>

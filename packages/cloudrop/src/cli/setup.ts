@@ -35,6 +35,8 @@ interface Step {
   reason?: string;
   /** What cloudrop's rule gains, for an update. */
   added?: string;
+  /** How many rules carried cloudrop's ID, when there were several: they are written as one. */
+  merged?: number;
   /** The rule cloudrop's rule goes before, when another would answer its uploads in its place, and why. */
   placement?: Placement;
   write(): Promise<Result<void>>;
@@ -86,30 +88,36 @@ function plan<Rule extends { id?: string }>(
     return { status: "problem", text: unreadable(label, read.error, replace, service) };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
-  const { change, kept, reason, added, placement } = merged;
+  const { rules, ...result } = merged;
   return {
     label,
     ruleId: ours.id,
     describe,
-    change,
-    kept,
+    ...result,
     replacing: read.error !== null,
-    reason,
-    added,
-    placement,
-    write: () => setting.write(merged.rules),
+    write: () => setting.write(rules),
   };
 }
 
+const WOULD = { add: "add", merge: "merge", allow: "allow", move: "move", keep: "keep" };
+const DID = { add: "added", merge: "merged", allow: "allowed", move: "moved", keep: "kept" };
+
 /** What a step does, each as the words after "would" or as a past tense: "add rule …", "moved it before …". */
 function changes(step: Step, dryRun: boolean): string[] {
-  const { ruleId, describe, kept, added, placement } = step;
-  const [add, move, keep] = dryRun ? ["add", "move", "keep"] : ["added", "moved", "kept"];
+  const { ruleId, describe, kept, added, merged, placement } = step;
+  const verb = dryRun ? WOULD : DID;
   const before = placement ? ` before ${placement.before}` : "";
-  const done = step.change === "update" ? [] : [`${add} rule "${ruleId}" ${describe}${before}`];
-  if (added) done.push(`${add} ${added} to rule "${ruleId}"`);
-  if (step.change === "update" && before) done.push(`${move} ${added ? "it" : `rule "${ruleId}"`}${before}`);
-  if (kept.length > 0) done.push(`${keep} ${plural(kept.length, "other rule")} (${ruleNames(kept)})`);
+  const done = step.change === "update" ? [] : [`${verb.add} rule "${ruleId}" ${describe}${before}`];
+  // Once a part has named cloudrop's rule, the next calls it "it".
+  const rule = () => (done.length > 0 ? "it" : `rule "${ruleId}"`);
+  if (merged) {
+    done.push(
+      `${verb.merge} the ${merged} rules named "${ruleId}" into one, which allows everything they ${verb.allow}`,
+    );
+  }
+  if (added) done.push(`${verb.add} ${added} to ${rule()}`);
+  if (step.change === "update" && before) done.push(`${verb.move} ${rule()}${before}`);
+  if (kept.length > 0) done.push(`${verb.keep} ${plural(kept.length, "other rule")} (${ruleNames(kept)})`);
   return done;
 }
 
@@ -117,7 +125,7 @@ function describeChange(step: Step, dryRun: boolean): string {
   const { label, ruleId, describe } = step;
   if (step.replacing) {
     const verb = dryRun ? "would replace" : "replaced";
-    return `${label}: ${verb} every rule with "${ruleId}" ${describe} (--replace: the current rules could not be read).`;
+    return `${label}: ${verb} every rule with "${ruleId}" ${describe}, as --replace asks: the current rules could not be read.`;
   }
   const why = step.placement ? ` ${step.placement.why}` : "";
   return `${label}: ${dryRun ? "would " : ""}${listed(changes(step, dryRun))}.${why}`;

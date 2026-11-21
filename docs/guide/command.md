@@ -192,6 +192,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   expirations, transitions and filters included, and so is the bucket's transition default on AWS.
 - **It only adds.** When `cloudrop-uploads` exists, it gains what it lacks (an origin you pass, a method or header
   cloudrop needs); origins, headers and the max age already on it stay. To remove an origin, edit the rule by hand.
+  When the bucket holds several rules named `cloudrop-uploads`, they are written back as one that allows everything
+  they allowed, and the output says how many it merged.
 - **It puts its CORS rule where the service answers with it.** The service answers a request with the first rule that
   matches it. A new `cloudrop-uploads` goes last, and an existing one stays where it stands, unless an earlier rule
   allows `PUT` from one of your origins without exposing `ETag` and `Retry-After`: then cloudrop's rule goes just

@@ -2163,3 +2163,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   the behaviour.
 - **Status:** in force. Completes `M11-R92`.
 - **Visible in:** `docs/guide/store.md` ("Known costs").
+
+### M11-R204: `setup` says that it merged several rules with cloudrop's ID, in a sentence
+
+- **Decision:** when the bucket holds more than one rule with the ID `cloudrop-uploads`, `setup --apply` and
+  `--dry-run` say `merged the 2 rules named "cloudrop-uploads" into one, which allows everything they allowed`
+  (`would merge … they allow`), beside whatever else the run does: `added origins … to it`, `moved it before rule
+  "legacy"`, `kept 1 other rule ("legacy")`. The merge is its own value (`Merged.merged`, the number of rules), no
+  longer text put where "what the rule gains" goes. A `--replace` run reads `replaced every rule with
+  "cloudrop-uploads" for <origin>, as --replace asks: the current rules could not be read.`
+- **Why:** the merge was written into `added`, which `setup` prints as "added <what> to rule …", so the line read
+  `added its copies folded into one to rule "cloudrop-uploads"`; and when the rule also gained an origin or moved,
+  `added` held that instead and the merge was not mentioned at all, although the write removed rules from the bucket.
+  Every other sentence `src/cli/rules.ts` and `src/cli/setup.ts` can print was then read in each combination (add,
+  update with and without a gain, a move, kept rules, nothing to change, an edited lifecycle rule, an unreadable
+  setting for R2 and S3, a failed write, `--replace`, a dry run). One more was changed: the `--replace` line ended a
+  lifecycle rule's description with two parentheses in a row, `(aborts …, whole bucket) (--replace: …)`. A rule that
+  gains several kinds of thing lists them with semicolons (`added origins a, b; exposed headers Retry-After to rule
+  …`), which is kept: each kind is itself a list with commas.
+- **If wrong:** a script that reads the old `--replace` line sees new words; the status column and the exit code are
+  unchanged.
+- **Status:** in force.
+- **Visible in:** `src/cli/rules.ts` (`mergeCors`), `src/cli/setup.ts` (`changes`, `describeChange`),
+  `src/cli/setup-order.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#setup`.
