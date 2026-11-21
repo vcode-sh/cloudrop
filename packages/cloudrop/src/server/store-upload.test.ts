@@ -149,22 +149,25 @@ describe("POST /upload with a store", () => {
     {
       name: "the quota lookup throws",
       quota: () => Promise.reject(new Error("plans service down")),
-      message: "The server could not check your storage limit. Try again in a moment.",
+      logged: new Error("plans service down"),
     },
     {
       name: "the quota lookup returns something other than bytes",
       quota: () => -1,
-      message: "The server could not check your storage limit. Try again in a moment.",
+      logged: new TypeError("quota must return null or a whole number of bytes, got -1."),
     },
-  ])("refuses every file, retryably, and signs nothing when $name", async ({ quota, message }) => {
+  ])("refuses every file, retryably, signs nothing and logs why when $name", async ({ quota, logged }) => {
     const calls: AbortContext[] = [];
     const fixture = storeFixture({ owned }, { plugins: [recorder(calls)], quota, multipartThreshold: 0 });
     const tickets = await upload(fixture, [png(10), png(9 * MiB)]);
+    const message = "The server could not check your storage limit. Try again in a moment.";
     const refusal = { kind: "rejected", error: { code: "SERVER_ERROR", message, retryable: true } };
     expect(tickets).toEqual([refusal, refusal]);
     expect([await fixture.store.raw.files(), fixture.fake.pendingUploads()]).toEqual([[], 0]);
     expect(calls.map((call) => call.reason)).toEqual(["failed", "failed"]);
-    expect(fixture.logger.errors).toHaveLength(1);
+    expect(fixture.logger.errors).toEqual([
+      { message: 'cloudrop: the quota lookup failed for an upload on route "owned".', error: logged },
+    ]);
   });
 
   it("refuses every file, retryably, and creates no upload when the store cannot write the rows", async () => {
