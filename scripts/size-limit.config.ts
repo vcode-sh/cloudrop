@@ -64,15 +64,15 @@ export default [
   // Its own file only, as cloudrop/testing: it imports CloudropError from index.js, which the cloudrop budget counts,
   // and only a server that installs a plugin loads it (M10-K5). Measured 2026-11-21 with contentChecks(): 5.05 kB;
   // 5.96 kB after the review fixes up to M11-R212, and 6.15 kB with a doctype read as an XML parser reads it, when the
-  // ceiling went from 6 to 7 kB: provisional until the owner confirms it (M11-R220). 6.27 kB with the ZIP64 extra field
+  // ceiling went from 6 to 7 kB, which the owner confirmed for 0.6.0 (M11-R220). 6.27 kB with the ZIP64 extra field
   // read (M11-R221), and 6.46 kB after the final review's fixes (M11-R253 to M11-R258).
   { name: "cloudrop/plugins", path: join(dist, "plugins.js"), gzip: true, limit: "7 kB", ...summed },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
   // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.37 kB after /abort's
   // `keep` (M3-U94), 29.55 kB at 0.3.0 and 30.76 kB after onDelete and the file filters, when the ceiling went from 30
-  // to 32 kB (M10-D10). 0.6.0's features and review fixes pass 32 kB: 36 kB is provisional until the owner sets the
-  // ceiling before the release (M11-R100). Measured 2026-11-21 for 0.6.0: 34.51 kB.
+  // to 32 kB (M10-D10). 0.6.0's features and review fixes pass 32 kB: the owner set 36 kB for 0.6.0 (M11-R100).
+  // Measured 2026-11-21 for 0.6.0: 34.71 kB.
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),

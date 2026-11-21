@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.6.0, not yet released (the pilot's four gaps, `api.allFiles`, a review of every area). This file
+Updated 2026-11-21 for 0.6.0, released that day (the pilot's four gaps, `api.allFiles`, a review of every area). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -132,11 +132,21 @@ each now decided:
   replacement's hook gets the replacing request (`M10-D12`): the pilot's move to 0.4.0 found its audit trail needed
   them.
 
-- **Built for 0.6.0 (2026-11-21, waiting for the pilot's run on the candidate and the owner's go):** what the pilot's
+- **Released in 0.6.0 (2026-11-21),** after the pilot passed every gate on the packed candidate and the owner's go: what the pilot's
   move to 0.5.0 could not do (`api.deleteFile` says what it did, `onDelete` can refuse, a content refusal says what the
   file is, the command reads an app's own variable names: `M11-D`, `M11-K`, `M11-C`), `api.allFiles` (`M11-L`), and a
   review of every area by reviewers who had to prove each finding, with every proven finding fixed (`M11-R`). Designed
   in `docs/superpowers/specs/2026-11-21-0.6.0-design.md`.
+
+### For 0.7: what the pilot's move to 0.6.0 asked for (deferred by the owner, 2026-11-21)
+
+None of these is a gap in 0.6.0; each is a feature the pilot still writes around:
+
+- `close()` with a timeout the app sets, so a sign-out never waits the full 40 seconds for a server that does not
+  answer (`M11-R261`, `M11-R264`).
+- `api.allFiles` filters: a creation date range, files stuck in `pending` past their grace, a substring of the type,
+  and the owner's details beside each file. A search by the owner's name or email stays the app's own query: those
+  live in the app's tables (spec 0.6.0, "Out of scope").
 
 ### After 0.4.0: candidates, none decided
 
@@ -145,8 +155,8 @@ each now decided:
 - The remaining plugins: `limits()`, `images()`, `checksums()`; quarantine and virus scanning.
 - "Attach on submit" (an upload kept pending until the form that holds it is saved) and a server-side upload with a
   row. The listing across owners that stood here is built for 0.6.0: `api.allFiles`, with its index (`M11-L`).
-- The store paths behind their own entry (`M5-T69`): the bundled server measured 34.51 kB on 2026-11-21, under a
-  ceiling of 36 kB that is provisional until the owner sets it (`M10-D10`, `M11-R100`).
+- The store paths behind their own entry (`M5-T69`): the bundled server measured 34.71 kB on 2026-11-21, under the
+  36 kB ceiling the owner set for 0.6.0 (`M10-D10`, `M11-R100`).
 
 ### M6: the plugins
 
