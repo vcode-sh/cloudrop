@@ -639,7 +639,7 @@ What this means for cloudrop's client ([`client/bucket.ts`](../../packages/cloud
   generic "refused the file (HTTP 400)" is accurate but less helpful.
 - **N1 `NoSuchUpload`: readable.** `classifyAnswer(404, "NoSuchUpload")` gives `rejected`, `uploadRejected(404)`, not
   retryable; no renewal or retry is spent, which is right, because no new URL revives an aborted upload. Only a new
-  upload does.
+  upload does. *Update 2026-11-21:* the error is now `NO_SUCH_UPLOAD`, as the server reports it (`M9-H4`).
 - **T1 `429`: readable.** `classifyAnswer(429, …)` gives `retry` with `storageBusy()` (`RATE_LIMITED`, retryable), as
   designed. `parseRetryAfter(null)` is 0, so the client retries on its own jitter (first retry within 0.5 s) instead
   of R2's 5 s. A bucket owner who wants the client to honour it must add `Retry-After` to the rule's `ExposeHeaders`
@@ -733,6 +733,114 @@ Ruling (`M7-P1`): the driver sends `accept-encoding: identity` on every `HEAD`, 
 the change and passes after it; the fake R2 compresses the same way, so the unit lane catches a regression. Each probe
 deleted its objects (12, 1 and 17) and listed its `live-test/cloudrop-gzipprobe-<uuid>/` prefix empty; no bucket setting
 was read or written.
+
+## Upload protocol edge cases, 2026-11-21
+
+Measured 2026-11-21, 02:18–02:27 UTC, on a second bucket of the same account (location EEUR) with an Object Read &
+Write token, for the hardening pass before 0.3.0 (`M9-H1` to `M9-H4`). Node 24.22.2 drove cloudrop's own code: the
+handler (`createCloudrop` on `r2()`, threshold 8 MiB unless noted) called as a browser would, the `r2` driver for
+storage-level rows, and `createCloudropClient` in Node (fetch path, `persist: false`) for the large file. Raw rows used
+Node's `https` to send a body slowly. Each probe wrote under its own `live-test/cloudrop-<32 hex>/` prefix and printed
+through `createRedactor`, never a URL, signature or upload ID. The probe scripts were scratch code in the worktree's
+`.superpowers/r2-edge/`, not committed.
+
+### Sizes, names and types
+
+| Row | Measured | cloudrop |
+|---|---|---|
+| 0 bytes, 1 byte, threshold − 1, threshold | single `PUT`s, `200`, `/complete` `200`, HEAD size exact | as designed |
+| threshold + 1 | two parts, 8 MiB and **1 byte**: both `200`, Complete `200`, the last 4 bytes read back equal | a 1-byte last part is valid on R2 |
+| 2 × threshold + 1 | three parts (8, 8 MiB, 1 byte), `200` | as designed |
+| parts of 5 MiB + 1 byte, and of 5 MiB − 1 + 1 byte | `200`; `400 EntityTooSmall` → `INVALID_PART`, the upload stays open (2 parts listed) | Q4 extended to the exact boundary; the planner never makes a part under 8 MiB |
+| names in NFD and NFC | one stored disposition, NFC (`Am%C3%A9li%C3%A9.txt`) | the server normalizes names to NFC |
+| right-to-left, quotes and backslash, `%`, `; filename=`, CR/LF, NUL, 255 ASCII, 255 emoji | all stored and verified; the fallback `filename` replaces non-ASCII, `"` and `\` with `_` (two `_` per emoji, one per UTF-16 unit), `filename*` percent-encodes the rest (`%0D%0A`, `%00`, `%22`, `%5C`, `%25`) | a 3.6 KB `Content-Disposition` (255 emoji) is accepted on the URL and at Create |
+| 256 characters | `/upload` `400 INVALID_INPUT` | as designed |
+| type `""`, `IMAGE/PNG`, a vendor type with capitals | stored as `application/octet-stream`, `image/png`, lower case | as designed |
+| `text/plain;charset=utf-8`, `text/plain; charset=utf-8` | **refused**, `FILE_TYPE_NOT_ALLOWED` "The file's type is not a valid MIME type" | defect, fixed by `M9-H1`: stored as the essence |
+| `image/svg+xml` | stored, `attachment` | as designed |
+| metadata JSON 2,048 / 2,049 bytes | accepted / `INVALID_METADATA` | as designed |
+| largest token: 2 KiB owner, 2 KiB metadata of `\u0001` escapes, a 255-character name of control characters, multipart | token 8,363 characters (cap 16,384); `/sign` and `/abort` `200` | an R2 upload ID is 343 characters |
+| object metadata 2,048 bytes (name + value) | stored and read back exactly; 2,049 refused by the driver before any request | as designed |
+| 300 MiB + 12,345 bytes through the real client in Node, concurrency `auto`, threshold 64 MiB | done in 3.4 s (87 MiB/s): one `/upload`, 19 parts of 16 MiB, one `/complete`, every answer `200`, at most **4** PUTs in flight, the SHA-256 of a full GET equal | per-file parallelism is fixed at 4 (`PARTS_IN_FLIGHT`, spec §6.1); `auto` sizes the pool across files |
+
+### Keys
+
+Keys written by the driver (header-signed `PUT`), then HEAD, `ListObjectsV2` with the key as prefix, a presigned `PUT`
+and `GET`, and `copy`: space and `+`, `%`, `?`, `&`, `=`, `#`, `!$&'()*+,;=`, `-._~`, ``@:[]{}|^`<>"``, `\`, emoji, Arabic,
+a trailing space, `..` inside a segment, 40 segments, and a key of exactly 1,024 bytes. **Every one round-tripped**: the
+listing returned the key as written, and the presigned GET returned the bytes.
+
+**R2 treats the NFC and NFD forms of a key as one key.** Writing `café` in NFC and then in NFD leaves one object, which
+both forms read; the listing returns the form of the **last write**, also when listed with a prefix in the other form; a
+`DELETE` in either form deletes it; a create-only `PUT` in the NFC form of a key written in NFD answers `412`.
+cloudrop's server normalizes every key to NFC, so its own uploads never alias. A key written in NFD by other code
+(`api.put` does not normalize) is listed in NFD, so a caller comparing listed keys with an NFC prefix by string sees it
+outside the prefix.
+
+### Time
+
+| Row | Measured | cloudrop |
+|---|---|---|
+| presigned `PUT` and header-signed `HEAD` and Create, signing clock off by −3600, −900, −600, +300, +600, +840, +900, +960, +1200 s (URL `expiresIn` 900) | header-signed: accepted from −600 to +900 s, `403 RequestTimeTooSkewed` at −900 and from +960 s. Presigned: `ExpiredRequest` once the URL's end has passed, `RequestTimeTooSkewed` from +960 s. **R2's tolerance is 15 minutes either way**: the −900 s request reached R2 a
+little more than 900 s after its signing time, the +900 s one a little less | `storageError`'s "more than 15 minutes off" is right |
+| the same `HEAD`, refused | a bare `403` with **no body and no `x-amz-error-code`**; header names `cf-ray, connection, content-encoding, content-type, date, server, vary`. Only `date` (±1,200 s from the signing time) tells it from a wrong secret (`date` within 0 s) | defect, fixed by `M9-H2` |
+| single `PUT` and UploadPart whose URL expires 3 s in, body sent over 8 s | **`200` and stored** (8 MiB, 5 MiB): R2 checks the expiry when the request starts | the client's 60 s renewal margin is enough for any part; see `M9-H3` |
+| single `PUT` started 2.5 s after a 1-second URL | `403 ExpiredRequest` | renewed once by the client |
+| a token 2 s from its deadline: `/sign`, `PUT`, `/complete` 2.5 s later | URL signed (lifetime under a second by the server's count), `PUT` `200`, `/complete` **`410 UPLOAD_EXPIRED`**, `/abort` `200` keeping the 8-byte object | defect, fixed by `M9-H3` |
+| `api.getUrl(key, { expiresIn: 302400, download })` | signed 181,211 s (2.1 days) earlier at its window's start with `X-Amz-Expires=604800`: `200`, and the download name with `é`, CR/LF and `"` came back as `attachment; filename="rapport _t____x_.txt"; filename*=UTF-8''rapport%20%C3%A9t%C3%A9%0D%0A%22x%22.txt` | the windowed signing time is safe on R2 |
+| presigned `GET` signed 1, 3.5 and 6.9 days ago, `expiresIn` 604800 | `200` each: R2 accepts an old `X-Amz-Date` while the URL lasts | |
+| presigned `GET` signed 5, 10, 14 and 16 minutes ahead | `200`, `200`, `200`, `403 RequestTimeTooSkewed` | |
+
+### Concurrency and replays
+
+| Row | Measured | cloudrop |
+|---|---|---|
+| one create-only single-PUT URL twice in a row | `200`, `412` | as Q3 |
+| the same URL 2, 5 and 10 times at once | one `200`, the rest `412`, never `429`; `/complete` `200` | the client counts `412` as stored |
+| a create-only `PUT` retried 1 s into a first attempt that sends 8 MiB over 8 s | the retry `200` in about 0.3 s; the first attempt `412` when its body ends, or `ECONNRESET` when cut at 4 s; the retry's bytes are stored, both rounds of both variants | **`If-None-Match` is checked when the body ends**, so a `412` means an object is there: the client's "412 is stored" (spec §5.4) holds even when the first attempt is still sending |
+| two single PUTs of two uploads to one fixed key at once (3 rounds) | one `200`, one `412`; the loser's `/complete` `422 VERIFICATION_FAILED` (another writer's id, object kept) | as designed |
+| two multipart uploads to one key completed at once (3 rounds) | one `200`, one `409 ALREADY_EXISTS`, never two `200` | conditional Complete is atomic |
+| 16, 32 and 64 UploadParts of 1 MiB at once on one upload | all `200`, no `429` (387–648 ms) | Q9 extended from 8 |
+| **8 copies of part 1 with different bytes at once** | all `200`, 8 different ETags, and in 2 of 3 runs **ListParts listed no part 1**, also 3 s later; Complete with a returned ETag `400 InvalidPart`. In the third run copy 7 was kept | R2 can lose a part every `PUT` of which was acknowledged. `/complete` lists the parts itself (`M2-D19`), so it answers `PARTS_MISSING` and the client sends the part again. The client starts no second copy of a part while its own first copy is in flight; a copy it gave up on (stall, pause) may still be arriving, which the 2-copy rows cover |
+| 2 copies of one part at once (different or same bytes, or 100 ms apart; 5 MiB and 64 KiB; 3 rounds each) | both `200`; one part is listed (the second sent, in every run) and completes | a re-send after a stalled attempt is safe |
+| part 1 sent again with its URL: same bytes, then other bytes | `200`, one part listed each time; Complete keeps the last bytes | Complete uses ListParts' ETags |
+| `/complete` 5 at once, single and multipart | all `200` (single: each HEAD verifies; multipart: as `M4-F12`) | onComplete runs more than once, as documented |
+| `/abort` 0, 50, 150, 300 ms after `/complete` (5 parts) | 0 and 50 ms: `/complete` `410 NO_SUCH_UPLOAD`, nothing stored. 150 ms: `/complete` `200`, `/abort` **`503 RATE_LIMITED`**, object kept. 300 ms: both `200`, object deleted | the stateless `/abort` deletes this upload's object while the token lives (`M3-U94`); a store's row closes that |
+| AbortMultipartUpload 0, 20, 60, 120 ms into CompleteMultipartUpload | 0 and 20 ms: Complete `404 NoSuchUpload`, nothing stored. 60 ms: Complete `200`, Abort **`429 ServiceUnavailable`**. 120 ms: both succeed, the object stays | an Abort racing a Complete is throttled like a same-key write; no partial object was ever seen |
+| an upload aborted behind the server, then `/sign`, a part `PUT`, `/complete` | `/sign` `200`, `PUT` `404 NoSuchUpload`, `/complete` `410 NO_SUCH_UPLOAD` | the client called the `404` `UPLOAD_REJECTED`; fixed by `M9-H4` |
+
+### What this means for cloudrop
+
+- **Fixed:** `M9-H1` (a type with parameters is stored as its essence), `M9-H2` (a skewed `HEAD` reports the clock),
+  `M9-H3` (every URL ends 15 minutes before its token, since R2 checks expiry at the request's start) and `M9-H4` (a
+  part sent to a gone upload is `NO_SUCH_UPLOAD`). The fake R2 now sends `Date` on every answer and no body on `HEAD`.
+  The live lane proves `M9-H1`, `M9-H2` and `M9-H4` on R2.
+- **Relied on, now measured:** a `412` on a create-only retry means an object is stored, even while the first attempt
+  still sends; a URL expiry is checked once, at the start; the clock tolerance is 15 minutes either way, which
+  `storageError`'s message already said.
+- **R2 behaviour cloudrop already absorbs:** a part lost among concurrent copies (ListParts at `/complete`); `429` on an
+  Abort racing a Complete (retryable); the NFC/NFD key equivalence (keys are NFC).
+- **Not cloudrop's to fix here, reported:** `api.deletePrefix` compares listed keys with its prefix by string, so a
+  prefix with non-ASCII characters under which other code wrote an NFD key would stop as "outside the prefix"; the
+  stateless `/abort` racing a finished `/complete` deletes the object (`M3-U94`, documented).
+
+**Cleanup proof.** Each probe registered every upload ID before using it, aborted every upload and deleted every key
+under its prefix in a `finally` (also on SIGINT, SIGTERM or SIGHUP), then listed the prefix with `ListObjectsV2` and
+`ListMultipartUploads`. Every run ended with `objects=0 uploads=0`:
+
+```
+live-test/cloudrop-b0ac3a8ffbc5ac64c3a09140443241b5/  sizes and names   deleted 21  left objects=0 uploads=0
+live-test/cloudrop-40663efbfaa7550dd1ce3394c85f3480/  time              deleted 8   left objects=0 uploads=0
+live-test/cloudrop-75fbdc614342bfec91c1884a51a56736/  refused HEAD      deleted 1   left objects=0 uploads=0
+live-test/cloudrop-7ffff853792d41ab985a6e9fac1c9466/  races             deleted 16  left objects=0 uploads=0
+live-test/cloudrop-aa57f48f439655a7c687c449c5c29aa1/  same part         deleted 13  left objects=0 uploads=0
+live-test/cloudrop-f0ed8cdca522aaab4585697ec86cf5e3/  300 MiB client    deleted 1   left objects=0 uploads=0
+live-test/cloudrop-987df2bc9c0042c48c116aa6db9db4ab/  keys              deleted 43  left objects=0 uploads=0
+live-test/cloudrop-97b4614299b8c6bfe82206f4d12c4519/  NFC and NFD keys  deleted 1   left objects=0 uploads=0
+live-test/cloudrop-a43618d161f43970185b9c0bf08d7e1c/  in-flight 412     deleted 4   left objects=0 uploads=0
+```
+
+No bucket setting was read or written, and nothing outside these prefixes was touched.
 
 ## Not verified
 
