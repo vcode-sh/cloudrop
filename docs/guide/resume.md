@@ -90,7 +90,8 @@ of R2's two billed operation classes.
   a [database store](store.md) a finished `/complete` is answered from its row instead, and neither runs again.
 - **Parts missing:** exactly those are sent, then `/complete` again. The parts already stored in the bucket count in `bytes` from that
   answer; before it, `bytes` is 0.
-- **The upload is gone** (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`): the file is `queued` again, asks
+- **The upload is gone** (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`, or parts missing in the ticket's
+  last 15 minutes, when the server signs no more URLs for it): the file is `queued` again, asks
   `/upload` once for a new ticket with the record's route and metadata, and sends the whole file under a new key, its
   `bytes` from 0, with no failure in between. The old parts wait for the bucket's lifecycle rule. When that `/upload` is
   refused, the file ends `failed` with its error.
@@ -108,7 +109,8 @@ One record per upload, in the IndexedDB database `cloudrop`:
 
 Never a presigned URL, an ETag or a part list.
 
-The token is a bearer credential for its upload for 24 hours: it signs `PUT`s for its key, completes the upload, and
+The token is a bearer credential for its upload for 24 hours: it signs `PUT`s for its key (until 15 minutes before it
+expires), completes the upload, and
 through `/abort` cancels it or deletes its finished file (not with a [database store](store.md), which keeps a finished
 file). It is signed, not encrypted, so what `authorize` returned and
 the metadata can be read from it.

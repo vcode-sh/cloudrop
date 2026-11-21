@@ -329,7 +329,9 @@ Then the rules that follow from a stateless token:
 - **`authorize` runs only in `/upload`.** The token is the authority for that file for 24 hours. A session revoked
   mid-upload can still finish the upload, so check the session again in `onComplete` when that matters: `request`
   carries the caller's cookies and headers.
-- **Upload URLs live 15 minutes.** The client renews them through `/sign`.
+- **Upload URLs live 15 minutes.** The client renews them through `/sign`. Every URL ends at least 15 minutes before
+  its token, so a `PUT` started under the last one can still be completed; in a token's last 15 minutes `/sign`
+  answers `UPLOAD_EXPIRED`.
 - **`/abort` is cleanup, not revocation.** Until the token expires, whoever holds it can get a new single-`PUT` URL,
   upload and complete, and can delete its own completed file through `/abort`. An expired token still aborts an
   unfinished upload, but never deletes a stored file.

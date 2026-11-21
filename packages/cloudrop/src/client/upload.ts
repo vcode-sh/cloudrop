@@ -2,14 +2,14 @@
 // pool, then /complete with up to two repair rounds (decisions S13, S14). file-run.ts runs the passes and decides how
 // the file ends.
 
-import { fail, ok, type Result } from "../errors.ts";
+import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { sizeOfPart } from "../part-size.ts";
 import type { CompleteResponse, MultipartTicket, SignedPart, SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import type { Lifetime } from "./close.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import type { Entry } from "./entry.ts";
-import { aborted } from "./failures.ts";
+import { aborted, uploadExpired } from "./failures.ts";
 import type { Leftovers } from "./lifecycle.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
@@ -19,6 +19,12 @@ import type { PutObject } from "./transport.ts";
 
 /** /complete may answer PARTS_MISSING this many times before the file fails (S13). */
 const REPAIR_ROUNDS = 2;
+
+/** The server signs no URL in a ticket's last 15 minutes (spec §5.2, M9-H3). */
+const SIGNING_MARGIN_MS = 15 * 60_000;
+
+/** Whether the server still signs URLs for `ticket`, by this page's clock. */
+export const canSign = (ticket: Ticket): boolean => Date.parse(ticket.expiresAt) - SIGNING_MARGIN_MS > Date.now();
 
 export interface UploadContext {
   endpoints: Endpoints;
@@ -151,10 +157,13 @@ function senderFor(context: UploadContext, { ticket, entry, urls }: Upload, sign
  * A resumed upload's probe got `done`. Its first answer that lists what landed, success or PARTS_MISSING naming
  * `missing`, ends the probe: the parts it did not name count their whole size from now; no byte flowed, so neither the
  * pool nor the speed hears of them (M3-U75, audit I3). That PARTS_MISSING is the list of what is left, not a repair:
- * it takes no repair round. Any other answer leaves the probe for a retry to send again.
+ * it takes no repair round. Any other answer leaves the probe for a retry to send again. Answers UPLOAD_EXPIRED, the
+ * probe kept, when parts are missing and the ticket can no longer sign them: runFile then starts the upload over, as
+ * for a gone one (M3-U74, M9-H3).
  */
-function probed(upload: Upload, done: Result<unknown>, missing: readonly number[] | undefined): void {
-  if (done.error && !missing) return;
+function probed(upload: Upload, done: Result<unknown>, missing: readonly number[] | undefined): CloudropError | null {
+  if (!upload.probe || (done.error && !missing)) return null;
+  if (missing?.length && !canSign(upload.ticket)) return uploadExpired();
   const { entry, ticket } = upload;
   upload.probe = false;
   // Only a multipart ticket is probed: each size comes from the plan, without slicing the file (final review M2).
@@ -167,6 +176,7 @@ function probed(upload: Upload, done: Result<unknown>, missing: readonly number[
   }
   // The caller counts a repair round for this answer next: given back here.
   if (missing) upload.repairs--;
+  return null;
 }
 
 /** Sends the parts that have not landed and completes the file. ABORTED when `signal` (the pass's) fired first. */
@@ -199,7 +209,8 @@ export async function sendAndComplete(
     moveTo(entry, "completing");
     const done = await withRetry(complete, entry.cancel.signal);
     const missing = done.error?.code === "PARTS_MISSING" ? done.error.parts : undefined;
-    if (upload.probe) probed(upload, done, missing);
+    const gone = probed(upload, done, missing);
+    if (gone) return fail(gone);
     // A cancel during /complete ends the file with this answer rather than start a repair (M4-F4).
     if (!missing?.length || upload.repairs === REPAIR_ROUNDS || entry.cancel.signal.aborted) return done;
     upload.repairs++;

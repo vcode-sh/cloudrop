@@ -10,8 +10,8 @@ The measurements behind the first range are in
 - **Decision:** `/upload` reads a file's declared type up to its first `;`, trims it and lowercases it: the essence
   (`text/csv;charset=UTF-8` → `text/csv`). The route's `accept` policy, the extension check, the signed and stored
   `Content-Type` and the `inline`/`attachment` choice all use the essence. A type whose essence is not
-  `type/subtype` is still refused as `FILE_TYPE_NOT_ALLOWED`. Amends `M2-D9`, which refused every type with
-  parameters.
+  `type/subtype` is still refused as `FILE_TYPE_NOT_ALLOWED`. Whitespace around the essence is trimmed too, so
+  `" image/png"` is now accepted as `image/png`. Amends `M2-D9`, which refused every type with parameters.
 - **Why:** `Blob.type` keeps parameters, so a page that builds its upload with
   `new File([text], "export.csv", { type: "text/csv;charset=utf-8" })` was refused with "The file's type is not a
   valid MIME type. Pick another file.", which is false and leaves the user nothing to do (measured on R2 2026-11-21:
@@ -28,14 +28,15 @@ The measurements behind the first range are in
 
 - **Decision:** The S3 transport reads the `Date` header of every refused answer and passes its distance from the
   request's signing time to `storageError`. A `403` without an S3 error code whose `Date` is more than 15 minutes from
-  the signing time, either way, gets the clock message of `RequestTimeTooSkewed` ("This server's clock is more than 15
-  minutes off …") instead of "Check the access key, its permissions and the bucket name". The code stays
-  `STORAGE_DENIED`, and `storageCode` stays unset: the storage did not send one.
+  the signing time, either way (less one second, the precision of `Date`), gets the clock message of
+  `RequestTimeTooSkewed` ("This server's clock is more than 15 minutes off …") instead of "Check the access key, its
+  permissions and the bucket name". The code stays `STORAGE_DENIED`, and `storageCode` stays unset: the storage did
+  not send one.
 - **Why:** R2 refuses a request signed more than 15 minutes from its clock (measured 2026-11-21: 900 s ahead accepted,
   960 s refused; 600 s behind accepted, 900 s refused), and says so with `RequestTimeTooSkewed` in the body. An answer
   to `HEAD` has no body, so the same refusal reached `head()` as a bare `403`, indistinguishable from bad credentials
-  except by its `Date` header. `head()` is the first storage call of a single-PUT `/complete`, of `/abort` and of
-  `api.head`, so a server with a wrong clock was told to check its keys.
+  except by its `Date` header. `head()` is the first storage call of a single-PUT `/complete`, of a single-PUT
+  `/abort` and of `api.head`, so a server with a wrong clock was told to check its keys.
 - **If wrong:** a storage service whose `Date` header is itself wrong by more than 15 minutes would get the clock
   message for a credentials problem; the code is the same either way.
 - **Status:** in force. The fake R2 now sends `Date` on every answer and no body on `HEAD`, as R2 does.
@@ -45,7 +46,11 @@ The measurements behind the first range are in
 
 - **Decision:** Every URL that `/upload` and `/sign` sign ends at least 15 minutes before the token's deadline: its
   lifetime is the shorter of 15 minutes and the time left until `exp - 900`. Once that time is over, `/sign` answers
-  `410 UPLOAD_EXPIRED` before anything is signed. `/complete` and `/abort` keep the token's own deadline.
+  `410 UPLOAD_EXPIRED` before anything is signed. `/complete` and `/abort` keep the token's own deadline. The client
+  mirrors the margin by its own clock (`canSign` in `client/upload.ts`): `retry()` asks for a new ticket once a
+  ticket can no longer sign parts still to send (a ticket whose parts all landed is kept: its `/complete` still
+  works), and a resumed upload whose probe finds parts missing then starts over as a gone upload
+  does (`M3-U74`) instead of failing on `/sign`.
 - **Why:** measured on R2 2026-11-21: a URL's expiry is checked when the request starts, not when its body ends (a PUT
   and an UploadPart whose URL expired 3 s into an 8 s body both answered 200 and stored the bytes). Before this ruling a
   URL could be signed with seconds left on the token, so a PUT started in the token's last moments landed after the
@@ -55,11 +60,13 @@ The measurements behind the first range are in
   Fifteen minutes covers a default single PUT (64 MiB) at the 100 KiB/s the client's fetch timeout assumes, about 11
   minutes, and every 16 MiB part.
 - **If wrong:** a PUT slower than that still lands after the deadline, as before; the resume window for sending bytes is
-  now 23 hours 45 minutes instead of 24 hours. Without a store, an upload paused across its token's last 15 minutes
-  fails 15 minutes earlier than before, with the same `UPLOAD_EXPIRED`.
+  now 23 hours 45 minutes instead of 24 hours. An upload paused across its token's last 15 minutes fails 15 minutes
+  earlier than before, with the same `UPLOAD_EXPIRED`. A page whose clock is far behind the server's may still try to
+  sign in that window and fail as before; one far ahead gives a ticket up a little early.
 - **Status:** in force. The sweep's `MIN_GRACE_MS` (`src/server/leftovers.ts`) assumes no URL outlives its token; that
   still holds, with 15 minutes to spare.
-- **Visible in:** `src/server/presign.ts`, spec §5.2.
+- **Visible in:** `src/server/presign.ts`, `src/client/upload.ts`, `src/client/retry-file.ts`, spec §5.2,
+  `docs/guide/server.md`, `docs/guide/resume.md`.
 
 ### M9-H4: a part sent to a gone upload fails as `NO_SUCH_UPLOAD`
 

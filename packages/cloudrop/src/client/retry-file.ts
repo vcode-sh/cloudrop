@@ -8,16 +8,24 @@ import { NEEDS_NEW_TICKET } from "./failures.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
 import type { FileOutcome } from "./types.ts";
+import { canSign } from "./upload.ts";
 
 /**
  * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): never when
  * a /complete may have finished the file, which only /complete with its ticket can tell; always without a ticket,
- * with one that expired or whose /abort was sent, or after a failure in M3-U31.
+ * with one that expired, or can no longer sign parts still to send (M9-H3), or whose /abort was sent, or after a
+ * failure in M3-U31.
  */
-function needsTicket({ upload, error }: Entry): boolean {
+function needsTicket({ upload, error, landed }: Entry): boolean {
   if (!upload) return true;
   if (upload.mayBeComplete) return false;
-  return upload.dropped || Date.parse(upload.ticket.expiresAt) <= Date.now() || NEEDS_NEW_TICKET.has(error?.code);
+  const { ticket } = upload;
+  const expired = Date.parse(ticket.expiresAt) <= Date.now();
+  // Past its signing time a ticket still completes, so it is kept while only /complete is left. A PARTS_MISSING error
+  // names parts that are still counted as landed until the retry queues them again.
+  const partCount = ticket.kind === "single" ? 1 : ticket.partCount;
+  const unsent = error?.code === "PARTS_MISSING" || landed.size < partCount;
+  return upload.dropped || expired || (unsent && !canSign(ticket)) || NEEDS_NEW_TICKET.has(error?.code);
 }
 
 /** Queues a failed file again without telling the page. A new ticket starts from no parts and no bytes (M3-U36); the

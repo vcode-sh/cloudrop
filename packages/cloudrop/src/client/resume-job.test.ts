@@ -37,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -152,6 +153,29 @@ describe("a resumed file whose probe got no answer (M9)", () => {
       ],
       key: setup.issued[1]?.key,
       stored: {},
+    });
+  });
+});
+
+describe("a resumed file in its ticket's last 15 minutes (M9-H3)", () => {
+  it("starts over when its probe finds parts missing: the server signs no URL for them any more", async () => {
+    const setup = await reloaded(gate(partThree));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(setup.issued[0]?.expiresAt ?? "") - 14 * 60_000);
+    const sent = setup.from();
+    const { data } = await setup.client.resume(setup.upload, fourParts()).done;
+    await setup.drained();
+    const outcome = data?.files[0];
+
+    expect({
+      sent: sent(),
+      key: outcome?.status === "done" ? outcome.result.file.key : outcome?.error.code,
+    }).toEqual({
+      sent: [
+        ...["POST /complete", "POST /upload"],
+        ...["PUT part 1", "PUT part 2", "PUT part 3", "PUT part 4", "POST /complete"],
+      ],
+      key: setup.issued[1]?.key,
     });
   });
 });
