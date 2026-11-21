@@ -2388,3 +2388,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing: one row, and `src/server/store-delete-race.test.ts` holds the behaviour.
 - **Status:** in force. Completes `M11-R150`.
 - **Visible in:** `docs/guide/store.md` ("File operations").
+
+### M11-R215: `eraseOwner` counts a file created within the grace before the run as begun during it
+
+- **Decision:** the last read of `api.eraseOwner` keeps the run from `done` when the owner's newest file was created
+  at or after the run's start less `graceMs` (`created < startedAt - graceMs` is the only case that goes on to the
+  last read of the live statuses). Nothing else changed.
+- **Why:** each server stamps a row with its own clock, and the run compared `created_at` with its own start to tell
+  whether an upload had begun while it went on. Reproduced with two clocks: an upload taken and cancelled, during
+  the run and after the run had read the aborted files, by a server whose clock lagged by one second or by two
+  minutes got a `created_at` before the run's start, was never live when the run read the live statuses, and the run
+  answered `done: true` with the cancelled upload's object still in the bucket. With equal clocks, and with the
+  other clock ahead, the same run answered `done: false`. The margin is the grace because that is the difference the
+  store's times already allow between servers: the sweep and every "settled" check compare one server's clock with
+  times another wrote, and rest on the grace being "minutes, far above normal skew" (`docs/guide/store.md`, "Clock
+  skew"). It costs no run its `done`: a file the passes saw that was created within the grace is waiting in that run
+  anyway, since an ended file's key is checked for the last time no sooner than 15 minutes plus the grace after it
+  was created (`settledAt`), and a live one waits by itself; so the margin decides only for a file the passes did
+  not see.
+- **If wrong:** two servers whose clocks differ by more than `graceMs` (at least 15 minutes, 1 hour by default) can
+  still hide such an upload from the run; a server that far from the storage service's clock cannot sign a request
+  it accepts, so it can start no multipart upload, and its single-`PUT` URLs expire as they are made. A file that
+  became final within the milliseconds of the run itself keeps one run from `done`, and the next one reports it.
+  The "Clock skew" paragraph of `docs/guide/store.md` still names only a clock that runs ahead; it was outside this
+  change.
+- **Status:** in force.
+- **Visible in:** `src/server/erase.ts` (`lastReads`), `src/server/erase-clocks.test.ts`.

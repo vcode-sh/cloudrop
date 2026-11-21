@@ -183,18 +183,22 @@ async function runPasses(
 
 /**
  * The last reads, when nothing is waiting yet. The owner's newest file in any status: one created since the run
- * started is an upload that began while it went on, even one already cancelled after its status was read. Then the
- * live statuses once more, for an /upload whose reserve began just before the run, committed during it and is still
- * unfinished. One cancelled before these reads, and one that starts after them, are the race the guide describes.
+ * started is an upload that began while it went on, even one already cancelled after its status was read. A row
+ * carries the clock of the server that took its upload, which may lag this one's, so "since the run started" reaches
+ * back by the grace: the store's times allow servers that much apart, as the sweep does, and a file that young was
+ * waiting in this run anyway when the passes saw it (M11-R215). Then the live statuses once more, for an /upload
+ * whose reserve began just before the run, committed during it and is still unfinished. One cancelled before these
+ * reads, and one that starts after them, are the race the guide describes.
  */
 async function lastReads(eraser: Eraser, startedAt: number): Promise<Result<boolean>> {
-  const { config, store, owner, report } = eraser;
+  const { config, store, owner, graceMs, report } = eraser;
   if (report.waiting > 0) return ok(true);
   const newest = await storeCall(config.logger, `list the newest file of ${owner}`, () =>
     store.list({ owner, statuses: EVERY, ...UNFILTERED, limit: 1, cursor: null }),
   );
   if (newest.error) return newest;
-  if ((newest.data.records[0]?.createdAt.getTime() ?? 0) < startedAt) return eachRow(eraser, LIVE, wait);
+  const created = newest.data.records[0]?.createdAt.getTime() ?? 0;
+  if (created < startedAt - graceMs) return eachRow(eraser, LIVE, wait);
   report.waiting += 1;
   return ok(true);
 }
