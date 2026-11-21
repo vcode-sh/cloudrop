@@ -50,10 +50,13 @@ const PLAIN_EXTENSION = /^[a-z0-9]{1,16}$/;
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/;
 const ACCEPT_ENTRY = /^(\*\/\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}))$/;
 
-/** A browser sends "" for a type it does not know; that file is stored as application/octet-stream. */
+/**
+ * The type's essence, lower case: a browser sends "" for a type it does not know, which is stored as
+ * application/octet-stream, and Blob.type keeps parameters such as "; charset=utf-8", which are dropped (M9-H1).
+ */
 export function normalizeType(type: string): string | null {
-  const lower = type === "" ? "application/octet-stream" : type.toLowerCase();
-  return MIME_TYPE.test(lower) ? lower : null;
+  const essence = type === "" ? "application/octet-stream" : (type.split(";", 1)[0] ?? "").trim().toLowerCase();
+  return MIME_TYPE.test(essence) ? essence : null;
 }
 
 export function isAcceptEntry(entry: string): boolean {

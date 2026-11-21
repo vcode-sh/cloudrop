@@ -11,8 +11,17 @@ describe("normalizeType", () => {
   });
 
   it.for([
-    // A parameter would be signed and stored as part of the type, and would dodge the inline/attachment rule.
-    { name: "a parameter", type: "text/html; charset=utf-8" },
+    // Blob.type keeps parameters, but a parameter signed and stored as part of the type would dodge the
+    // inline/attachment rule, so only the essence is kept (M9-H1).
+    { type: "text/html; charset=utf-8", essence: "text/html" },
+    { type: "text/csv;charset=UTF-8", essence: "text/csv" },
+    { type: "Image/PNG ; x=1", essence: "image/png" },
+  ])("keeps only the essence of $type", ({ type, essence }) => {
+    expect(normalizeType(type)).toBe(essence);
+  });
+
+  it.for([
+    { name: "parameters but no type", type: "; charset=utf-8" },
     { name: "no subtype", type: "image" },
     { name: "a line break", type: "image/png\r\nx-amz-meta-a: b" },
     { name: "a wildcard", type: "image/*" },

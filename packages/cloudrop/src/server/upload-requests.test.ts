@@ -45,9 +45,15 @@ describe("POST /upload: policy", () => {
       message: "The file name ends in .html, which does not match its type image/png. Rename the file or pick another.",
     },
     {
-      name: "a type with parameters",
-      file: { name: "a.png", size: 1, type: "image/png; x=1" },
+      name: "a type that is not a MIME type",
+      file: { name: "a.png", size: 1, type: "png" },
       message: "The file's type is not a valid MIME type. Pick another file.",
+    },
+    {
+      // Parameters are dropped (M9-H1); the essence still has to pass the policy.
+      name: "a type whose essence the route does not accept",
+      file: { name: "a.gif", size: 1, type: "image/gif; x=1" },
+      message: "This upload does not accept image/gif files.",
     },
   ])("refuses $name", async ({ file, message }) => {
     const { body } = await upload(serverFixture({ avatar }), {

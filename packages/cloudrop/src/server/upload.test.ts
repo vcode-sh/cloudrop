@@ -111,6 +111,22 @@ describe("POST /upload: a single PUT ticket", () => {
     );
   });
 
+  it("stores a type with parameters, as Blob.type keeps them, as its essence (M9-H1)", async () => {
+    const fixture = serverFixture({ files });
+    const { body } = await upload(fixture, {
+      route: "files",
+      files: [{ name: "page.html", size: 5, type: "Text/HTML ; Charset=UTF-8" }],
+    });
+    const ticket = body.files[0] as SingleTicket;
+    expect({ key: ticket.key, headers: ticket.put.headers }).toMatchObject({
+      key: `${ticket.id}.html`,
+      headers: {
+        "content-type": "text/html",
+        "content-disposition": "attachment; filename=\"page.html\"; filename*=UTF-8''page.html",
+      },
+    });
+  });
+
   it("stores a file the browser could not type as application/octet-stream, as an attachment", async () => {
     const fixture = serverFixture({ files });
     const { body } = await upload(fixture, { route: "files", files: [{ name: "data", size: 0, type: "" }] });

@@ -2,6 +2,27 @@
 
 Rulings from testing against the owner's development bucket and as a new user before 0.3.0 (2026-11-21). The upload
 protocol numbers from `M9-H1`, the store and owner API from `M9-H50`, `cloudrop/testing` and the command from `M9-H100`.
+The measurements behind the first range are in
+[Upload protocol edge cases](../research/r2-spike-findings.md#upload-protocol-edge-cases-2026-11-21).
+
+### M9-H1: a type with parameters is stored as its essence
+
+- **Decision:** `/upload` reads a file's declared type up to its first `;`, trims it and lowercases it: the essence
+  (`text/csv;charset=UTF-8` → `text/csv`). The route's `accept` policy, the extension check, the signed and stored
+  `Content-Type` and the `inline`/`attachment` choice all use the essence. A type whose essence is not
+  `type/subtype` is still refused as `FILE_TYPE_NOT_ALLOWED`. Amends `M2-D9`, which refused every type with
+  parameters.
+- **Why:** `Blob.type` keeps parameters, so a page that builds its upload with
+  `new File([text], "export.csv", { type: "text/csv;charset=utf-8" })` was refused with "The file's type is not a
+  valid MIME type. Pick another file.", which is false and leaves the user nothing to do (measured on R2 2026-11-21:
+  both spellings refused before any request to the bucket). `M2-D9`'s reason still holds for the parameters
+  themselves: signed and stored as part of the type, they would dodge the `inline`/`attachment` rule, so they are
+  dropped, never kept.
+- **If wrong:** a charset given by the page is not stored, so a text file served inline from the bucket is read with
+  the browser's default charset. cloudrop serves every text type as an attachment (spec §7.5), where the charset
+  matters less.
+- **Status:** in force.
+- **Visible in:** `src/server/accept.ts`.
 
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 

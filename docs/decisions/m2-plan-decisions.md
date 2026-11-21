@@ -92,6 +92,7 @@ later.
 - **Why:** the browser's type is client-controlled; the extension check catches the cheap mismatch.
 - **If wrong:** a missing table entry means that type is matched by MIME only.
 - **Status:** amended by M2-X15: the plan said 37 types; the table has 36. Browser MIME aliases wait for M3 evidence.
+  Amended by M9-H1: a type with parameters is read as its essence instead of refused.
 - **Visible in:** `src/server/accept.ts`.
 
 ### M2-D10: keys
