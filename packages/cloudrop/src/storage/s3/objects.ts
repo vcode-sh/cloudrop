@@ -15,10 +15,10 @@ import {
   rangeProblem,
   sizeProblem,
 } from "../validate.ts";
-import { stripQuotes, xmlBlocks, xmlText, xmlValue } from "../xml.ts";
+import { xmlBlocks, xmlText, xmlValue } from "../xml.ts";
 import { objectUrl, type S3Context } from "./context.ts";
 import { META_PREFIX, orEmpty, writeHeaders } from "./options.ts";
-import { allOk, etagIn, incompleteResponse, validDate, wholeNumber } from "./responses.ts";
+import { allOk, etagIn, etagOf, incompleteResponse, validDate, wholeNumber } from "./responses.ts";
 import { REQUEST_TIMEOUT_MS, send, sendForXml } from "./transport.ts";
 
 const encoder = new TextEncoder();
@@ -30,7 +30,7 @@ function readObjectInfo(key: string, headers: Headers): Result<ObjectInfo> {
   if (!headers.has("content-length")) return fail(incompleteResponse("content length"));
   const size = wholeNumber(headers.get("content-length"));
   if (size === undefined) return fail(incompleteResponse("valid content length"));
-  const etag = stripQuotes(headers.get("etag") ?? "");
+  const etag = etagOf(headers);
   if (etag === "") return fail(incompleteResponse("ETag"));
   const uploadedAt = validDate(headers.get("last-modified"));
   if (uploadedAt === undefined) return fail(incompleteResponse("valid last-modified date"));
@@ -66,6 +66,19 @@ function readListedObject(block: string): Result<ListedObject> {
   return ok({ key, size, etag: etagIn(block), uploadedAt });
 }
 
+function readListing(xml: string): Result<{ items: ListedObject[]; nextCursor: string | null }> {
+  // Any other 200 (a web page, say) would read as an empty, final listing: deletePrefix would report a verified
+  // erasure of files that are still stored.
+  if (!xml.includes("<ListBucketResult")) return fail(incompleteResponse("object listing"));
+  const listed = allOk(xmlBlocks(xml, "Contents").map(readListedObject));
+  if (listed.error) return listed;
+  const items = listed.data;
+  if (xmlValue(xml, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
+  // Ending the listing here would silently skip the rest of the prefix.
+  const nextCursor = xmlText(xml, "NextContinuationToken");
+  return nextCursor ? ok({ items, nextCursor }) : fail(incompleteResponse("continuation token"));
+}
+
 async function forEachConcurrently<T>(
   items: readonly T[],
   limit: number,
@@ -95,7 +108,10 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
     async getRange(key, start, end) {
       const problem = keyProblem(key) ?? rangeProblem(start, end);
       if (problem) return fail(invalidInput(problem));
-      const result = await send(ctx, "GET", objectUrl(ctx, key), { headers: { range: `bytes=${start}-${end}` } });
+      const result = await send(ctx, "GET", objectUrl(ctx, key), {
+        headers: { range: `bytes=${start}-${end}` },
+        maxBytes: end - start + 1,
+      });
       if (result.error) return result;
       return ok(result.data.body);
     },
@@ -119,7 +135,7 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
         timeoutMs: REQUEST_TIMEOUT_MS + Math.ceil(size / MiB) * 1000,
       });
       if (result.error) return result;
-      const etag = stripQuotes(result.data.headers.get("etag") ?? "");
+      const etag = etagOf(result.data.headers);
       return etag ? ok({ etag }) : fail(incompleteResponse("ETag"));
     },
 
@@ -155,14 +171,7 @@ export function objectMethods(ctx: S3Context): ObjectMethods {
       url.searchParams.set("max-keys", String(limit));
       if (cursor !== undefined) url.searchParams.set("continuation-token", cursor);
       const result = await sendForXml(ctx, "GET", url);
-      if (result.error) return result;
-      const listed = allOk(xmlBlocks(result.data, "Contents").map(readListedObject));
-      if (listed.error) return listed;
-      const items = listed.data;
-      if (xmlValue(result.data, "IsTruncated") !== "true") return ok({ items, nextCursor: null });
-      // Ending the listing here would silently skip the rest of the prefix.
-      const nextCursor = xmlText(result.data, "NextContinuationToken");
-      return nextCursor ? ok({ items, nextCursor }) : fail(incompleteResponse("continuation token"));
+      return result.error ? result : readListing(result.data);
     },
   };
   return methods;

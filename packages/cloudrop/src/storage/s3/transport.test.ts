@@ -115,4 +115,68 @@ describe("createS3Driver", () => {
       message: "The storage service ignored the byte range. Check that the endpoint supports ranged GET.",
     });
   });
+
+  /** An answer whose body is 32 chunks of 1 MiB, the first starting with `start`, and what the driver did with it. */
+  function megabytes(status: number, start = "") {
+    const read = { chunks: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>(
+      {
+        pull(controller) {
+          if (read.chunks === 32) return controller.close();
+          const chunk = new Uint8Array(MiB);
+          if (read.chunks === 0) chunk.set(new TextEncoder().encode(start));
+          read.chunks += 1;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          read.cancelled = true;
+        },
+      },
+      // Nothing is produced ahead of a read, so the count is what the driver asked for.
+      { highWaterMark: 0 },
+    );
+    return { fetch: stubbed(async () => new Response(body, { status })), read };
+  }
+  const tooLarge = "The storage endpoint sent more data than an S3 answer holds. Check the endpoint setting.";
+
+  it("reads only the start of an error body, where S3 names its code", async () => {
+    const { fetch, read } = megabytes(403, "<Error><Code>AccessDenied</Code>");
+    expect((await driverWith(fetch).list("")).error).toMatchObject({
+      code: "STORAGE_DENIED",
+      storageCode: "AccessDenied",
+    });
+    expect(read).toEqual({ chunks: 1, cancelled: true });
+  });
+
+  it("stops reading a listing larger than any S3 listing of 1,000 keys", async () => {
+    const { fetch, read } = megabytes(200, "<ListBucketResult>");
+    expect((await driverWith(fetch).list("")).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: false,
+      message: tooLarge,
+    });
+    // 8 MiB is the limit, so the ninth chunk is the first one past it.
+    expect(read).toEqual({ chunks: 9, cancelled: true });
+  });
+
+  it("cuts off a ranged answer that carries more bytes than the range", async () => {
+    const { fetch, read } = megabytes(206);
+    expect((await driverWith(fetch).getRange("a.txt", 0, 4095)).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      message: tooLarge,
+    });
+    expect(read).toEqual({ chunks: 1, cancelled: true });
+  });
+
+  it("returns a ranged answer of exactly the bytes asked for, sent in pieces", async () => {
+    const pieces = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3, 4]));
+        controller.close();
+      },
+    });
+    const partial = stubbed(async () => new Response(pieces, { status: 206 }));
+    expect((await driverWith(partial).getRange("a.txt", 0, 3)).data).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
 });

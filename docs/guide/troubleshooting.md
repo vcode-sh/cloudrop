@@ -149,6 +149,18 @@ compressible type (`text/plain`, `application/json`, `text/html`, `image/svg+xml
 and then sends no `Content-Length`. Since 0.1.1 the driver asks for an uncompressed answer. On 0.1.0, a `fetch` option
 for `r2()` or `s3()` that sets `accept-encoding: identity` on `HEAD` requests works around it.
 
+## Storage calls fail with "no object listing" or "more data than an S3 answer holds"
+
+`cloudrop.api` calls, `cloudrop doctor` or `/complete` answer `STORAGE_ERROR` with "The storage service's response had
+no object listing", "The storage endpoint sent more data than an S3 answer holds" or "The storage endpoint redirected
+the request, or the bucket is in another region".
+
+**The endpoint is not the S3 API.** Something answered, but not as S3 does: the port of the storage's web console
+instead of its API port (MinIO and RustFS serve both), the address of your own app, a captive portal, or an address
+that redirects (http to https, or AWS for a bucket in another region). cloudrop never follows a redirect, because a
+request is signed for one host. Set `endpoint` in `s3()` (`CLOUDROP_S3_ENDPOINT`) to the API's own address, with the
+scheme it serves, and `region` to the bucket's region. Before 0.6.0 such an endpoint read as an empty bucket.
+
 ## checkBucket reports unknown
 
 `cloudrop doctor` shows the same as `NOT CHECKED`. The credentials may not read the bucket's settings (an R2 Object

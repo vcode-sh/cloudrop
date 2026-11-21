@@ -213,3 +213,73 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   of it.
 - **Status:** in force.
 - **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`, `docs/guide/errors.md`.
+
+### M11-R20: a 200 that is not S3's answer is an error, never an empty result
+
+- **Decision:** `list` requires a `<ListBucketResult` element and `listParts` a `<ListPartsResult` element, and answer
+  the incomplete-response error otherwise ("The storage service's response had no object listing. Retry the request.",
+  "… no part listing …"). A call S3 answers without a body (`put`, `delete`, `abortMultipart`, `putBucketCors`,
+  `putBucketLifecycle`) refuses a 2xx that carries one: "The storage endpoint sent more data than an S3 answer holds.
+  Check the endpoint setting." An ETag header that is weak (`W/"…"`) counts as missing, on `head` and on `put`.
+- **Why:** an `s3()` endpoint that answers every request with 200 and a page (a console's port, a single-page app's
+  host, a captive portal) read as an empty bucket: `api.deletePrefix("users/42/")` answered `{ deleted: 0, verifiedAt }`,
+  a verified erasure, while the files stayed stored. `getBucketCors` and `getBucketLifecycle` already refused such a
+  body. Audited against a real server that answers `200 text/html` with a length, a date and a weak ETag to every
+  method (`src/storage/s3/web-page.test.ts`), each call on its own:
+
+  | Call | Before | Now |
+  | --- | --- | --- |
+  | `list`, `listParts` | an empty, final listing | fixed: the root element is required |
+  | `head` | an object of the page's size | fixed for a weak ETag; see "If wrong" |
+  | `put` | stored, with the page's ETag | fixed: a body where S3 sends none, and the weak ETag |
+  | `delete`, `abortMultipart`, `deleteMany` | deleted | fixed: a body where S3 sends none |
+  | `putBucketCors`, `putBucketLifecycle` | written | fixed: a body where S3 sends none |
+  | `createMultipart`, `completeMultipart`, `copy` | safe: no upload ID, no ETag in the body | unchanged |
+  | `getRange` | safe: a 200 is "ignored the byte range" | unchanged, and now bounded (`M11-R22`) |
+  | `getBucketCors`, `getBucketLifecycle` | safe: no configuration element | unchanged |
+  | `presignPut`, `presignPart`, `presignGet` | no request is sent | unchanged |
+
+  There is no batch delete: `deleteMany` sends one `DELETE` per key.
+- **If wrong:** a host that answers `HEAD` and a ranged `GET` as a static file server does (a strong ETag, a date, a
+  length, `206`) still reads as an object: nothing in such an answer differs from S3's, since an object may itself be
+  a page. The upload protocol is not fooled, because `/complete` compares the object's `x-amz-meta-cloudrop-id`. An
+  S3-compatible service that answers a `PUT` or a `DELETE` with a body would now fail every write; R2, RustFS and
+  Wrangler's local R2 send none (the three backend lanes pass).
+- **Status:** in force.
+- **Visible in:** `src/storage/s3/objects.ts`, `src/storage/s3/multipart.ts`, `src/storage/s3/responses.ts`,
+  `src/storage/s3/transport.ts`, `src/storage/s3/web-page.test.ts`, `docs/guide/troubleshooting.md`.
+
+### M11-R21: the driver never follows a redirect
+
+- **Decision:** every request is sent with `redirect: "manual"`, and a `3xx` is the error of `M11-R23`. A custom
+  `fetch` that follows a redirect all the same is caught by `response.redirected` and reported the same way, with the
+  status 302 standing for the first answer's, which is gone by then.
+- **Why:** a request is signed for one host: its `Host` header is part of the signature, so the host a redirect names
+  can only refuse it, and fetch drops `Authorization` on a cross-origin redirect anyway. What arrived there was an
+  unsigned request, answered with a page (a captive portal's 200) that read as a result, or with a 403 that pointed at
+  the access key. A `307` or `308` also sends the body again, so a file's bytes went to a host nobody configured.
+- **If wrong:** AWS answers `307 TemporaryRedirect` for a bucket created minutes ago in another region, which an SDK
+  follows; cloudrop reports it and the request works once the endpoint names the bucket's region. A runtime whose
+  fetch answers a manual redirect with an opaque status 0 (a browser) reports the generic refusal with "HTTP 0".
+- **Status:** in force.
+- **Visible in:** `src/storage/s3/transport.ts`, `src/storage/storage-error.ts`, `src/storage/s3/web-page.test.ts`.
+
+### M11-R22: answers are read up to a bound, and the tag reader is linear
+
+- **Decision:** `send` reads a body through its stream and cancels it at a bound: 4 KiB of an error body (S3 names its
+  code first), `end - start + 1` bytes of a ranged GET, 8 MiB of an XML answer, none for a call S3 answers without a
+  body. Past the bound a successful answer fails with the error of `M11-R20`; an error body is cut and still read for
+  its code. `xmlBlocks` matches an opening tag only up to the next `<` and finds its end with a plain search that
+  stops once no closing tag is left; the self-closing check of `getBucketCors` and `getBucketLifecycle` matches the
+  same way.
+- **Why:** the JSDoc said bodies were bounded by the caller and nothing bounded them: a 4 KiB content sniff read
+  whatever a server sent with a `206`, and every answer was read whole. The tag pattern was quadratic on unclosed tags:
+  `xmlValue("<Code>".repeat(n), "Code")` took 7 s for 480 KB, and 1.2 MB took 21 s to 123 s in the new tests before
+  the fix. The XML bound is derived from the largest page cloudrop asks for: 1,000 entries (`MAX_LIST_PAGE`, for
+  objects and for parts), each a key of 1,024 bytes with every byte escaped to six characters (`&quot;`) and under
+  1 KiB of other fields, come to 7.2 MB; a CORS or lifecycle configuration is far smaller.
+- **If wrong:** a listing over 8 MiB fails where it was read; it cannot be S3's answer to `max-keys=1000`. A ranged
+  answer that sends more than the range is refused rather than cut, since which bytes it sent is then unknown.
+- **Status:** in force.
+- **Visible in:** `src/storage/s3/transport.ts`, `src/storage/xml.ts`, `src/storage/s3/bucket-settings.ts`,
+  `src/storage/s3/transport.test.ts`, `src/storage/xml.test.ts`.

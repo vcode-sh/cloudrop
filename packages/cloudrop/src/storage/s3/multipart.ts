@@ -35,6 +35,8 @@ async function partsPage(
     objectUrl(ctx, key, { uploadId, "max-parts": String(MAX_LIST_PAGE), "part-number-marker": marker }),
   );
   if (result.error) return result;
+  // Any other 200 would read as an upload with no parts.
+  if (!result.data.includes("<ListPartsResult")) return fail(incompleteResponse("part listing"));
   const parts = allOk(xmlBlocks(result.data, "Part").map((block) => readPart(block, ctx.rules.maxParts)));
   if (parts.error) return parts;
   if (xmlValue(result.data, "IsTruncated") !== "true") return ok({ parts: parts.data, next: null });

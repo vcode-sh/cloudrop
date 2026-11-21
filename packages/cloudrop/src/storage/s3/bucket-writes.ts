@@ -7,7 +7,7 @@ import type { BucketCorsRule, BucketLifecycleRule } from "../driver.ts";
 import { escapeXml } from "../xml.ts";
 import { configurationReadError } from "./bucket-settings.ts";
 import type { S3Context } from "./context.ts";
-import { send } from "./transport.ts";
+import { MAX_XML_BYTES, send } from "./transport.ts";
 
 const encoder = new TextEncoder();
 const element = (name: string, value: string | number): string => `<${name}>${escapeXml(String(value))}</${name}>`;
@@ -94,7 +94,7 @@ const TRANSITION_DEFAULT = "x-amz-transition-default-minimum-object-size";
  */
 async function keptLifecycleHeaders(ctx: S3Context): Promise<Result<Record<string, string>>> {
   const kept: Record<string, string> = {};
-  const current = await send(ctx, "GET", new URL(`${ctx.bucketUrl}?lifecycle=`));
+  const current = await send(ctx, "GET", new URL(`${ctx.bucketUrl}?lifecycle=`), { maxBytes: MAX_XML_BYTES });
   if (current.error) {
     if (current.error.code === "STORAGE_DENIED" || current.error.status === 501) return ok(kept);
     // As the rule read reports it: no configuration means nothing to keep, a bare 404 a wrong endpoint.

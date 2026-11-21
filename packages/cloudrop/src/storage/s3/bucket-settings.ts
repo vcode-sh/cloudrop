@@ -29,7 +29,7 @@ const UNREADABLE_XML = /<!\[CDATA\[|<!--|<\/?[A-Za-z_][\w.-]*:/;
 
 /** The configuration element's inner XML; "" for an empty, self-closing one. */
 function readConfiguration(xml: string, root: string, setting: string): Result<string> {
-  if (new RegExp(`<${root}(?:\\s[^>]*)?/>`).test(xml)) return ok("");
+  if (new RegExp(`<${root}(?:\\s[^<>]*)?/>`).test(xml)) return ok("");
   // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
   const configuration = xmlBlocks(xml, root)[0];
   if (configuration === undefined) return fail(incompleteResponse(`${setting} configuration`));

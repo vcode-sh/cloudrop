@@ -15,12 +15,21 @@ function decodeXml(text: string): string {
 
 /**
  * Inner XML of every `<tag>…</tag>` element, in document order. `tag` is an internal constant, never user input, so it
- * is not escaped into the pattern; response bodies are bounded by the caller. Self-closing `<tag />` has no content and
- * is skipped.
+ * is not escaped into the pattern. Self-closing `<tag />` has no content and is skipped. Linear in the document's
+ * length, whatever it holds: an opening tag is matched only up to the next `<`, and its end is found by a plain search
+ * that stops for good once no closing tag is left (the transport bounds the document, never its shape).
  */
 export function xmlBlocks(xml: string, tag: string): string[] {
-  const pattern = new RegExp(`<${tag}(?:\\s[^>]*)?(?<!/)>([\\s\\S]*?)</${tag}>`, "g");
-  return Array.from(xml.matchAll(pattern), (match) => match[1] ?? "");
+  const opening = new RegExp(`<${tag}(?:\\s[^<>]*)?(?<!/)>`, "g");
+  const closing = `</${tag}>`;
+  const blocks: string[] = [];
+  while (opening.test(xml)) {
+    const end = xml.indexOf(closing, opening.lastIndex);
+    if (end < 0) break;
+    blocks.push(xml.slice(opening.lastIndex, end));
+    opening.lastIndex = end + closing.length;
+  }
+  return blocks;
 }
 
 /**

@@ -118,6 +118,14 @@ describe("bucket configuration", () => {
     });
   });
 
+  it("reads a configuration answer of opening tags that never end in linear time", async () => {
+    // Each of the 100,000 tags made the self-closing check scan to the end of the body.
+    const unclosed = stubbed(async () => new Response("<CORSConfiguration ".repeat(100_000)));
+    expect((await driverWith(unclosed).getBucketCors()).error?.message).toBe(
+      "The storage service's response had no CORS configuration. Retry the request.",
+    );
+  }, 1000);
+
   it("reports a refused read as STORAGE_DENIED, never as no rules", async () => {
     const driver = configured();
     expect([(await driver.getBucketCors()).error?.code, (await driver.getBucketLifecycle()).error?.code]).toEqual([
@@ -134,6 +142,7 @@ describe("bucket configuration writes", () => {
     prefix: "",
     abortIncompleteMultipartUploadDays: 1,
   };
+  const anyOrigin = { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] };
   // Without bucketConfig the fake answers as for an R2 object token, which may not change bucket settings.
   const fake = (bucketConfig: { cors?: string; lifecycle?: string } | undefined) =>
     writable(createFakeR2({ bucket: "test", credentials, now, bucketConfig }).fetch);
@@ -142,7 +151,6 @@ describe("bucket configuration writes", () => {
     const driver = fake({});
     const rules = [
       {
-  const anyOrigin = { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] };
         id: "R&D <uploads>",
         allowedOrigins: ["https://app.example.com", "http://localhost:5173"],
         allowedMethods: ["PUT"],
@@ -251,14 +259,6 @@ describe("bucket configuration writes", () => {
       write: (driver: S3Driver) => driver.putBucketLifecycle([]),
       message: "Pass at least one lifecycle rule: an empty list would remove every rule.",
     },
-  ])("refuses $name before sending anything", async ({ write, message }) => {
-    expect((await write(writable(neverCalled))).error).toMatchObject({ code: "INVALID_INPUT", message });
-  });
-
-  it("reports a refused write as STORAGE_DENIED", async () => {
-    const driver = fake(undefined);
-    const results = [
-      await driver.putBucketCors([
     ...[
       { name: "a CORS rule that is null", rule: null },
       { name: "a CORS rule without its lists", rule: {} },
@@ -284,6 +284,14 @@ describe("bucket configuration writes", () => {
       message:
         "Each lifecycle rule must be an object with its sourceXml as text, or with a prefix as text and abortIncompleteMultipartUploadDays as a whole number from 1.",
     })),
+  ])("refuses $name before sending anything", async ({ write, message }) => {
+    expect((await write(writable(neverCalled))).error).toMatchObject({ code: "INVALID_INPUT", message });
+  });
+
+  it("reports a refused write as STORAGE_DENIED", async () => {
+    const driver = fake(undefined);
+    const results = [
+      await driver.putBucketCors([
         { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] },
       ]),
       await driver.putBucketLifecycle([abortRule]),

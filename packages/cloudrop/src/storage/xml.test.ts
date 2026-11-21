@@ -64,4 +64,22 @@ describe("xml reader", () => {
       "c",
     ]);
   });
+
+  // Unclosed tags made the pattern scan to the end once per tag: 480 KB took 7 s. Each input here is over 1 MB and
+  // would never finish within the timeout that way.
+  it.each([
+    ["opening tags that never close", "<Code>"],
+    ["opening tags that never end", "<Code "],
+    ["self-closing tags", "<Code />"],
+  ])(
+    "reads %s in linear time",
+    (_name, piece) => {
+      expect(xmlValue(piece.repeat(200_000), "Code")).toBeUndefined();
+    },
+    1000,
+  );
+
+  it("reads the block after an opening tag that never ends", () => {
+    expect(xmlBlocks("<Part <Part>1</Part><Part>2</Part>", "Part")).toEqual(["1", "2"]);
+  });
 });

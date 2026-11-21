@@ -1,4 +1,5 @@
 import { CloudropError, fail, ok, type Result } from "../../errors.ts";
+import { MiB } from "../../rules.ts";
 import { canonicalQuery, EMPTY_SHA256, sha256Hex, signRequest, UNSIGNED_PAYLOAD } from "../sigv4.ts";
 import { storageError } from "../storage-error.ts";
 import type { S3Context } from "./context.ts";
@@ -9,6 +10,8 @@ interface SendOptions {
   headers?: Record<string, string>;
   body?: Bytes | Blob;
   timeoutMs?: number;
+  /** The most bytes a successful answer may carry. The default is none: S3 answers a write or a delete without a body. */
+  maxBytes?: number;
 }
 
 const decoder = new TextDecoder();
@@ -16,6 +19,29 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 // A server-side copy of up to 5 GiB runs inside one request, and S3 documents that completing a multipart upload
 // "could take several minutes".
 export const SLOW_REQUEST_TIMEOUT_MS = 300_000;
+/**
+ * More than any listing or settings answer cloudrop asks for: 1,000 entries (MAX_LIST_PAGE), each a key of 1,024 bytes
+ * with every byte escaped to six characters and under 1 KiB of other fields, come to 7.2 MB.
+ */
+export const MAX_XML_BYTES: number = 8 * MiB;
+// An S3 error is a few hundred bytes and names its code first; a proxy's error page can be any size.
+const MAX_ERROR_BYTES = 4096;
+
+/** The body's first `limit` bytes, and whether it has more: the rest is cancelled, never read. */
+async function readBody(response: Response, limit: number): Promise<{ bytes: Bytes; more: boolean }> {
+  const reader = response.body?.getReader();
+  const chunks: Bytes[] = [];
+  let size = 0;
+  while (reader && size <= limit) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+  }
+  const more = size > limit;
+  if (more) reader?.cancel().catch(() => undefined);
+  return { bytes: new Uint8Array(await new Blob(chunks).slice(0, limit).arrayBuffer()), more };
+}
 
 // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID. The
 // quote can sit in a nested cause (an undici error wraps the socket error), which may be a plain object or an error from
@@ -46,7 +72,10 @@ function unreachable(cause: unknown, timeoutMs: number): CloudropError {
   );
 }
 
-/** Signs and sends one request and reads its whole body; every expected failure comes back as a Result. */
+/**
+ * Signs and sends one request and reads its body up to `maxBytes`; every expected failure comes back as a Result. A
+ * redirect is never followed: the request is signed for one host, and its headers and body are for that host only.
+ */
 export async function send(
   ctx: S3Context,
   method: string,
@@ -57,7 +86,7 @@ export async function send(
   const { http, now, credentials, region } = ctx;
   // Send exactly the query that is signed: URLSearchParams writes a space as "+", which a server may read literally.
   url.search = canonicalQuery(url.searchParams);
-  const { headers = {}, body, timeoutMs = REQUEST_TIMEOUT_MS } = options;
+  const { headers = {}, body, timeoutMs = REQUEST_TIMEOUT_MS, maxBytes = 0 } = options;
   const signedAt = now();
   const signed = await signRequest({
     method,
@@ -74,11 +103,15 @@ export async function send(
   // cannot break the signature.
   const sent = method === "HEAD" ? { ...signed, "accept-encoding": "identity" } : signed;
   try {
-    const response = await http(url, { method, headers: sent, body, signal: AbortSignal.timeout(timeoutMs) });
-    if (!response.ok) {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const response = await http(url, { method, headers: sent, body, signal, redirect: "manual" });
+    // A custom fetch may follow a redirect all the same; its first answer's status is gone, so 302 stands for it.
+    const status = response.redirected ? 302 : response.status;
+    if (!response.ok || response.redirected) {
       // NaN without a readable Date header, which storageError reads as no offset.
       const clockOffsetMs = Date.parse(response.headers.get("date") ?? "") - signedAt.getTime();
-      return fail(storageError(response.status, await response.text(), clockOffsetMs));
+      const { bytes } = await readBody(response, MAX_ERROR_BYTES);
+      return fail(storageError(status, decoder.decode(bytes), clockOffsetMs));
     }
     // A server that ignores Range answers 200 with the whole object; never read gigabytes for a 4 KiB sniff.
     if (headers.range !== undefined && response.status !== 206) {
@@ -91,7 +124,18 @@ export async function send(
         ),
       );
     }
-    return ok({ headers: response.headers, body: new Uint8Array(await response.arrayBuffer()) });
+    const { bytes, more } = await readBody(response, maxBytes);
+    if (more) {
+      // A page from a console port, an app's host or a captive portal, or a server that sends past the range asked for.
+      return fail(
+        new CloudropError(
+          "STORAGE_ERROR",
+          "The storage endpoint sent more data than an S3 answer holds. Check the endpoint setting.",
+          { status },
+        ),
+      );
+    }
+    return ok({ headers: response.headers, body: bytes });
   } catch (cause) {
     // Also covers a connection dropped or timed out while a body was read, and a Blob that could not be read.
     return fail(unreachable(cause, timeoutMs));
@@ -104,7 +148,7 @@ export async function sendForXml(
   url: URL,
   options?: SendOptions,
 ): Promise<Result<string>> {
-  const result = await send(ctx, method, url, options);
+  const result = await send(ctx, method, url, { ...options, maxBytes: MAX_XML_BYTES });
   if (result.error) return result;
   const text = decoder.decode(result.data.body);
   // CompleteMultipartUpload and CopyObject can answer HTTP 200 with an <Error> body. S3 documents it as a

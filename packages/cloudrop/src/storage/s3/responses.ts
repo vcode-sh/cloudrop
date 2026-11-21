@@ -3,6 +3,12 @@ import { stripQuotes, xmlValue } from "../xml.ts";
 
 export const etagIn = (xml: string): string => stripQuotes(xmlValue(xml, "ETag") ?? "");
 
+/** The ETag header without its quotes: "" when it is missing, or weak (`W/"…"`), which a web host sends and S3 never does. */
+export function etagOf(headers: Headers): string {
+  const etag = headers.get("etag") ?? "";
+  return etag.startsWith("W/") ? "" : stripQuotes(etag);
+}
+
 /** A 2xx response without a field cloudrop needs: a fault on the storage side, worth a retry. */
 export function incompleteResponse(missing: string): CloudropError {
   return new CloudropError("STORAGE_ERROR", `The storage service's response had no ${missing}. Retry the request.`, {
