@@ -140,8 +140,10 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   Postgres: the listing orders ids in byte order (`COLLATE "C"`), which an index in the database's own collation
   cannot serve, so the planner uses it exactly as it uses `(created_at)` and it is five times larger. The `COLLATE "C"`
   form does serve it and wins inside a large tie (0.02 against 0.92 ms for 5,000 files of one instant), but Prisma's
-  schema cannot declare a collation on an index column, so its users could not have it from their models, and a
-  tie is normally the files of one `/upload`, at most `maxFiles` of them. `(status, created_at)` helps only listings with a status
+  schema cannot declare a collation on an index column (checked for `M11-R71` against Prisma ORM 7's "Indexes" page:
+  a column of an index takes `length`, `sort` and `ops`, the index `map`, `type`, `clustered` and `where`), so its
+  users could not have it from their models, and a tie is normally the files of one `/upload`, at most `maxFiles` of
+  them. `(status, created_at)` helps only listings with a status
   (rare ones most) and leaves the listing without one at 33 ms; as a second index it would cost every upload two more
   index writes for an admin screen. On SQLite `(created_at, id)` is the better index only inside a large tie, at
   nearly twice the size; one definition for every adapter is worth more than that.

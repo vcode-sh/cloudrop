@@ -1537,3 +1537,18 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   10 ms of CPU per cron run was not measured against the signing of 45 requests, and the guide says so.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md#cloudflare-workers-with-d1-how-much-fits-in-one-run`.
+
+### M11-R71: Prisma's schema has no collation for an index column, as `M11-L5` assumed
+
+- **Decision:** `M11-L5` stands as written, with its source added: the `(created_at)` index is kept, and the
+  `(created_at, id COLLATE "C")` form stays something an app adds in its own migration.
+- **Why:** `M11-L5` chose partly on the belief that a Prisma model cannot declare that index. Checked against Prisma
+  ORM 7's documentation, [Indexes](https://www.prisma.io/docs/orm/prisma-schema/data-model/indexes), read
+  2026-11-21: an indexed column takes `length` (MySQL), `sort` and `ops` (an operator class, for GIN, GiST, SP-GiST
+  and BRIN indexes), and the index takes `map`, `type`, `clustered` and `where`; the page does not mention collation,
+  and says indexes over a function "are not yet supported". `ops: raw("text_pattern_ops")` is no way around it: that
+  operator class orders with its own operators, which `ORDER BY id COLLATE "C"` does not use. The belief was right.
+- **If wrong:** should Prisma add a collation argument, the choice still stands on size (3.4 MB against 17.1 MB) and
+  on one definition for every adapter.
+- **Status:** in force.
+- **Visible in:** `docs/decisions/m11-listing.md` (`M11-L5`).
