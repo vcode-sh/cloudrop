@@ -123,27 +123,22 @@ describe("retry with the file's ticket", () => {
     });
   });
 
-  it.each([
-    { name: "a live ticket", late: false, outcome: ["done", undefined] },
-    // The server's own verdict on the expired token; asking for a new one could store the file twice (M3-U30).
-    { name: "an expired ticket", late: true, outcome: ["failed", "UPLOAD_EXPIRED"] },
-  ])("sends /complete first when one may have succeeded, with $name", async (row) => {
-    vi.useFakeTimers({ toFake: ["Date"] });
+  // With an expired ticket too, whatever the clock says (M3-U30): retry-dead-ends.test.ts, "gives a ticket in doubt up".
+  it("sends /complete alone when one may have succeeded, and ends done with the file it finished", async () => {
     let dropping = true;
-    const { client, issued, from } = setup((call) =>
+    const { client, from } = setup((call) =>
       dropping && call.label === "POST /complete" ? lostAnswer(call) : undefined,
     );
     const job = client.start("files", fileOf(1000));
     const first = await job.done;
     dropping = false;
-    if (row.late) vi.setSystemTime(Date.parse(issued[0]?.expiresAt ?? "") + 1000);
     const sent = from();
     const outcome = await job.files[0]?.retry();
-    expect({
-      first: first.error?.code,
-      sent: sent(),
-      outcome: [outcome?.status, outcome?.status === "done" ? undefined : outcome?.error.code],
-    }).toEqual({ first: "NETWORK_ERROR", sent: ["POST /complete"], outcome: row.outcome });
+    expect({ first: first.error?.code, sent: sent(), outcome: outcome?.status }).toEqual({
+      first: "NETWORK_ERROR",
+      sent: ["POST /complete"],
+      outcome: "done",
+    });
   });
 });
 

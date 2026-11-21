@@ -1,6 +1,7 @@
 // Contract: M4-F4 and M11-R86. A cancel while /complete is in flight does not cut that request off: the file stays
 // `completing` until the server answers, then ends with the answer. A completion that succeeded ends the file `done`,
-// with its result and no /abort, whether abort() or the signal cancelled; one that failed ends it `aborted`.
+// with its result and no /abort; one that failed ends it `aborted`. The same through upload() and its signal:
+// upload-failures.test.ts ("upload, when it is cancelled").
 // Oracle: the statuses the page sees before and after the answer, the result, and the requests the fixture saw.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,18 +53,6 @@ describe("a cancel while /complete is in flight", () => {
         sent: ["POST /upload", "PUT object", "POST /complete"],
       },
     );
-  });
-
-  it("answers upload() with the file, not ABORTED, when the signal fired during a /complete that succeeded", async () => {
-    const { held, client } = setup();
-    const cancel = new AbortController();
-    const uploading = client.upload("files", file(), { signal: cancel.signal });
-    await held.reached;
-    cancel.abort();
-    held.open();
-    const { data, error } = await uploading;
-
-    expect([data?.file.size, error]).toEqual([1000, null]);
   });
 
   it("ends the file aborted once a /complete that failed has answered, without another attempt", async () => {
