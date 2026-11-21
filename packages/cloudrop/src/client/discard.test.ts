@@ -95,7 +95,7 @@ describe("discard(upload)", () => {
       call.label === "POST /complete" ? call.forward(call.init).then(() => new Promise<never>(() => {})) : undefined;
     const setup = persistFixture({ fault: answerLost });
     setup.client.start("files", threeParts());
-    await vi.waitFor(() => expect(setup.fixture.requests).toContain("POST /complete"));
+    await vi.waitFor(() => expect(setup.fixture.requests).toContain("POST /complete"), { interval: 1 });
     await setup.drained();
     const client = setup.reload();
     const [upload] = (await client.resumable()).data ?? [];

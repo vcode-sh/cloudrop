@@ -43,6 +43,7 @@ afterEach(() => {
 });
 
 describe("a resumed job sending its missing parts", () => {
+  // Over 250 ms in the full lane, about 130 ms alone: reloaded()'s 16 MiB (persist-fixture.ts), then part 3 twice.
   it("pauses and resumes: the paused PUT stops, and the next pass sends the parts left on their URLs (M4-F8)", async () => {
     const third = gate(nth("PUT part 3", 2));
     const setup = await reloaded(gate(partThree), third.fault);

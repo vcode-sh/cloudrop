@@ -24,8 +24,8 @@ afterEach(() => {
 });
 
 /**
- * Uploads three parts (8 MiB, 8 MiB, 5 bytes) while `failing` answers for the request it names, then retries the
- * failed file 14 minutes before its ticket expires, with nothing failing any more.
+ * Uploads two parts (8 MiB and 5 bytes) while `failing` answers for the request it names, then retries the failed file
+ * 14 minutes before its ticket expires, with nothing failing any more.
  */
 async function retryInLastMinutes(label: string, failing: () => Response) {
   const issued: { key: string; expiresAt: string }[] = [];
@@ -45,7 +45,7 @@ async function retryInLastMinutes(label: string, failing: () => Response) {
     },
   );
   const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
-  const job = client.start("files", new File([offsetBytes(16 * MiB + 5)], "a.bin"));
+  const job = client.start("files", new File([offsetBytes(8 * MiB + 5)], "a.bin"));
   const first = await job.done;
   failed = false;
   vi.setSystemTime(Date.parse(issued[0]?.expiresAt ?? "") - 14 * 60_000);
@@ -66,7 +66,7 @@ describe("retry() in a ticket's last 15 minutes (M9-H3)", () => {
     expect(result).toEqual({
       first: "STORAGE_ERROR",
       // The /abort gives the first ticket up, whose part 1 had landed (M11-R89).
-      sent: ["POST /abort", "POST /complete", "POST /upload", "PUT part 1", "PUT part 2", "PUT part 3"],
+      sent: ["POST /abort", "POST /complete", "POST /upload", "PUT part 1", "PUT part 2"],
       key: issued[1],
     });
   });

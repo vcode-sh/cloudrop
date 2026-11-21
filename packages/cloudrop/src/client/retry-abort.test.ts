@@ -237,11 +237,11 @@ describe("connectivity during a retry", () => {
     // more when online fires.
     put.release();
     a?.abort();
-    await vi.waitFor(() => expect(page.listening()).toEqual([]));
+    await vi.waitFor(() => expect(page.listening()).toEqual([]), { interval: 1 });
     page.fire("online");
     upload.release();
     // A file left paused would hold the retry for good: fail on the statuses instead of the test's timeout.
-    await vi.waitFor(() => expect(statuses(job)).toEqual(["aborted", "done", "done"]));
+    await vi.waitFor(() => expect(statuses(job)).toEqual(["aborted", "done", "done"]), { interval: 1 });
     const { data } = await retried;
     expect({ offline, retried: data?.files.map((file) => file.status) }).toEqual({
       offline: ["paused", "paused", "paused"],
@@ -265,7 +265,7 @@ describe("pagehide", () => {
     // a.bin fails, b.bin is done, c.bin uploads while the page hides.
     const job = client.start("files", [fileOf(1000, "a.bin"), fileOf(2000, "b.bin"), fileOf(3000, "c.bin")]);
     await put.reached;
-    await vi.waitFor(() => expect(statuses(job)).toEqual(["failed", "done", "uploading"]));
+    await vi.waitFor(() => expect(statuses(job)).toEqual(["failed", "done", "uploading"]), { interval: 1 });
     const whileHeld = page.listening();
     page.fire("pagehide");
     const aborts = [...seen.aborts];

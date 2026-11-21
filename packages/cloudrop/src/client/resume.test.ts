@@ -45,6 +45,7 @@ afterEach(() => {
 });
 
 describe("a resumed file asks /complete first", () => {
+  // Over 250 ms in the full lane, about 140 ms alone: reloaded()'s 16 MiB (persist-fixture.ts), then 8 MiB more.
   it("sends only parts 3 and 4, signed through /sign, after 2 of 4 parts landed before the reload (I6)", async () => {
     const signs = bodiesOf("POST /sign");
     const setup = await reloaded(gate(partThree), signs.fault);

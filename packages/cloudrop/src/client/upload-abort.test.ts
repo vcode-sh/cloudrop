@@ -191,7 +191,7 @@ describe("a /complete that was never sent", () => {
     const { fixture, seen, client } = unsentCompletes();
     const result = await run(client);
     // Either /abort is sent in the background: wait until it left, then until the server answered it.
-    await vi.waitFor(() => expect(fixture.requests).toContain("POST /abort"));
+    await vi.waitFor(() => expect(fixture.requests).toContain("POST /abort"), { interval: 1 });
     await seen.aborted;
     expect({
       error: errorOf(result),

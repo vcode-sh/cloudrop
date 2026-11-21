@@ -88,6 +88,8 @@ async function reloadedWithQuota(...faults: Fault[]) {
   return { ...page, client, upload, sent: page.from() };
 }
 
+// Each over 250 ms in the full lane, about 100 ms alone: 16 MiB before the reload, then the whole 24 MiB file again
+// under the new ticket, hashed and checksummed in process; no multipart file is smaller (parts of 8 MiB).
 describe("a resumed upload that starts over, for an owner whose quota fits the file once (M11-R90)", () => {
   it("gives the ticket that can no longer sign its missing parts up first (M9-H3)", async () => {
     const setup = await reloadedWithQuota();

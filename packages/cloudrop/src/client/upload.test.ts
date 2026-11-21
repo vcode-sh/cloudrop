@@ -203,6 +203,8 @@ describe("upload", () => {
     const threeParts = 16 * MiB + 1;
     const video = () => new File([offsetBytes(threeParts)], "video.bin");
 
+    // About 55 ms alone, near 250 ms in the full lane: 32 MiB in six parts. A smaller pair (a two-part file and a single
+    // PUT) passed with a pool one slot too large, since its short PUTs end before the third one starts.
     it.each([
       { name: "concurrency 2", concurrency: 2, most: 2 },
       { name: 'the default "auto", which starts at 4', concurrency: undefined, most: 4 },
@@ -214,7 +216,8 @@ describe("upload", () => {
 
     it.each([
       { name: "a 3-part file", bytes: threeParts, most: 3 },
-      { name: "a 9-part file", bytes: 8 * 8 * MiB + 1, most: 4 },
+      // One part more than the 4 a file may have in flight.
+      { name: "a 5-part file", bytes: 4 * 8 * MiB + 1, most: 4 },
     ])("keeps one file to 4 PUTs in flight under concurrency 16: $name", async ({ bytes, most }) => {
       const { seen, upload } = counting({ concurrency: 16 });
       const { error } = await upload(bytes);

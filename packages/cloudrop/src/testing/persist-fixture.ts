@@ -235,6 +235,7 @@ export const partThree: (call: FaultCall) => boolean = nth("PUT part 3", 1);
 /**
  * One PUT at a time, so the order of requests is fixed. The page before the reload starts a four-part file with
  * METADATA and is interrupted once `held` holds a call; the new client lists that upload.
+ * About 55 ms alone, several times that in the full lane: 16 MiB sent and checksummed in process, in parts of 8 MiB.
  */
 export async function reloaded(held: ReturnType<typeof gate>, ...faults: Fault[]) {
   const setup = persistFixture({ fault: firstOf(held.fault, ...faults), options: { concurrency: 1 } });
