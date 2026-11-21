@@ -2415,7 +2415,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   lasts longer than 15 minutes can check such a young file's key for the last time and still count the file as
   waiting; the next run reports `done`. The "Clock skew" paragraph of `docs/guide/store.md` still names only a clock that runs ahead; it was outside this
   change.
-- **Status:** in force.
+- **Status:** in force. The guide's "Clock skew" paragraph names the lagging clock since `M11-R223`.
 - **Visible in:** `src/server/erase.ts` (`lastReads`), `src/server/erase-clocks.test.ts`.
 
 ### M11-R220: a doctype ends where an XML parser ends it, and one still open after 4 KiB is XML
@@ -2526,3 +2526,24 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   of the table through the handler, stateless and with the memory store.
 - **Visible in:** `src/server/key.ts` (`keyForFile`), `src/server/upload-request.ts` (`prepareFile`),
   `src/server/upload-name-keys.test.ts`, `docs/guide/server.md`.
+
+### M11-R223: the store guide names the lagging clock and the `/complete` of an upload the bucket no longer has
+
+- **Decision:** two passages of `docs/guide/store.md` say what the code does. "Clock skew" (Known costs) now says
+  how `eraseOwner` tells an upload that began during a run (the time in its row, written by the server that took
+  the upload), what a clock that runs ahead does (delays `done`), what a lagging one does (its upload looks older
+  than the run), what a run does about it (the owner's newest file created up to `graceMs` before the run started
+  counts in `waiting`, `M11-R215`), and where that stops (clocks more than `graceMs` apart). "What changes for the
+  client" has a bullet for a `/complete` whose multipart upload the bucket no longer has (`M11-R200`): the answer
+  `NO_SUCH_UPLOAD`, the row `rejected`, its bytes released, `onAbort` with `"rejected"`, `UPLOAD_EXPIRED` for a later
+  `/complete`, and the two rows that are not ended (one whose finished object the bucket holds, one another request
+  is completing). No code changed.
+- **Why:** `M11-R215` left the paragraph naming only a clock that runs ahead ("it was outside this change"), and the
+  list of what `/complete` answers with a store had every refusal but the one `M11-R200` added. Each sentence was
+  read against `lastReads` (`src/server/erase.ts`), `uploadGone` (`src/server/complete-verify.ts`) and the three
+  cases of `src/server/store-complete-gone.test.ts`. The bullet says the upload was aborted "behind the server": an
+  `/abort`, the sweep and `revokeUploads` end the row first, and a `/complete` of an ended row answers
+  `UPLOAD_EXPIRED` without asking the bucket.
+- **If wrong:** none; the text follows the code and its tests.
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md` ("Known costs", "What changes for the client").

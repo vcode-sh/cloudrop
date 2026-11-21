@@ -806,6 +806,13 @@ the row deleted but not cleaned up.
 - **A second `/complete` of a file being completed** is answered busy: `SERVER_ERROR`, retryable, "Another request is
   completing this upload. Try again in a moment.", with `Retry-After: 2`. The client waits and asks again, and gets
   the stored answer. Busy is not logged as an error.
+- **A `/complete` of a multipart upload the bucket no longer has** (aborted behind the server: by the bucket's
+  lifecycle rule, or by someone with the bucket's credentials) answers `NO_SUCH_UPLOAD`, as without a store, and ends
+  the upload: its row becomes `rejected`, the bytes it reserved are free at once, and the plugins' `onAbort` runs
+  with `reason: "rejected"`. A later `/complete` with the same token answers `UPLOAD_EXPIRED`. Two rows are not ended:
+  when the bucket holds this upload's finished object (an earlier `/complete` stored it and recorded nothing), the
+  request completes the row; and a row another request is completing is answered busy and left alone until that
+  request's lease is over.
 - **`/abort`** of a completed file answers `ok` and deletes nothing. An unfinished upload is aborted and its object
   deleted as before.
 - **A refused file whose delete fails** (the object did not match what was declared, and the storage service did not
@@ -1160,9 +1167,14 @@ the store, a query being one statement or one batch:
   SQLite and D1 have no such statistics, so there the walk is fixed: a status or a route that very few files have
   reads most or all of them (22 to 72 ms at 300,000 files, and D1 bills the rows read). For frequent narrow searches
   over many files, keep a query and an index of your own, such as a trigram index on Postgres.
-- **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. A server whose
-  clock runs ahead can delay `eraseOwner`'s `done` by that much: a file it wrote looks newer than the run. Keep server
-  clocks in sync (NTP), as SigV4 signing already requires.
+- **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. `eraseOwner`
+  tells an upload that began during a run by the time in its row, which is the clock of the server that took the
+  upload, so skew reaches it both ways. A server whose clock runs ahead can delay `done` by that much: a file it
+  wrote looks newer than the run. A server whose clock lags gives an upload it takes during a run a time before the
+  run started; so a run counts the owner's newest file as begun during it when that file was created up to `graceMs`
+  before the run started, reports it in `waiting`, and answers `done: false` until a later run. Servers whose clocks
+  are more than `graceMs` apart (at least 15 minutes, 1 hour by default) can still hide such an upload from a run.
+  Keep server clocks in sync (NTP), as SigV4 signing already requires.
 - **Bundle size.** The store paths add about 6.7 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
   the browser bundle does not change.
 
