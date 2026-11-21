@@ -18,10 +18,16 @@ import { HTML, SCRIPT } from "./sniff-text.ts";
 export interface ContentCheckOptions {
   /**
    * Types let through the default refusals: web pages, programs, scripts, and XML or SVG on a route that does not name
-   * the type. The route's `accept` and the match between content and declared type still apply. Such as ["text/html"].
+   * the type. One name of a kind lets the kind through under all its names, such as ["text/html"] for web pages or
+   * ["application/x-msdownload"] for Windows programs. The route's `accept` and the match between content and
+   * declared type still apply.
    */
   allow?: readonly string[];
-  /** Types refused on every route, by declared type or by content; wins over `allow`. Such as ["application/zip"]. */
+  /**
+   * Types refused on every route, by declared type or by content; wins over `allow`. Such as ["application/zip"]. A
+   * container whose bytes do not say which of its types it is (WebM, MP4, Ogg, a ZIP that names no package) is the
+   * type it was sent as: ["video/*"] does not refuse a recording sent as audio/webm.
+   */
   deny?: readonly string[];
 }
 
