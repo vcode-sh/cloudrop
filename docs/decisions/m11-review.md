@@ -666,6 +666,27 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/cli/variables.test.ts`,
   `docs/guide/command.md#settings`.
 
+### M11-R115: the command and the origin rule repeat nothing that may be a secret
+
+- **Decision:** an argument the command does not know is repeated only when it is shaped like an option's name
+  (`--force`, up to its `=`) or a command's (letters and hyphens, at most 20). `NAME=value` after the command is named
+  by `NAME` when that is one of the ten settings ("CLOUDROP_SECRET is given as an argument…"), and any other argument
+  by its position ("Argument 4 is not an option…"). An `--env-file` that cannot be read is reported by its error code
+  alone, and by its number when there are several; a path is printed only once it was read as a file. `originProblem`
+  (the server's `trustedOrigins` and `checkBucket`, and `--origin`) does not repeat a value with an `@` in it: "An
+  origin holds no user name or password, so this one is not repeated here. Use https://app.example.com…". The tests'
+  leak check now covers values under 8 characters as whole words.
+- **Why:** the output goes to terminals, CI logs and, for the server's `INVALID_CONFIG`, application logs.
+  `doctor --origin X CLOUDROP_SECRET=<value>` printed the value in `Unknown option "…"`, `--env-file <value>` printed
+  it in `Cannot read <value> (ENOENT)`, and `--origin https://KEY:pw@host` and `trustedOrigins` printed the password.
+  The old leak check skipped values under 8 characters, so a short password was never looked for.
+- **If wrong:** an honest typo that is not shaped like a name (`doctor orig1n …`) is named by its position, which is
+  less direct. A word of letters typed as the command (`cloudrop hunter`) is still repeated. On Node a missing
+  `--env-file` never reaches the command: Node exits 9 and prints the path itself (`M9-H104`).
+- **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`.
+- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
+  `src/cli/command-fixture.ts`, `src/server/bucket-check.test.ts`, `docs/guide/command.md#settings`.
+
 ### M11-R117: a variable is read as an own property
 
 - **Decision:** the command reads the environment with `Object.hasOwn` and an env file's variables from a `Map`.

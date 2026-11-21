@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ORIGIN, run } from "./command-fixture.ts";
+import { ENV, ORIGIN, run } from "./command-fixture.ts";
 
 describe("cloudrop usage", () => {
   it.each([
@@ -49,7 +49,7 @@ describe("cloudrop usage", () => {
     {
       name: "an unknown option",
       argv: ["doctor", "--origin", ORIGIN, "--force"],
-      message: 'Unknown option "--force". Run cloudrop --help to see the options.',
+      message: 'Unknown option "--force". The options are listed below.',
     },
     { name: "an option without its value", argv: ["setup", "--origin"], message: "--origin needs a value." },
     {
@@ -96,19 +96,76 @@ describe("cloudrop usage", () => {
     ]);
   });
 
+  // The path is not repeated: text typed after --env-file by mistake may be a setting's value (M11-R115).
   it.each([
-    { code: "ENOENT", message: "Cannot read .env.local (ENOENT). Check the path.\n" },
-    { code: "EISDIR", message: "Cannot read .env.local (EISDIR). Name a file, not a directory.\n" },
-    { code: "EACCES", message: "Cannot read .env.local (EACCES). Check that you may read it.\n" },
-  ])(
-    "reports an --env-file it cannot read ($code) by its path and error code, with exit code 2",
-    async ({ code, message }) => {
-      const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env.local"], {
-        files: { ".env.local": { error: code } },
-      });
-      expect([result.code, result.stderr]).toEqual([2, message]);
+    { code: "ENOENT", message: "Cannot read the --env-file (ENOENT). Check its path.\n" },
+    { code: "EISDIR", message: "Cannot read the --env-file (EISDIR). Name a file, not a directory.\n" },
+    { code: "EACCES", message: "Cannot read the --env-file (EACCES). Check that you may read it.\n" },
+  ])("reports an --env-file it cannot read ($code) by its error code, with exit code 2", async ({ code, message }) => {
+    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ENV.CLOUDROP_SECRET], {
+      files: { [ENV.CLOUDROP_SECRET]: { error: code } },
+    });
+    expect([result.code, result.stderr]).toEqual([2, message]);
+  });
+
+  it("says which --env-file it cannot read when there are several", async () => {
+    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env", "--env-file", ".env.local"], {
+      files: { ".env": "" },
+    });
+    expect([result.code, result.stderr]).toEqual([2, "Cannot read --env-file number 2 (ENOENT). Check its path.\n"]);
+  });
+
+  // Each of these may hold a secret typed in the wrong place; `run` fails when a value of `env` reaches the output.
+  it.each([
+    {
+      name: "a setting given as an argument",
+      argv: ["doctor", "--origin", ORIGIN, `CLOUDROP_SECRET=${ENV.CLOUDROP_SECRET}`],
+      message:
+        'CLOUDROP_SECRET is given as an argument. The command reads settings from the environment or an --env-file, never from its arguments; what follows "=" is not repeated here.',
     },
-  );
+    {
+      name: "an argument that is no option",
+      argv: ["doctor", "--origin", ORIGIN, "hunter2"],
+      message:
+        "Argument 4 is not an option. It is not repeated here, in case it is a setting's value. The options are listed below.",
+    },
+    {
+      name: "a name=value that is no setting",
+      argv: ["doctor", "hunter2=hunter2", "--origin", ORIGIN],
+      message:
+        "Argument 2 is not an option. It is not repeated here, in case it is a setting's value. The options are listed below.",
+    },
+    {
+      name: "an unknown option with a value",
+      argv: ["doctor", "--origin", ORIGIN, "--password=hunter2"],
+      message: 'Unknown option "--password". The options are listed below.',
+    },
+    {
+      name: "a first argument that is no command's name",
+      argv: ["hunter2"],
+      message: "The first argument is not a command. Use doctor or setup.",
+    },
+    {
+      name: "an option before the command",
+      argv: ["--origin", ORIGIN, "doctor"],
+      message: "Name the command first, doctor or setup, then its options.",
+    },
+    {
+      name: "an origin with a user name and password",
+      argv: ["doctor", "--origin", "https://AKIDexample:hunter2@app.example.com"],
+      message:
+        "An origin holds no user name or password, so this one is not repeated here. Use https://app.example.com: an origin is the scheme, host and port, with no path.",
+    },
+    {
+      name: "an origin with a password that is no URL",
+      argv: ["doctor", "--origin", "//deploy:hunter2@app.example.com"],
+      message:
+        "An origin holds no user name or password, so this one is not repeated here. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.",
+    },
+  ])("does not repeat $name", async ({ argv, message }) => {
+    const result = await run(argv, { env: { ...ENV, DB_PASSWORD: "hunter2" } });
+    expect([result.code, result.stdout, result.stderr.split("\n")[0]]).toEqual([2, "", message]);
+  });
 
   it("accepts --name=value", async () => {
     const result = await run(["setup", `--origin=${ORIGIN}`, "--env-file=.env", "--jurisdiction=eu"], {

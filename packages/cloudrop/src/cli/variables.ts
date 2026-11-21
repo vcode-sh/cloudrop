@@ -22,9 +22,13 @@ interface FromFile {
 
 const note = (text: string): Finding => ({ status: "note", text });
 
+/** An error code as the file system writes one, such as ENOENT. */
+const ERROR_CODE = /^[A-Z][A-Z0-9_]*$/;
+
 /**
  * The files' variables, a later file's value replacing an earlier one's as with Node, or why a file cannot be read, by
- * its path and an error code only.
+ * an error code only. A path that cannot be read is not repeated: text typed after --env-file by mistake may be a
+ * setting's value (M11-R115).
  */
 function readEnvFiles(
   paths: readonly string[],
@@ -32,15 +36,16 @@ function readEnvFiles(
 ): { file: Map<string, FromFile>; notes: Finding[] } | { error: string } {
   const file = new Map<string, FromFile>();
   const notes: Finding[] = [];
-  for (const path of paths) {
+  for (const [index, path] of paths.entries()) {
     let text: string;
     try {
       text = readFile(path);
     } catch (error) {
       // Only the code: a message could quote the file.
       const code = (error as { code?: unknown } | null)?.code;
-      const known = typeof code === "string" ? code : "unknown error";
-      return { error: `Cannot read ${path} (${known}). ${READ_ADVICE.get(known) ?? "Check the path."}` };
+      const known = typeof code === "string" && ERROR_CODE.test(code) ? code : "unknown error";
+      const which = paths.length === 1 ? "the --env-file" : `--env-file number ${index + 1}`;
+      return { error: `Cannot read ${which} (${known}). ${READ_ADVICE.get(known) ?? "Check its path."}` };
     }
     const values = parseEnvFile(text);
     // Node keeps the mark in the name, so the variable the file means is never set.

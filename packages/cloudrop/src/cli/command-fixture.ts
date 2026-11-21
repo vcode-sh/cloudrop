@@ -108,6 +108,16 @@ export interface RunResult {
   lines: string[];
 }
 
+/**
+ * Whether `output` holds `value`. A value under 8 characters counts only as a word of its own: "auto" is not printed
+ * by "automatic".
+ */
+function prints(output: string, value: string): boolean {
+  if (value.length >= 8) return output.includes(value);
+  const literal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9])${literal}(?![A-Za-z0-9])`).test(output);
+}
+
 export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunOptions = {}): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -134,9 +144,9 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
   const texts = Object.values(files).filter((file) => typeof file === "string");
   const fromFiles = texts.flatMap((text) => [...parseEnvFile(text).values()]);
   const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
-    (value): value is string => typeof value === "string" && value.length >= 8,
+    (value): value is string => typeof value === "string" && value !== "",
   );
-  const leaked = values.filter((value) => stdout.includes(value) || stderr.includes(value));
+  const leaked = values.filter((value) => prints(stdout, value) || prints(stderr, value));
   if (leaked.length > 0) throw new Error(`The command printed a setting's value (${leaked.length} of them).`);
   return { code, stdout, stderr, lines: stdout.split("\n").slice(0, -1) };
 }

@@ -18,28 +18,44 @@ const PAGE_SCHEME = /^https?:/;
 
 const NOT_TEXT = 'pass a list of origins as text, such as ["https://app.example.com"].';
 
-/** What is wrong with `value` as an origin (M9-H100), or null when a browser can send it as a page's origin. */
-export function originProblem(value: unknown): string | null {
-  if (typeof value !== "string") return NOT_TEXT;
-  const shown = JSON.stringify(value);
+const EXAMPLE = "such as https://app.example.com.";
+
+/** What is wrong with `value` as an origin and what to write instead, or null when a page can have it. */
+function originFault(value: string): [wrong: string, fix: string] | null {
   // A browser never sends a pattern, so one matches no request (URL accepts "*" in a host).
   if (value.includes("*")) {
-    return `${shown} is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.`;
+    return ["is a pattern, not an origin.", `Name each origin your pages upload from, ${EXAMPLE}`];
   }
   // "null" is the origin of a URL without one (file:, data:, an app's own scheme) and of text that is no URL.
   const origin = URL.canParse(value) ? new URL(value).origin : "null";
   if (origin === "null") {
-    return APP_ORIGIN.test(value)
-      ? null
-      : `${shown} is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.`;
+    if (APP_ORIGIN.test(value)) return null;
+    return ["is not an origin.", `Write it in lowercase as scheme://host[:port] with no path, ${EXAMPLE}`];
   }
   if (!PAGE_SCHEME.test(origin)) {
-    return `${shown} is not a page's origin: a page is loaded over http or https, or over an app's own scheme. Name the origin of the page that uploads, such as https://app.example.com.`;
+    return [
+      "is not a page's origin: a page is loaded over http or https, or over an app's own scheme.",
+      `Name the origin of the page that uploads, ${EXAMPLE}`,
+    ];
   }
   // Naming the origin also corrects a host a browser sends differently: lowercase, and punycode for other scripts.
-  return origin === value
-    ? null
-    : `${shown} is not an origin. Use ${origin}: an origin is the scheme, host and port, with no path.`;
+  if (origin === value) return null;
+  return ["is not an origin.", `Use ${origin}: an origin is the scheme, host and port, with no path.`];
+}
+
+/**
+ * What is wrong with `value` as an origin (M9-H100), or null when a browser can send it as a page's origin. The
+ * message repeats the value unless it holds an "@": what stands before one may be a password, and the message goes to
+ * a terminal or a log (M11-R115).
+ */
+export function originProblem(value: unknown): string | null {
+  if (typeof value !== "string") return NOT_TEXT;
+  const fault = originFault(value);
+  if (!fault) return null;
+  const [wrong, fix] = fault;
+  return value.includes("@")
+    ? `An origin holds no user name or password, so this one is not repeated here. ${fix}`
+    : `${JSON.stringify(value)} ${wrong} ${fix}`;
 }
 
 /** Whether `origin` is text a browser can send as an origin, and so safe to echo in a log line or a report. */

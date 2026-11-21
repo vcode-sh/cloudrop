@@ -161,11 +161,12 @@ describe("api.checkBucket", () => {
       message:
         'checkBucket: "https://app.example.com\\r\\nx-forged: 1" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
     },
+    // What stands before "@" may be a password, and the message goes to a log: it is never repeated (M11-R115).
     {
       name: "an origin with credentials",
       options: { origins: ["https://user:secret@app.example.com"] },
       message:
-        'checkBucket: "https://user:secret@app.example.com" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+        "checkBucket: An origin holds no user name or password, so this one is not repeated here. Use https://app.example.com: an origin is the scheme, host and port, with no path.",
     },
     // A bucket rule may hold a pattern, but a page's origin never is one, so a check for it would match no page.
     {

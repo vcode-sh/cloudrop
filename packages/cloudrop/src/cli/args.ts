@@ -1,6 +1,7 @@
 // The command line of `cloudrop`: two commands, a handful of options, `--name value` or `--name=value`.
 
 import { originProblem } from "../server/origins.ts";
+import { SETTINGS } from "./names.ts";
 import { readVar } from "./vars.ts";
 
 export interface CommandOptions {
@@ -86,6 +87,8 @@ interface Arg {
   value: string | undefined;
   /** True for `--name=value`. */
   inline: boolean;
+  /** Its place on the command line, the command being 1. */
+  position: number;
 }
 
 /** `--name=value` and `--name value` each as one Arg. */
@@ -93,18 +96,41 @@ function splitArgs(args: readonly string[]): Arg[] {
   const split: Arg[] = [];
   for (let index = 0; index < args.length; index++) {
     const arg = args[index] ?? "";
+    const position = index + 2;
     const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
-    if (equals > 0) split.push({ name: arg.slice(0, equals), value: arg.slice(equals + 1), inline: true });
-    else split.push({ name: arg, value: VALUE_OPTIONS.has(arg) ? args[++index] : undefined, inline: false });
+    if (equals > 0) split.push({ name: arg.slice(0, equals), value: arg.slice(equals + 1), inline: true, position });
+    else split.push({ name: arg, value: VALUE_OPTIONS.has(arg) ? args[++index] : undefined, inline: false, position });
   }
   return split;
 }
 
-function readOption(options: CommandOptions, { name, value, inline }: Arg): string | null {
+// An argument the command does not know is repeated only when it is shaped like an option's or a command's name.
+// Anything else may be a setting's value typed in the wrong place, and the output may go to a log (M11-R115).
+const OPTION_NAME = /^--?[A-Za-z][A-Za-z-]*$/;
+const COMMAND_NAME = /^[A-Za-z][A-Za-z-]{0,19}$/;
+
+function unknownArgument({ name, position }: Arg): string {
+  if (OPTION_NAME.test(name)) return `Unknown option "${name}". The options are listed below.`;
+  const setting = name.slice(0, Math.max(name.indexOf("="), 0));
+  if (SETTINGS.includes(setting)) {
+    return `${setting} is given as an argument. The command reads settings from the environment or an --env-file, never from its arguments; what follows "=" is not repeated here.`;
+  }
+  return `Argument ${position} is not an option. It is not repeated here, in case it is a setting's value. The options are listed below.`;
+}
+
+function unknownCommand(command: string): string {
+  if (command.startsWith("-")) return "Name the command first, doctor or setup, then its options.";
+  return COMMAND_NAME.test(command)
+    ? `Unknown command "${command}". Use doctor or setup.`
+    : "The first argument is not a command. Use doctor or setup.";
+}
+
+function readOption(options: CommandOptions, arg: Arg): string | null {
+  const { name, value, inline } = arg;
   if (Object.hasOwn(SETUP_FLAGS, name)) {
     return setFlag(options, name as keyof typeof SETUP_FLAGS, inline ? value : undefined);
   }
-  if (!VALUE_OPTIONS.has(name)) return `Unknown option "${name}". Run cloudrop --help to see the options.`;
+  if (!VALUE_OPTIONS.has(name)) return unknownArgument(arg);
   return value ? setValue(options, name, value) : `${name} needs a value.`;
 }
 
@@ -124,7 +150,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   const [command, ...rest] = argv;
   if (command === undefined) return { help: false, error: "Name a command: doctor or setup." };
   if (command !== "doctor" && command !== "setup") {
-    return { help: false, error: `Unknown command "${command}". Use doctor or setup.` };
+    return { help: false, error: unknownCommand(command) };
   }
   const options: CommandOptions = {
     command,

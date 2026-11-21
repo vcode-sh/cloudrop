@@ -54,7 +54,11 @@ the setting it was probably meant to be, among the settings of the service its n
 `CLOUDROP_R2_REGION` get a note that R2 needs neither. When settings for R2 and S3 are both set, a `note` says that R2
 is checked and names the R2 variables to unset to check S3.
 
-The command never prints a setting's value, only the name of its variable. The commands it prints name the bucket as
+The command never prints a setting's value, only the name of its variable. It does not repeat what you typed in the
+wrong place either, since that may be a value: an argument it does not know is repeated only when it is shaped like an
+option's name (`CLOUDROP_SECRET=...` after the command is named up to its `=`, anything else by its position), an
+origin with a user name or password is refused without being repeated, and an `--env-file` it cannot read is reported
+by its error code, not its path. The commands it prints name the bucket as
 `"$CLOUDROP_R2_BUCKET"` (or `"$CLOUDROP_S3_BUCKET"`), so they work in a shell that has the variable set.
 
 ## Your own variable names
