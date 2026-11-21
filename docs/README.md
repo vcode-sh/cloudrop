@@ -20,6 +20,8 @@ For developers adding uploads to an app, in reading order:
 7. [Deployment](guide/deployment.md): same-origin and cross-origin setups, cookies, proxies, building without secrets,
    Cloudflare Workers.
 8. [Hono with better-auth and Drizzle](guide/hono.md): a complete app, step by step, with a Vite SPA on another origin.
+9. [Testing your app](guide/testing-your-app.md): `cloudrop/testing`, your routes, store and a whole upload in your
+   own tests, with no bucket, browser or network.
 
 When something goes wrong:
 

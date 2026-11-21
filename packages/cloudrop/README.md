@@ -82,6 +82,26 @@ erasure of a user's files (`api.eraseOwner`) and a sweep for abandoned uploads, 
 crash, a throw or a run longer than its lease; only its writes through `tx` on Postgres with `transaction: true` commit
 exactly once: [Database store](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#what-it-guarantees).
 
+## Testing your app
+
+`cloudrop/testing` runs your server and the real client in one process, in Vitest, Bun or `node:test`, with no bucket,
+browser or network:
+
+```ts
+import { createCloudrop } from "cloudrop";
+import { testBucket, testClient } from "cloudrop/testing";
+
+const bucket = testBucket();
+const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { avatar } });
+const client = testClient(cloudrop, { bucket, headers: { cookie: "session=alice" } });
+
+const { data, error } = await client.upload("avatar", new File([png], "me.png", { type: "image/png" }));
+expect(bucket.object(data!.file.key)?.size).toBe(png.byteLength);
+```
+
+`memoryStore()` stands in for a database store. Examples for `authorize`, metadata, quotas, `onComplete` and multipart
+files: [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/testing-your-app.md).
+
 ## Bucket setup
 
 The browser uploads to the bucket directly, so the bucket needs a CORS rule that allows `PUT` from your page's origin
@@ -98,6 +118,7 @@ Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudr
 [Database store](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md) ·
 [Deployment](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/deployment.md) ·
 [Resume after reload](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/resume.md) ·
+[Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/testing-your-app.md) ·
 [Hono guide](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/hono.md) ·
 [Errors](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/errors.md) ·
 [Troubleshooting](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/troubleshooting.md)

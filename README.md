@@ -197,6 +197,7 @@ failure never throws: `error.code` is for your code to branch on (`UNAUTHORIZED`
 | `cloudrop/adapters/sql` | `sqlStore` with node-postgres, postgres.js, `node:sqlite` and Cloudflare D1 executors |
 | `cloudrop/adapters/drizzle` | `drizzleStore` and the table definitions for Drizzle on Postgres and SQLite (drizzle-orm 0.45 or later) |
 | `cloudrop/adapters/prisma` | `prismaStore` for Prisma 7 |
+| `cloudrop/testing` | `testBucket`, `testClient` and `memoryStore`: your routes and a whole upload in your tests, with no bucket or browser |
 
 Hono, Bun, Deno and Cloudflare Workers need no adapter: `cloudrop.handler(request)` takes a `Request` and resolves to a
 `Response`.
@@ -264,6 +265,7 @@ Start at the [documentation index](docs/README.md). The guides:
 | [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies, proxies, building without secrets |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |
 | [Hono with better-auth and Drizzle](docs/guide/hono.md) | A Hono API and a Vite SPA on another origin, step by step |
+| [Testing your app](docs/guide/testing-your-app.md) | `cloudrop/testing`: test routes, quotas, `onComplete` and uploads without a bucket |
 | [Errors](docs/guide/errors.md) | Every error code, where it comes from and what to do |
 | [Troubleshooting](docs/guide/troubleshooting.md) | Symptoms and their usual causes |
 
