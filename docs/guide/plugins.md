@@ -115,7 +115,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
 | Word, Excel, PowerPoint | the Office Open XML types | a ZIP with an entry under `word/`, `xl/` or `ppt/` among the entries in the first 4 KiB | ECMA-376 Part 1 |
 | OpenDocument, EPUB | the type in the archive | a ZIP whose first entry `mimetype` names it | ODF 1.3 Part 2 §3.3; EPUB OCF 3.3 §4.2.1 |
-| Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0`, `NE`, `LE` or `LX` where the offset at `0x3C` points (past the first 4 KiB, a file long enough to hold it), or a DOS header with fewer than 512 bytes on its last page and a header of at least two paragraphs that fits in its pages | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
+| Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0`, `NE`, `LE` or `LX` where the offset at `0x3C` points (past the first 4 KiB, an offset under 151 MB in a file long enough to hold it), or a DOS header with fewer than 512 bytes on its last page and a header of at least two paragraphs that fits in its pages | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
 | Linux program | `application/x-executable` | `7F 45 4C 46` | System V ABI, ELF header |
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
 | Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/` | `execve(2)` |

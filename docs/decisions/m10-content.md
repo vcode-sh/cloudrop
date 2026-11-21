@@ -57,26 +57,26 @@ Entries continue from 1.
 ### M10-K3: web pages, programs and scripts are refused by default; XML needs its type named
 
 - **Decision:** refused whatever the route accepts: `text/html`, `application/xhtml+xml`, WHATWG's unknown types
-  (`unknown/unknown`, `application/unknown`), `multipart/x-mixed-replace`, the program types (`application/vnd.microsoft.portable-executable`,
-  `application/x-msdownload`, `application/x-msdos-program`, `application/x-dosexec`, `application/x-executable`,
-  `application/x-elf`, `application/x-sharedlib`, `application/x-mach-binary`, `application/x-mach-o-executable`,
-  and the Windows installer and HTML application types `application/x-msi`, `application/x-ms-installer`,
-  `application/hta`),
-  every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, the shell script types (`text/x-shellscript`,
-  `application/x-sh`, `application/x-shellscript`, `text/x-sh`) and `text/vbscript`. A Windows installer's content
-  (an OLE compound file) is not detected: Word and Excel files before 2007 share that container. Every XML type (`text/xml`, `application/xml`,
-  `text/xsl` and any `+xml`, SVG among them) passes only when the file was sent as an XML type that the route's
-  `accept` lists exactly. `allow` lifts these refusals per type; `deny` adds to them and wins over `allow`.
+  (`unknown/unknown`, `application/unknown`), `multipart/x-mixed-replace`, the program types
+  (`application/vnd.microsoft.portable-executable`, `application/x-msdownload`, `application/x-msdos-program`,
+  `application/x-dosexec`, `application/x-executable`, `application/x-elf`, `application/x-sharedlib`,
+  `application/x-mach-binary`, `application/x-mach-o-executable`, and the Windows installer and HTML application types
+  `application/x-msi`, `application/x-ms-installer`, `application/hta`), every JavaScript MIME type essence of WHATWG
+  MIME Sniffing §4.6, the shell script types (`text/x-shellscript`, `application/x-sh`, `application/x-shellscript`,
+  `text/x-sh`) and `text/vbscript`. A Windows installer's content (an OLE compound file) is not detected: Word and Excel
+  files before 2007 share that container. Every XML type (`text/xml`, `application/xml`, `text/xsl` and any `+xml`, SVG
+  among them) passes only when the file was sent as an XML type that the route's `accept` lists exactly. `allow` lifts
+  these refusals per type; `deny` adds to them and wins over `allow`.
 - **Why:** the design names HTML, executables, scripts and SVG. The SVG rule is widened to every XML type because a
   browser renders `text/xml`, `text/xsl` and `application/rss+xml` too, and an element in the SVG or XHTML namespace
   runs its scripts there; "named exactly" means `image/*` or `*/*` let no XML through by accident. A browser sniffs the
   unknown types (WHATWG §7) and may render the file as a page. A browser navigated to a `multipart/x-mixed-replace`
   response renders each body part as a document of the part's own type (HTML Standard §7.5.5, Loading
   `multipart/x-mixed-replace` documents; §17.2 names `text/html` parts as its security concern), and Firefox does
-  (review finding, 2026-11-21). An object cloudrop signs is stored with the type's essence only, without the
-  `boundary` parameter §17.2 requires, and a reviewer reading Firefox's `nsMultiMixedConv` found it refuses such a
-  response; the refusal is kept as defence in depth, for an app that serves stored files under a header of its own and
-  for any later change that keeps parameters. Nothing legitimate is uploaded as this type.
+  (review finding, 2026-11-21). An object cloudrop signs is stored with the type's essence only, without the `boundary`
+  parameter §17.2 requires, and a reviewer reading Firefox's `nsMultiMixedConv` found it refuses such a response; the
+  refusal is kept as defence in depth, for an app that serves stored files under a header of its own and for any later
+  change that keeps parameters. Nothing legitimate is uploaded as this type.
 - **If wrong:** a route that takes RSS or other XML on purpose lists the type in `accept`; one that takes HTML adds it
   to `allow` and `accept`.
 - **Status:** in force.
@@ -183,33 +183,37 @@ Entries continue from 1.
 
 ### M10-K10: `MZ` and `ID3` count only with the header they open
 
-- **Decision:** a file is a Windows or DOS program when it starts with `MZ`, is at least 28 bytes long, and either
-  (a) is at least 64 bytes long and `e_lfanew` (the 32-bit little-endian value at `0x3C`) points inside the bytes read
-  at `PE\0\0`, `NE`, `LE` or `LX`, or past the bytes read at an offset where four bytes still fit in the file, or
-  (b) its MS-DOS header describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a header of at
-  least two 16-byte paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4). `sniff`
-  takes the file's size for (a); `contentChecks()` passes the size the upload token signed. A file is an ID3-tagged
-  recording when it starts with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision is under
-  `FF`, the low four bits of its flags are clear, and each of the four size bytes is under `80`.
-- **Why:** two or three letters are text that people write: a CSV whose first cell is `MZ` (Mozambique's country
-  code) was refused as a program, and a note that starts "ID3 tags are" contradicted every text type (review finding,
-  2026-11-21). The rules come from the formats' own definitions. Microsoft's PE Format ("MS-DOS Stub" and
-  "Signature"): the offset at `0x3C` leads to `PE\0\0`, and `MZ` and that offset are all Windows' loader reads, so a
-  packed or hand-made program with zeroed DOS fields is found by (a), also when its header lies past the first 4 KiB;
-  `NE` (Microsoft's Executable-File Header Format) and `LE`/`LX` (IBM's Linear eXecutable Module Format) are the older
+- **Decision:** a file is a Windows or DOS program when it starts with `MZ`, is at least 28 bytes long, and either (a)
+  is at least 64 bytes long and `e_lfanew` (the 32-bit little-endian value at `0x3C`) points inside the bytes read at
+  `PE\0\0`, `NE`, `LE` or `LX`, or past the bytes read at an offset under `09 09 09 09` where four bytes still fit in
+  the file, or (b) its MS-DOS header describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a
+  header of at least two 16-byte paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4).
+  `sniff` takes the file's size for (a); `contentChecks()` passes the size the upload token signed. A file is an
+  ID3-tagged recording when it starts with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision
+  is under `FF`, the low four bits of its flags are clear, and each of the four size bytes is under `80`.
+- **Why:** two or three letters are text that people write: a CSV whose first cell is `MZ` (Mozambique's country code)
+  was refused as a program, and a note that starts "ID3 tags are" contradicted every text type (review finding,
+  2026-11-21). The rules come from the formats' own definitions. Microsoft's PE Format ("MS-DOS Stub" and "Signature"):
+  the offset at `0x3C` leads to `PE\0\0`, and `MZ` and that offset are all Windows' loader reads, so a packed or
+  hand-made program with zeroed DOS fields is found by (a), also when its header lies past the first 4 KiB; `NE`
+  (Microsoft's Executable-File Header Format) and `LE`/`LX` (IBM's Linear eXecutable Module Format) are the older
   headers the same offset leads to. The MS-DOS Encyclopedia, Article 4, for the `.EXE` header, whose last-page count is
   the image length modulo 512 and whose header size counts paragraphs, so (b) finds a DOS program and any program a
-  linker made. ID3v2.4.0 structure §3.1, whose detection pattern is `49 44 33 yy yy xx zz zz zz zz` with `yy` under
-  `FF` and `zz` under `80`; versions 2.2 to 2.4 define no flag in the low four bits. Text cannot form either header
-  inside the first 4 KiB: the last-page count under 512 needs a byte `00` or `01` at offset 3, a version byte of 2 to 4
-  is a control character, and four text bytes at `0x3C` read as an offset of at least `09 09 09 09`, 151 MB.
-- **If wrong:** a text file over 151 MB that starts with `MZ` and has four whitespace bytes at `0x3C` reads as a
-  program; none is known. A file under 28 bytes is not a program DOS can load and is not detected. A file with an ID3
-  header of a future version 5 is not read as MP3 and keeps only its declared type, which `/upload` judged.
-- **Status:** in force; `src/plugins/sniff.test.ts` holds a PE header as GNU ld and lld-link write it, a packed one,
-  an NE one, one past the first 4 KiB, a DOS program, ID3v2.2, v2.3 and v2.4 tags, and as near misses the CSV, the
-  prose, each DOS header field and each ID3 field broken alone, and both headers one byte short;
-  `src/plugins/content-checks.test.ts` refuses a program whose PE header lies past 4 KiB, which needs the file's size.
+  linker made. ID3v2.4.0 structure §3.1, whose detection pattern is `49 44 33 yy yy xx zz zz zz zz` with `yy` under `FF`
+  and `zz` under `80`; versions 2.2 to 2.4 define no flag in the low four bits. Text cannot form either header inside
+  the first 4 KiB: the last-page count under 512 needs a byte `00` or `01` at offset 3, a version byte of 2 to 4 is a
+  control character, and four text bytes at `0x3C` read as an offset of at least `09 09 09 09` (151 MB), which (a) never
+  takes past the bytes read, whatever the file's size; no DOS stub is that long.
+- **If wrong:** binary data that starts with `MZ` and happens to form either header reads as a program, as every `MZ`
+  file did before; no such format is known. A program whose header starts in the last three bytes read is judged by
+  those bytes, and one whose DOS fields are broken too is missed. A file under 28 bytes is not a program DOS can load
+  and is not detected. A file with an ID3 header of a future version 5 is not read as MP3 and keeps only its declared
+  type, which `/upload` judged.
+- **Status:** in force; `src/plugins/sniff.test.ts` holds a PE header as GNU ld and lld-link write it, a packed one, an
+  NE and an LX one, one past the first 4 KiB and one ending the file there, DOS programs, ID3v2.2, v2.3 and v2.4 tags,
+  and as near misses the CSV, the prose, a 3 GB log that starts with `MZ`, each DOS header field and each ID3 field
+  broken alone, and both headers one byte short; `src/plugins/content-checks.test.ts` refuses a program whose PE header
+  lies past 4 KiB, which needs the file's size.
 - **Visible in:** `src/plugins/sniff.ts`, `src/plugins/content-checks.ts`, `docs/guide/plugins.md`.
 
 ### M10-K11: a `#!` line naming a path stays refused, and once allowed agrees with any text type
