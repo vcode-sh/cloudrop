@@ -35,6 +35,11 @@ export interface Entry {
   readonly landed: Set<number>;
   /** The current ticket's upload, which a retry with the same ticket continues; null without a ticket. */
   upload: Upload | null;
+  /**
+   * The /upload ask that ended without a ticket for this file, shared by that ask's files: its key, until the next ask
+   * of one of them takes it (launch.ts, M11-R92). Null once an ask answered the file.
+   */
+  lostAsk: { key: string | null } | null;
   /** How the file first settled, which `done` reports whatever a retry does later (M3-U35). */
   firstOutcome: FileOutcome<unknown> | null;
   /** The file's current run, from its /upload or retry until it settles. */
@@ -59,6 +64,7 @@ export function createEntry(file: File, rank: number, changed: (urgent: boolean)
     networkPaused: false,
     landed: new Set(),
     upload: null,
+    lostAsk: null,
     firstOutcome: null,
     run: Promise.resolve(),
     changed,

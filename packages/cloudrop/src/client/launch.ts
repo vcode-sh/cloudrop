@@ -110,16 +110,24 @@ export async function launch(
   const signal = own ? own.cancel.signal : job.signal;
   let attempt = (first ?? 1) - 1;
   // One key per ask, shared by its retries: with a store, a retry after a lost answer supersedes what that answer held.
-  const key = newRequestKey();
+  // An ask that ended without a ticket leaves its key to the next ask of one of its files, whose /upload so frees what
+  // the lost answers reserved. That ask takes the key: a second one sending it would end the first one's live rows
+  // (M5-T101, M11-R92).
+  const lost = entries.find((entry) => entry.lostAsk?.key)?.lostAsk;
+  const key = lost?.key ?? newRequestKey();
+  if (lost) lost.key = null;
   const ask = (at: number) => {
     attempt = at;
     const start = () => context.endpoints.start(args.route, files, args.metadata, key, signal);
     // Without `after` the request leaves in this step, as before.
     return after ? after.then(start) : start();
   };
-  const started = (own ? askAlone(job, own, ask, () => attempt + 1, waitMs) : withRetry(ask, signal)).then((answer) =>
-    answer.error && signal.aborted ? fail(aborted()) : answer,
-  );
+  const started = (own ? askAlone(job, own, ask, () => attempt + 1, waitMs) : withRetry(ask, signal)).then((answer) => {
+    // Before any file settles: a listener that retries at once already finds the key.
+    const lostAsk = answer.error ? { key } : null;
+    for (const entry of entries) entry.lostAsk = lostAsk;
+    return answer.error && signal.aborted ? fail(aborted()) : answer;
+  });
   const whole = (first ?? 1) === 1 && entries.length === job.entries.length;
   entries.forEach((entry, index) => {
     entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole, attempt)).finally(job.idle);

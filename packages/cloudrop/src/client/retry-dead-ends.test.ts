@@ -3,7 +3,8 @@
 // new ticket; after /complete found no object (a proxy answered the PUT for the bucket), it sends the bytes again on
 // the same ticket; and once /complete has answered that a ticket in doubt is over, the next retry leaves it.
 // A retry that replaces a ticket gives the old one up first, as abort() of the failed file would (M11-R89), so what it
-// reserved or stored does not stand in the new upload's way.
+// reserved or stored does not stand in the new upload's way; a retry after an /upload that gave no ticket sends that
+// ask's idempotency key again, so the server frees what the lost answers reserved (M11-R92).
 // Oracle: the requests each retry sent and the objects and open uploads the fake bucket holds.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -181,30 +182,46 @@ describe("retry with a new ticket, after the bucket refused the file", () => {
     (call) =>
       call.label === label ? errorResponse(400, "BadRequest", "Refused.") : undefined;
 
-  it("frees what the first ticket reserved, so an owner near their quota can retry", async () => {
+  /** A client of the owner "u1": the 600-byte file takes 600 of their 1,000 bytes, so two reservations never fit. */
+  function nearQuota(fault: Fault) {
     const owned = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }, { owner: () => "u1" });
-    let failing = true;
+    const state = { failing: true };
     const fixture = clientFixture(
       { owned },
-      // 600 of the owner's 1,000 bytes: two reservations of this file never fit together.
-      {
-        store: memoryStore(),
-        quota: () => 1000,
-        fault: (call) => (failing ? refusedPut("PUT object")(call) : undefined),
-      },
+      { store: memoryStore(), quota: () => 1000, fault: (call) => (state.failing ? fault(call) : undefined) },
     );
     const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false });
-    const job = client.start("owned", bytes(600));
-    const first = await job.done;
-    failing = false;
-    const before = fixture.requests.length;
-    const outcome = await job.files[0]?.retry();
+    /** Starts the file, lets it fail, then retries it with the fault gone. */
+    const failThenRetry = async () => {
+      const job = client.start("owned", bytes(600));
+      const first = await job.done;
+      state.failing = false;
+      const before = fixture.requests.length;
+      const outcome = await job.files[0]?.retry();
+      return [first.error?.code, fixture.requests.slice(before), codeOf(outcome)];
+    };
+    return { failThenRetry };
+  }
 
-    expect([first.error?.code, fixture.requests.slice(before), codeOf(outcome)]).toEqual([
+  it("frees what the first ticket reserved, so an owner near their quota can retry", async () => {
+    const { failThenRetry } = nearQuota(refusedPut("PUT object"));
+
+    expect(await failThenRetry()).toEqual([
       "UPLOAD_REJECTED",
       ["POST /abort", "POST /upload", "PUT object", "POST /complete"],
       "done",
     ]);
+  });
+
+  it("frees what an /upload reserved whose every answer was lost: the retry sends that ask's key (M11-R92)", async () => {
+    // The server reserves the file on every attempt, and no answer reaches the page: it holds no ticket to give up.
+    const { failThenRetry } = nearQuota(async (call) => {
+      if (call.label !== "POST /upload") return undefined;
+      await call.forward(call.init);
+      throw new TypeError("Failed to fetch");
+    });
+
+    expect(await failThenRetry()).toEqual(["NETWORK_ERROR", ["POST /upload", "PUT object", "POST /complete"], "done"]);
   });
 
   it("aborts the first multipart upload, whose first part had landed", async () => {

@@ -1,5 +1,6 @@
 // Contract: every /upload ask carries an idempotencyKey of its own, and every automatic retry of that ask sends the
-// same one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request. A runtime
+// same one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request; an ask that
+// gave no ticket leaves its key to the first retry of one of its files, and to no other (M11-R92). A runtime
 // without crypto.getRandomValues (React Native's Hermes) still uploads, each ask with a key of its own in the shape the
 // server accepts (M11-R83). Oracle: the bodies of the /upload requests the fixture saw.
 
@@ -67,13 +68,14 @@ it("sends one key on every retry of an ask, and a new key when a refused file as
   expect(shape(keys)).toEqual(["a", "a", "b", "b"]);
 });
 
-it("sends one key through all six attempts, and retry() asks with a new one", async () => {
+it("sends one key through all six attempts and once more in the first retry of that ask's files (M11-R92)", async () => {
   const { keys, client } = setup(({ nth }) => (nth <= 6 ? storageBusy() : undefined));
   const job = client.start("files", [fileOf("a.bin"), fileOf("b.bin")]);
   expect((await job.done).error?.code).toBe("RATE_LIMITED");
-  const { data } = await job.retry();
-  expect(data?.files.map((file) => file.status)).toEqual(["done", "done"]);
-  expect(shape(keys)).toEqual(["a", "a", "a", "a", "a", "a", "b"]);
+  // Each file retried alone: the second must not send the key again, which would end the first one's pending row.
+  const outcomes = [await job.files[0]?.retry(), await job.files[1]?.retry()];
+  expect(outcomes.map((outcome) => outcome?.status)).toEqual(["done", "done"]);
+  expect(shape(keys)).toEqual(["a", "a", "a", "a", "a", "a", "a", "b"]);
 });
 
 it.each([

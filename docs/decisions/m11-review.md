@@ -1611,3 +1611,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M4-F1`: "a later `retry()`'s new ticket leaves its record in place" no longer holds.
 - **Visible in:** `src/client/retry-file.ts` (`giveUpReplaced`), `src/client/replaced-ticket.test.ts`,
   `src/client/persist.test.ts`, `docs/guide/client.md` ("Retry"), `docs/guide/resume.md` ("When a record is deleted").
+
+### M11-R92: the first retry after an `/upload` that gave no ticket sends that ask's key again
+
+- **Decision:** an `/upload` ask that ends with an error for the whole request leaves its idempotency key with its
+  files (`Entry.lostAsk`, one object shared by the ask's files). The next ask that includes one of them, a `retry()`
+  of one file or of the job, sends that key instead of a new one and takes it: no later ask sends it, unless that ask
+  ends without a ticket too. An ask that was answered, with tickets or with refusals per file, leaves no key.
+- **Why:** reproduced with a store and a quota of 1,000 bytes: the server reserved a 600-byte file on each of the six
+  attempts of an `/upload` whose answers never reached the page, each attempt ending the rows of the one before
+  (`M5-T100`); the file failed with `NETWORK_ERROR`, and every `retry()` was answered `QUOTA_EXCEEDED`, because it
+  asked with a new key and the last attempt's row was still pending. The page holds no ticket for that row, so it has
+  no `/abort` to send: the key is the only handle. `M5-T101` stated this cost and named the danger of the plain fix:
+  "one-file retries of one ask sharing its key would end each other's live rows". Taking the key rules that out. Until
+  an ask is answered nobody holds a ticket made under its key, so ending its pending rows ends nothing live; and once
+  one retry has taken the key, the ask's other files find it gone and ask with a new one, so no second request can end
+  the rows the first retry was given. A refusal the server answered for the whole request (`UNAUTHORIZED`,
+  `RATE_LIMITED`) reserved nothing, and its key ends nothing.
+- **If wrong:** a `job.retry()` over files of two asks that both gave no ticket sends one key, and the other ask's
+  rows wait for the sweep, as all of them did before. A first attempt the server is still working on when the retry
+  arrives writes its rows after the retry's, as `M5-T101` says of automatic retries. A custom store that ignores
+  `requestKey` keeps the old cost.
+- **Status:** in force. Amends `M5-T101` ("an ask whose every attempt lost its answer") and `M5-T102` ("the next
+  `launch()` makes a new one"), and the first row of `M11-R80`'s table: a retry frees the rows a lost answer left.
+  `docs/guide/store.md` ("Known costs") still describes the old cost.
+- **Visible in:** `src/client/launch.ts`, `src/client/entry.ts`, `src/client/launch.test.ts`,
+  `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Stalled requests").
