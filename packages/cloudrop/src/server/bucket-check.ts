@@ -4,6 +4,7 @@
 import { fail, ok, type Result } from "../errors.ts";
 import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
+import { answers, hidden, ruleLabel, UPLOAD_HEADERS, uploadAnswer } from "./bucket-cors.ts";
 import type { ServerConfig } from "./config.ts";
 
 export interface BucketCheck {
@@ -21,23 +22,36 @@ export interface BucketReport {
   publicAccess: BucketCheck;
 }
 
-/** The headers cloudrop's signed PUTs carry (spec §7.5); a preflight fails if the bucket's CORS rule omits one. */
-const UPLOAD_HEADERS = ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"];
+const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+const them = (headers: readonly string[]): string => (headers.length === 1 ? "it" : "them");
 
-/** S3 CORS patterns may hold one "*" wildcard, such as "https://*.example.com" or "x-amz-meta-*". */
-function matchesAny(patterns: readonly string[], value: string): boolean {
-  return patterns.some((pattern) => {
-    const [head = "", tail] = pattern.toLowerCase().split("*");
-    if (tail === undefined) return head === value;
-    return value.length >= head.length + tail.length && value.startsWith(head) && value.endsWith(tail);
-  });
+/** A rule that answers the PUT of some origins, by its place among the bucket's rules. */
+interface Answering {
+  rule: BucketCorsRule;
+  index: number;
+  origins: string[];
 }
 
-const allowsUploads = (rule: BucketCorsRule, origin: string): boolean =>
-  matchesAny(rule.allowedOrigins, origin) &&
-  rule.allowedMethods.includes("PUT") &&
-  UPLOAD_HEADERS.every((header) => matchesAny(rule.allowedHeaders, header)) &&
-  rule.exposeHeaders.some((header) => header.toLowerCase() === "etag");
+/**
+ * What an answering rule keeps from a page (`lacks`), and what to do. A later rule that would expose it is named: the
+ * service never gets to it.
+ */
+function hiding(rules: readonly BucketCorsRule[], { rule, index, origins }: Answering, lacks: string[]): string {
+  const cost = lacks.includes("ETag")
+    ? `so a page cannot read ${them(lacks)}`
+    : "so after a 429 or 503 a page cannot wait as long as the bucket asks";
+  const later = rules.findIndex(
+    (each, at) =>
+      at > index &&
+      hidden(each, lacks).length === 0 &&
+      origins.some((origin) => answers(each, { origin, method: "PUT" })),
+  );
+  const laterRule = rules[later];
+  const passedOver = laterRule
+    ? ` It stands before ${ruleLabel(laterRule, later)}, which exposes ${them(lacks)}: the storage service answers a request with the first rule that matches it, never a later one.`
+    : "";
+  return `${sentence(ruleLabel(rule, index))} answers uploads from ${origins.join(", ")} and does not expose ${lacks.join(" or ")}, ${cost}.${passedOver} Add ${lacks.join(" and ")} to its exposed headers, or put a rule that exposes ${them(lacks)} before it.`;
+}
 
 /** `origins` are exact origins (checked by the caller), so they are safe to echo. */
 function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[]): BucketCheck {
@@ -47,12 +61,29 @@ function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[])
       message: 'Name the origins your pages upload from: api.checkBucket({ origins: ["https://app.example.com"] }).',
     };
   }
-  const blocked = origins.filter((origin) => !rules.some((rule) => allowsUploads(rule, origin)));
-  if (blocked.length === 0)
-    return { status: "ok", message: `Browsers on ${origins.join(", ")} can upload and read ETag.` };
+  const blocked: string[] = [];
+  const answering = new Map<number, Answering>();
+  for (const origin of origins) {
+    const { allowed, index } = uploadAnswer(rules, origin);
+    const rule = rules[index];
+    if (!allowed || !rule) blocked.push(origin);
+    else answering.set(index, { rule, index, origins: [...(answering.get(index)?.origins ?? []), origin] });
+  }
+  const problems = blocked.length
+    ? [
+        `The bucket's CORS rules do not let ${blocked.join(", ")} upload. Add a rule that allows PUT from there with the headers ${UPLOAD_HEADERS.join(", ")} and exposes ETag.`,
+      ]
+    : [];
+  const advice: string[] = [];
+  for (const each of answering.values()) {
+    const lacks = hidden(each.rule);
+    if (lacks.length > 0) (lacks.includes("ETag") ? problems : advice).push(hiding(rules, each, lacks));
+  }
+  if (problems.length > 0) return { status: "problem", message: problems.join(" ") };
+  // Uploads work without Retry-After (bucket-setup.md), so a rule that hides only that is advice, never a problem.
   return {
-    status: "problem",
-    message: `The bucket's CORS rules do not let ${blocked.join(", ")} upload. Add a rule that allows PUT from there with the headers ${UPLOAD_HEADERS.join(", ")} and exposes ETag.`,
+    status: "ok",
+    message: [`Browsers on ${origins.join(", ")} can upload and read ETag.`, ...advice].join(" "),
   };
 }
 

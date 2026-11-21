@@ -61,6 +61,11 @@ export interface Bucket {
   writes: string[];
   cors(): Promise<BucketCorsRule[] | null>;
   lifecycle(): Promise<BucketLifecycleRule[] | null>;
+  /**
+   * What a page on `origin` gets when it sends a file as cloudrop's client does: the status of the preflight a browser
+   * sends first, then the PUT's status and the headers its answer exposes, both null when the preflight is refused.
+   */
+  upload(origin: string): Promise<{ preflight: number; put: number | null; exposed: string | null }>;
 }
 
 /** The fake R2 behind the settings in ENV. Without `bucketConfig` it answers as for an R2 object token. */
@@ -85,11 +90,33 @@ export function bucket(bucketConfig?: { cors?: string; lifecycle?: string }): Bu
     rules: R2_RULES,
     fetch: fake.fetch,
   });
+  let uploads = 0;
   return {
     fetch,
     writes,
     cors: async () => (await reader.getBucketCors()).data,
     lifecycle: async () => (await reader.getBucketLifecycle()).data,
+    async upload(origin) {
+      // The single PUT as the server signs it (presign.ts); a browser lists every one of its headers for image/png.
+      const signed = await reader.presignPut(`browser/${++uploads}.png`, {
+        type: "image/png",
+        disposition: 'attachment; filename="a.png"',
+        metadata: { "cloudrop-id": "fixture" },
+        ifNoneMatch: true,
+        size: 2,
+        expiresIn: 60,
+      });
+      if (signed.error) throw signed.error;
+      const { url, headers } = signed.data;
+      const asked = Object.keys(headers).sort().join(",");
+      const preflight = await fake.fetch(url, {
+        method: "OPTIONS",
+        headers: { origin, "access-control-request-method": "PUT", "access-control-request-headers": asked },
+      });
+      if (preflight.status !== 204) return { preflight: preflight.status, put: null, exposed: null };
+      const put = await fake.fetch(url, { method: "PUT", headers: { ...headers, origin }, body: "hi" });
+      return { preflight: 204, put: put.status, exposed: put.headers.get("access-control-expose-headers") };
+    },
   };
 }
 

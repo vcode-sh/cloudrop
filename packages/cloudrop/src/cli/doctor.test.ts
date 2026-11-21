@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../storage/driver.ts";
 import { bucket, ENV, ORIGIN, run } from "./command-fixture.ts";
 
-// A rule that lets ORIGIN upload, and R2's default 7-day multipart rule.
+// A rule that lets ORIGIN upload and read what the client reads, and R2's default 7-day multipart rule.
 const READY = {
-  cors: `<CORSConfiguration><CORSRule><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedHeader>content-type</AllowedHeader><AllowedHeader>content-disposition</AllowedHeader><AllowedHeader>if-none-match</AllowedHeader><AllowedHeader>x-amz-meta-cloudrop-id</AllowedHeader><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>`,
+  cors: `<CORSConfiguration><CORSRule><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedHeader>content-type</AllowedHeader><AllowedHeader>content-disposition</AllowedHeader><AllowedHeader>if-none-match</AllowedHeader><AllowedHeader>x-amz-meta-cloudrop-id</AllowedHeader><ExposeHeader>ETag</ExposeHeader><ExposeHeader>Retry-After</ExposeHeader></CORSRule></CORSConfiguration>`,
   lifecycle:
     "<LifecycleConfiguration><Rule><ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>",
 };

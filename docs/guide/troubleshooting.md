@@ -176,11 +176,27 @@ code 9, before any line of the command's own. **The file does not exist, or is a
 the same way when Node is installed, since it starts the command with Node; only Bun itself (`bunx --bun cloudrop`)
 runs the command, which then reports the file by its error code ([The cloudrop command](command.md#settings)).
 
+## ETag is not exposed, although the cloudrop rule is there
+
+`cloudrop doctor` or `checkBucket` reports that a rule "answers uploads from" your origin "and does not expose ETag",
+while the bucket holds `cloudrop-uploads` with `ETag` in its exposed headers. **An earlier rule answers in its place.**
+The storage service answers a request with the first CORS rule that matches it and never looks at a later one, so a
+rule for every origin (`*`) that allows `PUT` and stands first answers your uploads, with its own exposed headers.
+Uploads still work; the page cannot read `ETag` or `Retry-After`.
+
+- The finding names the rule that answers, by its ID or by its place (`rule 1 (no ID)`).
+- `npx cloudrop setup --origin <origin> --apply` moves `cloudrop-uploads` before that rule and keeps the others in
+  their order. `--dry-run` shows the move first.
+- By hand: list the rules, put cloudrop's rule before the one that answers, and set them again
+  ([When the bucket has other CORS rules](bucket-setup.md#when-the-bucket-has-other-cors-rules)).
+
 ## Retries after 429 come too fast
 
-R2 answers concurrent writes to one key with `429` and `Retry-After: 5`, but the client retries sooner. **The CORS rule
-does not expose `Retry-After`**, so the browser hides it and the client waits its own backoff alone. Add `Retry-After` to
-the rule's exposed headers. See [Why expose Retry-After](bucket-setup.md#why-expose-retry-after).
+R2 answers concurrent writes to one key with `429` and `Retry-After: 5`, but the client retries sooner. **The rule that
+answers the upload does not expose `Retry-After`**, so the browser hides it and the client waits its own backoff alone.
+That rule is the first one that allows `PUT` from your origin, which may not be cloudrop's:
+`npx cloudrop doctor --origin <origin>` names it. Add `Retry-After` to its exposed headers, or run
+`npx cloudrop setup --origin <origin> --apply`. See [Why expose Retry-After](bucket-setup.md#why-expose-retry-after).
 
 ## A dev server's first request logs bucket warnings
 

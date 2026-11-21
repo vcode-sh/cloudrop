@@ -1695,3 +1695,84 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/guide/errors.md` ("Upload endpoint errors", "Client errors"), `docs/guide/client.md`
   ("Retry").
+
+### M11-R170: `checkBucket` and `doctor` judge the CORS rule the service answers with
+
+- **Decision:** for each origin, `api.checkBucket` and `cloudrop doctor` find the rule that answers each request a
+  page sends when it uploads, as the service finds it: the first rule, in stored order, that matches the whole
+  request (`src/server/bucket-cors.ts`, shared by both). A rule matches on the origin, exactly as written or by a
+  pattern with one `*`; on the method; and, for a preflight, on every header it lists, by name without case or by
+  pattern. The requests are the preflight of a single `PUT` with `content-disposition`, `if-none-match`,
+  `x-amz-meta-cloudrop-id` and `content-type`, the same without `content-type` (a browser does not list it for a type
+  a form can send, such as `text/plain`), the preflight of a part's `PUT`, which lists no header, and the `PUT` itself,
+  matched on origin and method. A browser never lists `content-length`, and the server signs no checksum header into
+  either `PUT`, so none is matched. The check is `ok` when every preflight is answered and the rule that answers the
+  `PUT` exposes `ETag`. When that rule does not, the problem names it, by its ID or its place (`rule 1 (no ID)`), says
+  what it does not expose, and names the later rule that would have. A rule that answers the `PUT` without
+  `Retry-After` is named in an `ok` message, as advice. An exposed `*` counts as every header.
+- **Why:** both accepted the bucket when **any** rule allowed the upload (`rules.some(allowsUploads)`). Measured on R2
+  on 2026-11-21 (`docs/research/r2-spike-findings.md`, "Which CORS rule answers when several match"): the service
+  answers with the first rule that matches the whole request and with that rule alone, as S3 documents. Reproduced: a
+  bucket holding `origin *, GET PUT, headers *, nothing exposed` before `cloudrop-uploads` printed `ok CORS: Browsers
+  on https://app.example.com can upload and read ETag.`, while the first rule answers every `PUT` and exposes nothing.
+  The old sentence "do not let … upload" was also printed for a rule that only lacked `ETag`, which blocks no upload.
+  R2's documentation gives the origin rule ("Origin values without a wildcard must match the request's `Origin`
+  header exactly", one `*` that "can span periods"); the old check lowercased the rule's origin first.
+- **If wrong:** that the `PUT` itself is matched on origin and method alone is S3's documented rule, and R2's `GET`
+  in the measurement agrees with it; a `PUT` whose headers an earlier rule does not allow was not measured on R2. If
+  R2 passed such a rule over, the check would name a rule that does not answer. An `ok` message is now longer for a
+  bucket whose answering rule exposes `ETag` and not `Retry-After`; code that compares the whole message sees the
+  difference, the status is unchanged. R2's answer for an exposed `*` is unmeasured: the Fetch standard reads it as
+  every header for a request without credentials, which cloudrop's `PUT`s are.
+- **Status:** in force. Amends `M9-C2` (what the CORS check accepts).
+- **Visible in:** `src/server/bucket-cors.ts`, `src/server/bucket-cors.test.ts`, `src/server/bucket-check.ts`,
+  `src/server/bucket-check.test.ts`, `src/cli/setup-order.test.ts`, `docs/guide/bucket-setup.md`
+  ("When the bucket has other CORS rules", "What checkBucket can tell you"), `docs/guide/command.md#doctor`,
+  `docs/guide/troubleshooting.md`.
+
+### M11-R171: `setup` puts cloudrop's CORS rule before a rule that would answer in its place
+
+- **Decision:** `setup --apply` and `--dry-run` place `cloudrop-uploads` so that the service answers with it. A new
+  rule goes last and an existing one stays where it stands, unless an earlier rule allows `PUT` from one of the run's
+  origins without exposing `ETag` and `Retry-After`: then cloudrop's rule goes just before the first such rule, in the
+  same write that adds or grows it. Every other rule is written back as read and in its order. The finding says so:
+  `added rule "cloudrop-uploads" for <origin> before rule "legacy" and kept 1 other rule ("legacy"). The storage
+  service answers a request with the first rule that matches it, and rule "legacy" matches uploads from <origin>
+  without exposing ETag and Retry-After.`; an existing rule is `moved`. A rule without an ID is named by its place.
+  A rule for another origin, or one that answers uploads in full, stays in front. When the bucket's other rules
+  already answer every request cloudrop's rule exists for (each `PUT` preflight, the `PUT` with both headers exposed,
+  `GET` and `HEAD`), nothing is added and the finding names the rule that does it. A second run changes nothing.
+  `--replace` writes cloudrop's rule alone, so no order arises. The by-hand instructions say where the rule goes.
+- **Why:** `setup --apply` appended its rule after the bucket's others, and after the first-match measurement of
+  `M11-R170` an appended rule behind `origin *, PUT` never answers: `doctor` then reported a problem that `setup`
+  could not fix. Placing it before the first rule that answers in its place, not at the top, leaves every rule that
+  answers something else in front of it untouched. The test sends a browser's preflight and `PUT` to the fake R2
+  (`M11-R172`) after each run and reads the exposed headers of the answer.
+- **If wrong:** from the run's origins, cloudrop's rule now answers `GET` and `HEAD` too in place of the rule it went
+  before, so a page that read a header only that rule exposed, or sent a header only that rule allowed, loses it; the
+  guide says so, and the remedy is to add them to `cloudrop-uploads`, which `setup` never trims. A service that drops
+  rule IDs gets a second copy if the first is later shadowed, since `setup` cannot tell which rule to move. An origin
+  left out of a later run is not looked at: only the origins passed decide the place.
+- **Status:** in force. Amends `M9-C6` (cloudrop's rule may move; no other rule does).
+- **Visible in:** `src/cli/rules.ts` (`place`, `serving`, `mergeCors`), `src/cli/setup.ts`, `src/cli/instructions.ts`,
+  `src/cli/setup-order.test.ts`, `docs/guide/command.md#setup`, `docs/guide/bucket-setup.md`.
+
+### M11-R172: the fake R2 answers preflights and CORS headers as measured
+
+- **Decision:** `createFakeR2` with `bucketConfig.cors` answers an `OPTIONS` request from its stored rules: `204` with
+  the answering rule's methods and max age, the headers asked for and the origin (`*` for a rule that allows every
+  origin), or `403` without a CORS header when no rule matches. A request that passes its signature check and names
+  an `Origin` gets `access-control-allow-origin` and the rule's exposed headers; one refused for its signature gets
+  none. The answering rule is the first that matches. The code (`src/testing/fake-r2/cors.ts`) shares nothing with
+  `src/server/bucket-cors.ts`.
+- **Why:** the fake answered `OPTIONS` with a signature error and never sent a CORS header, so no test could show what
+  a browser gets from a configuration `setup` wrote. Each answer is a measured one: the four stored orders of
+  `docs/research/r2-spike-findings.md` ("Which CORS rule answers when several match") are the fake's test, with the
+  `204` and `403` shapes of the browser sections and the refused URL without CORS headers (U2, R1). Two
+  implementations, so a browser-like request against the fake checks the command against the measurement.
+- **If wrong:** a test that sends an `Origin` to the fake of `cloudrop/testing` now gets CORS headers when its
+  `bucketConfig.cors` has a matching rule. The body of R2's `403` to a preflight no rule matches was read only on a
+  bucket without rules; `vary: Origin` is not modelled.
+- **Status:** in force.
+- **Visible in:** `src/testing/fake-r2/cors.ts`, `src/testing/fake-r2/cors.test.ts`, `src/testing/fake-r2.ts`,
+  `src/cli/command-fixture.ts` (`upload`).

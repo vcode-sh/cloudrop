@@ -8,9 +8,17 @@ import type { S3Driver } from "../storage/s3-driver.ts";
 import type { CommandOptions } from "./args.ts";
 import { reachBucket } from "./bucket-access.ts";
 import { cloudropCommand, type Runner } from "./commands.ts";
-import type { Service, Settings } from "./names.ts";
+import { listed, type Service, type Settings } from "./names.ts";
 import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
-import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
+import {
+  ABORT_DAYS,
+  corsRule,
+  LIFECYCLE_RULE,
+  type Merged,
+  mergeCors,
+  mergeLifecycle,
+  type Placement,
+} from "./rules.ts";
 import type { StorageSettings } from "./settings.ts";
 
 /** What setup does to one setting, once its current rules are read and cloudrop's merged in. */
@@ -27,6 +35,8 @@ interface Step {
   reason?: string;
   /** What cloudrop's rule gains, for an update. */
   added?: string;
+  /** The rule cloudrop's rule goes before, when another would answer its uploads in its place, and why. */
+  placement?: Placement;
   write(): Promise<Result<void>>;
 }
 
@@ -76,7 +86,7 @@ function plan<Rule extends { id?: string }>(
     return { status: "problem", text: unreadable(label, read.error, replace, service) };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
-  const { change, kept, reason, added } = merged;
+  const { change, kept, reason, added, placement } = merged;
   return {
     label,
     ruleId: ours.id,
@@ -86,22 +96,31 @@ function plan<Rule extends { id?: string }>(
     replacing: read.error !== null,
     reason,
     added,
+    placement,
     write: () => setting.write(merged.rules),
   };
 }
 
+/** What a step does, each as the words after "would" or as a past tense: "add rule …", "moved it before …". */
+function changes(step: Step, dryRun: boolean): string[] {
+  const { ruleId, describe, kept, added, placement } = step;
+  const [add, move, keep] = dryRun ? ["add", "move", "keep"] : ["added", "moved", "kept"];
+  const before = placement ? ` before ${placement.before}` : "";
+  const done = step.change === "update" ? [] : [`${add} rule "${ruleId}" ${describe}${before}`];
+  if (added) done.push(`${add} ${added} to rule "${ruleId}"`);
+  if (step.change === "update" && before) done.push(`${move} ${added ? "it" : `rule "${ruleId}"`}${before}`);
+  if (kept.length > 0) done.push(`${keep} ${plural(kept.length, "other rule")} (${ruleNames(kept)})`);
+  return done;
+}
+
 function describeChange(step: Step, dryRun: boolean): string {
-  const { label, ruleId, describe, kept } = step;
+  const { label, ruleId, describe } = step;
   if (step.replacing) {
     const verb = dryRun ? "would replace" : "replaced";
     return `${label}: ${verb} every rule with "${ruleId}" ${describe} (--replace: the current rules could not be read).`;
   }
-  const keeps =
-    kept.length > 0 ? ` and ${dryRun ? "keep" : "kept"} ${plural(kept.length, "other rule")} (${ruleNames(kept)})` : "";
-  if (step.change === "update") {
-    return `${label}: ${dryRun ? "would add" : "added"} ${step.added} to rule "${ruleId}"${keeps}.`;
-  }
-  return `${label}: ${dryRun ? "would add" : "added"} rule "${ruleId}" ${describe}${keeps}.`;
+  const why = step.placement ? ` ${step.placement.why}` : "";
+  return `${label}: ${dryRun ? "would " : ""}${listed(changes(step, dryRun))}.${why}`;
 }
 
 async function carryOut(step: Step, dryRun: boolean): Promise<Finding> {

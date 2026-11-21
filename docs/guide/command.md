@@ -134,7 +134,11 @@ setting's own cloudrop name.
    the service cannot be reached, the keys, the bucket and `--jurisdiction` when it refuses them, the region (S3) when
    it answers that the bucket is in another one, and the endpoint when the answer is not a storage service's at all
    (a redirect, or a `404` that names no missing bucket: a proxy, or an endpoint with a wrong path);
-4. the bucket's CORS rule for each `--origin` and its lifecycle rule, as `cloudrop.api.checkBucket` does.
+4. the bucket's CORS rules for each `--origin` and its lifecycle rule, as `cloudrop.api.checkBucket` does. The CORS
+   check judges the rule the storage service answers with: the first one that matches a request, never a later one
+   ([When the bucket has other CORS rules](bucket-setup.md#when-the-bucket-has-other-cors-rules)). When an earlier
+   rule answers uploads in place of cloudrop's and does not expose `ETag`, the finding is a `PROBLEM` that names that
+   rule, by its ID or by its place (`rule 1 (no ID)`), and `setup --apply` fixes it.
 
 Each line is one finding: `ok`, `PROBLEM` with what to do, `NOT CHECKED` with how to check by hand, or a `note`. The
 last line sums them up. Against an R2 bucket with an Object Read & Write token it prints:
@@ -169,7 +173,8 @@ of [Bucket setup](bucket-setup.md): `PUT`, `GET` and `HEAD` from your origins wi
 `ETag` and `Retry-After` exposed, and an abort of incomplete multipart uploads after 1 day across the bucket.
 
 Setting CORS with Wrangler or the AWS CLI replaces every rule the bucket has. List the current rules first and add the
-ones you keep to the file, or use `--apply`: the output ends with that command, ready to run.
+ones you keep to the file, with cloudrop's rule before any that also allows `PUT` from your origins (the output says
+so), or use `--apply`: the output ends with that command, ready to run.
 
 With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and `PutBucketLifecycleConfiguration`):
 
@@ -177,8 +182,15 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   CORS, `cloudrop-abort-incomplete` for lifecycle. Every other rule is written back as it was read, a lifecycle rule's
   expirations, transitions and filters included, and so is the bucket's transition default on AWS.
 - **It only adds.** When `cloudrop-uploads` exists, it gains what it lacks (an origin you pass, a method or header
-  cloudrop needs) where it stands; origins, headers and the max age already on it stay. To remove an origin, edit the
-  rule by hand.
+  cloudrop needs); origins, headers and the max age already on it stay. To remove an origin, edit the rule by hand.
+- **It puts its CORS rule where the service answers with it.** The service answers a request with the first rule that
+  matches it. A new `cloudrop-uploads` goes last, and an existing one stays where it stands, unless an earlier rule
+  allows `PUT` from one of your origins without exposing `ETag` and `Retry-After`: then cloudrop's rule goes just
+  before the first such rule, and the output names that rule and says why. The other rules keep their order. From
+  those origins cloudrop's rule then answers `GET` and `HEAD` too, in place of the rule it went before. A rule for
+  another origin, or one that answers uploads in full, stays in front.
+- When the bucket's other rules already answer everything `cloudrop-uploads` would for your origins (every `PUT`
+  with `ETag` and `Retry-After` exposed, and `GET` and `HEAD`), no rule is added.
 - When another enabled rule already aborts incomplete multipart uploads across the bucket (R2 creates one by default),
   the lifecycle rules are left as they are. When `cloudrop-abort-incomplete` exists but no longer does that (someone
   disabled it or gave it a prefix), `setup` leaves the lifecycle rules alone, still writes the CORS rule, and reports
@@ -196,8 +208,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   it, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
   comments or namespace prefixes): check that bucket's rules by hand.
 
-`--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add or update
-and which rules it would keep, and ends with the command that writes. `--apply` ends with the `doctor` command that
+`--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add, update or
+move before another, and which rules it would keep, and ends with the command that writes. `--apply` ends with the `doctor` command that
 checks the result; R2 can take up to 30 seconds to apply a change.
 
 Wrangler's local R2 cannot read or write bucket settings (it answers `501`), and needs no CORS rule.

@@ -22,6 +22,7 @@ the page. With the page and the API on different origins, see [Deployment](deplo
 | The four headers cloudrop signs, in the rule's allowed headers | `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`. A preflight fails if one is missing. |
 | `ETag` in the exposed headers | Only `checkBucket` needs it: its CORS check reports a problem without it. The client never reads `ETag`; the server gets part ETags from the bucket when it completes an upload. |
 | `Retry-After` in the exposed headers (recommended) | Lets the client wait as long as the bucket asks after a `429` or `503`. |
+| That rule before any other rule that allows `PUT` from your origin | The service answers with the first rule that matches, never a later one: see [When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules). |
 | A lifecycle rule that aborts incomplete multipart uploads | Parts of an upload that never finished are removed instead of staying stored. |
 
 Add your production origin and, for development, your local origin such as `http://localhost:5173`. `GET` and `HEAD`
@@ -34,16 +35,46 @@ A browser hides every answer header the CORS rule does not expose. With `Retry-A
 its own backoff alone: a random wait up to 0.5 s, then 1 s, 2 s and so on. R2 answers concurrent writes to one key with
 `429` and `Retry-After: 5`, which a page cannot read when the rule omits it (measured 2026-11-16,
 [findings](../research/r2-spike-findings.md#bad-checksum-gone-upload-and-throttling-from-a-browser-2026-11-16)).
-Uploads work without it, and `checkBucket` does not ask for it.
+Uploads work without it, so `checkBucket` reports `ok` either way; it names the rule that answers uploads without
+exposing it, as advice.
 
 ### Checksum headers
 
 If you add a checksum header to uploads, such as `x-amz-checksum-crc32c`, add it to the allowed headers too. A rule that
 misses any header a `PUT` carries blocks that `PUT`.
 
+### When the bucket has other CORS rules
+
+The storage service answers each request with **the first rule, in stored order, that matches all of it**, and with
+that rule alone. Rules are never merged, and a later rule is never looked at. R2 does this (measured 2026-11-21,
+[findings](../research/r2-spike-findings.md#which-cors-rule-answers-when-several-match-2026-11-21)) and S3 documents
+the same. A rule matches when it allows:
+
+- the page's origin, written exactly as the browser sends it, or by a pattern with one `*` (`https://*.example.com`,
+  or `*` for every origin);
+- the method;
+- for a preflight, every header the preflight lists, by name without case or by a pattern such as `x-amz-meta-*`.
+
+What a page sends when it uploads with cloudrop:
+
+| Request | What the rule is matched on |
+| --- | --- |
+| Preflight of a single `PUT` | The origin, `PUT`, and `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id` and `content-type`. A browser leaves `content-type` out of the list for a type a form can send, such as `text/plain`, and never lists `content-length`. |
+| Preflight of a part's `PUT` | The origin and `PUT`. A part carries no header. |
+| The `PUT` itself | The origin and `PUT`. The answer's exposed headers come from this rule. |
+
+So a rule that stands before cloudrop's and allows `PUT` from your origin, such as an old rule for every origin
+(`*`), answers the `PUT` in its place. Uploads still work, but the page gets that rule's exposed headers: without
+`ETag` and `Retry-After` there, `checkBucket` reports a problem and retries after a `429` come too fast, whatever
+cloudrop's rule says. **Put cloudrop's rule before any rule that also allows `PUT` from your origins.**
+`cloudrop setup --apply` does that; in a file you write by hand, the order of the rules is the order they are tried in.
+
+cloudrop's server signs no checksum header into an upload, so none is matched here.
+
 ## Set the CORS rule on R2
 
-Setting CORS replaces the bucket's whole policy. Read the current rules first and keep any you still need (or let
+Setting CORS replaces the bucket's whole policy. Read the current rules first and keep any you still need, with
+cloudrop's rule [before any that also allows `PUT` from your origins](#when-the-bucket-has-other-cors-rules) (or let
 `cloudrop setup --apply` merge them):
 
 ```bash
@@ -149,7 +180,8 @@ aws s3api get-bucket-cors --bucket <bucket> --endpoint-url "$ENDPOINT"
 aws s3api get-bucket-lifecycle-configuration --bucket <bucket> --endpoint-url "$ENDPOINT"
 ```
 
-Both commands replace the bucket's whole CORS or lifecycle configuration, so merge in any rules it already has. The
+Both commands replace the bucket's whole CORS or lifecycle configuration, so merge in any rules it already has, with
+cloudrop's CORS rule [before any that also allows `PUT` from your origins](#when-the-bucket-has-other-cors-rules). The
 credentials need permission to change bucket settings, which upload credentials often lack. Use an admin key for this
 step, not the key you give cloudrop. These commands were checked against RustFS, with `checkBucket` reporting both rules
 `ok` afterwards.
@@ -205,13 +237,19 @@ const { data: report, error } = await cloudrop.api.checkBucket({ origins: ["http
 
 | Check | `ok` when | Reported `unknown` when |
 | --- | --- | --- |
-| `cors` | Every origin may `PUT` with the four signed headers, and `ETag` is exposed. | The credentials may not read CORS (R2 object tokens), the storage cannot report it (Wrangler's local R2 answers `501`), or no origin was given. |
+| `cors` | For every origin, a rule answers each preflight of cloudrop's `PUT`s, and the rule that answers the `PUT` itself exposes `ETag`. | The credentials may not read CORS (R2 object tokens), the storage cannot report it (Wrangler's local R2 answers `501`), or no origin was given. |
 | `lifecycle` | An enabled rule for the whole bucket aborts incomplete multipart uploads. | The credentials may not read lifecycle rules, or the storage cannot report them. Origins do not matter here. |
 | `publicAccess` | No private route stores files on a bucket with a `publicUrl`. | Never: this check reads only your configuration. |
 
+It judges the rule the service answers with, the first that matches
+([When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules)), not any rule that would do. When an
+earlier rule answers uploads and does not expose `ETag`, the problem names that rule, by its ID or its place among the
+rules, and the rule after it that would have exposed it. A rule that answers uploads without exposing `Retry-After` is
+named too, as advice: the check stays `ok`, since uploads work without it.
+
 What it does not check:
 
-- `Retry-After` in the exposed headers;
+- `GET` and `HEAD` from your pages;
 - checksum headers you add;
 - what an R2 admin read token would show: R2's answers to one have not been measured yet.
 

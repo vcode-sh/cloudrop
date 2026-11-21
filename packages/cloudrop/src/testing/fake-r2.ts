@@ -6,6 +6,7 @@ import type { FetchLike } from "../storage/driver.ts";
 import type { Credentials } from "../storage/sigv4.ts";
 import { type Bytes, type FakeBucket, type FakeRequest, objectId, type StoredObject } from "./fake-r2/bucket.ts";
 import { bucketConfig, copy, putBucketConfig } from "./fake-r2/copy.ts";
+import { corsHeaders, preflight } from "./fake-r2/cors.ts";
 import { abortUpload, completeUpload, createUpload, listParts, uploadPart } from "./fake-r2/multipart.ts";
 import { deleteObject, getObject, listObjects, putObject } from "./fake-r2/objects.ts";
 import { errorResponse } from "./fake-r2/responses.ts";
@@ -18,7 +19,9 @@ export interface FakeR2Options {
   /**
    * The CORS and lifecycle XML the bucket serves; a missing entry answers 404 as a bucket without that configuration.
    * Without this option, both reads answer 403 AccessDenied, as they do for an R2 object token (spike Q8), and so do
-   * both writes. A write replaces the fake's copy of the entry, never the object passed here.
+   * both writes. A write replaces the fake's copy of the entry, never the object passed here. The CORS XML also
+   * answers a browser: a preflight (OPTIONS) and the CORS headers of a request that names an Origin come from its
+   * first rule that matches, as on R2.
    */
   bucketConfig?: { cors?: string; lifecycle?: string };
 }
@@ -90,8 +93,11 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     if (decodeURIComponent(bucketSegment) !== bucket.name) {
       return errorResponse(404, "NoSuchBucket", "The specified bucket does not exist.");
     }
+    // A browser signs no preflight, so it is answered from the CORS rules alone.
+    if (request.method === "OPTIONS") return preflight(bucket, request);
     const key = keySegments.map(decodeURIComponent).join("/");
     const body: Bytes = new Uint8Array(await request.arrayBuffer());
+    // R2 sends a request it refuses for its signature or its expiry without CORS headers (spike U2, R1).
     const denied = await verifySignature(bucket, request, url, body);
     if (denied) return denied;
 
@@ -103,8 +109,11 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
       body,
     };
     const matched = ROUTES.find((candidate) => candidate.matches(verified));
-    if (matched) return matched.run(bucket, verified);
-    return errorResponse(501, "NotImplemented", `${request.method} is not implemented by the fake.`);
+    const answer = matched
+      ? await matched.run(bucket, verified)
+      : errorResponse(501, "NotImplemented", `${request.method} is not implemented by the fake.`);
+    for (const [name, value] of Object.entries(corsHeaders(bucket, request))) answer.headers.set(name, value);
+    return answer;
   }
 
   return {
