@@ -18,7 +18,7 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   most often wrong ("Every upload ends in NETWORK_ERROR"), and `setup` has nothing to write, so it is required rather
   than reported as not checked. Plain columns stay readable in CI logs, where the command is most useful.
 - **If wrong:** a user who wants only the settings checked must still pass an origin; the cost is one flag.
-- **Status:** in force.
+- **Status:** amended by `M9-H100` (a pattern is refused, the exact origin named).
 - **Visible in:** `packages/cloudrop/src/cli/args.ts`, `src/cli/report.ts`, `src/cli/run.ts`, `docs/guide/command.md`.
 
 ### M9-C2: what `doctor` checks, and what counts as a problem
@@ -38,7 +38,7 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **If wrong:** an app that passes its settings in code gets problems for variables it does not use; the guide says so.
   `doctor` writes nothing, so a read-only token passes it although it cannot upload; the guide says so too (review
   finding, 2026-11-21).
-- **Status:** in force.
+- **Status:** amended by `M9-H101` (a bucket that does not answer names the settings to check).
 - **Visible in:** `src/cli/doctor.ts`, `src/cli/settings.ts`, `src/server/bucket-check.ts`.
 
 ### M9-C3: what R2 documents for the two writes, and the checksum sent
@@ -104,7 +104,7 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   list. Its test runs `doctor` against a bucket name the fake does not hold.
 - **If wrong:** credentials that may read objects but not list them would be reported as refused; cloudrop's
   `deletePrefix` needs listing anyway (`bucket-setup.md`).
-- **Status:** in force.
+- **Status:** amended by `M9-H101` and `M9-H102` (setup lists the bucket too).
 - **Visible in:** `src/cli/doctor.ts`.
 
 ### M9-C6: `setup --apply` merges by rule ID and never writes over rules it could not read
@@ -127,7 +127,7 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   `bucket-setup.md` advises), was silently removed, so the rule now only grows.
 - **If wrong:** the rules can change between the read and the write; S3 has no conditional write for them. R2's answer
   to a reader allowed to see the rules is unmeasured, including whether it keeps IDs.
-- **Status:** in force.
+- **Status:** amended by `M9-H102` (a refused read is diagnosed by a listing; `--replace` offered only where it acts).
 - **Visible in:** `src/cli/rules.ts`, `src/cli/setup.ts`, `docs/guide/command.md`.
 
 ### M9-C7: cloudrop's rules, and no second abort rule
@@ -166,7 +166,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   setting's value reached its output, including values that came from an env file. A rule ID read from the bucket is
   printed with its control characters escaped, so it cannot drive the terminal or split a finding.
 - **If wrong:** a shell without the variables set needs the bucket name typed into the printed command by hand.
-- **Status:** in force. Checked against the live bucket on 2026-11-21: no value of the env file in `doctor`'s or
+- **Status:** amended by `M9-H103` (notes for near-miss names) and `M9-H104` (advice for an unreadable file; Node's
+  exit 9). Checked against the live bucket on 2026-11-21: no value of the env file in `doctor`'s or
   `setup --dry-run`'s output.
 - **Visible in:** `src/cli/settings.ts`, `src/cli/env-file.ts`, `src/storage/presets.ts`, `src/cli/command-fixture.ts`.
 

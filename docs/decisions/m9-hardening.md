@@ -12,7 +12,7 @@
   would have written, an origin no browser sends. The trailing slash and upper case are the usual copy-paste mistakes,
   and the generic message did not say which part was wrong.
 - **If wrong:** none known; S3's single-`*` origins can still be written by hand.
-- **Status:** in force.
+- **Status:** in force; amends `M9-C1`.
 - **Visible in:** `packages/cloudrop/src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
 
 ### M9-H101: a bucket that does not answer names the settings to check
@@ -22,8 +22,9 @@
   `CLOUDROP_R2_ACCOUNT_ID` (and `--jurisdiction`), for S3 it is `CLOUDROP_S3_ENDPOINT`. Refused with 401, or 403 other
   than `RequestTimeTooSkewed` and `ExpiredRequest`: "The storage service refused these credentials (HTTP n)", then the
   two key variables, the bucket variable, and for R2 the jurisdiction (a hint to pass `--jurisdiction`, or the one
-  given); for S3 `CLOUDROP_S3_REGION`. Any other failure keeps the storage's message, such as "The bucket does not
-  exist."
+  given); for S3 `CLOUDROP_S3_REGION`. For S3, `AuthorizationHeaderMalformed` and `PermanentRedirect` read "The bucket
+  is in another region", naming `CLOUDROP_S3_REGION` and `CLOUDROP_S3_ENDPOINT`. Any other failure keeps the storage's
+  message, such as "The bucket does not exist."
 - **Why:** measured against `vstack-dev` with an object token on 2026-11-21: a wrong account ID printed "Could not reach
   the storage service. Check the endpoint and the network connection" after "R2 settings are present and valid", and R2
   has no endpoint setting; an unknown access key ID got R2's `401`, which the storage maps to "Check the key, size and
@@ -31,41 +32,48 @@
   access key, its permissions and the bucket name" without a variable. A token scoped to one bucket gets `403`, not
   `NoSuchBucket`, for a bucket name it does not cover, so the hint keeps the bucket in the list.
 - **If wrong:** the storage's own messages for `401` and `403` are the server's and driver's; the command's wording
-  replaces them only in its own output.
-- **Status:** in force. The storage's mapping of `401` to a generic `STORAGE_ERROR` is reported to the storage layer's
-  owner, not changed here.
+  replaces them only in its own output. The two region codes are AWS's documented answers, not measured here; another
+  service that answers a wrong region otherwise gets the storage's message.
+- **Status:** in force; amends `M9-C2` and `M9-C5`. The storage's mapping of `401` to a generic `STORAGE_ERROR` is
+  reported to the storage layer's owner, not changed here.
 - **Visible in:** `src/cli/bucket-access.ts`, `src/cli/doctor.test.ts`, `docs/guide/command.md`.
 
 ### M9-H102: setup lists the bucket before blaming the token, and offers --replace only where it acts
 
 - **Decision:** `setup --apply` and `--dry-run` list the bucket as `doctor` does, beside their reads of the current
-  rules, and use the listing only when a read failed. A failed listing is reported as the one problem (`M9-H101`), since wrong keys, a wrong bucket or no network
-  also fail the reads, and `--replace` could not help. A listing that succeeds means the credentials may not read
-  bucket settings: "these credentials may not read the bucket's CORS rules (R2 object tokens cannot)", with an R2
-  Admin Read & Write token as the way on, and `--replace` as the alternative. A read that failed for another reason
-  (a `5xx`) no longer mentions `--replace`, which would not act on it; a `501` names it beside "Use a service that
-  supports it". A failed listing with readable rules changes nothing: the writes need no list permission. Running it
-  beside the reads keeps an unreachable endpoint at one timeout (10 s), not two (21 s measured when it ran after).
+  rules, and use the listing only when a read failed. A failed listing is reported as the one problem (`M9-H101`),
+  since wrong keys, a wrong bucket or no network also fail the reads, and `--replace` could not help. A listing that
+  succeeds after a refused read means the credentials may not read bucket settings: for R2 "these credentials may not
+  read the bucket's CORS rules (R2 object tokens cannot)" with an R2 Admin Read & Write token as the way on, for S3 the
+  setting's two permissions (`s3:GetBucketCORS` and `s3:PutBucketCORS`, or `s3:GetLifecycleConfiguration` and
+  `s3:PutLifecycleConfiguration`), and `--replace` as the alternative. Any other failed read, a `501` included, no
+  longer mentions `--replace`: Wrangler's local R2, the one `501` measured, refuses the writes too (`M9-C4`). A failed
+  listing with readable rules changes nothing: the writes need no list permission. Running it beside the reads keeps
+  an unreachable endpoint at one timeout (10 s), not two (21 s measured when it ran after).
 - **Why:** measured on 2026-11-21: with the object token, a wrong bucket, a wrong secret and an unroutable endpoint,
   `setup --dry-run` printed "The storage service refused the request. Check the access key ... or pass --replace to
   replace the rules with cloudrop's alone" for all four, inviting a destructive flag that could not have helped.
 - **If wrong:** credentials that may read bucket settings but not list objects get the read's own message; that is the
   previous behaviour.
-- **Status:** in force.
+- **Status:** in force; amends `M9-C6`.
 - **Visible in:** `src/cli/setup.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md`.
 
 ### M9-H103: a near-miss setting name gets a note; so do settings for two services
 
 - **Decision:** every `CLOUDROP_*` name in the environment or the env file that is not a setting, but is one in another
   case or at most two edits from a setting that is not set, gets
-  `note  CLOUDROP_R2_BUCKT is not a cloudrop setting. Did you mean CLOUDROP_R2_BUCKET?` (names only, never values).
+  `note  CLOUDROP_R2_BUCKT is not a cloudrop setting. Did you mean CLOUDROP_R2_BUCKET?` (names only, never values). A
+  name that starts with `CLOUDROP_R2_` or `CLOUDROP_S3_` is compared with that service's settings only;
+  `CLOUDROP_R2_ENDPOINT` and `CLOUDROP_R2_REGION` get "R2's endpoint is built from CLOUDROP_R2_ACCOUNT_ID." and "R2
+  needs no region." instead.
   When `CLOUDROP_R2_*` and `CLOUDROP_S3_*` settings are both set, a note says R2 is checked.
 - **Why:** measured on 2026-11-21: a misspelt `CLOUDROP_R2_BUCKT` gave only "CLOUDROP_R2_BUCKET is not set", and
   lower-case names gave "No storage settings found", with the right values sitting in the file. With both services
-  set, `doctor` checked R2 silently while an app using `s3()` uses the others.
+  set, `doctor` checked R2 silently while an app using `s3()` uses the others. The review found that, compared with
+  every setting, `CLOUDROP_R2_ENDPOINT` was answered "Did you mean CLOUDROP_S3_ENDPOINT?", advice that changes nothing.
 - **If wrong:** an app's own `CLOUDROP_*` variable two edits from a setting gets a needless note; notes never change the
   exit code.
-- **Status:** in force.
+- **Status:** in force; amends `M9-C8`.
 - **Visible in:** `src/cli/settings.ts`, `src/cli/doctor.test.ts`, `docs/guide/command.md`.
 
 ### M9-H104: an unreadable --env-file says what to do per error; Node's own exit 9 is documented, not worked around
@@ -81,8 +89,9 @@
   way, and a shebang with Node flags (`env -S node --`) is not portable to npm's Windows shims.
 - **If wrong:** a later Node that stops scanning script arguments makes the guide's note stale; the command's own
   message then shows instead.
-- **Status:** in force.
-- **Visible in:** `src/cli/settings.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`, `docs/guide/troubleshooting.md`.
+- **Status:** in force; amends `M9-C8`.
+- **Visible in:** `src/cli/settings.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`,
+  `docs/guide/troubleshooting.md`.
 
 ### M9-H105: testClient through the app's own mount is a supported use
 
@@ -95,7 +104,7 @@
   keeps the route types, and a mount at another path fails the upload.
 - **If wrong:** a `Cloudrop` that gains members `testClient` reads must keep them through a spread; it is a plain
   object today.
-- **Status:** in force.
+- **Status:** in force; amends `M9-T4`.
 - **Visible in:** `src/testing.guide.test.ts`, `docs/guide/testing-your-app.md` ("Through your app's mount").
 
 ### M9-H106: cloudrop/testing under node:test and bun test, measured

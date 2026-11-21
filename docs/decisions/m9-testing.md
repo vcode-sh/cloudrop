@@ -67,7 +67,7 @@ Entries continue from `M9-T1`.
 - **If wrong:** an app that serves the API from another origin cannot test its `trustedOrigins` here; it would need an
   origin option. The app's own mounting (route file, framework adapter, body-parsing middleware) does not run either;
   the guide lists both among the differences.
-- **Status:** in force.
+- **Status:** amended by `M9-H105` (testing through the app's own mount is supported).
 - **Visible in:** `packages/cloudrop/src/testing.ts`, `docs/guide/testing-your-app.md`.
 
 ### M9-T5: bucket `PUT`s through `fetch`, no persistence, no modelled cancellation
