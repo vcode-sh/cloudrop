@@ -2900,3 +2900,30 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; test code only.
 - **Status:** in force.
 - **Visible in:** `src/server/api.test.ts`, `src/server/complete-multipart.test.ts`.
+
+### M11-R245: every api call reads its options argument by one rule
+
+- **Decision:** `optionsOf` (`src/input.ts`) reads the options argument of every `api.*` call that can do without
+  one: null and undefined are no options, a plain object is the options, and anything else is `INVALID_INPUT` with
+  that call's own message. Two calls change. `api.allFiles(null)` lists as `api.allFiles()` does; it was refused.
+  `api.put(key, body, options)` refuses options that are not a plain object with "put options must be an object,
+  such as { type: "text/plain" }."; it stored the object and ignored them. `api.files` and `api.revokeUploads` need
+  their options (`owner`), so null and undefined are refused there with the same message as any other value.
+- **Why:** probed on the memory store before the change, each call with null, undefined, `[]`, `"x"` and `5`:
+
+  | Call | null | undefined | `[]`, `"x"`, `5` |
+  | --- | --- | --- | --- |
+  | `allFiles` | `INVALID_INPUT` | answers | `INVALID_INPUT` |
+  | `sweep`, `eraseOwner`, `reconcile`, `deleteFile`, `getUrl`, `checkBucket` | answers as without options | answers | `INVALID_INPUT`, the call's own message |
+  | `put` | stores | stores | stores, the options ignored |
+  | `files`, `revokeUploads` (options required) | `INVALID_INPUT` | `INVALID_INPUT` | `INVALID_INPUT` |
+
+  A value that comes out of JSON or a database as null reached six calls as "no options" and one as an error, and
+  `api.put(key, body, "image/png")` from plain JavaScript stored the object without its type and said nothing, the
+  mistake `getUrl` already refuses for `getUrl(key, 3600)`. One function holds the rule, so a new call cannot read it
+  another way.
+- **If wrong:** a caller that passed `api.put` options of another shape and relied on them being ignored gets
+  `INVALID_INPUT` and nothing stored. 0.5.0 ignored them too; its types never allowed the call.
+- **Status:** in force.
+- **Visible in:** `src/input.ts`, `src/server/api.ts`, `src/server/all-files.ts`, `src/server/store-api.ts`,
+  `src/server/erase.ts`, `src/server/sweep-options.ts`, `src/server/api-options.test.ts`.

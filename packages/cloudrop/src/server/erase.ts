@@ -3,7 +3,7 @@
 // Each run is idempotent; run it again until it reports done.
 
 import { fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
+import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
 import { badOwner, isOwnerOrId } from "./owner-files.ts";
@@ -84,8 +84,8 @@ const EVERY: readonly FileStatus[] = [...LIVE, ...ENDED];
 const UNFILTERED = { route: null, name: null, type: null, order: "newest" } as const;
 
 function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSignal | undefined; context: unknown }> {
-  const options = given ?? {};
-  if (!isPlainObject(options)) return fail(invalidInput("eraseOwner takes options such as { graceMs: 3600000 }."));
+  const options = optionsOf(given);
+  if (!options) return fail(invalidInput("eraseOwner takes options such as { graceMs: 3600000 }."));
   const { signal } = options;
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     return fail(invalidInput("signal must be an AbortSignal, such as AbortSignal.timeout(60_000)."));

@@ -2,7 +2,7 @@
 // store each one answers INVALID_CONFIG.
 
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
+import { invalidInput, isPlainObject, optionsOf } from "../input.ts";
 import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
 import type { ServerConfig } from "./config.ts";
 import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
@@ -79,8 +79,8 @@ async function deleteFile(
   id: string,
   given: unknown,
 ): Promise<Result<DeletedFile>> {
-  const options = given ?? {};
-  if (!isPlainObject(options)) return fail(invalidInput("deleteFile takes the file id and optionally { context }."));
+  const options = optionsOf(given);
+  if (!options) return fail(invalidInput("deleteFile takes the file id and optionally { context }."));
   const ended = await deleteCompleted(config, store, id, { reason: "deleted", context: options.context });
   // Also onDelete's refusal: the error as the hook returned it, without the mark deleteCompleted answers it with.
   if (ended.error) return fail(ended.error);
@@ -97,8 +97,8 @@ async function reconcile(
   store: CloudropStore<unknown>,
   given: unknown,
 ): Promise<Result<{ checked: number; repaired: number }>> {
-  const options = given ?? {};
-  if (!isPlainObject(options)) return fail(invalidInput("reconcile takes { owner } or nothing."));
+  const options = optionsOf(given);
+  if (!options) return fail(invalidInput("reconcile takes { owner } or nothing."));
   const repair = (owner: string) => storeCall(config.logger, `reconcile owner ${owner}`, () => store.reconcile(owner));
   if (options.owner !== undefined) {
     if (!isOwnerOrId(options.owner)) return badOwner();

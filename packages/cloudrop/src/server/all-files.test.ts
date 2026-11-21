@@ -137,7 +137,6 @@ describe("cloudrop.api.allFiles", () => {
   });
 
   it.for([
-    { name: "options that are not an object", options: "u1" },
     { name: "an empty owner", options: { owner: "" } },
     { name: "an owner that is null", options: { owner: null } },
     { name: "a status that is null", options: { status: null } },

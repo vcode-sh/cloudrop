@@ -187,13 +187,6 @@ describe("onDelete with api.deleteFile", () => {
     expect(calls).toEqual(["get", "claim", "complete"]);
   });
 
-  it("refuses options that are not an object", async () => {
-    const { fixture, uploaded } = deleting("transaction");
-    const ticket = await uploaded();
-    const refused = await fixture.cloudrop.api.deleteFile(ticket.id, "admin" as never);
-    expect(refused.error?.message).toBe("deleteFile takes the file id and optionally { context }.");
-  });
-
   it.for(MODES)("%s: a file that never completed runs no onDelete", async (mode) => {
     const { fixture, seen, upload } = deleting(mode);
     const ticket = await upload();

@@ -2,7 +2,7 @@
 // how many rows, how long a grace, and whether it runs every page.
 
 import { fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
+import { invalidInput, optionsOf } from "../input.ts";
 import { readGrace } from "./leftovers.ts";
 import { isStoreCursor, readLimit } from "./owner-files.ts";
 
@@ -47,8 +47,8 @@ function readAll(options: Record<string, unknown>): Result<{ all: boolean; signa
 }
 
 export function readOptions(given: unknown): Result<Run> {
-  const options = given ?? {};
-  if (!isPlainObject(options)) return fail(invalidInput("sweep takes options such as { limit: 100 }."));
+  const options = optionsOf(given);
+  if (!options) return fail(invalidInput("sweep takes options such as { limit: 100 }."));
   const { cursor } = options;
   const limit = readLimit(options.limit);
   if (limit.error) return limit;

@@ -7,6 +7,13 @@ export function invalidInput(message: string): CloudropError {
   return new CloudropError("INVALID_INPUT", message);
 }
 
+/**
+ * The options argument of a call that can do without it (M11-R245): `{}` for null and undefined, the object itself,
+ * and null for anything else, which the call refuses with its own message.
+ */
+export const optionsOf = (given: unknown): Record<string, unknown> | null =>
+  given == null ? {} : isPlainObject(given) ? given : null;
+
 /** An object literal or Object.create(null): never an array, a Map, a Response, an Error or another class instance. */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;

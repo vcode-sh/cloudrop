@@ -1,7 +1,7 @@
 // cloudrop.api (spec §9): server-side file operations on the configured storage, all returning { data, error }.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
+import { invalidInput, optionsOf } from "../input.ts";
 import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
 import { keyProblem } from "../storage/validate.ts";
@@ -54,9 +54,8 @@ async function getUrl(
   key: string,
   given: unknown,
 ): Promise<Result<{ url: string; expiresAt: Date | null }>> {
-  const options = given ?? {};
-  if (!isPlainObject(options))
-    return fail(invalidInput("getUrl options must be an object, such as { expiresIn: 3600 }."));
+  const options = optionsOf(given);
+  if (!options) return fail(invalidInput("getUrl options must be an object, such as { expiresIn: 3600 }."));
   const { expiresIn, download } = options;
   if (storage.publicUrl && expiresIn === undefined && download === undefined) {
     const problem = keyProblem(key);
@@ -171,15 +170,20 @@ export function createFileApi(config: ServerConfig): FileApi {
     ...storeApi(config, whenReady),
     getUrl: (key, options) => whenReady(() => getUrl(storage, nfc(key), options)),
     head: (key) => whenReady(() => storage.head(nfc(key))),
-    put: (key, body, options) => whenReady(() => storage.put(nfc(key), body, options)),
+    put: (key, body, options) =>
+      whenReady(async () =>
+        optionsOf(options)
+          ? storage.put(nfc(key), body, options)
+          : fail(invalidInput('put options must be an object, such as { type: "text/plain" }.')),
+      ),
     delete: (key) => whenReady(() => storage.delete(nfc(key))),
     deleteMany: (keys) => whenReady(() => storage.deleteMany(Array.isArray(keys) ? keys.map(nfc) : keys)),
     copy: (from, to) => whenReady(() => storage.copy(nfc(from), nfc(to))),
     deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, nfc(prefix))),
     checkBucket: async (given) => {
-      const options = given ?? {};
+      const options = optionsOf(given);
       // The origins are echoed in the report, so only exact origins may reach it.
-      const read = readOrigins(isPlainObject(options) ? (options.origins ?? [...config.trustedOrigins]) : null);
+      const read = readOrigins(options ? (options.origins ?? [...config.trustedOrigins]) : null);
       if ("problem" in read) return fail(invalidInput(`checkBucket: ${read.problem}`));
       return whenReady(() => checkBucket(config, read.origins));
     },

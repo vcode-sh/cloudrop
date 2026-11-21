@@ -3,7 +3,7 @@
 // never list everyone's files. Its options, cursors and page check are api.files's (owner-files.ts).
 
 import { configError, fail, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject } from "../input.ts";
+import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listPage } from "./owner-files.ts";
 import type { CloudropStore, FileStatus } from "./store.ts";
@@ -40,7 +40,7 @@ const isStatus = (status: unknown): status is FileStatus => STATUSES.includes(st
 export async function listAllFiles(
   config: ServerConfig,
   store: CloudropStore<unknown>,
-  given: unknown = {},
+  given: unknown,
 ): Promise<Result<FilesPage>> {
   // Anything but a function counts as missing: a store written before 0.6 has none.
   const { listAll } = store;
@@ -51,15 +51,16 @@ export async function listAllFiles(
       ),
     );
   }
-  if (!isPlainObject(given)) {
+  const options = optionsOf(given);
+  if (!options) {
     return fail(
       invalidInput("allFiles takes { owner, status, route, name, type, order, limit, cursor }, all optional."),
     );
   }
-  const { owner, status } = given;
+  const { owner, status } = options;
   // A key that is there with no value is an id that got lost on its way here, the mistake this method is kept apart
   // from api.files for: only a call without the key crosses owners (M11-R195).
-  if (owner === undefined && "owner" in given) {
+  if (owner === undefined && "owner" in options) {
     return fail(
       invalidInput(
         "owner is undefined. Pass the owner's id to list that owner's files, or leave the owner key out to list every owner's files.",
@@ -72,5 +73,5 @@ export async function listAllFiles(
   }
   const scope = { owner: owner ?? null, status: status ?? null };
   // Called on the store, as a store may be a class whose methods read `this`.
-  return listPage(config, given, scope, "listAll", (query) => listAll.call(store, query));
+  return listPage(config, options, scope, "listAll", (query) => listAll.call(store, query));
 }
