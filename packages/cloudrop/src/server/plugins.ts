@@ -18,6 +18,8 @@ export interface PluginFile {
 export interface BeforeUploadContext {
   request: Request;
   route: string;
+  /** The route's `accept`, which every file in `files` has passed: ["image/*", "application/pdf"]. */
+  accept: readonly string[];
   files: readonly PluginFile[];
   metadata: unknown;
   auth: unknown;

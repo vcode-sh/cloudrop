@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bytes } from "../testing/file-samples.ts";
+import { bytes, zipEntry } from "../testing/file-samples.ts";
 import { sniff } from "./sniff.ts";
 
 /** A big-endian 32-bit length, as ISO BMFF boxes carry it. */
@@ -8,13 +8,6 @@ const u32 = (value: number) => [value >>> 24, (value >>> 16) & 0xff, (value >>> 
 /** An ISO BMFF FileTypeBox: size, "ftyp", major brand, minor version 0, compatible brands. */
 const ftyp = (major: string, ...compatible: string[]) =>
   bytes(u32(16 + 4 * compatible.length), "ftyp", major, [0, 0, 0, 0], compatible.join(""));
-
-/** A ZIP local file header (APPNOTE 4.3.7) for a stored entry with `data`. */
-function zipEntry(name: string, data: string): Uint8Array {
-  const size = [data.length & 0xff, data.length >> 8, 0, 0];
-  const header = [0x50, 0x4b, 3, 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...size, ...size];
-  return bytes(header, [name.length, 0, 0, 0], name, data);
-}
 
 const typeOf = (input: Uint8Array) => sniff(input)?.type ?? null;
 
@@ -147,9 +140,26 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "UTF-16BE with a BOM", input: "\xfe\xff\0<\0s\0c\0r\0i\0p\0t\0>", type: "text/html" },
     { name: "XHTML", input: '<?xml version="1.0"?>\n<html xmlns="http://www.w3.org/1999/xhtml">', type: "text/html" },
     {
+      name: "a script root after an XML declaration",
+      input: "<?xml version='1.0'?><script>alert(1)</script>",
+      type: "text/html",
+    },
+    { name: "a script after a comment with no space", input: "<!--x--><script>alert(1)</script>", type: "text/html" },
+    {
+      // Namespaces are not read: a character reference can spell one, so any XML a route names may carry scripts.
       name: "XML with an XHTML element in a namespace",
       input: '<?xml version="1.0"?><feed xmlns:h="http://www.w3.org/1999/xhtml"><h:script/>',
-      type: "text/html",
+      type: "application/xml",
+    },
+    {
+      name: "SVG after a generator comment",
+      input: "<!-- Generator: Adobe Illustrator -->\n<svg>",
+      type: "image/svg+xml",
+    },
+    {
+      name: "SVG with an XHTML foreignObject",
+      input: '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">',
+      type: "image/svg+xml",
     },
     { name: "SVG", input: '<svg xmlns="http://www.w3.org/2000/svg">', type: "image/svg+xml" },
     {

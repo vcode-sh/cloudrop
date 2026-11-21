@@ -71,51 +71,60 @@ function sniffEbml(bytes: Uint8Array): Sniffed | null {
 
 const LOCAL_FILE = ascii("PK\x03\x04");
 const OFFICE = "application/vnd.openxmlformats-officedocument.";
-/** Every ZIP-based type a plain archive may have been declared as. */
-const ZIP = kind(
-  "application/zip",
-  "a ZIP archive",
-  "application/x-zip-compressed",
-  "application/java-archive",
-  "*+zip",
-  `${OFFICE}*`,
-  "application/vnd.oasis.opendocument.*",
-);
+/**
+ * A ZIP whose entries do not name its package agrees with any application or model type: ZIP is the container of APK,
+ * JAR, Visio, 3MF, macro-enabled Office and many more (M10-K1).
+ */
+const ZIP = kind("application/zip", "a ZIP archive", "application/*", "model/*");
 /**
  * Office Open XML keeps its main part in a folder of its own (ECMA-376 Part 1, §11.3.10 word/document.xml, §12.3.23
- * xl/workbook.xml, §13.3.6 ppt/presentation.xml, the names Office writes).
+ * xl/workbook.xml, §13.3.6 ppt/presentation.xml, the names Office writes). An application's templates, slide shows and
+ * macro-enabled files share its folder, so each agrees with its application's types, Open XML and Microsoft's own.
  */
+const office = (family: string, microsoft: string, type: string, name: string) =>
+  kind(
+    `${OFFICE}${family}.${type}`,
+    name,
+    `${OFFICE}${family}.*`,
+    `application/vnd.ms-${microsoft}*`,
+    "application/zip",
+  );
 const OFFICE_FOLDERS: readonly [string, Sniffed][] = [
-  ["word/", kind(`${OFFICE}wordprocessingml.document`, "a Word document", "application/zip")],
-  ["xl/", kind(`${OFFICE}spreadsheetml.sheet`, "an Excel workbook", "application/zip")],
-  ["ppt/", kind(`${OFFICE}presentationml.presentation`, "a PowerPoint presentation", "application/zip")],
+  ["word/", office("wordprocessingml", "word", "document", "a Word document")],
+  ["xl/", office("spreadsheetml", "excel", "sheet", "an Excel workbook")],
+  ["ppt/", office("presentationml", "powerpoint", "presentation", "a PowerPoint presentation")],
 ];
 /** OpenDocument (ODF 1.3 Part 2 §3.3) and EPUB (OCF 3.3 §4.2.1) open with a stored "mimetype" entry naming the type. */
 const PACKAGE_TYPE = /^application\/(?:vnd\.oasis\.opendocument\.[a-z.-]{1,64}|epub\+zip)$/;
 
-/** What one entry shows of its package: the type a first "mimetype" entry stores, or an office folder. */
-function entryType(name: string, stored: () => string, first: boolean): Sniffed | null {
-  const type = first && name === "mimetype" ? stored() : "";
-  if (PACKAGE_TYPE.test(type)) {
-    return kind(type, type === "application/epub+zip" ? "an EPUB book" : "an OpenDocument file", "application/zip");
-  }
-  return OFFICE_FOLDERS.find(([folder]) => name.startsWith(folder))?.[1] ?? null;
-}
-
-/** The type of a ZIP archive's package, from the entries whose local headers lie in `bytes`. */
-function packageType(bytes: Uint8Array): Sniffed | null {
+/** The entries whose local file headers (PKWARE APPNOTE 6.3.10 §4.3.7) lie in `bytes`, while sizes lead to the next. */
+function* zipEntries(bytes: Uint8Array): Generator<{ name: string; stored: string }> {
   let at = 0;
-  // A local file header (PKWARE APPNOTE 6.3.10 §4.3.7) at a time, while their sizes say where the next one starts.
   while (startsWith(bytes, LOCAL_FILE, at) && at + 30 <= bytes.length) {
-    const compressedSize = uint32LE(bytes, at + 18);
+    const size = uint32LE(bytes, at + 18);
     const nameEnd = at + 30 + uint16LE(bytes, at + 26);
     const data = nameEnd + uint16LE(bytes, at + 28);
-    const stored = () => latin1(bytes, data, data + compressedSize);
-    const found = entryType(latin1(bytes, at + 30, nameEnd), stored, at === 0);
-    if (found) return found;
+    yield { name: latin1(bytes, at + 30, nameEnd), stored: latin1(bytes, data, data + size) };
     // Bit 3: the sizes follow the data, so the next header cannot be found from here.
-    if (uint16LE(bytes, at + 6) & 0x08) return null;
-    at = data + compressedSize;
+    if (uint16LE(bytes, at + 6) & 0x08) return;
+    at = data + size;
+  }
+}
+
+/** The type of a ZIP archive's package: its first entry's stored "mimetype", or an Office folder. */
+function packageType(bytes: Uint8Array): Sniffed | null {
+  let first = true;
+  for (const { name, stored } of zipEntries(bytes)) {
+    if (first && name === "mimetype" && PACKAGE_TYPE.test(stored)) {
+      return kind(
+        stored,
+        stored === "application/epub+zip" ? "an EPUB book" : "an OpenDocument file",
+        "application/zip",
+      );
+    }
+    first = false;
+    const found = OFFICE_FOLDERS.find(([folder]) => name.startsWith(folder));
+    if (found) return found[1];
   }
   return null;
 }

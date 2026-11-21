@@ -28,18 +28,15 @@ export function uploadedFile(config: ServerConfig, token: UploadTokenPayload, ro
 export async function checkAfterVerify(
   request: Request,
   config: ServerConfig,
-  token: UploadTokenPayload,
-  file: UploadedFile,
+  { token, route, file }: { token: UploadTokenPayload; route: RouteConfig; file: UploadedFile },
 ): Promise<Verdict> {
-  const { route, metadata, owner: auth } = token;
-  // The token's route was found before the token reached here.
-  const accept = config.routes.get(route)?.accept ?? [];
+  const { metadata, owner: auth } = token;
   let refused: CloudropError | undefined;
   try {
-    const context = { request, route, accept, file, metadata, auth, storage: config.storage };
+    const context = { request, route: route.name, accept: route.accept, file, metadata, auth, storage: config.storage };
     refused = await runAfterVerify(config.plugins, context);
   } catch (error) {
-    config.logger.error(`cloudrop: a plugin's afterVerify failed for route "${route}".`, error);
+    config.logger.error(`cloudrop: a plugin's afterVerify failed for route "${route.name}".`, error);
     return { kind: "failed", error: unfinished() };
   }
   return refused ? { kind: "refused", error: refused, cleanup: "delete" } : { kind: "verified" };

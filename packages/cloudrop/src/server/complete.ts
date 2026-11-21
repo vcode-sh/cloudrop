@@ -21,7 +21,7 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   if (stored.kind === "failed") return fail(stored.error);
   if (stored.kind === "refused") return cleanUpRefused(config, token, stored);
   const file = uploadedFile(config, token, route);
-  const checked = await checkAfterVerify(request, config, token, file);
+  const checked = await checkAfterVerify(request, config, { token, route, file });
   if (checked.kind === "failed") return fail(checked.error);
   if (checked.kind === "refused") return cleanUpRefused(config, token, checked);
   const ran = await runOnComplete(config.logger, route, completeContext(request, token, file));

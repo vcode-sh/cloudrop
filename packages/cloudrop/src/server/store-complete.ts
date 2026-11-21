@@ -201,7 +201,7 @@ export async function completeStored(
   if (early) return early;
   // Storage and plugins run outside any transaction: no network call while a row lock is held.
   const stored = await verifyUpload(config, token);
-  const checked = stored.kind === "verified" ? await checkAfterVerify(request, config, token, completion.file) : stored;
+  const checked = stored.kind === "verified" ? await checkAfterVerify(request, config, completion) : stored;
   if (checked.kind === "failed") return fail(checked.error);
   if (checked.kind === "refused") return refuse(completion, checked);
   const attempt = store.transaction

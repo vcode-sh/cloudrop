@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
+import type { SignedPart } from "../protocol/types.ts";
 import type { CloudropPlugin } from "../server/plugins.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { complete } from "../testing/complete-fixture.ts";
-import { bytes, HTML, JPEG, PNG, SVG, TEXT } from "../testing/file-samples.ts";
+import { bytes, HTML, JPEG, PNG, SVG, TEXT, zipEntry } from "../testing/file-samples.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { type ContentCheckOptions, contentChecks } from "./content-checks.ts";
 
@@ -97,25 +98,57 @@ describe("contentChecks: the file's content against its declared type and the ro
       },
       expected: passed,
     },
+  ])("$name", async ({ input, expected }) => {
+    expect(await outcome(input)).toEqual(expected);
+  });
+});
+
+const OFFICE = "application/vnd.openxmlformats-officedocument";
+const WORKBOOK = bytes(zipEntry("[Content_Types].xml", "<Types/>"), zipEntry("xl/workbook.xml", "<w/>"));
+const ARCHIVE = zipEntry("notes.txt", "hello");
+
+describe("contentChecks: ZIP-based files", () => {
+  it.for([
     {
-      name: "a Word document sent as a ZIP-based office type",
+      name: "a workbook sent as a Word document",
+      input: { accept: "*/*", file: { name: "a.docx", type: `${OFFICE}.wordprocessingml.document` }, body: WORKBOOK },
+      expected: refused(
+        `This file is an Excel workbook, but it was sent as ${OFFICE}.wordprocessingml.document. Give it the right extension, or pick another file.`,
+      ),
+    },
+    {
+      // A macro-enabled workbook keeps its parts under xl/ too.
+      name: "a workbook sent as macro-enabled",
       input: {
         accept: "*/*",
-        file: { name: "a.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-        body: bytes("PK", [3, 4], new Array(26).fill(0)),
+        file: { name: "a.xlsm", type: "application/vnd.ms-excel.sheet.macroenabled.12" },
+        body: WORKBOOK,
       },
       expected: passed,
+    },
+    {
+      // An archive whose entries name no package may be any of the formats built on ZIP.
+      name: "a plain archive sent as an Android package",
+      input: { accept: "*/*", file: { name: "a.apk", type: "application/vnd.android.package-archive" }, body: ARCHIVE },
+      expected: passed,
+    },
+    {
+      name: "a plain archive sent as an image",
+      input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: ARCHIVE },
+      expected: refused(
+        "This file is a ZIP archive, but it was sent as image/png. Give it the right extension, or pick another file.",
+      ),
     },
   ])("$name", async ({ input, expected }) => {
     expect(await outcome(input)).toEqual(expected);
   });
 });
 
-describe("contentChecks: types refused by default", () => {
+describe("contentChecks: XML and SVG by content", () => {
   it.for([
     {
-      name: "an SVG on a route that accepts every image",
-      input: { accept: "image/*", file: { name: "a.svg", type: "image/svg+xml" }, body: SVG },
+      name: "an SVG sent as a PNG",
+      input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: SVG },
       expected: refused("This file is an SVG image, which this upload does not accept. Pick another file."),
     },
     {
@@ -124,23 +157,8 @@ describe("contentChecks: types refused by default", () => {
       expected: passed,
     },
     {
-      // The declared type decides when the content says nothing: a browser renders it as what it was sent as.
-      name: "plain text sent as image/svg+xml on a route that accepts every image",
-      input: { accept: "image/*", file: { name: "a.svg", type: "image/svg+xml" }, body: TEXT },
-      expected: refused("This file is an SVG image, which this upload does not accept. Pick another file."),
-    },
-    {
-      name: "plain text sent as text/html",
-      input: { accept: "*/*", file: { name: "a.html", type: "text/html" }, body: TEXT },
-      expected: refused("This file is a web page (HTML), which this upload does not accept. Pick another file."),
-    },
-    {
-      name: "an XML feed on a route that accepts anything",
-      input: {
-        accept: "*/*",
-        file: { name: "a.rss", type: "application/rss+xml" },
-        body: bytes("<?xml version='1.0'?><rss/>"),
-      },
+      name: "an untyped XML document on a route that accepts anything",
+      input: { accept: "*/*", file: { name: "data", type: "" }, body: bytes("<?xml version='1.0'?><rss/>") },
       expected: refused("This file is an XML document, which this upload does not accept. Pick another file."),
     },
     {
@@ -182,19 +200,19 @@ describe("contentChecks: allow and deny", () => {
       ),
     },
     {
+      name: "allow lets XML through a route that does not name it",
+      input: {
+        accept: "*/*",
+        file: { name: "data", type: "" },
+        body: bytes("<?xml version='1.0'?><rss/>"),
+        options: { allow: ["application/xml"] },
+      },
+      expected: passed,
+    },
+    {
       name: "deny refuses a type the route accepts, by its content",
       input: { accept: "*/*", file: { name: "data", type: "" }, body: PNG, options: { deny: ["image/*"] } },
       expected: refused("This file is a PNG image, which this upload does not accept. Pick another file."),
-    },
-    {
-      name: "deny wins over allow",
-      input: {
-        accept: "text/html",
-        file: { name: "a.html", type: "text/html" },
-        body: HTML,
-        options: { allow: ["text/html"], deny: ["text/*"] },
-      },
-      expected: refused("This file is a web page (HTML), which this upload does not accept. Pick another file."),
     },
   ])("$name", async ({ input, expected }) => {
     expect(await outcome(input)).toEqual(expected);
@@ -241,6 +259,15 @@ describe("contentChecks: reading the bucket", () => {
     const sent = recordRanges(fixture);
     expect((await complete(fixture, ticket.token)).status).toBe(200);
     expect(sent).toEqual(ranges);
+  });
+
+  it("completes, reads and deletes a refused multipart upload", async () => {
+    const files = route({ accept: "image/*", maxSize: "1MB", authorize: allowAnyone });
+    const fixture = serverFixture({ files }, { plugins: [contentChecks()], multipartThreshold: 0 });
+    const ticket = await fixture.multipart("files", { name: "a.png", type: "image/png", size: HTML.length });
+    await fixture.send(ticket.parts[0] as SignedPart, HTML);
+    expect((await complete(fixture, ticket.token)).body.error?.code).toBe("FILE_TYPE_NOT_ALLOWED");
+    expect([fixture.fake.keys(), fixture.fake.pendingUploads()]).toEqual([[], 0]);
   });
 
   it("keeps the object and asks the client to retry when the bucket cannot be read", async () => {

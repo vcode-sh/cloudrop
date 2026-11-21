@@ -16,3 +16,10 @@ export const JPEG: Uint8Array<ArrayBuffer> = bytes([0xff, 0xd8, 0xff, 0xe0, 0, 1
 export const HTML: Uint8Array<ArrayBuffer> = bytes("<!DOCTYPE html><script>alert(1)</script>");
 export const SVG: Uint8Array<ArrayBuffer> = bytes('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
 export const TEXT: Uint8Array<ArrayBuffer> = bytes("hello");
+
+/** A ZIP local file header (PKWARE APPNOTE §4.3.7) for an entry stored uncompressed, with its data. */
+export function zipEntry(name: string, data: string): Uint8Array<ArrayBuffer> {
+  const size = [data.length & 0xff, data.length >> 8, 0, 0];
+  const header = [0x50, 0x4b, 3, 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...size, ...size];
+  return bytes(header, [name.length, 0, 0, 0], name, data);
+}

@@ -18,6 +18,7 @@ const file = { id: "f1", key: "k/f1.txt", name: "a.txt", size: 1, type: "text/pl
 const context: BeforeUploadContext = {
   request: new Request("https://app.example.com/api/cloudrop/upload"),
   route: "files",
+  accept: ["*/*"],
   files: [file],
   metadata: undefined,
   auth: {},
@@ -96,7 +97,7 @@ describe("runAfterVerify", () => {
     const verified = {
       request: context.request,
       route: "files",
-      accept: ["*/*"],
+      accept: context.accept,
       file: { ...file, url: null },
       metadata: undefined,
       auth: {},

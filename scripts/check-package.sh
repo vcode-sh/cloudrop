@@ -46,8 +46,12 @@ fi
 # cloudrop/testing and cloudrop/plugins must use the server's own CloudropError (M9-T2, M10-K5): a copy of the class
 # fails the server's instanceof check, and every refusal from a plugin would reach the client as a server error.
 for entry in testing plugins; do
-  if grep -q "class CloudropError" "dist/$entry.js" || ! grep -q 'from "./index.js"' "dist/$entry.js"; then
+  if grep -q "class CloudropError" "dist/$entry.js"; then
     echo "dist/$entry.js carries its own CloudropError. Build it apart, importing src/index.ts (tsdown.config.ts)." >&2
+    exit 1
+  fi
+  if ! grep -q 'from "./index.js"' "dist/$entry.js"; then
+    echo "dist/$entry.js does not import ./index.js. Build it apart, importing src/index.ts (tsdown.config.ts)." >&2
     exit 1
   fi
 done

@@ -116,7 +116,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,
-      { request, route: route.name, files: accepted, metadata, auth },
+      { request, route: route.name, accept: route.accept, files: accepted, metadata, auth },
       config.logger,
     );
     if (refused) return fail(refused);

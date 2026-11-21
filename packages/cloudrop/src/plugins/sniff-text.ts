@@ -1,6 +1,6 @@
 // Text a browser runs as a page or an image with scripts: HTML, XHTML, SVG and XML, and a script's "#!" line
 // (M10-K1). Only the start of the text decides, as in a browser's own sniffing; an XML document is read on to its root
-// element and its namespaces, which decide what a browser renders it as.
+// element, which decides what a browser renders it as.
 
 import { ascii, kind, type Sniffed, startsWith } from "./bytes.ts";
 
@@ -14,9 +14,10 @@ const SCRIPT = kind("text/x-shellscript", "a script", "application/x-sh", "appli
  * end in a space or ">". A "/" and any other whitespace end them here too: a browser's parser reads those the same.
  */
 const HTML_START = /^<(?:!doctype html|html|head|script|iframe|h1|div|font|table|a|style|title|b|body|br|p|!--)[\s/>]/i;
-// The namespaces of XHTML and SVG (W3C XHTML 1.0 §3.1.1, SVG 2 §1.3): in any element, they make a browser run scripts.
-const XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
-const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+/** The same tags as a root element after a prolog, where a browser that renders the document as HTML finds them. */
+const HTML_ROOTS: ReadonlySet<string> = new Set(
+  "html head script iframe h1 div font table a style title b body br p".split(" "),
+);
 /** What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype. */
 const PROLOG_ITEM = /\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
 /** An element's start tag, with or without a namespace prefix: the local name is captured. */
@@ -59,11 +60,11 @@ export function sniffText(bytes: Uint8Array): Sniffed | null {
   // The kernel runs a file that starts with "#!" through the interpreter named after it (execve(2)).
   if (startsWith(bytes, ascii("#!"))) return SCRIPT;
   const text = decode(bytes).trimStart();
-  if (HTML_START.test(text)) return HTML;
   if (!text.startsWith("<")) return null;
+  // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
   const root = rootElement(text);
-  if (root === "html" || text.includes(XHTML_NAMESPACE)) return HTML;
-  if (root === "svg" || text.includes(SVG_NAMESPACE)) return SVG;
+  if (root === "svg") return SVG;
+  if ((root !== null && HTML_ROOTS.has(root)) || HTML_START.test(text)) return HTML;
   // WHATWG MIME Sniffing §7.1: "<?xml" is XML.
   return text.startsWith("<?xml") ? XML : null;
 }

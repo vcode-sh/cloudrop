@@ -1,6 +1,6 @@
-// contentChecks(): at /complete, the first 4 KiB of the stored file decide whether its content is what it was declared
-// as and what the route accepts (M10-K). A refusal is an afterVerify refusal: the server ends the upload, deletes the
-// object only when it is this upload's, and tells the plugins through onAbort.
+// contentChecks(): the declared type is judged at /upload, before anything is signed, and the content at /complete,
+// from the first 4 KiB of the stored file (M10-K2). A refusal at /complete is an afterVerify refusal: the server ends
+// the upload, deletes the object only when it is this upload's, and tells the plugins through onAbort.
 
 // CloudropError comes through the published entry, so a refusal is an instance of the class the server checks for
 // (M10-K5, as M9-T2 does for cloudrop/testing).
@@ -22,35 +22,34 @@ export interface ContentCheckOptions {
 const SNIFF_BYTES = 4096;
 const OCTET_STREAM = "application/octet-stream";
 
-const named = (name: string, types: readonly string[]) => types.map((type) => [type, name] as const);
-/** Refused by default, whatever the route accepts (M10-K3): what a browser runs, and programs. */
-const REFUSED: ReadonlyMap<string, string> = new Map([
-  ...named("a web page (HTML)", ["text/html", "application/xhtml+xml"]),
-  ...named("a program", [
-    "application/vnd.microsoft.portable-executable",
-    "application/x-msdownload",
-    "application/x-msdos-program",
-    "application/x-dosexec",
-    "application/x-executable",
-    "application/x-elf",
-    "application/x-sharedlib",
-    "application/x-mach-binary",
-  ]),
-  ...named("a script", [
-    "text/javascript",
-    "application/javascript",
-    "application/x-javascript",
-    "text/ecmascript",
-    "application/ecmascript",
-    "text/x-shellscript",
-    "application/x-sh",
-    "application/x-shellscript",
-    "text/x-sh",
-  ]),
+/** Refused by default, whatever the route accepts (M10-K3). */
+const REFUSED: ReadonlySet<string> = new Set([
+  // Web pages, and WHATWG MIME Sniffing §7's unknown types, which a browser sniffs and may render as one.
+  "text/html",
+  "application/xhtml+xml",
+  "unknown/unknown",
+  "application/unknown",
+  // Programs: the types the sniffer gives them (sniff.ts) and their common aliases.
+  "application/vnd.microsoft.portable-executable",
+  "application/x-msdownload",
+  "application/x-msdos-program",
+  "application/x-dosexec",
+  "application/x-executable",
+  "application/x-elf",
+  "application/x-sharedlib",
+  "application/x-mach-binary",
+  "application/x-mach-o-executable",
+  // Scripts: every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, and shell scripts.
+  ..."application/ecmascript application/javascript application/x-ecmascript application/x-javascript".split(" "),
+  ..."text/ecmascript text/javascript text/jscript text/livescript text/x-ecmascript text/x-javascript".split(" "),
+  ..."text/javascript1.0 text/javascript1.1 text/javascript1.2 text/javascript1.3 text/javascript1.4".split(" "),
+  "text/javascript1.5",
+  ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh".split(" "),
 ]);
 
-/** XML types (RFC 7303 §3, and every "+xml" type): a browser renders them, SVG with its scripts. */
-const isXml = (type: string) => type === "text/xml" || type === "application/xml" || type.endsWith("+xml");
+/** XML types (RFC 7303 §3, every "+xml" type, and text/xsl): a browser renders them, SVG with its scripts. */
+const isXml = (type: string) =>
+  type === "text/xml" || type === "application/xml" || type === "text/xsl" || type.endsWith("+xml");
 
 interface Lists {
   allow: readonly string[];
@@ -68,19 +67,13 @@ function readList(list: readonly string[] | undefined): readonly string[] {
   return list;
 }
 
-/** Whether `type` is refused before anything else is compared. */
+/** Whether `type`, sent as or found in a file sent as `declared`, is refused whatever else matches. */
 function isRefused(type: string, declared: string, accept: readonly string[], { allow, deny }: Lists): boolean {
   if (acceptsType(deny, type)) return true;
   if (acceptsType(allow, type)) return false;
   if (REFUSED.has(type)) return true;
   // XML and SVG pass only on a route that names the type the file was sent as (M10-K3).
   return isXml(type) && !(isXml(declared) && accept.includes(declared));
-}
-
-function nameOf(type: string, sniffed: Sniffed | null): string {
-  if (sniffed?.type === type) return sniffed.name;
-  if (type === "image/svg+xml") return "an SVG image";
-  return REFUSED.get(type) ?? (isXml(type) ? "an XML document" : `a ${type} file`);
 }
 
 /** An entry of Sniffed.agrees: an exact type, a prefix ending in "*" or a suffix starting with "*". */
@@ -91,25 +84,18 @@ function agrees(sniffed: Sniffed, declared: string): boolean {
   });
 }
 
-const notAccepted = (name: string) =>
-  new CloudropError(
-    "FILE_TYPE_NOT_ALLOWED",
-    `This file is ${name}, which this upload does not accept. Pick another file.`,
-  );
+const notAccepted = (what: string) =>
+  new CloudropError("FILE_TYPE_NOT_ALLOWED", `${what}, which this upload does not accept. Pick another file.`);
 
-/** The refusal for a file declared as `declared` whose content shows `sniffed`, or undefined when it may be kept. */
-function check(declared: string, sniffed: Sniffed | null, accept: readonly string[], lists: Lists) {
-  // The content first: a file is refused as what it is before what it was sent as.
-  const refused = [sniffed?.type, declared].find(
-    (type) => type !== undefined && isRefused(type, declared, accept, lists),
-  );
-  if (refused) return notAccepted(nameOf(refused, sniffed));
+/** The refusal of a file sent as `declared` whose first bytes show `sniffed`, or undefined when it may be kept. */
+function checkContent(declared: string, sniffed: Sniffed | null, accept: readonly string[], lists: Lists) {
   if (!sniffed) return undefined;
+  if (isRefused(sniffed.type, declared, accept, lists)) return notAccepted(`This file is ${sniffed.name}`);
   // A browser that could not type the file sent it as application/octet-stream: nothing to contradict, so the content's
   // own type must be accepted (M10-K2).
   if (declared === OCTET_STREAM) {
     const types = [sniffed.type, ...sniffed.agrees.filter((entry) => !entry.includes("*"))];
-    return types.some((type) => acceptsType(accept, type)) ? undefined : notAccepted(sniffed.name);
+    return types.some((type) => acceptsType(accept, type)) ? undefined : notAccepted(`This file is ${sniffed.name}`);
   }
   if (agrees(sniffed, declared)) return undefined;
   return new CloudropError(
@@ -128,17 +114,22 @@ async function firstBytes(storage: StorageDriver, { key, size }: AfterVerifyCont
 }
 
 /**
- * Refuses a file whose first bytes show a type the route does not accept, a type other than the one it was sent as,
- * or a web page, program or script whatever it was sent as. XML and SVG pass only on a route that names their type.
- * A file whose bytes show no known type passes as the type it was sent as.
+ * Refuses, at /upload, a file sent as a web page, program, script, or XML or SVG type the route does not name; and at
+ * /complete, a file whose first bytes show such a type, a type other than the one it was sent as, or, for a file the
+ * browser could not type, a type the route does not accept. A file whose bytes show no known type passes as sent.
  */
 export function contentChecks(options?: ContentCheckOptions): CloudropPlugin {
   const lists = { allow: readList(options?.allow), deny: readList(options?.deny) };
   return {
     id: "content-checks",
     server: {
+      // A refusal here refuses the whole request, before anything is signed, so no such file reaches the bucket.
+      beforeUpload({ files, accept }) {
+        const refused = files.find(({ type }) => isRefused(type, type, accept, lists));
+        return refused && notAccepted(`One of the files was sent as ${refused.type}`);
+      },
       async afterVerify({ file, accept, storage }) {
-        return check(file.type, sniff(await firstBytes(storage, file)), accept, lists);
+        return checkContent(file.type, sniff(await firstBytes(storage, file)), accept, lists);
       },
     },
   };
