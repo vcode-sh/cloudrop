@@ -1,7 +1,7 @@
 // Formats whose type is written inside a container's header, not in fixed bytes: ISO BMFF brands (MP4, MOV, AVIF,
 // HEIC), the EBML DocType (WebM, Matroska) and the entries of a ZIP archive (office documents, EPUB) (M10-K1).
 
-import { ascii, kind, latin1, type Sniffed, startsWith, uint16LE, uint32BE, uint32LE } from "./bytes.ts";
+import { ascii, container, kind, latin1, type Sniffed, startsWith, uint16LE, uint32BE, uint32LE } from "./bytes.ts";
 
 const brands = (sniffed: Sniffed, ...names: string[]) => names.map((name) => [name, sniffed] as const);
 
@@ -22,14 +22,14 @@ const BRANDS: ReadonlyMap<string, Sniffed> = new Map([
     "msf1",
   ),
   ...brands(
-    kind("video/mp4", "an MP4 video", "audio/mp4", "audio/x-m4a", "video/x-m4v"),
+    container("video/mp4", "an MP4 file", "audio/mp4", "audio/x-m4a", "video/x-m4v"),
     ...["isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9", "mp41", "mp42", "avc1", "dash"],
     ...["M4V ", "f4v "],
   ),
   ...brands(kind("audio/mp4", "an MP4 recording", "audio/x-m4a"), "M4A ", "M4B ", "M4P "),
   ...brands(kind("video/quicktime", "a QuickTime video"), "qt  "),
-  ...brands(kind("video/3gpp", "a 3GP video", "audio/3gpp"), "3gp4", "3gp5", "3gp6", "3gp7", "3ge6", "3gg6"),
-  ...brands(kind("video/3gpp2", "a 3GP video", "audio/3gpp2"), "3g2a", "3g2b", "3g2c"),
+  ...brands(container("video/3gpp", "a 3GP file", "audio/3gpp"), "3gp4", "3gp5", "3gp6", "3gp7", "3ge6", "3gg6"),
+  ...brands(container("video/3gpp2", "a 3GP file", "audio/3gpp2"), "3g2a", "3g2b", "3g2c"),
 ]);
 
 /**
@@ -53,8 +53,11 @@ function sniffIsoBmff(bytes: Uint8Array): Sniffed | null {
  * the name comes from the file, and a plain object would answer "constructor" with a function (M11-R130).
  */
 const DOC_TYPES: ReadonlyMap<string, Sniffed> = new Map([
-  ["webm", kind("video/webm", "a WebM video", "audio/webm")],
-  ["matroska", kind("video/x-matroska", "a Matroska video", "audio/x-matroska", "video/matroska", "audio/matroska")],
+  ["webm", container("video/webm", "a WebM file", "audio/webm")],
+  [
+    "matroska",
+    container("video/x-matroska", "a Matroska file", "audio/x-matroska", "video/matroska", "audio/matroska"),
+  ],
 ]);
 
 /**
@@ -75,10 +78,22 @@ function sniffEbml(bytes: Uint8Array): Sniffed | null {
 const LOCAL_FILE = ascii("PK\x03\x04");
 const OFFICE = "application/vnd.openxmlformats-officedocument.";
 /**
- * A ZIP whose entries do not name its package agrees with any application or model type: ZIP is the container of APK,
- * JAR, Visio, 3MF, macro-enabled Office and many more (M10-K1).
+ * A ZIP whose entries do not name its package. Sent as a type of a format built on ZIP it is that type: Office Open
+ * XML and Microsoft's macro-enabled types, OpenDocument, and every "+zip" type (WHATWG MIME Sniffing §4.6, ZIP-based
+ * MIME type), EPUB among them. It contradicts no other application or model type either: ZIP is the container of APK,
+ * JAR, Visio, 3MF and many more (M10-K1).
  */
-const ZIP = kind("application/zip", "a ZIP archive", "application/*", "model/*");
+const ZIP: Sniffed = {
+  ...container(
+    "application/zip",
+    "a ZIP archive",
+    `${OFFICE}*`,
+    "application/vnd.ms-*",
+    "application/vnd.oasis.opendocument.*",
+    "*+zip",
+  ),
+  loose: ["application/*", "model/*"],
+};
 /**
  * Office Open XML keeps its main part in a folder of its own (ECMA-376 Part 1, §11.3.10 word/document.xml, §12.3.23
  * xl/workbook.xml, §13.3.6 ppt/presentation.xml, the names Office writes). An application's templates, slide shows and

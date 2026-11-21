@@ -90,13 +90,12 @@ function isRefused(type: string, declared: string, accept: readonly string[], { 
   return isXml(type) && !(isXml(declared) && accept.includes(declared));
 }
 
-/** An entry of Sniffed.agrees: an exact type, a prefix ending in "*" or a suffix starting with "*". */
-function agrees(sniffed: Sniffed, declared: string): boolean {
-  return sniffed.agrees.some((entry) => {
-    if (entry.endsWith("*")) return declared.startsWith(entry.slice(0, -1));
-    return entry.startsWith("*") ? declared.endsWith(entry.slice(1)) : declared === entry;
+/** Whether `type` is one of `entries`: an exact type, a prefix ending in "*" or a suffix starting with "*". */
+const fits = (entries: readonly string[] = [], type: string): boolean =>
+  entries.some((entry) => {
+    if (entry.endsWith("*")) return type.startsWith(entry.slice(0, -1));
+    return entry.startsWith("*") ? type.endsWith(entry.slice(1)) : type === entry;
   });
-}
 
 /** A refusal with `content`, which says in data what `message` says in English (M11-K1). */
 const refusal = (message: string, content: ContentRefusal) =>
@@ -115,16 +114,23 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
   if (!sniffed) return undefined;
   const detected = sniffed.type;
   const what = `This file is ${sniffed.name}`;
-  if (isRefused(detected, declared, accept, lists)) return notAccepted(what, { declared, detected, reason: "refused" });
-  // A browser that could not type the file sent it as application/octet-stream: nothing to contradict, so the content's
-  // own type must be accepted (M10-K2).
-  if (declared === OCTET_STREAM) {
-    const types = [detected, ...sniffed.agrees.filter((entry) => !entry.includes("*"))];
-    return types.some((type) => acceptsType(accept, type))
+  // A browser that could not type the file sent it as application/octet-stream: nothing to contradict (M10-K2).
+  const typed = declared !== OCTET_STREAM;
+  // The types this content can be here: its own names, and of the type it was sent as, or untyped of the route's
+  // entries, those it can be.
+  const can = [...sniffed.agrees, ...(typed ? [declared] : accept)].filter(
+    (type) => !type.includes("*") && fits(sniffed.agrees, type),
+  );
+  // A container's bytes do not say which of them the file is, so it is refused only when all of them are (M11-R133).
+  const open = (sniffed.container ? can : [detected]).filter((type) => !isRefused(type, declared, accept, lists));
+  if (!open.length) return notAccepted(what, { declared, detected, reason: "refused" });
+  if (!typed) {
+    // The content's own type must be accepted.
+    return (sniffed.container ? open : can).some((type) => acceptsType(accept, type))
       ? undefined
       : notAccepted(what, { declared, detected, reason: "not-accepted" });
   }
-  if (agrees(sniffed, declared)) return undefined;
+  if (fits(sniffed.agrees, declared) || fits(sniffed.loose, declared)) return undefined;
   return refusal(`${what}, but it was sent as ${declared}. Give it the right extension, or pick another file.`, {
     declared,
     detected,

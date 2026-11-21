@@ -1,7 +1,7 @@
 // A file's real type from its first bytes (M10-K1). Every signature names the specification that defines it; where the
 // WHATWG MIME Sniffing standard lists one too, a browser recognises the file the same way.
 
-import { ascii, kind, type Pattern, type Sniffed, startsWith, uint16LE, uint32LE } from "./bytes.ts";
+import { ascii, container, kind, type Pattern, type Sniffed, startsWith, uint16LE, uint32LE } from "./bytes.ts";
 import { sniffContainer } from "./sniff-containers.ts";
 import { hasBom, sniffText } from "./sniff-text.ts";
 
@@ -34,7 +34,7 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   // PDF: ISO 32000-2:2020 §7.5.2, File header; WHATWG §7.1.
   [ascii("%PDF-"), kind("application/pdf", "a PDF document")],
   // Ogg: RFC 3533 §6, the capture pattern "OggS" and stream structure version 0; WHATWG §6.2.
-  [[...ascii("OggS"), 0], kind("audio/ogg", "an Ogg recording", "audio/opus", "video/ogg", "application/ogg")],
+  [[...ascii("OggS"), 0], container("audio/ogg", "an Ogg file", "audio/opus", "video/ogg", "application/ogg")],
   // FLAC: RFC 9639 §8, the stream marker "fLaC".
   [ascii("fLaC"), kind("audio/flac", "a FLAC recording", "audio/x-flac")],
   // Linux programs: System V ABI, ELF header, e_ident[EI_MAG0..3].

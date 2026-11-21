@@ -48,7 +48,8 @@ At `/complete`, a file whose **first bytes show**:
    type is judged again here, for an upload signed before the plugin was installed or its lists changed.
 4. **A type that contradicts the declared type.** A JPEG sent as `image/png`, a PDF sent as `text/plain`, a ZIP sent as
    an image. A content type agrees with its common aliases: `audio/x-wav` with a WAV, `image/heif` with a HEIC, a
-   Word template or a macro-enabled document with a Word file. A ZIP whose entries do not say what it is agrees with
+   Word template or a macro-enabled document with a Word file, a WebM, MP4, 3GP, Matroska or Ogg file with its
+   audio and its video types. A ZIP whose entries do not say what it is agrees with
    any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF); a ZIP sent as
    `application/pdf` passes for the same reason, while one sent as an image or a font does not.
 5. **For a file the browser could not type, a type the route does not accept.** Such a file is sent as
@@ -87,7 +88,7 @@ error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mism
 | Field | What it holds |
 | --- | --- |
 | `declared` | The type the file was sent as: the browser's type for it, or `application/octet-stream` when the browser had none. |
-| `detected` | The type the file's first bytes show, from the [table below](#what-it-recognises). Present when the bytes decided; absent when the declared type alone was refused. |
+| `detected` | The type the file's first bytes show, from the [table below](#what-it-recognises): for a container, the first of its types (`video/webm` for any WebM file). Present when the bytes decided; absent when the declared type alone was refused. |
 | `reason` | Why the file was refused: one of the three below. |
 
 | `reason` | Rules | What it means | `detected` |
@@ -111,7 +112,7 @@ a store, the sweep removes it. A browser shows such an object as that type.
 | Option | What it does | Default |
 | --- | --- | --- |
 | `allow` | Types let through rules 1 to 3, such as `["text/html"]` on a route that takes web pages on purpose. The route's `accept` and rules 4 and 5 still apply. | `[]` |
-| `deny` | Types refused on every route, by declared type at `/upload` and by what the first bytes show at `/complete`, such as `["application/zip"]` or `["video/*"]`. Wins over `allow`. | `[]` |
+| `deny` | Types refused on every route: a file sent as one, at `/upload`, and a file whose first bytes show one, at `/complete`. Such as `["application/zip"]` or `["video/*"]`. Wins over `allow`. For audio and video containers and for ZIP, see [below](#containers). | `[]` |
 
 Both take exact types or a top-level wildcard such as `"image/*"`, in lower case. Anything else throws
 `INVALID_CONFIG` when `contentChecks()` is called.
@@ -124,6 +125,29 @@ contentChecks({ allow: ["text/html"], deny: ["application/zip"] });
 A recognised package is its own type, not `application/zip`: `deny: ["application/zip"]` still lets a Word file, an
 OpenDocument file or an EPUB through. Deny their types too when they must not pass.
 
+#### Containers
+
+WebM, Matroska, MP4, 3GP and Ogg files hold audio, video or both, and their first bytes do not say which. Such a file
+is the type it was sent as, when its container can be that type:
+
+```ts
+// A voice recorder: MediaRecorder makes audio/webm, and Chrome sends an .m4a file as audio/x-m4a. Both pass.
+route({ accept: "audio/*", maxSize: "20MB", authorize });
+contentChecks({ deny: ["video/*"] });
+```
+
+So `deny: ["video/*"]` refuses every file sent as a video type, at `/upload`, and every file whose bytes show a
+format that is only video (QuickTime) under another name. It does not refuse a WebM, MP4, 3GP, Matroska or Ogg file
+sent as that container's audio type, with or without a video stream inside: telling them apart takes a parser for
+each format, which this check is not. A container sent untyped passes when the route accepts one of its types and
+`deny` does not name that one. RIFF files are different: `WAVE` is audio and `WEBP` an image, and the bytes say so.
+
+A ZIP that shows no package within the first 4 KiB is treated the same way. Sent as an Office, OpenDocument or `+zip`
+type, it is that type, since ZIP is what such a file is: `deny: ["application/zip"]` refuses a ZIP sent as
+`application/zip`, as `application/x-zip-compressed`, or as any type that is not built on ZIP, and not a document
+whose `word/` folder starts past the bytes read. Anyone can put a `word/` entry into a ZIP, so `deny` never kept a
+determined ZIP out of a route that takes Office files.
+
 The plugin applies to every route. A type that one route takes and another must not belongs in each route's `accept`.
 
 ### What it recognises
@@ -135,11 +159,11 @@ The plugin applies to every route. A type that one route takes and another must 
 | GIF | `image/gif` | `GIF87a`, `GIF89a` | GIF89a specification §17; WHATWG §6.1 |
 | WebP | `image/webp` | `RIFF`, 4 bytes, `WEBPVP` | RFC 9649 §2.5; WHATWG §6.1 |
 | AVIF, HEIC, HEIF | `image/avif`, `image/heic`, `image/heif` | ISO BMFF `ftyp` box, major brand `avif`, `heic` and kin, `mif1` | AVIF §9.1; ISO/IEC 23008-12 |
-| MP4, M4A, MOV, 3GP | `video/mp4`, `audio/mp4`, `video/quicktime`, `video/3gpp` | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
-| WebM, Matroska | `video/webm`, `video/x-matroska` | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
+| MP4, M4A, MOV, 3GP | `video/mp4` (also `audio/mp4`, `audio/x-m4a`), `audio/mp4`, `video/quicktime`, `video/3gpp` (also `audio/3gpp`) | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
+| WebM, Matroska | `video/webm` (also `audio/webm`), `video/x-matroska` (also `audio/x-matroska`) | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
 | MP3 | `audio/mpeg` | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
 | WAV | `audio/wav` | `RIFF`, 4 bytes, `WAVE` | WHATWG §6.2 |
-| Ogg | `audio/ogg` | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
+| Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |
 | PDF | `application/pdf` | `%PDF-` | ISO 32000-2 §7.5.2; WHATWG §7.1 |
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
@@ -172,7 +196,8 @@ asks for a space or `>` after `<!--` too; Chromium and Firefox take it before an
   as `application/octet-stream` passes; keep those types out of `accept` and do not serve such files to be opened.
 - **Archives are not opened.** A ZIP of programs passes as a ZIP. There is no virus scanning.
 - **`deny` sees what the first bytes show.** A ZIP behind a one-byte prefix, which ZIP readers still open, shows no
-  ZIP signature.
+  ZIP signature. A video in a WebM, MP4 or Ogg file sent as an audio type is not told from a recording
+  ([Containers](#containers)).
 - **A text file that starts with `#!` and a path is refused as a script,** even on a route that takes `text/*`, and
   so is other text that opens with `#!/`, such as a list of hash-bang URLs. A route that takes source code adds
   `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type, such as `text/x-python` or

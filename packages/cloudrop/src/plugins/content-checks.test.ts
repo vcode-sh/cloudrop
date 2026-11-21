@@ -1,37 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
-import type { CloudropPlugin } from "../server/plugins.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { complete } from "../testing/complete-fixture.ts";
+import { contentOutcome } from "../testing/content-check-fixture.ts";
 import { bytes, HTML, JPEG, PNG, PROGRAM, SVG, TEXT, zipEntry } from "../testing/file-samples.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
-import { type ContentCheckOptions, contentChecks } from "./content-checks.ts";
-
-interface Case {
-  accept: string | string[];
-  file: { name: string; type: string };
-  body: Uint8Array<ArrayBuffer>;
-  options?: ContentCheckOptions;
-}
-
-/** A server with contentChecks on a route that accepts `accept`, holding `body` uploaded as `file`, not completed. */
-async function uploaded({ accept, file, body, options }: Case) {
-  const aborted: string[] = [];
-  const witness: CloudropPlugin = { id: "witness", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
-  const files = route({ accept, maxSize: "1MB", authorize: allowAnyone });
-  const fixture = serverFixture({ files }, { plugins: [witness, contentChecks(options)] });
-  const ticket = await fixture.single("files", { ...file, size: body.length });
-  expect((await fixture.send(ticket.put, body)).status).toBe(200);
-  return { fixture, ticket, aborted };
-}
-
-/** The answer to /complete, whether the bucket kept the object, and the reasons onAbort heard. */
-async function outcome(input: Case) {
-  const { fixture, ticket, aborted } = await uploaded(input);
-  const { status, body: answer } = await complete(fixture, ticket.token);
-  const kept = (await fixture.storage.head(ticket.key)).data !== null;
-  return { status, error: answer.error ?? null, kept, aborted };
-}
+import { contentChecks } from "./content-checks.ts";
 
 /** A refusal as the client is sent it: `content` says in data what `message` says in English (M11-K1, M11-K2). */
 const refused = (message: string, content: { declared: string; detected: string; reason: string }) => ({
@@ -177,7 +151,7 @@ describe("contentChecks: the file's content against its declared type and the ro
       expected: passed,
     },
   ])("$name", async ({ input, expected }) => {
-    expect(await outcome(input)).toEqual(expected);
+    expect(await contentOutcome(input)).toEqual(expected);
   });
 });
 
@@ -229,7 +203,7 @@ describe("contentChecks: ZIP-based files", () => {
       ),
     },
   ])("$name", async ({ input, expected }) => {
-    expect(await outcome(input)).toEqual(expected);
+    expect(await contentOutcome(input)).toEqual(expected);
   });
 });
 
@@ -268,7 +242,7 @@ describe("contentChecks: XML and SVG by content", () => {
       expected: passed,
     },
   ])("$name", async ({ input, expected }) => {
-    expect(await outcome(input)).toEqual(expected);
+    expect(await contentOutcome(input)).toEqual(expected);
   });
 });
 
@@ -317,7 +291,7 @@ describe("contentChecks: allow and deny", () => {
       }),
     },
   ])("$name", async ({ input, expected }) => {
-    expect(await outcome(input)).toEqual(expected);
+    expect(await contentOutcome(input)).toEqual(expected);
   });
 
   it.for([

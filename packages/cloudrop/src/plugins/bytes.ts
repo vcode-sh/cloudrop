@@ -7,16 +7,28 @@ export interface Sniffed {
   /** What a person is told the file is, such as "a PNG image". */
   name: string;
   /**
-   * The declared types this content agrees with, `type` first: exact types, a prefix such as
+   * The declared types this content can be, `type` first: exact types, a prefix such as
    * "application/vnd.oasis.opendocument.*", or a suffix such as "*+xml".
    */
   agrees: readonly string[];
+  /** Declared types the content does not contradict, without being known as one: any application type, for a ZIP. */
+  loose?: readonly string[];
+  /**
+   * Set for a container whose first bytes do not say which of `agrees` the file is: audio or video, or which package
+   * a ZIP holds. Such a file is the type it was sent as, when that is one of them (M11-R133).
+   */
+  container?: true;
 }
 
 export const kind = (type: string, name: string, ...also: string[]): Sniffed => ({
   type,
   name,
   agrees: [type, ...also],
+});
+
+export const container = (type: string, name: string, ...also: string[]): Sniffed => ({
+  ...kind(type, name, ...also),
+  container: true,
 });
 
 /** A pattern of bytes; null matches any byte. */

@@ -1098,3 +1098,36 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; `src/plugins/sniff-zip.test.ts` (each first entry, with and without the signature, a header
   inside an entry's data, a descriptor of another size, an Office folder past 4 KiB).
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/testing/file-samples.ts`, `docs/guide/plugins.md`.
+
+### M11-R133: a container is the type it was sent as, when it can be that type
+
+- **Decision:** a detection is marked a container when its first bytes do not say which of its types the file is:
+  ISO BMFF with a general brand (`isom`, `iso2` to `iso9`, `mp41`, `mp42`, `avc1`, `dash`, `M4V `, `f4v `: `video/mp4`,
+  `audio/mp4`, `audio/x-m4a`, `video/x-m4v`), 3GPP and 3GPP2 (`video/` and `audio/`), WebM and Matroska (`video/` and
+  `audio/`), Ogg (`audio/ogg`, `audio/opus`, `video/ogg`, `application/ogg`), and a ZIP whose entries name no package
+  (`application/zip`; sent as an Office Open XML, `application/vnd.ms-*`, OpenDocument or `+zip` type, that type).
+  For a container, `deny`, `allow` and the default refusals judge each type it can be, among them the type it was
+  sent as: it is refused only when all of them are, with `reason: "refused"` and the container's first type as
+  `detected`. Sent as one of its types, which `/upload` already judged, it therefore passes. Sent untyped, it passes
+  when the route accepts one of the types left; the route's own entries count among the types a ZIP or an Office
+  file can be. Sent as a type it cannot be, it is a `mismatch` as before. A ZIP still does not contradict any other
+  `application/` or `model/` type (`M10-K1`), but is judged as `application/zip` there. Every other detection is one
+  type, judged as before; RIFF needs no rule, since its form type (`WAVE`, `WEBP`) says what the file is. The names
+  in messages no longer claim a kind the bytes do not show: "a WebM file", "an MP4 file", "a 3GP file", "a Matroska
+  file", "an Ogg file".
+- **Why:** `deny` and the refused list were matched against the sniffer's first type, a video type for WebM and for
+  the MP4 brands above. On a route with `accept: "audio/*"` and the guide's own `deny: ["video/*"]`, a recording sent
+  as `audio/webm` (what `MediaRecorder` makes) was refused "This file is a WebM video", an `audio/x-m4a` with major
+  brand `mp42` "an MP4 video", and an Ogg video sent as `video/ogg` under `deny: ["audio/*"]` "an Ogg recording"
+  (review finding G2, reproduced). The same held for ZIP: a Word file whose `word/` entry starts past 4 KiB was
+  refused by `deny: ["application/zip"]` and, sent untyped, was not accepted by a route that takes Word files (G3).
+- **If wrong:** what `deny` cannot promise. `deny: ["video/*"]` refuses a file sent as a video type and a file
+  whose bytes show a video-only format; a video in a WebM, MP4, 3GP, Matroska or Ogg file sent as that container's
+  audio type passes, and so does one sent untyped to a route that accepts the audio type. `deny: ["application/zip"]`
+  does not refuse a plain ZIP sent as, or untyped to a route that takes, an Office, OpenDocument or `+zip` type;
+  a ZIP with an empty `word/` entry passed there already. Telling audio from video takes a parser per container
+  (track boxes, EBML tracks, Ogg codec headers), which is the scanning work the design leaves for later.
+- **Status:** in force; amends `M11-K2`: `detected` is still the sniffer's first type, and a container sent as one of
+  its own types is never refused on it.
+- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/bytes.ts`, `src/plugins/sniff-containers.ts`,
+  `src/plugins/sniff.ts`, `src/plugins/content-checks-containers.test.ts`, `docs/guide/plugins.md#containers`.
