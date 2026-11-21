@@ -4,7 +4,7 @@ import type { SignedPart } from "../protocol/types.ts";
 import type { CloudropPlugin } from "../server/plugins.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { complete } from "../testing/complete-fixture.ts";
-import { bytes, HTML, JPEG, PNG, SVG, TEXT, zipEntry } from "../testing/file-samples.ts";
+import { bytes, HTML, JPEG, PNG, PROGRAM, SVG, TEXT, zipEntry } from "../testing/file-samples.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { type ContentCheckOptions, contentChecks } from "./content-checks.ts";
 
@@ -63,13 +63,24 @@ describe("contentChecks: the file's content against its declared type and the ro
     },
     {
       name: "a Windows program sent as a PDF",
-      input: { accept: "*/*", file: { name: "a.pdf", type: "application/pdf" }, body: bytes("MZ", [0x90, 0]) },
+      input: { accept: "*/*", file: { name: "a.pdf", type: "application/pdf" }, body: PROGRAM },
       expected: refused("This file is a program, which this upload does not accept. Pick another file."),
     },
     {
       name: "a shell script sent as text",
       input: { accept: "*/*", file: { name: "a.txt", type: "text/plain" }, body: bytes("#!/bin/sh\necho hi\n") },
       expected: refused("This file is a script, which this upload does not accept. Pick another file."),
+    },
+    {
+      // A script is text: once allowed, a "#!" line agrees with any text type it is sent as.
+      name: "a Python script on a route that allows scripts",
+      input: {
+        accept: "text/*",
+        file: { name: "a.py", type: "text/x-python" },
+        body: bytes("#!/usr/bin/env python3\nprint('hi')\n"),
+        options: { allow: ["text/x-shellscript"] },
+      },
+      expected: passed,
     },
     {
       // The browser could not type it, so nothing contradicts; the content's own type must be accepted.

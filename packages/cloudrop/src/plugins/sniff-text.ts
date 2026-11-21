@@ -7,7 +7,8 @@ import { ascii, kind, type Sniffed, startsWith } from "./bytes.ts";
 export const HTML: Sniffed = kind("text/html", "a web page (HTML)", "application/xhtml+xml");
 const SVG = kind("image/svg+xml", "an SVG image");
 const XML = kind("application/xml", "an XML document", "text/xml", "*+xml");
-const SCRIPT = kind("text/x-shellscript", "a script", "application/x-sh", "application/x-shellscript", "text/x-sh");
+/** A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type. */
+const SCRIPT = kind("text/x-shellscript", "a script", "application/x-sh", "application/x-shellscript", "text/*");
 
 /**
  * WHATWG MIME Sniffing §7.1, the rules for identifying an unknown MIME type: these tags, in any case, after whitespace,
@@ -59,9 +60,19 @@ function rootElement(text: string): string | null {
 export const hasBom = (bytes: Uint8Array): boolean =>
   startsWith(bytes, [0xfe, 0xff]) || startsWith(bytes, [0xff, 0xfe]) || startsWith(bytes, [0xef, 0xbb, 0xbf]);
 
+/**
+ * A script's first line (execve(2)): "#!", the blanks Linux's binfmt_script skips, and the interpreter's path, which
+ * scripts give in full. Prose that opens with "#!", such as "#!important", names no path and is not a script.
+ */
+function isScript(bytes: Uint8Array): boolean {
+  if (!startsWith(bytes, ascii("#!"))) return false;
+  let at = 2;
+  while (bytes[at] === 0x20 || bytes[at] === 0x09) at++;
+  return bytes[at] === 0x2f;
+}
+
 export function sniffText(bytes: Uint8Array): Sniffed | null {
-  // The kernel runs a file that starts with "#!" through the interpreter named after it (execve(2)).
-  if (startsWith(bytes, ascii("#!"))) return SCRIPT;
+  if (isScript(bytes)) return SCRIPT;
   const text = decode(bytes).trimStart();
   if (!text.startsWith("<")) return null;
   // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.

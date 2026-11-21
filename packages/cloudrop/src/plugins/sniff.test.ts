@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bytes, zipEntry } from "../testing/file-samples.ts";
+import { bytes, PROGRAM, zipEntry } from "../testing/file-samples.ts";
 import { sniff } from "./sniff.ts";
 
 /** A big-endian 32-bit length, as ISO BMFF boxes carry it. */
@@ -24,12 +24,30 @@ describe("sniff: binary signatures", () => {
     { name: "empty ZIP", input: bytes("PK", [5, 6], new Array(18).fill(0)), type: "application/zip" },
     { name: "Ogg", input: bytes("OggS", [0, 2]), type: "audio/ogg" },
     { name: "FLAC", input: bytes("fLaC", [0, 0, 0, 0x22]), type: "audio/flac" },
-    { name: "MP3 with an ID3v2 tag", input: bytes("ID3", [4, 0, 0, 0, 0, 0, 0]), type: "audio/mpeg" },
+    // ID3v2.4 §3.1: version 4, revision 0, no flags, a syncsafe size of 1,071 bytes.
+    { name: "MP3 with an ID3v2.4 tag", input: bytes("ID3", [4, 0, 0, 0, 0, 0x08, 0x2f]), type: "audio/mpeg" },
+    // ID3v2.3 §3.1: flag "a", unsynchronisation, is the top bit.
+    {
+      name: "MP3 with an unsynchronised ID3v2.3 tag",
+      input: bytes("ID3", [3, 0, 0x80, 0, 0, 0x10, 0]),
+      type: "audio/mpeg",
+    },
     // MPEG-1 Layer III, 128 kbit/s, 44.1 kHz.
     { name: "MP3 frame", input: bytes([0xff, 0xfb, 0x90, 0x64]), type: "audio/mpeg" },
+    { name: "Windows program", input: PROGRAM, type: "application/vnd.microsoft.portable-executable" },
     {
-      name: "Windows program",
-      input: bytes("MZ", [0x90, 0, 3, 0]),
+      // Windows' loader reads only "MZ" and e_lfanew: a packed program may leave every other DOS field zero.
+      name: "Windows program whose DOS header is zero but for e_lfanew",
+      input: bytes("MZ", new Array(58).fill(0), [0x40, 0, 0, 0], "PE\0\0", [0x4c, 0x01]),
+      type: "application/vnd.microsoft.portable-executable",
+    },
+    {
+      // A DOS program: 80 bytes on the last of 2 pages, no relocations, a 512-byte header (0x20 paragraphs).
+      name: "MS-DOS program",
+      input: bytes(
+        "MZ",
+        [0x50, 0, 2, 0, 0, 0, 0x20, 0, 0x11, 0, 0xff, 0xff, 0, 0, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x3e, 0, 0, 0],
+      ),
       type: "application/vnd.microsoft.portable-executable",
     },
     { name: "Linux program", input: bytes([0x7f], "ELF", [2, 1, 1]), type: "application/x-executable" },
@@ -58,6 +76,18 @@ describe("sniff: binary signatures", () => {
     // FF FE is UTF-16LE's byte order mark, and "h" after it would read as a valid MPEG audio header.
     { name: "UTF-16LE text", input: bytes([0xff, 0xfe], "h\0i\0") },
     { name: "an empty file", input: bytes() },
+    // Text that starts with a signature's letters: no byte of it can be a header's binary field.
+    { name: "a CSV whose first cell is MZ", input: bytes("MZ,Mozambique,Maputo\nZA,South Africa,Pretoria\n") },
+    { name: "text that starts with ID3", input: bytes("ID3 tags are the metadata of an MP3 file.\n") },
+    {
+      // e_cblp 0x9000 is past a 512-byte page, and e_lfanew points at no PE signature.
+      name: "an MZ header with an impossible last-page size",
+      input: bytes("MZ", [0, 0x90, 3, 0], new Array(54).fill(0), [0x40, 0, 0, 0], "NOPE"),
+    },
+    { name: "an ID3 tag of version 5", input: bytes("ID3", [5, 0, 0, 0, 0, 0, 0]) },
+    { name: "an ID3 tag with revision 0xFF", input: bytes("ID3", [4, 0xff, 0, 0, 0, 0, 0]) },
+    { name: "an ID3 tag with an undefined flag set", input: bytes("ID3", [4, 0, 0x01, 0, 0, 0, 0]) },
+    { name: "an ID3 tag whose size is not syncsafe", input: bytes("ID3", [4, 0, 0, 0, 0, 0x80, 0]) },
     { name: "plain text", input: bytes("Shopping list:\n- milk\n") },
     { name: "JSON", input: bytes('{"html": "<html>"}') },
   ])("detects nothing in $name", ({ input }) => {
@@ -168,6 +198,8 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "SVG with a prefix", input: '<s:svg xmlns:s="http://www.w3.org/2000/svg">', type: "image/svg+xml" },
     { name: "an XML document", input: '<?xml version="1.0"?><note>hi</note>', type: "application/xml" },
     { name: "a shell script", input: "#!/bin/sh\nrm -rf /tmp/x\n", type: "text/x-shellscript" },
+    // Linux's binfmt_script skips blanks between "#!" and the interpreter's path.
+    { name: "a script with a space after #!", input: "#! /usr/bin/env python3\n", type: "text/x-shellscript" },
   ])("detects $name", ({ input, type }) => {
     expect(typeOf(bytes(input))).toBe(type);
   });
@@ -179,6 +211,7 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "markup in a CSV", input: "id,body\n1,<b>hi</b>\n" },
     { name: "XML without a declaration", input: "<note>hi</note>" },
     { name: "a prefixed root named like an HTML tag", input: '<x:p xmlns:x="urn:a"/>' },
+    { name: "prose that opens with #!", input: "#!important: water the plants\n" },
   ])("detects nothing in $name", ({ input }) => {
     expect(sniff(bytes(input))).toBeNull();
   });

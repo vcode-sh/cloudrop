@@ -1,7 +1,7 @@
 // A file's real type from its first bytes (M10-K1). Every signature names the specification that defines it; where the
 // WHATWG MIME Sniffing standard lists one too, a browser recognises the file the same way.
 
-import { ascii, kind, type Pattern, type Sniffed, startsWith } from "./bytes.ts";
+import { ascii, kind, type Pattern, type Sniffed, startsWith, uint16LE, uint32LE } from "./bytes.ts";
 import { sniffContainer } from "./sniff-containers.ts";
 import { hasBom, sniffText } from "./sniff-text.ts";
 
@@ -31,10 +31,6 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   [[...ascii("OggS"), 0], kind("audio/ogg", "an Ogg recording", "audio/opus", "video/ogg", "application/ogg")],
   // FLAC: RFC 9639 §8, the stream marker "fLaC".
   [ascii("fLaC"), kind("audio/flac", "a FLAC recording", "audio/x-flac")],
-  // An ID3v2 tag (id3.org, ID3v2.4.0 structure §3.1), which WHATWG §6.2 reads as MP3; FLAC and AAC files carry one too.
-  [ascii("ID3"), kind("audio/mpeg", "an MP3 recording", "audio/mp3", "audio/flac", "audio/x-flac", "audio/aac")],
-  // Windows programs: Microsoft PE Format, MS-DOS stub, the "MZ" signature every PE and DOS executable starts with.
-  [ascii("MZ"), WINDOWS],
   // Linux programs: System V ABI, ELF header, e_ident[EI_MAG0..3].
   [[0x7f, ...ascii("ELF")], LINUX],
   // macOS programs: Apple's <mach-o/loader.h> MH_MAGIC and MH_MAGIC_64 in either byte order, and <mach-o/fat.h>
@@ -48,6 +44,33 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
 ];
 
 const MP3 = kind("audio/mpeg", "an MP3 recording", "audio/mp3");
+const ID3 = kind("audio/mpeg", "an MP3 recording", "audio/mp3", "audio/flac", "audio/x-flac", "audio/aac");
+
+/**
+ * An ID3v2 tag, which WHATWG §6.2 reads as MP3; FLAC and AAC files carry one too. Its header as id3.org's ID3v2.4.0
+ * structure §3.1 detects it: "ID3", a major version (2 to 4 exist) and a revision under FF, flags whose low four bits,
+ * undefined in every version, are clear, and a size of four bytes each under 80.
+ */
+function sniffId3(bytes: Uint8Array): Sniffed | null {
+  if (bytes.length < 10 || !startsWith(bytes, ascii("ID3"))) return null;
+  const [major = 0, revision = 0, flags = 0, ...size] = bytes.subarray(3, 10);
+  const header = major >= 2 && major <= 4 && revision < 0xff && (flags & 0x0f) === 0;
+  return header && size.every((byte) => byte < 0x80) ? ID3 : null;
+}
+
+/**
+ * A program that starts with an MS-DOS header. A Windows program is found as Windows' loader finds it (Microsoft PE
+ * Format, "MS-DOS Stub" and "Signature"): e_lfanew, at 3C, gives the offset of "PE\0\0". A DOS program, or one whose
+ * signature lies past the bytes read, by the header's own fields (The MS-DOS Encyclopedia, Article 4, the .EXE file
+ * header): fewer than 512 bytes on the last 512-byte page, at least one page, and a header of at least two paragraphs
+ * (its 28 bytes) that fits in those pages. Text cannot form such a header: the last-page count needs a byte 00 or 01.
+ */
+function sniffWindows(bytes: Uint8Array): Sniffed | null {
+  if (bytes.length < 28 || !startsWith(bytes, ascii("MZ"))) return null;
+  if (bytes.length >= 64 && startsWith(bytes, ascii("PE\0\0"), uint32LE(bytes, 0x3c))) return WINDOWS;
+  const [lastPage, pages, paragraphs] = [uint16LE(bytes, 2), uint16LE(bytes, 4), uint16LE(bytes, 8)];
+  return lastPage < 512 && pages > 0 && paragraphs >= 2 && paragraphs * 16 <= pages * 512 ? WINDOWS : null;
+}
 
 /**
  * An MPEG audio frame header without an ID3 tag, as WHATWG MIME Sniffing §6.2.3 matches one: the 11-bit frame sync, a
@@ -62,6 +85,7 @@ function sniffMp3([sync, flags = 0, rates = 0]: Uint8Array): Sniffed | null {
 /** The type the first bytes of a file show, or null when they show none this module knows. */
 export function sniff(bytes: Uint8Array): Sniffed | null {
   for (const [pattern, sniffed] of SIGNATURES) if (startsWith(bytes, pattern)) return sniffed;
+  const binary = sniffId3(bytes) ?? sniffWindows(bytes) ?? sniffContainer(bytes);
   // FF FE is UTF-16's byte order mark, and text after it can read as an MPEG audio header: text is tried first.
-  return sniffContainer(bytes) ?? (hasBom(bytes) ? null : sniffMp3(bytes)) ?? sniffText(bytes);
+  return binary ?? (hasBom(bytes) ? null : sniffMp3(bytes)) ?? sniffText(bytes);
 }

@@ -17,6 +17,22 @@ export const HTML: Uint8Array<ArrayBuffer> = bytes("<!DOCTYPE html><script>alert
 export const SVG: Uint8Array<ArrayBuffer> = bytes('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
 export const TEXT: Uint8Array<ArrayBuffer> = bytes("hello");
 
+/**
+ * The start of a 64-bit Windows program as Microsoft's linker writes it: the MS-DOS header (e_lfanew at 0x3C = 0x80),
+ * the DOS stub that prints its message, then the PE signature and the AMD64 machine type (Microsoft PE Format).
+ */
+export const PROGRAM: Uint8Array<ArrayBuffer> = bytes(
+  "MZ",
+  [0x90, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0xff, 0xff, 0, 0, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0],
+  new Array(32).fill(0),
+  [0x80, 0, 0, 0],
+  [0x0e, 0x1f, 0xba, 0x0e, 0, 0xb4, 0x09, 0xcd, 0x21, 0xb8, 0x01, 0x4c, 0xcd, 0x21],
+  "This program cannot be run in DOS mode.\r\r\n$",
+  new Array(7).fill(0),
+  "PE\0\0",
+  [0x64, 0x86],
+);
+
 /** A ZIP local file header (PKWARE APPNOTE §4.3.7) for an entry stored uncompressed, with its data. */
 export function zipEntry(name: string, data: string): Uint8Array<ArrayBuffer> {
   const size = [data.length & 0xff, data.length >> 8, 0, 0];
