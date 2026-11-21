@@ -20,7 +20,7 @@ TARBALL=("$SCRATCH"/*.tgz)
 # its own when they sit next to package.json, and the changelog through `files`, so this catches a deleted or renamed
 # file.
 CONTENTS="$(tar -tzf "${TARBALL[0]}")"
-for required in README.md LICENSE CHANGELOG.md; do
+for required in README.md LICENSE CHANGELOG.md docs/README.md docs/server.md; do
   if ! grep -qx "package/$required" <<<"$CONTENTS"; then
     echo "The packed tarball has no $required. Add packages/cloudrop/$required." >&2
     exit 1

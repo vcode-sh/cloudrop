@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The guides copied into the package by scripts/package-docs.ts at build time
+packages/cloudrop/docs/
 coverage/
 .turbo/
 *.tgz

@@ -308,3 +308,18 @@ The measurements behind the first range are in
 - **If wrong:** none known.
 - **Status:** in force.
 - **Visible in:** `src/cli/setup.ts`.
+
+### M9-H108: the user guides ship inside the package
+
+- **Decision:** the package's `build` runs `scripts/package-docs.ts`, which copies `docs/guide/*.md` (all but the
+  contributors' `testing.md`) flat into `packages/cloudrop/docs/` with an index made from the "Guides" part of
+  `docs/README.md`, and `files` publishes that folder. A link between two shipped guides stays relative; every other
+  relative link becomes its GitHub URL; a relative link to a missing file fails the build. `check-package.sh` requires
+  `docs/README.md` and `docs/server.md` in the tarball.
+- **Why:** the owner asked for the docs to be the package's documentation: an app's editor and coding agent read
+  `node_modules/cloudrop/docs/` offline, for the installed version, while GitHub's `main` may already describe the next
+  one.
+- **If wrong:** about 70 kB more in the tarball; nothing is added to any bundle.
+- **Status:** in force from 0.3.0.
+- **Visible in:** `scripts/package-docs.ts`, `packages/cloudrop/package.json`, `scripts/check-package.sh`,
+  `packages/cloudrop/README.md`.
