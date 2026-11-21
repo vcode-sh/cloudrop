@@ -40,3 +40,21 @@ export function zipEntry(name: string, data: string): Uint8Array<ArrayBuffer> {
   const header = [0x50, 0x4b, 3, 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...size, ...size];
   return bytes(header, [name.length, 0, 0, 0], name, data);
 }
+
+const u32le = (value: number) => [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, value >>> 24];
+
+/**
+ * A ZIP entry as a writer that cannot seek back writes it (PKWARE APPNOTE §4.4.4, bit 3 of the general purpose flag):
+ * crc-32 and sizes are zero in the local file header, and follow the deflated data in a data descriptor (§4.3.9), with
+ * the signature most writers put before it unless `signature` is false. `deflated` is the entry's compressed data.
+ */
+export function streamedZipEntry(
+  name: string,
+  deflated: Uint8Array,
+  { signature = true, size = deflated.length }: { signature?: boolean; size?: number } = {},
+): Uint8Array<ArrayBuffer> {
+  // Version 2.0, flags: bit 3 and bit 11 (UTF-8 names), method 8 (deflate), then time, date, crc-32 and both sizes.
+  const header = [0x50, 0x4b, 3, 4, 20, 0, 0x08, 0x08, 8, 0, 0, 0, 0x21, 0, ...new Array(12).fill(0)];
+  const descriptor = [...(signature ? [0x50, 0x4b, 7, 8] : []), 0xde, 0xad, 0xbe, 0xef, ...u32le(size), ...u32le(size)];
+  return bytes(header, [name.length, 0, 0, 0], name, deflated, descriptor);
+}

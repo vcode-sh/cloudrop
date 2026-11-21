@@ -100,7 +100,22 @@ const OFFICE_FOLDERS: readonly [string, Sniffed][] = [
 /** OpenDocument (ODF 1.3 Part 2 §3.3) and EPUB (OCF 3.3 §4.2.1) open with a stored "mimetype" entry naming the type. */
 const PACKAGE_TYPE = /^application\/(?:vnd\.oasis\.opendocument\.[a-z.-]{1,64}|epub\+zip)$/;
 
-/** The entries whose local file headers (PKWARE APPNOTE 6.3.10 §4.3.7) lie in `bytes`, while sizes lead to the next. */
+/**
+ * Where the entry after a streamed one starts. Bit 3 of the general purpose flag (PKWARE APPNOTE 6.3.10 §4.4.4) leaves
+ * the sizes zero in the local file header and puts them after the data in a data descriptor (§4.3.9), which Java's
+ * ZipOutputStream, Apache Commons Compress (so Apache POI) and Node's archiver write for every deflated entry, with a
+ * signature the format does not require (§4.3.9.3). The next entry is the first local file header behind a descriptor,
+ * signed or not, whose compressed size is the distance from `data`; those bytes anywhere else are the entry's data.
+ */
+function afterStreamed(bytes: Uint8Array, data: number): number {
+  for (let at = data + 12; at + 4 <= bytes.length; at++) {
+    const size = uint32LE(bytes, at - 8);
+    if (startsWith(bytes, LOCAL_FILE, at) && (size === at - 12 - data || size === at - 16 - data)) return at;
+  }
+  return bytes.length;
+}
+
+/** The entries whose local file headers (APPNOTE §4.3.7) lie in `bytes`. */
 function* zipEntries(bytes: Uint8Array): Generator<{ name: string; stored: string }> {
   let at = 0;
   while (startsWith(bytes, LOCAL_FILE, at) && at + 30 <= bytes.length) {
@@ -108,9 +123,7 @@ function* zipEntries(bytes: Uint8Array): Generator<{ name: string; stored: strin
     const nameEnd = at + 30 + uint16LE(bytes, at + 26);
     const data = nameEnd + uint16LE(bytes, at + 28);
     yield { name: latin1(bytes, at + 30, nameEnd), stored: latin1(bytes, data, data + size) };
-    // Bit 3: the sizes follow the data, so the next header cannot be found from here.
-    if (uint16LE(bytes, at + 6) & 0x08) return;
-    at = data + size;
+    at = uint16LE(bytes, at + 6) & 0x08 ? afterStreamed(bytes, data) : data + size;
   }
 }
 

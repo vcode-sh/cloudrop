@@ -1046,7 +1046,6 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.test.ts`, `src/plugins/sniff-fuzz.test.ts`.
 
-
 ### M11-R131: a tag is its whole name, and `<!--` is a web page before any byte
 
 - **Decision:** text reads as `text/html` when, after the standard's whitespace bytes (`09 0A 0C 0D 20`), it starts
@@ -1073,3 +1072,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; `src/plugins/sniff-text.test.ts` has every row of the table, in both cases, before each
   terminator, after the whitespace bytes, and inside a longer name.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `docs/guide/plugins.md`.
+
+### M11-R132: the entry walk goes past a streamed ZIP entry
+
+- **Decision:** when a local file header has bit 3 of the general purpose flag set, the next entry is the first local
+  file header in the bytes read that follows a data descriptor whose compressed size equals the distance from the
+  entry's data: 12 bytes back without the descriptor's signature, 16 with it. The same four bytes anywhere else are
+  the entry's data. An Office file is then found by its `word/`, `xl/` or `ppt/` entry as before, whichever of
+  `[Content_Types].xml`, `_rels/.rels` or `docProps/` comes first. ZIP64 descriptors (8-byte sizes) are not read: a
+  writer uses them for entries of 4 GiB, which do not fit in the 4 KiB read. What a ZIP that names no package answers
+  when it was sent as an Office type is `M11-R133`.
+- **Why:** the walk stopped at the first entry with bit 3, so such a file read as a plain ZIP (review finding G3,
+  reproduced with files built as these writers build them). PKWARE APPNOTE 6.3.10 §4.4.4 defines bit 3 (crc-32 and
+  sizes zero in the local header, the values in a data descriptor after the data), §4.3.9 the descriptor and §4.3.9.3
+  that its signature `PK 07 08` is optional. Writers that set it for every deflated entry, read from their sources:
+  Java's `ZipOutputStream.putNextEntry` (`e.flag = 8` when size, compressed size or crc is not preset) with `writeEXT`;
+  Apache Commons Compress `ZipArchiveOutputStream.usesDataDescriptor` (deflated, and the output is not a
+  `RandomAccessOutputStream`), which Apache POI's `ZipPackage.saveImpl(OutputStream)` wraps its stream in, writing
+  `[Content_Types].xml` first; Node's archiver (`compress-commons`, `useDataDescriptor(true)` for streamed sources).
+  The compressed size is what makes a header the next entry: a stored archive inside an entry holds headers too.
+- **If wrong:** an entry's data that holds a local file header 12 or 16 bytes after four bytes spelling its own offset
+  is read as the next entry (one chance in 2^32 for random data); the worst outcome is a ZIP read as an Office file,
+  which any ZIP with a `word/` entry already is. An Office file whose first Office entry starts past the first 4 KiB
+  still reads as a ZIP.
+- **Status:** in force; `src/plugins/sniff-zip.test.ts` (each first entry, with and without the signature, a header
+  inside an entry's data, a descriptor of another size, an Office folder past 4 KiB).
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/testing/file-samples.ts`, `docs/guide/plugins.md`.
