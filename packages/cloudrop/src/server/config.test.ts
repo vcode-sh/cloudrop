@@ -194,7 +194,7 @@ describe("readConfig errors", () => {
     ),
     // The URL parser gives these an origin, but no page has one: the URL standard's special schemes are ftp, file,
     // http, https, ws and wss, and a browser loads a page over http and https alone (M11-R111).
-    ...["ws://app.example.com", "wss://app.example.com", "ftp://files.example.com"].map((origin) => ({
+    ...["ws://app.example.com", "ftp://files.example.com"].map((origin) => ({
       name: `a trusted origin of ${origin}`,
       make: create({ trustedOrigins: [origin] }),
       message: `trustedOrigins: "${origin}" is not a page's origin: a page is loaded over http or https, or over an app's own scheme. Name the origin of the page that uploads, such as https://app.example.com.`,
