@@ -5,8 +5,7 @@ bucket, browser or network. Your tests call `client.upload()` as your page does,
 bucket. Use it to test what is yours: who `authorize` lets in, the metadata your schema takes, your quotas, what
 `onComplete` returns, and how a large file goes through.
 
-It works in Vitest, Node's `node:test` and Bun's test runner (mind
-[Bun's `File`](#what-differs-from-a-browser-and-a-real-bucket)); the examples below are Vitest. They are the
+It works in Vitest, Node's `node:test` and Bun's test runner; the examples below are Vitest. They are the
 repository's own tests (`packages/cloudrop/src/testing.guide.test.ts`), so they run as written. This page is for
 testing an app that uses cloudrop; for the lanes that test cloudrop itself, see [Testing](testing.md).
 
@@ -284,10 +283,8 @@ cannot see:
   Bun, `setSystemTime(date)` from `bun:test`. Faking every timer works too (`vi.useFakeTimers()`): an in-process
   upload waits on no timer.
 - **Bun's `File`.** Under `bun test`, `new File(parts, name, { type: "text/plain" })` reads back as
-  `text/plain;charset=utf-8`, and so does `application/json`, where a browser keeps the type as given. The server
-  refuses a type with parameters with `FILE_TYPE_NOT_ALLOWED` ("The file's type is not a valid MIME type"), so test
-  routes that take those types in Vitest or `node:test`. Other types, such as `image/png` or `application/pdf`, are kept
-  as given in Bun too.
+  `text/plain;charset=utf-8`, and so does `application/json`, where a browser keeps the type as given. The server reads
+  a type by its essence (`M9-H1`), so the file is accepted and stored as `text/plain`, as from a browser.
 
 ## API
 

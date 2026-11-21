@@ -163,13 +163,6 @@ code 9, before any line of the command's own. **The file does not exist, or is a
 `--env-file` on its command line, even one meant for the command, and stops there. Fix the path; Bun runs the command,
 which reports the file itself ([The cloudrop command](command.md#settings)).
 
-## Tests under bun test refuse text files with FILE_TYPE_NOT_ALLOWED
-
-A `cloudrop/testing` test that passes in Vitest fails under `bun test` with "The file's type is not a valid MIME type".
-**Bun's `File` adds `;charset=utf-8` to `text/plain` and `application/json`**, and the server refuses a type with
-parameters. Test those routes in Vitest or `node:test`
-([Testing your app](testing-your-app.md#what-differs-from-a-browser-and-a-real-bucket)).
-
 ## Retries after 429 come too fast
 
 R2 answers concurrent writes to one key with `429` and `Retry-After: 5`, but the client retries sooner. **The CORS rule
