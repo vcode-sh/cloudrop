@@ -1,6 +1,8 @@
 // Contract: spec §4.1 and decision S10: in a browser without a fetch option, a bucket PUT goes through XMLHttpRequest,
-// reports its bytes while they are sent, and its answer is classified exactly as the fetch path classifies it. Oracle:
-// bucket.test.ts's rows for the same statuses, and the bytes the fake bucket stored.
+// reports its bytes while they are sent, and its answer is classified exactly as the fetch path classifies it: the
+// rows below hold what XMLHttpRequest hands the classifier (the status, the body, Retry-After) and its own 412;
+// bucket.test.ts holds every answer's verdict. Oracle: bucket.test.ts's rows for the same statuses, and the bytes the
+// fake bucket stored.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
@@ -116,24 +118,9 @@ describe("createPut through XMLHttpRequest", () => {
       expected: { kind: "rejected", error: withCode("UPLOAD_REJECTED") },
     },
     {
-      name: "renews a RustFS expiry",
-      fault: answer(403, "<Error><Code>AccessDenied</Code></Error>"),
-      expected: { kind: "expired", error: withCode("UPLOAD_REJECTED"), retryAfterMs: 0 },
-    },
-    {
       name: "waits as long as a busy bucket asks",
       fault: answer(503, "", { "retry-after": "7" }),
       expected: { kind: "retry", error: withCode("RATE_LIMITED"), retryAfterMs: 7000 },
-    },
-    {
-      name: "retries a server error",
-      fault: answer(500),
-      expected: { kind: "retry", error: withCode("STORAGE_ERROR"), retryAfterMs: 0 },
-    },
-    {
-      name: "fails a bad request",
-      fault: answer(400),
-      expected: { kind: "rejected", error: withCode("UPLOAD_REJECTED") },
     },
   ])("$name", async ({ fault, expected }) => {
     const { put, target, body, onBytes } = await setup({ fault });

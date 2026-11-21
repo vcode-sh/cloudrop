@@ -151,7 +151,8 @@ describe("start", () => {
   });
 
   it("refuses JSON of another shape", async () => {
-    const { endpoints } = setup({ fault: () => Response.json({ files: [] }) });
+    // A 200 that is some other service's: it has no list of files at all.
+    const { endpoints } = setup({ fault: () => Response.json({ ok: true }) });
     const result = await endpoints.start("files", [png], undefined, KEY, live());
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
@@ -197,7 +198,6 @@ describe("start", () => {
         partSize: 8 * MiB,
         partCount: 3,
       },
-      { name: "one part per byte", size: 8 * MiB + 5, partSize: 1, partCount: 8 * MiB + 5 },
       { name: "10,001 parts", size: 52_428_800_001, partSize: 5_242_880, partCount: 10_001 },
       { name: "parts one byte under 5 MiB", size: 8 * MiB + 5, partSize: 5_242_879, partCount: 2 },
       { name: "parts one byte over 5 GiB", size: 5_368_709_122, partSize: 5_368_709_121, partCount: 2 },

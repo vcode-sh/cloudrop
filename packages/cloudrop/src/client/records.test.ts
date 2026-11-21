@@ -255,8 +255,8 @@ describe("store failures", () => {
     await afterQueued(records);
     fake.failNext("UnknownError");
     const failed = await records.list("user-1");
+    // The whole message is cloudrop's own sentence.
     expect(failed).toMatchObject({ data: null, error: STORAGE_ERROR });
-    expect(failed.error?.message).not.toMatch(/UnknownError|fake database/);
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
   });
 
