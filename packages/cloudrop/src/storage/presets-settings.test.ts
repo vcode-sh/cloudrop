@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { goodR2, goodS3, thrownBy } from "../testing/presets-fixture.ts";
+import type { StorageDriver } from "./driver.ts";
 import { r2, s3 } from "./presets.ts";
 
 describe("bucket names", () => {
@@ -28,14 +29,21 @@ describe("bucket names", () => {
     expect(thrownBy(() => s3({ ...goodS3, bucket }))).toMatchObject({ code: "INVALID_CONFIG", message: s3Message });
   });
 
-  it("accepts the shortest and the longest valid name", () => {
-    expect(() => r2({ ...goodR2, bucket: "a1b" })).not.toThrow();
-    expect(() => r2({ ...goodR2, bucket: `a${"-".repeat(61)}1` })).not.toThrow();
+  /** The path of the URL the driver signs for "a.txt": "/<bucket>/a.txt" when it addresses the bucket it was given. */
+  const signedPath = async (driver: StorageDriver): Promise<string> =>
+    new URL((await driver.presignGet("a.txt", { expiresIn: 60 })).data?.url ?? "").pathname;
+
+  it("accepts the shortest and the longest valid name, and addresses that bucket", async () => {
+    const longest = `a${"-".repeat(61)}1`;
+    expect([
+      await signedPath(r2({ ...goodR2, bucket: "a1b" })),
+      await signedPath(r2({ ...goodR2, bucket: longest })),
+    ]).toEqual(["/a1b/a.txt", "/a-------------------------------------------------------------1/a.txt"]);
   });
 
-  it("r2() rejects a dot, s3() accepts one but not an IP address or a double dot", () => {
+  it("r2() rejects a dot, s3() accepts one but not an IP address or a double dot", async () => {
     expect(thrownBy(() => r2({ ...goodR2, bucket: "my.media" })).message).toBe(r2Message);
-    expect(() => s3({ ...goodS3, bucket: "my.media" })).not.toThrow();
+    expect(await signedPath(s3({ ...goodS3, bucket: "my.media" }))).toBe("/my.media/a.txt");
     expect(thrownBy(() => s3({ ...goodS3, bucket: "192.168.5.4" })).message).toBe(s3Message);
     expect(thrownBy(() => s3({ ...goodS3, bucket: "my..media" })).message).toBe(s3Message);
   });
