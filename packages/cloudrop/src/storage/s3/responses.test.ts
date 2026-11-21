@@ -148,6 +148,7 @@ describe("createS3Driver", () => {
     expect((await driverWith(stuck).listParts("big.bin", "upload-1")).error).toMatchObject({
       code: "STORAGE_ERROR",
       retryable: true,
+      message: "The storage service's response had no valid next part marker. Retry the request.",
     });
   });
 
@@ -171,6 +172,7 @@ describe("createS3Driver", () => {
     expect((await driverWith(empty).createMultipart("a.txt", {})).error).toMatchObject({
       code: "STORAGE_ERROR",
       retryable: true,
+      message: "The storage service's response had no upload ID. Retry the request.",
     });
   });
 });

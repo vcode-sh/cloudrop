@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MiB, R2_RULES } from "../../rules.ts";
+import { R2_RULES } from "../../rules.ts";
 import {
   copyStub,
   credentials,
@@ -43,18 +43,19 @@ describe("createS3Driver", () => {
     // An underscore in a metadata name and UTF-8 bytes in a disposition ("café", as HEAD returns it: one character
     // per byte) fail cloudrop's input rules, but the copy must keep what is stored.
     const disposition = 'attachment; filename="caf\u00c3\u00a9.txt"';
-    await putWithForeignTool(fake.fetch, "source.bin", offsetBytes(12 * MiB), {
+    await putWithForeignTool(fake.fetch, "source.bin", offsetBytes(R2_RULES.minPartSize + 4), {
       "content-type": "application/x-test",
       "content-disposition": disposition,
       "x-amz-meta-legacy_id": "s1",
     });
-    // Same bucket, lower single-PUT limit, so a 12 MiB copy takes the multipart path without a 5 GiB fixture.
+    // Same bucket, with a single-PUT limit of one minimum part: the smallest source a copy takes in parts, a part of
+    // 5 MiB and one of 4 bytes, without a 5 GiB fixture.
     const small = createS3Driver({
       endpoint,
       region: "auto",
       bucket: "test",
       credentials,
-      rules: { ...R2_RULES, maxSinglePutSize: 6 * MiB },
+      rules: { ...R2_RULES, maxSinglePutSize: R2_RULES.minPartSize },
       fetch: fake.fetch,
       now,
     });
