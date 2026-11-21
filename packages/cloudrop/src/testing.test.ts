@@ -97,12 +97,14 @@ describe("testClient", () => {
     {
       name: "a basePath that is a URL",
       options: { basePath: "https://api.example.com/api/cloudrop" },
-      message: 'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
+      message:
+        'basePath must be the path the server is mounted at, such as "/api/cloudrop", with no origin and no trailing slash.',
     },
     {
       name: "a basePath with a trailing slash",
       options: { basePath: "/api/cloudrop/" },
-      message: 'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
+      message:
+        'basePath must be the path the server is mounted at, such as "/api/cloudrop", with no origin and no trailing slash.',
     },
   ])("refuses $name with INVALID_CONFIG", ({ options, message }) => {
     const bucket = testBucket();

@@ -24,7 +24,7 @@ Entries continue from `M9-T1`.
   configuration. A small plugin there turns every import of `src/index.ts` and `src/client.ts` into an import of
   `./index.js` and `./client.js`, in the JavaScript and in the declarations, so `dist/testing.js` uses the published
   entries as an app does and carries only the fake bucket (with the signer, XML and checksum code it needs) and the
-  memory store. Its size-limit budget counts its own file only: 16 kB gzip, measured at 12.67 kB.
+  memory store. Its size-limit budget counts its own file only: 16 kB gzip, measured at 12.71 kB.
 - **Why:** built with the other entries, the shared modules move into chunks: tried on 2026-11-21, `dist/index.js` fell
   from 135,530 to 90,610 bytes and a 45,721-byte `presets-*.js` chunk appeared, so every server bundle would have
   changed. Built apart, every existing file in `dist/` keeps its size (all 16 compared) and every size-limit number is
@@ -59,8 +59,8 @@ Entries continue from `M9-T1`.
 - **Decision:** `testClient(cloudrop, { bucket, headers?, basePath? })` creates the real client with `basePath`
   `http://localhost<basePath>` and a `fetch` that sends requests under it to `cloudrop.handler` with
   `Origin: http://localhost` set last, and every other request to `bucket.fetch`. `basePath` must be a path without a
-  trailing slash (default `/api/cloudrop`) and must match the server's. `headers` is the client's own option, so it reaches the server and
-  never the bucket. A missing bucket or a non-path `basePath` throws `INVALID_CONFIG`.
+  trailing slash (default `/api/cloudrop`) and must match the server's. `headers` is the client's own option, so it
+  reaches the server and never the bucket. A missing bucket or a non-path `basePath` throws `INVALID_CONFIG`.
 - **Why:** a browser sets `Origin` on every `POST` and a page cannot change it; the handler's origin check then passes
   as for a same-origin page without `trustedOrigins`. A cross-origin page is the deployment's concern and needs a
   second origin the in-process client does not have. Cookies are modelled by `headers`, which is what the design asks.
@@ -98,11 +98,11 @@ Entries continue from `M9-T1`.
 
 ### M9-T7: `memoryStore()` leases; `{ transaction: true }` adds `store.route` with `tx` undefined
 
-- **Decision:** `memoryStore()` returns the repository's memory store without `transaction` and without its test
-  hooks (`raw`, `injectFailure`, `failNextUsageWrite`, `appRows`), so completions run under a lease, as with
-  `sqlStore(executor)`; `{ transaction: false }` and `null` mean the same. `memoryStore({ transaction: true })` returns a `TransactionalStore<undefined>`: `transaction`
-  runs the memory store's own, and `store.route` brands routes for it as the adapters do. `onComplete` of such a route
-  receives `tx: undefined`.
+- **Decision:** `memoryStore()` returns the repository's memory store without `transaction` and without its test hooks
+  (`raw`, `injectFailure`, `failNextUsageWrite`, `appRows`), so completions run under a lease, as with
+  `sqlStore(executor)`; `{ transaction: false }` and `null` mean the same. `memoryStore({ transaction: true })` returns
+  a `TransactionalStore<undefined>`: `transaction` runs the memory store's own, and `store.route` brands routes for it
+  as the adapters do. `onComplete` of such a route receives `tx: undefined`.
 - **Why:** it mirrors the adapters' `transaction: true` switch, which the design asks for ("the same route helper the
   adapters give"). The memory store's own handle (`calls`, `write`) is a test hook of this repository, and an app has
   no database here to write through; `undefined` says so in the types instead of offering a handle that writes

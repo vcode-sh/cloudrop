@@ -276,11 +276,11 @@ A missing `bucket`, or a `basePath` that is not a path, throws `INVALID_CONFIG`.
 
 ### `memoryStore(options?)`
 
-`memoryStore()`, or `memoryStore({ transaction: false })`, returns a store without transactions: `onComplete` runs under a lease, as with `sqlStore(executor)`.
-`memoryStore({ transaction: true })` adds `transaction` and `store.route`, as `sqlStore(executor, { transaction: true })`
-does; `onComplete` of a route built with `store.route` receives `tx`, which is `undefined`, since there is no database
-to write through. A route built with another store's `store.route`, such as your database store's, is refused by
-`createCloudrop`; build the routes your tests share with plain `route()`, or from a function that takes the store. Test
-the writes your `onComplete` makes through `tx` against your real database.
+`memoryStore()`, or `memoryStore({ transaction: false })`, returns a store without transactions: `onComplete` runs under
+a lease, as with `sqlStore(executor)`. `memoryStore({ transaction: true })` adds `transaction` and `store.route`, as
+`sqlStore(executor, { transaction: true })` does; `onComplete` of a route built with `store.route` receives `tx`, which
+is `undefined`, since there is no database to write through. A route built with another store's `store.route`, such as
+your database store's, is refused by `createCloudrop`; build the routes your tests share with plain `route()`, or from a
+function that takes the store. Test the writes your `onComplete` makes through `tx` against your real database.
 
 Each store is empty when created; create one per test.

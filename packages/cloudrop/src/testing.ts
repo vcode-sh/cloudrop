@@ -136,7 +136,7 @@ export function testClient<TCloudrop extends InferableCloudrop>(
   if (typeof basePath !== "string" || !PATH.test(basePath)) {
     throw new CloudropError(
       "INVALID_CONFIG",
-      'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
+      'basePath must be the path the server is mounted at, such as "/api/cloudrop", with no origin and no trailing slash.',
     );
   }
   const server = `${PAGE_ORIGIN}${basePath}`;

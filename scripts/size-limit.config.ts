@@ -57,7 +57,7 @@ export default [
     ...summed,
   },
   // Its own file only: index.js and client.js, which it imports, are the cloudrop and cloudrop/client budgets, and
-  // only an app's tests load it (M9-T2). Measured 2026-11-21: 12.67 kB.
+  // only an app's tests load it (M9-T2). Measured 2026-11-21: 12.71 kB.
   { name: "cloudrop/testing", path: join(dist, "testing.js"), gzip: true, limit: "16 kB", ...summed },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
