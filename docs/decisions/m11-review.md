@@ -446,6 +446,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/server/api.ts`, `src/server/api.test.ts`, `docs/guide/server.md#file-api`.
 
+### M11-R45: a plugin hook that returns `null` refuses nothing
+
+- **Decision:** `beforeUpload` and `afterVerify` may return `null` as well as `undefined`; the hook types say
+  `CloudropError | null | undefined`. Any other value still throws the "must return nothing or a CloudropError" error.
+- **Why:** a hook written in plain JavaScript, or ending in `return null`, answered `500` on every upload, with a
+  message about a second installed copy of cloudrop.
+- **If wrong:** none known: `null` could never have meant a refusal.
+- **Status:** in force.
+- **Visible in:** `src/server/plugins.ts`, `src/server/plugins.test.ts`, `docs/guide/server.md#plugin-hooks`.
+
 ### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
 
 - **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC

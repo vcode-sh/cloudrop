@@ -49,9 +49,9 @@ export interface AbortContext {
 
 export interface ServerHooks {
   /** Runs in `/upload` after authorization and policy, before anything is signed. Return an error to refuse every file. */
-  beforeUpload?(context: BeforeUploadContext): Awaitable<CloudropError | undefined>;
+  beforeUpload?(context: BeforeUploadContext): Awaitable<CloudropError | null | undefined>;
   /** Runs in `/complete` after verification, before `onComplete`. An error deletes the object and reaches the client. */
-  afterVerify?(context: AfterVerifyContext): Awaitable<CloudropError | undefined>;
+  afterVerify?(context: AfterVerifyContext): Awaitable<CloudropError | null | undefined>;
   /**
    * Runs when a file this plugin's `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete` or
    * is ended through an `/abort` that keeps nothing: after a cancel, or after a failure no `/complete` may have
@@ -74,7 +74,9 @@ export interface Logger {
   warn(message: string): void;
 }
 
-function refusal(plugin: CloudropPlugin, hook: string, value: unknown): CloudropError | undefined {
+function refusal(plugin: CloudropPlugin, hook: string, given: unknown): CloudropError | undefined {
+  // null is nothing too: plain JavaScript returns it as easily as undefined.
+  const value = given ?? undefined;
   if (value === undefined || value instanceof CloudropError) return value;
   // A CloudropError from a second installed copy of cloudrop fails this check too, so the message names that cause.
   throw new TypeError(

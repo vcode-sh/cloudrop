@@ -105,4 +105,22 @@ describe("runAfterVerify", () => {
     };
     expect([await runAfterVerify(plugins, verified), seen]).toEqual([refusal, []]);
   });
+
+  // Plain JavaScript returns null as easily as nothing, and a throw for it answered 500 on every upload (M11-R45).
+  it("reads null from beforeUpload and afterVerify as no refusal, and runs the plugins after it", async () => {
+    const seen: string[] = [];
+    const plugins: CloudropPlugin[] = [
+      { id: "null", server: { beforeUpload: () => null, afterVerify: () => null } },
+      {
+        id: "after",
+        server: { beforeUpload: () => void seen.push("before"), afterVerify: () => void seen.push("after") },
+      },
+    ];
+    const verified = { ...context, file: { ...file, url: null }, storage: {} as never };
+    expect([
+      await runBeforeUpload(plugins, context, recordingLogger()),
+      await runAfterVerify(plugins, verified),
+      seen,
+    ]).toEqual([undefined, undefined, ["before", "after"]]);
+  });
 });
