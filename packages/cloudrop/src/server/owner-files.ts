@@ -1,7 +1,9 @@
-// api.files (M8-A1): an owner's completed files, newest first, a page at a time, straight from the store's rows.
+// api.files (M8-A1, M10-D1, M10-D2): an owner's completed files, newest or oldest first, optionally filtered by route,
+// name and type, a page at a time, straight from the store's rows.
 
 import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
+import { MAX_NAME_LENGTH } from "../protocol/types.ts";
 import type { ServerConfig } from "./config.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
@@ -12,14 +14,20 @@ export interface FilesOptions {
   owner: string;
   /** Only this route's files. */
   route?: string;
+  /** Only files whose name contains this, ASCII letters in either case: `"report"` finds `"Q3 Report.pdf"`. */
+  name?: string;
+  /** Only this type, such as `"application/pdf"`, or every type under a top-level type, such as `"image/"`. */
+  type?: string;
+  /** `"newest"` upload first (the default) or `"oldest"`. */
+  order?: "newest" | "oldest";
   /** Files per page, 1 to 1000. Default 100. */
   limit?: number;
-  /** The `cursor` an earlier page answered, to read the next one. */
+  /** The `cursor` an earlier page answered, to read the next one. Pass the same route, name, type and order. */
   cursor?: string;
 }
 
 export interface FilesPage {
-  /** The files' rows, newest upload first. */
+  /** The files' rows, in the order asked for. */
   items: FileRecord[];
   /** Pass it back to read the next page; null on the last one. */
   cursor: string | null;
@@ -29,11 +37,18 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 /** The last time an ISO string without a sign names, which is how Postgres is given a time: 9999-12-31T23:59:59.999Z. */
 const LAST_TIME_MS = 253_402_300_799_999;
+/** A type, or a top-level type and its slash, as `/upload` stores types (lower case, RFC 6838 names). */
+const TYPE_FILTER = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(?:[a-z0-9][a-z0-9!#$&^_.+-]{0,63})?$/;
+/** A cursor of a filtered or oldest-first listing: the listing's fingerprint, a dot, then the store's cursor. */
+const FILTERED_CURSOR = /^(?:([0-9a-f]{8})\.)?(.*)$/s;
 
 /** The listing the store is asked for, every option checked. */
 interface FilesQuery {
   owner: string;
   route: string | null;
+  name: string | null;
+  type: string | null;
+  order: "newest" | "oldest";
   limit: number;
   cursor: string | null;
 }
@@ -61,22 +76,82 @@ export function isStoreCursor(cursor: string): boolean {
   return match !== null && Number(match[1]) <= LAST_TIME_MS && isOwnerOrId(match[2]);
 }
 
-function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
-  if (!isPlainObject(given))
-    return fail(invalidInput("files takes { owner }, and optionally route, limit and cursor."));
-  const { owner, route, limit = DEFAULT_LIMIT, cursor } = given;
-  if (!isOwnerOrId(owner)) return badOwner();
+/**
+ * Which listing a cursor belongs to: FNV-1a of its route, name, type and order, so a cursor passed with other filters is
+ * refused instead of paging a listing it was not made for. The default listing has none, so its cursors stay the plain
+ * store cursors of 0.3.
+ */
+function fingerprint({ route, name, type, order }: Pick<FilesQuery, "route" | "name" | "type" | "order">): string {
+  if (route === null && name === null && type === null && order === "newest") return "";
+  const text = JSON.stringify([route, name, type, order]);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/** The name filter as `/upload` normalizes names (NFC), or null for none; an empty name filters nothing. */
+function readName(name: unknown): Result<string | null> {
+  if (name === undefined || name === "") return ok(null);
+  if (typeof name === "string" && [...name].length <= MAX_NAME_LENGTH && !name.includes("\u0000")) {
+    return ok(name.normalize("NFC"));
+  }
+  return fail(invalidInput(`name must be text of at most ${MAX_NAME_LENGTH} characters without NUL (U+0000).`));
+}
+
+function readType(type: unknown): Result<string | null> {
+  if (type === undefined) return ok(null);
+  const lower = typeof type === "string" ? type.toLowerCase() : "";
+  if (TYPE_FILTER.test(lower)) return ok(lower);
+  return fail(invalidInput('type must be a type such as "application/pdf", or a top-level type such as "image/".'));
+}
+
+function readFilters(
+  config: ServerConfig,
+  given: Record<string, unknown>,
+): Result<Pick<FilesQuery, "route" | "name" | "type" | "order">> {
+  const { route, order = "newest" } = given;
   if (route !== undefined && (typeof route !== "string" || !config.routes.has(route))) {
     const names = [...config.routes.keys()].map((name) => JSON.stringify(name)).join(", ");
     return fail(invalidInput(`route must be one of this server's routes: ${names}.`));
   }
+  if (order !== "newest" && order !== "oldest") return fail(invalidInput('order must be "newest" or "oldest".'));
+  const name = readName(given.name);
+  if (name.error) return name;
+  const type = readType(given.type);
+  return type.error ? type : ok({ route: route ?? null, name: name.data, type: type.data, order });
+}
+
+/** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing. */
+function readCursor(cursor: unknown, query: Omit<FilesQuery, "cursor">): Result<string | null> {
+  if (cursor === undefined) return ok(null);
+  const [, mark = "", position = ""] = (typeof cursor === "string" && FILTERED_CURSOR.exec(cursor)) || [];
+  if (!isStoreCursor(position)) {
+    return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
+  }
+  if (mark !== fingerprint(query)) {
+    return fail(
+      invalidInput(
+        "cursor belongs to a listing with another route, name, type or order. Pass the options of the page that returned it, or leave cursor out to start again.",
+      ),
+    );
+  }
+  return ok(position);
+}
+
+function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
+  if (!isPlainObject(given)) {
+    return fail(invalidInput("files takes { owner }, and optionally route, name, type, order, limit and cursor."));
+  }
+  const { owner, limit = DEFAULT_LIMIT } = given;
+  if (!isOwnerOrId(owner)) return badOwner();
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  if (cursor !== undefined && (typeof cursor !== "string" || !isStoreCursor(cursor))) {
-    return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
-  }
-  return ok({ owner, route: route ?? null, limit, cursor: cursor ?? null });
+  const filters = readFilters(config, given);
+  if (filters.error) return filters;
+  const query = { owner, limit, ...filters.data };
+  const cursor = readCursor(given.cursor, query);
+  return cursor.error ? cursor : ok({ ...query, cursor: cursor.data });
 }
 
 export async function listFiles(
@@ -86,9 +161,12 @@ export async function listFiles(
 ): Promise<Result<FilesPage>> {
   const options = readOptions(config, given);
   if (options.error) return options;
-  const { owner } = options.data;
-  const page = await storeCall(config.logger, `list the files of ${owner}`, () =>
-    store.list({ ...options.data, statuses: ["completed"] }),
+  const query = options.data;
+  const page = await storeCall(config.logger, `list the files of ${query.owner}`, () =>
+    store.list({ ...query, statuses: ["completed"] }),
   );
-  return page.error ? page : ok({ items: page.data.records, cursor: page.data.cursor });
+  if (page.error) return page;
+  const mark = fingerprint(query);
+  const cursor = page.data.cursor === null || mark === "" ? page.data.cursor : `${mark}.${page.data.cursor}`;
+  return ok({ items: page.data.records, cursor });
 }

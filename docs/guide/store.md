@@ -631,8 +631,21 @@ if (data.cursor) {
 ```
 
 Completed files only, newest upload first (by when `/upload` accepted them), one page of `limit` files (1 to 1,000,
-default 100) at a time. `route` must be one of the server's routes; leave it out for all of them. The cursor is
-opaque: pass back only what a page answered. Files deleted between two pages make the next page skip nothing.
+default 100) at a time. Files deleted between two pages make the next page skip nothing. Narrow and order it with:
+
+| Option | What it does |
+| --- | --- |
+| `route` | Only that route's files; it must be one of the server's routes. |
+| `name` | Only files whose name contains it. ASCII letters match in either case (`"report"` finds `"Q3 Report.pdf"`); every other character, `%` and `_` included, matches only itself, so `"é"` does not find `"É"`. At most 255 characters; `""` filters nothing, so a search box can pass what was typed. |
+| `type` | Only that type (`"application/pdf"`), or with a trailing slash every type under a top-level type (`"image/"`). Not `"image/*"`. |
+| `order` | `"newest"` (the default) or `"oldest"` upload first. |
+
+```ts
+const page = await cloudrop.api.files({ owner: userId, name: search, type: "image/", order: "oldest", limit: 50 });
+```
+
+The cursor is opaque and belongs to its listing: pass it back with the same `route`, `name`, `type` and `order`, or the
+call answers `INVALID_INPUT`. Every backend answers the same files: Postgres, SQLite, D1 and the testing memory store.
 
 ## Erase an owner
 
@@ -686,7 +699,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | Call | What it does |
 | --- | --- |
 | `file(id)` | The file's row (`FileRecord`: status, key, owner, size, result, times), or `null`. |
-| `files({ owner, route?, limit?, cursor? })` | An owner's completed files, newest first, a page at a time ([above](#list-an-owners-files)). |
+| `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
 | `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
@@ -790,6 +803,9 @@ as required.
   (5 minutes by default), longer than the client retries. The client then reports a failure but keeps the file. Once
   the lease has passed, the next `/complete` of it (a `retry()` or a `resume()`) takes the file over and runs
   `onComplete` again: one more reason to keep it idempotent in this mode.
+- **Searching by name or type reads the owner's files.** The `(owner, status, created_at)` index finds an owner's
+  completed files in order, and `name` and `type` are checked on each of them, so a search that matches few of an
+  owner's many files reads them all to fill a page. No other index is needed, and 0.4.0 needs no migration.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. A server whose
   clock runs ahead can delay `eraseOwner`'s `done` by that much: a file it wrote looks newer than the run. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.

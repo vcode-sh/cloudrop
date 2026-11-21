@@ -3,6 +3,7 @@ import { complete, files } from "../testing/complete-fixture.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { FileApi } from "./api.ts";
+import type { FilesOptions } from "./owner-files.ts";
 import { route } from "./route.ts";
 
 const HOUR = 3_600_000;
@@ -212,7 +213,56 @@ describe("cloudrop.api.files", () => {
     ]);
   });
 
+  it("filters by name and type, in either order, each listing paging only with its own cursors", async () => {
+    const fixture = storeFixture({ owned });
+    const { api } = fixture.cloudrop;
+    const uploaded: string[] = [];
+    for (const [minutes, name, type] of [
+      [1, "Q3 Report.PDF", "application/pdf"],
+      [2, "photo.png", "image/png"],
+      [3, "report.txt", "text/plain"],
+      [4, "café.txt", "text/plain"],
+    ] as const) {
+      vi.setSystemTime(NOW.getTime() + minutes * 60_000);
+      const ticket = await fixture.single("owned", { name, size: 5, type });
+      await fixture.send(ticket.put, hello);
+      expect((await complete(fixture, ticket.token)).status).toBe(200);
+      uploaded.push(ticket.id);
+    }
+    const [pdf, png, txt, cafe] = uploaded;
+    const listed = async (options: object) =>
+      (await api.files({ owner: "u1", ...options })).data?.items.map((file) => file.id);
+    expect(await listed({ name: "REPORT" })).toEqual([txt, pdf]);
+    // Names are stored in NFC, so a decomposed é finds the composed one.
+    expect(await listed({ name: "cafe\u0301" })).toEqual([cafe]);
+    expect(await listed({ name: "", type: "IMAGE/" })).toEqual([png]);
+    expect(await listed({ type: "text/plain", order: "oldest" })).toEqual([txt, cafe]);
+    const first = await api.files({ owner: "u1", order: "oldest", limit: 2 });
+    expect(first.data?.items.map((file) => file.id)).toEqual([pdf, png]);
+    const cursor = first.data?.cursor ?? undefined;
+    const next = await api.files({ owner: "u1", order: "oldest", limit: 2, cursor });
+    expect(next.data?.items.map((file) => file.id)).toEqual([txt, cafe]);
+    const elsewhere = [
+      { owner: "u1", cursor },
+      { owner: "u1", order: "oldest", name: "report", cursor },
+      { owner: "u1", order: "oldest", route: "owned", cursor },
+    ];
+    const refused = await Promise.all(elsewhere.map((options) => api.files(options as FilesOptions)));
+    const otherListing =
+      "INVALID_INPUT: cursor belongs to a listing with another route, name, type or order. Pass the options of the page that returned it, or leave cursor out to start again.";
+    expect(refused.map(({ error }) => `${error?.code}: ${error?.message}`)).toEqual(elsewhere.map(() => otherListing));
+    // The default listing's cursor is a plain one, as 0.3 made, and is refused by a filtered listing all the same.
+    const plain = (await api.files({ owner: "u1", limit: 1 })).data?.cursor ?? undefined;
+    expect(plain).toMatch(/^\d+:/);
+    expect((await api.files({ owner: "u1", type: "text/", cursor: plain })).error?.code).toBe("INVALID_INPUT");
+  });
+
   it.for([
+    { name: "a name with a NUL character", options: { owner: "u1", name: "a\u0000" } },
+    { name: "a name over 255 characters", options: { owner: "u1", name: "x".repeat(256) } },
+    { name: "a type without its slash", options: { owner: "u1", type: "image" } },
+    { name: "an accept pattern for a type", options: { owner: "u1", type: "image/*" } },
+    { name: "an order that is not newest or oldest", options: { owner: "u1", order: "latest" } },
     { name: "an owner over 255 characters", options: { owner: "x".repeat(256) } },
     { name: "a route the server does not have", options: { owner: "u1", route: "avatars" } },
     { name: "a limit over 1000", options: { owner: "u1", limit: 1001 } },
@@ -222,6 +272,6 @@ describe("cloudrop.api.files", () => {
     { name: "a cursor after the year 9999", options: { owner: "u1", cursor: "253402300800000:f" } },
   ])("refuses $name with INVALID_INPUT", async ({ options }) => {
     const fixture = storeFixture({ owned });
-    expect((await fixture.cloudrop.api.files(options)).error?.code).toBe("INVALID_INPUT");
+    expect((await fixture.cloudrop.api.files(options as FilesOptions)).error?.code).toBe("INVALID_INPUT");
   });
 });

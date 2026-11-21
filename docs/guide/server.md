@@ -573,9 +573,10 @@ Same-origin versus cross-origin setups, cookies across sites and which origin th
 | `deletePrefix(prefix)` | Empties a folder prefix ending in `/`, such as `"users/42/"`, then lists it again to prove it is empty. For erasure requests. |
 | `checkBucket({ origins? })` | Reports the bucket's CORS rule, lifecycle rule and public-access conflicts (see below). |
 
-With a store, `api` also has `file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and
-`sweep` (see [Database store](store.md#file-operations)). For an erasure request, `eraseOwner` needs no key layout and
-proves when nothing is left; `deletePrefix` empties a folder you name.
+With a store, `api` also has `file`, `files` (filtered by route, name and type, newest or oldest first), `usage`,
+`revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep` (see [Database store](store.md#file-operations)).
+For an erasure request, `eraseOwner` needs no key layout and proves when nothing is left; `deletePrefix` empties a
+folder you name.
 
 `getUrl` signs at the start of an `expiresIn` window and the URL stays valid for two windows, so every viewer in one
 window gets the same, cacheable URL.

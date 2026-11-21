@@ -56,6 +56,8 @@ const LIVE: readonly FileStatus[] = ["pending", "completing", "completed"];
 /** Read after the live statuses, one at a time, as ended rows never change status again. */
 const ENDED: readonly FileStatus[] = ["aborted", "rejected", "failed", "expired", "deleted"];
 const EVERY: readonly FileStatus[] = [...LIVE, ...ENDED];
+/** Every row of the owner's, in the store's default order. */
+const UNFILTERED = { route: null, name: null, type: null, order: "newest" } as const;
 
 function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSignal | undefined }> {
   const options = given ?? {};
@@ -125,7 +127,7 @@ async function eachRow(eraser: Eraser, statuses: readonly FileStatus[], handle: 
     const page: Result<{ records: FileRecord[]; cursor: string | null }> = await storeCall(
       config.logger,
       `list the ${statuses.join(" or ")} files of ${owner}`,
-      () => store.list({ owner, statuses, route: null, limit: PAGE, cursor }),
+      () => store.list({ owner, statuses, ...UNFILTERED, limit: PAGE, cursor }),
     );
     if (page.error) return page;
     for (const record of page.data.records) {
@@ -163,7 +165,7 @@ async function lastReads(eraser: Eraser, startedAt: number): Promise<Result<bool
   const { config, store, owner, report } = eraser;
   if (report.waiting > 0) return ok(true);
   const newest = await storeCall(config.logger, `list the newest file of ${owner}`, () =>
-    store.list({ owner, statuses: EVERY, route: null, limit: 1, cursor: null }),
+    store.list({ owner, statuses: EVERY, ...UNFILTERED, limit: 1, cursor: null }),
   );
   if (newest.error) return newest;
   if ((newest.data.records[0]?.createdAt.getTime() ?? 0) < startedAt) return eachRow(eraser, LIVE, wait);

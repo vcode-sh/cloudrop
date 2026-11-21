@@ -28,12 +28,24 @@ const timeKey = (time: Date | null, id: string): string => `${String(time?.getTi
 const newestFirst = (a: RawFileRow, b: RawFileRow): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
-/** Rows strictly after a `list` cursor, `<milliseconds>:<id>`, in newest-first order. */
-function listedAfter(cursor: string): (row: RawFileRow) => boolean {
+/** Rows strictly after a `list` cursor, `<milliseconds>:<id>`, in the listing's order. */
+function listedAfter(cursor: string, newest: boolean): (row: RawFileRow) => boolean {
   const split = cursor.indexOf(":");
   const time = Number(cursor.slice(0, split));
   const id = cursor.slice(split + 1);
-  return (row) => row.createdAt.getTime() < time || (row.createdAt.getTime() === time && row.id < id);
+  return (row) => {
+    const order = row.createdAt.getTime() - time || (row.id < id ? -1 : row.id > id ? 1 : 0);
+    return newest ? order < 0 : order > 0;
+  };
+}
+
+/** ASCII letters in lower case, every other character as it is: the case folding `list`'s name filter uses. */
+const foldAscii = (text: string): string => text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+
+/** `list`'s name and type filters; null lets every row through. */
+function matchesFilters(row: RawFileRow, name: string | null, type: string | null): boolean {
+  if (name !== null && !foldAscii(row.name).includes(foldAscii(name))) return false;
+  return type === null || (type.endsWith("/") ? row.type.startsWith(type) : row.type === type);
 }
 
 export function readMethods({ files, usage }: MemoryTables): ReadMethods {
@@ -59,14 +71,15 @@ export function readMethods({ files, usage }: MemoryTables): ReadMethods {
       return { records: found.records.map(toRecord), cursor: found.cursor };
     },
 
-    list: async ({ owner, statuses, route, limit, cursor }) => {
-      const after = cursor === null ? () => true : listedAfter(cursor);
+    list: async ({ owner, statuses, route, name, type, order, limit, cursor }) => {
+      const newest = order === "newest";
+      const after = cursor === null ? () => true : listedAfter(cursor, newest);
       const rows = [...files.values()]
         .filter(
           (row) => row.owner === owner && statuses.includes(row.status) && (route === null || row.route === route),
         )
-        .filter(after)
-        .sort(newestFirst);
+        .filter((row) => matchesFilters(row, name, type) && after(row))
+        .sort(newest ? newestFirst : (a, b) => newestFirst(b, a));
       const kept = rows.slice(0, limit);
       const last = kept.at(-1);
       const next = rows.length > limit && last ? `${last.createdAt.getTime()}:${last.id}` : null;

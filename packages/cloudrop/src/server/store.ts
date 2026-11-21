@@ -185,17 +185,23 @@ export interface CloudropStore<TTx = never> {
     cursor: string | null;
   }): Promise<{ records: FileRecord[]; cursor: string | null }>;
   /**
-   * One page of an owner's rows in any of `statuses` (none: an empty page), newest first: by `created_at`, then id, both
-   * descending, and on `route` alone when it is not null. One page is read in one statement, so a row in one of the
-   * statuses when it runs is on it or on a later page, whatever status changes happen meanwhile. At most `limit`
-   * records; `cursor` continues after the previous page (keyset, so rows that leave the statuses between pages skip
-   * nothing) and is null on the last page. A cursor is `<milliseconds>:<id>`, the last row's `created_at` and id (the
-   * file API refuses any other before calling the store).
+   * One page of an owner's rows in any of `statuses` (none: an empty page), ordered by `created_at`, then id: both
+   * descending for `"newest"`, ascending for `"oldest"`, ids in byte order. Each filter that is not null narrows it:
+   * `route` to that route; `name` to names that contain it, with ASCII letters matched in either case and every other
+   * character, `%` and `_` included, only as itself; `type` to that exact type, or, when it ends in `/` (`"image/"`),
+   * to every type that starts with it. One page is read in one statement, so a row in one of the statuses when it runs
+   * is on it or on a later page, whatever status changes happen meanwhile. At most `limit` records; `cursor` continues
+   * after the previous page (keyset, so rows that leave the statuses between pages skip nothing) and is null on the
+   * last page. A cursor is `<milliseconds>:<id>`, the last row's `created_at` and id (the file API refuses any other
+   * before calling the store).
    */
   list(input: {
     owner: string;
     statuses: readonly FileStatus[];
     route: string | null;
+    name: string | null;
+    type: string | null;
+    order: "newest" | "oldest";
     limit: number;
     cursor: string | null;
   }): Promise<{ records: FileRecord[]; cursor: string | null }>;

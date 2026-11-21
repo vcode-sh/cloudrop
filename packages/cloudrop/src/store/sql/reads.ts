@@ -2,7 +2,7 @@
 // placeholders (the binder's) and the collation of keyset comparisons.
 
 import type { CloudropStore, FileRecord } from "../../server/store.ts";
-import { binder } from "./bind.ts";
+import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlDialect, type SqlExecutor, type SqlStatement } from "./executor.ts";
 import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage } from "./records.ts";
 import type { QuotedTables } from "./tables.ts";
@@ -25,6 +25,10 @@ type SingleStatementMethods = Pick<
 export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
 
 const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
+/** Postgres: the name with its ASCII letters in lower case and nothing else changed. */
+const FOLD_NAME = "translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
+
+const foldAscii = (text: string): string => text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
 
 /** Reads file `id`'s row as it is now. */
 export function selectRecord(dialect: SqlDialect, files: string, id: string): SqlStatement {
@@ -45,6 +49,13 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
   // SQLite's default collation already compares bytes.
   const byteOrder = (expression: string) => (dialect === "postgres" ? `${expression} COLLATE "C"` : expression);
   const run = (statement: SqlStatement) => runStatement(executor, statement);
+  // A substring search, not LIKE, so `%` and `_` in the name mean themselves. Both sides fold ASCII letters alone:
+  // SQLite's `lower` does only that, while Postgres's would fold other letters too, by the database's locale.
+  const nameContains = (b: Binder, name: string) =>
+    `${dialect === "postgres" ? `strpos(${FOLD_NAME}, ` : "instr(lower(name), "}${b.text(foldAscii(name))}) > 0`;
+  // `"image/"` is every type of that top-level type; types are ASCII, so lengths in characters are lengths in bytes.
+  const typeMatches = (b: Binder, type: string) =>
+    type.endsWith("/") ? `substr(type, 1, ${b.integer(type.length)}) = ${b.text(type)}` : `type = ${b.text(type)}`;
 
   return {
     async attach(id, uploadId, now) {
@@ -98,17 +109,20 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
       return { records: kept, cursor: next };
     },
 
-    async list({ owner, statuses, route, limit, cursor }) {
+    async list({ owner, statuses, route, name, type, order, limit, cursor }) {
       // `IN ()` is not SQL: no status, no rows.
       if (statuses.length === 0) return { records: [], cursor: null };
       const b = binder(dialect);
       const start = cursor === null ? null : decodeCursor(cursor);
+      const [direction, after] = order === "newest" ? ["DESC", "<"] : ["ASC", ">"];
       // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
       const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE owner = ${b.text(owner)}
         AND status IN (${statuses.map((status) => b.text(status)).join(", ")})
         ${route === null ? "" : `AND route = ${b.text(route)}`}
-        ${start ? `AND (created_at, ${byteOrder("id")}) < (${b.time(start.time)}, ${b.text(start.id)})` : ""}
-        ORDER BY created_at DESC, ${byteOrder("id")} DESC LIMIT ${b.integer(limit + 1)}`;
+        ${name === null ? "" : `AND ${nameContains(b, name)}`}
+        ${type === null ? "" : `AND ${typeMatches(b, type)}`}
+        ${start ? `AND (created_at, ${byteOrder("id")}) ${after} (${b.time(start.time)}, ${b.text(start.id)})` : ""}
+        ORDER BY created_at ${direction}, ${byteOrder("id")} ${direction} LIMIT ${b.integer(limit + 1)}`;
       const records = (await run(b.statement(sql))).map(toRecord);
       const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(last.createdAt, last.id));
       return { records: kept, cursor: next };
