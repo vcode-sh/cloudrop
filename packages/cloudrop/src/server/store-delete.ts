@@ -36,11 +36,18 @@ const hookFailed = (route: string): CloudropError =>
     { retryable: true },
   );
 
-/** The route whose onDelete a completed row runs; undefined for any other row, or a route the server no longer has. */
-function hookedRoute(config: ServerConfig, row: FileRecord | null): RouteConfig | undefined {
-  const route = row?.status === "completed" ? config.routes.get(row.route) : undefined;
+/** The route whose onDelete a completed file runs; undefined without one, or for a route the server no longer has. */
+function hookedRoute(config: ServerConfig, file: FileRecord): RouteConfig | undefined {
+  const route = config.routes.get(file.route);
   return route?.definition.onDelete ? route : undefined;
 }
+
+/**
+ * The answer for a row that was not completed when the deletion read it, as `end` gives for one it does not change.
+ * `end` is never called for such a row (M11-R150): the hook is chosen from this read, so an upload whose completion is
+ * recorded right after it would be deleted with no onDelete.
+ */
+const asRead = (row: FileRecord | null): Result<Transition> => ok({ changed: false, record: row });
 
 /**
  * The route's onDelete for one file. Undefined lets the deletion go on; anything else keeps the file: the CloudropError
@@ -78,7 +85,7 @@ async function runOnDelete(
 async function afterThrow(config: ServerConfig, store: Store, id: string, route: string): Promise<Result<Transition>> {
   const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
   if (row.error) return row;
-  return row.data?.status === "completed" ? fail(hookFailed(route)) : ok({ changed: false, record: row.data });
+  return row.data?.status === "completed" ? fail(hookFailed(route)) : asRead(row.data);
 }
 
 /**
@@ -104,8 +111,12 @@ async function deleteInTransaction(
   try {
     await transaction(async (tx, scoped) => {
       const row = await scoped.get(id);
+      if (row?.status !== "completed") {
+        answer = asRead(row);
+        return;
+      }
       const route = hookedRoute(config, row);
-      if (route && row) {
+      if (route) {
         const kept = await runOnDelete(config, route, row, deletion, { tx });
         if (kept) return rollBack({ ...fail(kept), refused: true });
         if (kept === false) {
@@ -127,9 +138,10 @@ async function deleteInTransaction(
 }
 
 /**
- * Ends a completed file as deleted, after its route's onDelete; answers as `end` does. A throw in onDelete keeps the
- * file and answers SERVER_ERROR; a CloudropError it returns keeps the file and is the answer, marked `refused`. Without
- * any onDelete on the server, this is `end` alone, as before onDelete existed.
+ * Ends a completed file as deleted, after its route's onDelete; answers as `end` does, and for a file that was not
+ * completed when read, from that read. A throw in onDelete keeps the file and answers SERVER_ERROR; a CloudropError it
+ * returns keeps the file and is the answer, marked `refused`. Without any onDelete on the server, this is `end` alone,
+ * as before onDelete existed.
  */
 export async function deleteCompleted(
   config: ServerConfig,
@@ -144,8 +156,9 @@ export async function deleteCompleted(
   if (store.transaction) return deleteInTransaction(config, store, store.transaction.bind(store), id, deletion);
   const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
   if (row.error) return row;
+  if (row.data?.status !== "completed") return asRead(row.data);
   const route = hookedRoute(config, row.data);
-  if (route && row.data) {
+  if (route) {
     const kept = await runOnDelete(config, route, row.data, deletion, undefined);
     if (kept) return { ...fail(kept), refused: true };
     if (kept === false) return afterThrow(config, store, id, route.name);

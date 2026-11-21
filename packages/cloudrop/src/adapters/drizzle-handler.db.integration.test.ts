@@ -304,6 +304,40 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     ]);
   });
 
+  // The deletion read the upload while unfinished and chose no hook; ending the row after that read deleted the file a
+  // completion committed meanwhile (M11-R150). `end` never waits for a pending row's lock, so the read is held here.
+  test("a deleteFile that read its file before the completion committed deletes nothing, and the file keeps its onDelete", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    const read = gate();
+    const transaction = store.transaction.bind(store);
+    store.transaction = (run) =>
+      transaction((tx, scoped) =>
+        run(tx, { ...scoped, get: (id) => scoped.get(id).then((row) => read.pass().then(() => row)) }),
+      );
+    const files = store.route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onDelete: async ({ tx, file, reason }) => {
+          await tx.insert(appUploads).values({ fileId: file.id, owner: reason });
+        },
+      },
+    );
+    const fixture = serverFixture({ files }, { store });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.send(ticket.put, hello);
+    const audit = () => db.query("SELECT file_id, owner FROM app_uploads");
+    const { api } = fixture.cloudrop;
+    const early = api.deleteFile(ticket.id);
+    await read.arrived;
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    read.open();
+    expect((await early).error?.code).toBe("NOT_FOUND");
+    expect([(await rawTables(db).files())[0]?.status, await audit()]).toEqual(["completed", []]);
+    expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, deleted: true, cleaned: false });
+    expect(await audit()).toEqual([{ file_id: ticket.id, owner: "deleted" }]);
+  });
+
   // A returned CloudropError refuses (M11-D3): the rollback a throw gets, on a real transaction, with nothing logged.
   test("an onDelete that refuses rolls its writes back, for deleteFile and for a replacement, and answers its error", async () => {
     const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });

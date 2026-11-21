@@ -513,3 +513,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `docs/research/r2-spike-findings.md` ("setup writes on R2, 2026-11-21") measured them once by hand.
 - **Status:** in force.
 - **Visible in:** `src/storage/s3-driver.r2.integration.test.ts`, `src/testing/storage-contract/bucket-settings.ts`.
+
+### M11-R150: a deletion never ends a file it did not read as completed
+
+- **Decision:** `deleteCompleted`, with a transaction and under a lease, answers a row that was not `completed` when it
+  read it from that read, as `end` answers a row it does not change, and never calls `end` for it. `api.deleteFile` of
+  an upload whose `/complete` is recorded a moment later answers `NOT_FOUND`, and the file stays completed, with its
+  object and its `onDelete` still to run; a row already `deleted` answers `deleted: false` as before. The other
+  callers were checked and hold: `eraseOwner` deletes only rows it listed as `completed`, each read again by the same
+  code; a replacement whose listing misses a file that completes before the record rolls back with a transaction
+  (`replacedAsListed`) and runs the late hook under a lease (`afterReplacing`); and a server without any `onDelete`
+  calls `end` alone (`M10-D8`), where there is no hook to miss.
+- **Why:** the hook is chosen from the row as read. A `pending` or `completing` row chose none, and `end(completed →
+  deleted)` then matched the row a completion had recorded in between: the file was deleted with no `onDelete`, so no
+  audit row was written and no pointer cleared. Seen on the memory store in both modes and on Postgres 18 through
+  Drizzle on both drivers (`deleteFile` answered `deleted: true`, the row `deleted`, the hook never run). On Postgres
+  the window is between the deletion's `SELECT` and its `UPDATE`: an `UPDATE … WHERE status = 'completed'` does not
+  wait for a row whose committed version is `pending`, so the test holds the read until the completion has committed.
+- **If wrong:** a caller that deletes a file in the moment it completes gets `NOT_FOUND` where 0.5.0 deleted it; it
+  calls again, and the hook then runs.
+- **Status:** in force. Each test was seen failing on the code before the fix.
+- **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete-race.test.ts`,
+  `src/adapters/drizzle-handler.db.integration.test.ts`, `src/testing/delete-fixture.ts` (`state.read`).

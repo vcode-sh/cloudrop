@@ -4,7 +4,7 @@
 import type { SingleTicket } from "../protocol/types.ts";
 import type { DeleteContext } from "../server/delete-context.ts";
 import { route, routeFor } from "../server/route.ts";
-import type { FileStatus } from "../server/store.ts";
+import type { CloudropStore, FileStatus } from "../server/store.ts";
 import { complete } from "./complete-fixture.ts";
 import { type MemoryStore, type MemoryTx, memoryStore } from "./memory-store.ts";
 import { hello, leaseStore, type StoreFixture, storeFixture, TEXT } from "./store-fixture.ts";
@@ -44,7 +44,13 @@ export interface Deleting {
   seen: Seen[];
   /** The files onComplete ran for, in order. */
   completions: string[];
-  state: { failing: boolean; unique: boolean; pause: (() => Promise<void>) | undefined };
+  state: {
+    failing: boolean;
+    unique: boolean;
+    pause: (() => Promise<void>) | undefined;
+    /** Stops the next read of a file's row, after the store answered it, until the test opens it. */
+    read: (() => Promise<void>) | undefined;
+  };
   /** Uploads a file's bytes and leaves the upload uncompleted. */
   upload(): Promise<SingleTicket>;
   /** Uploads a file and completes it. */
@@ -57,11 +63,29 @@ export interface Deleting {
 /**
  * A server whose "files" route (one file per owner with `replace`) records each onDelete call, writes an app row through
  * `tx` when it has one, and throws while `failing` is set, or with `unique` for a file it already ran for (as an
- * audit insert keyed by the file would). `pause` stops the next call until the test opens it. With `completing`, its
- * onComplete writes an app row through `tx` too, and `completions` lists the files it ran for.
+ * audit insert keyed by the file would). `pause` stops the next call until the test opens it, and `read` the store's
+ * next `get`, in a transaction or outside one, so what its caller read can go stale. With `completing`, its onComplete
+ * writes an app row through `tx` too, and `completions` lists the files it ran for.
  */
 export function deleting(mode: Mode, options: DeletingOptions = {}): Deleting {
-  const memory = memoryStore();
+  const state: Deleting["state"] = { failing: false, unique: false, pause: undefined, read: undefined };
+  /** `get`, stopped once after the store answered it while `state.read` is set. */
+  function held(get: MemoryStore["get"]): MemoryStore["get"] {
+    return async (id) => {
+      const row = await get(id);
+      const read = state.read;
+      state.read = undefined;
+      await read?.();
+      return row;
+    };
+  }
+  const base = memoryStore();
+  const memory: MemoryStore = {
+    ...base,
+    get: held(base.get),
+    transaction: <T>(run: (tx: MemoryTx, store: Omit<CloudropStore<MemoryTx>, "transaction">) => Promise<T>) =>
+      base.transaction((tx, scoped) => run(tx, { ...scoped, get: held(scoped.get) })),
+  };
   const backing: MemoryStore = options.inherited
     ? Object.create(memory, {
         transaction: {
@@ -74,7 +98,6 @@ export function deleting(mode: Mode, options: DeletingOptions = {}): Deleting {
     : memory;
   const seen: Seen[] = [];
   const completions: string[] = [];
-  const state: Deleting["state"] = { failing: false, unique: false, pause: undefined };
   const onDelete = async (context: DeleteContext & { tx?: MemoryTx }) => {
     const { file, owner, reason, tx, request } = context;
     const pause = state.pause;
