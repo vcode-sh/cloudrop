@@ -78,13 +78,20 @@ describe("POST /complete: multipart", () => {
     });
   });
 
-  it("never claims another writer's object for an upload that no longer exists", async () => {
-    const fixture = serverFixture({ files }, { multipartThreshold: 0 });
+  it("never claims another writer's object for an upload that no longer exists, and tells the plugins it is over", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
     const ticket = await fixture.multipart("files", { name: "a.bin", size: 5, type: "application/octet-stream" });
-    await fixture.post("abort", { token: ticket.token });
+    const uploadId = String(tokenPayload(ticket.token).uploadId);
+    // Aborted behind the server, as the bucket's lifecycle rule does.
+    await fixture.storage.abortMultipart(ticket.key, uploadId);
     // Same key and size as the plan: only the cloudrop-id tells the objects apart.
     await fixture.storage.put(ticket.key, "hello", { metadata: { "cloudrop-id": "someone-else" } });
     expect((await complete(fixture, ticket.token)).body.error?.code).toBe("NO_SUCH_UPLOAD");
+    // Nothing can complete this upload, so what a plugin reserved for it is released now (M11-R200).
+    expect(aborted).toEqual(["rejected"]);
+    expect((await fixture.storage.head(ticket.key)).data?.metadata["cloudrop-id"]).toBe("someone-else");
   });
 
   // Two /complete calls racing: when the second completion is refused with 412 rather than NoSuchUpload (R2's order

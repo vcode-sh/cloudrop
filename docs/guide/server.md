@@ -424,7 +424,7 @@ of these functions:
 | --- | --- |
 | `beforeUpload` | In `/upload`, after authorization and the size and type checks, before anything is signed. Its context carries the accepted `files` and the route's `accept`. Return a `CloudropError` to refuse every file, and nothing (`undefined` or `null`) to accept them. |
 | `afterVerify` | In `/complete`, after verification, before `onComplete`. Its context carries the `file`, the route's `accept` and the `storage` driver. Return a `CloudropError` to refuse the file: the object is deleted and the error reaches the client. Return nothing (`undefined` or `null`) to accept it. |
-| `onAbort` | When a file `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete`, or is ended through `/abort`. Release a reservation here. |
+| `onAbort` | When a file `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete` (a failed check, a plugin's refusal, a multipart upload the bucket no longer has), or is ended through `/abort`. Release a reservation here. |
 | `extendRoute` | Once per route, in `createCloudrop`. Throw a `CloudropError` with `INVALID_CONFIG` to refuse the route. |
 
 ```ts

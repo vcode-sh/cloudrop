@@ -66,13 +66,25 @@ async function completedBefore(config: ServerConfig, token: MultipartToken): Pro
 
 const fromResult = (result: Result<void>): Verdict => (result.error ? failed(result.error) : VERIFIED);
 
+/**
+ * The bucket no longer has the multipart upload. Without its own object under the key nothing can complete it, so the
+ * upload is over: its row ends and the plugins release what they hold for it, with no client asked to (M11-R200).
+ * Nothing is left to remove: the parts went with the upload, and an object under the key is another writer's.
+ */
+async function uploadGone(config: ServerConfig, token: MultipartToken): Promise<Verdict> {
+  const own = await completedBefore(config, token);
+  return own.error?.code === "NO_SUCH_UPLOAD"
+    ? { kind: "refused", error: own.error, cleanup: "keep" }
+    : fromResult(own);
+}
+
 /** Multipart: ListParts against the plan, then completion with the server's part list and ETags (spec §7.6, §12). */
 async function completeParts(config: ServerConfig, token: MultipartToken): Promise<Verdict> {
   const { storage, logger } = config;
   const listed = await storage.listParts(token.key, token.uploadId);
   if (listed.error) {
     return listed.error.code === "NO_SUCH_UPLOAD"
-      ? fromResult(await completedBefore(config, token))
+      ? uploadGone(config, token)
       : failed(storageFailure(listed.error, logger));
   }
   const byNumber = new Map(listed.data.map((part) => [part.partNumber, part]));
@@ -95,7 +107,7 @@ async function completeParts(config: ServerConfig, token: MultipartToken): Promi
   // this upload with 200 or NoSuchUpload, never 412 (M4-F12).
   const completed = await storage.completeMultipart(token.key, token.uploadId, parts, { ifNoneMatch: true });
   if (!completed.error) return VERIFIED;
-  if (completed.error.code === "NO_SUCH_UPLOAD") return fromResult(await completedBefore(config, token));
+  if (completed.error.code === "NO_SUCH_UPLOAD") return uploadGone(config, token);
   if (completed.error.code === "INVALID_PART") {
     // The parts and ETags were listed a moment ago, so a stale one is a part uploaded again in between. The upload
     // stays open: a retry lists the parts again.

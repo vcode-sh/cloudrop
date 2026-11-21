@@ -1587,6 +1587,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   pending until the sweep, and the new `/upload` of an owner without room for the file twice is `QUOTA_EXCEEDED` until
   then. A plugin's `onAbort` hears of the old upload.
 - **Status:** in force. Supersedes `M3-U55` for the start over, and the last sentence of `M11-R89`'s "If wrong".
+  Amended by `M11-R200` (the server ends the row `/complete` answers `NO_SUCH_UPLOAD` for, so that row is `rejected`
+  before the `/abort` arrives) and by `M11-R201` (the doubt followed by `UPLOAD_EXPIRED` in "If wrong" now gets its
+  `/abort`, with `keep`).
 - **Visible in:** `src/client/job-run.ts` (`startOver`), `src/client/replaced-ticket.test.ts`,
   `src/client/resume.test.ts`, `src/client/resume-job.test.ts`, `docs/guide/resume.md` ("The server is asked first").
 
@@ -2052,3 +2055,36 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `src/server/upload-requests.test.ts` moved there, with its new answer.
 - **Visible in:** `src/server/upload-request.ts` (`nameProblem`), the two tests, `docs/guide/server.md`.
 
+### M11-R200: `/complete` ends an upload whose multipart upload the bucket no longer has
+
+- **Decision:** when the bucket answers `NoSuchUpload` to `/complete`'s ListParts or CompleteMultipartUpload and HEAD
+  shows no object of this upload under the key (none, or another writer's), the answer is still
+  `410 NO_SUCH_UPLOAD`, and it now ends the upload as every other refusal at `/complete` does (`uploadGone` in
+  `src/server/complete-verify.ts`): the plugins' `onAbort` runs with `reason: "rejected"`, and with a store the
+  request claims the row as a completion would and ends it `rejected` (`M11-R138`), which gives its reserved bytes
+  back. Nothing is removed from the bucket: the parts went with the multipart upload, and an object under the key is
+  another writer's. When HEAD shows this upload's own object the upload is verified as before, so a `/complete` that
+  follows one which finished the upload in the bucket completes the row or is answered from it; a row another request
+  holds a live claim on is answered busy and left alone.
+- **Why:** reproduced with a store and a quota of 8 bytes: a 5-byte multipart upload was aborted in the bucket, as the
+  lifecycle rule does, `/complete` answered `NO_SUCH_UPLOAD`, the row stayed `pending` with its 5 bytes reserved, and
+  the owner's next `/upload` was `QUOTA_EXCEEDED` until the sweep. The token names the only multipart upload that row
+  can complete, so nothing could finish it. Its release rested on the client sending `/abort` afterwards (`M11-R89`,
+  `M11-R90`), which a closed tab never does. A row a stopped request had left `completing` was answered busy after
+  its lease for the same reason as in `M11-R138`, and ends now. `rejected`, not `aborted`: nobody cancelled this upload
+  through cloudrop; the server judged it at `/complete`, which is what `rejected` and `onAbort`'s `"rejected"` already
+  mean (`docs/guide/server.md`, "Plugins"). The stateless path was checked: the server holds nothing for the upload
+  (the token is its only record), and what a plugin reserved in `beforeUpload` is released by this `onAbort`, which no
+  request ran before unless the client sent `/abort`.
+- **If wrong:** the window `M4-F12` looked for and did not find in 23 trials on R2: a `/complete` that gets
+  `NoSuchUpload` while HEAD does not yet show the object another `/complete` is writing. With a store, the second
+  request then ends the row, the first finds it ended and answers `UPLOAD_EXPIRED`, the sweep's cleanup pass deletes
+  the stored object, and the client's retry sends the file again; before, the first completed and the client's retry
+  stored the file a second time. Without a store, `onAbort` runs for a file the first request then completes. The
+  `/abort` a client sends after `NO_SUCH_UPLOAD` finds the row ended, and `onAbort` hears of the upload a second time,
+  with `"aborted"`, as `M11-R89` says of any ticket the server had already ended.
+- **Status:** in force. Amends the `NO_SUCH_UPLOAD` row of `M11-R80`'s table (with a store the row is `rejected`) and
+  the "leaves the row pending" of `M11-R90`'s "Why".
+- **Visible in:** `src/server/complete-verify.ts`, `src/server/store-complete-gone.test.ts`,
+  `src/server/complete-multipart.test.ts`, `src/client/replaced-ticket.test.ts`, `docs/guide/errors.md`,
+  `docs/guide/server.md` ("Plugins").

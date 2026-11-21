@@ -105,14 +105,15 @@ describe("a resumed upload that starts over, for an owner whose quota fits the f
   it("gives the ticket of an upload the bucket lost up first", async () => {
     const setup = await reloadedWithQuota();
     const [row] = await setup.store.raw.files();
-    // The bucket's lifecycle rule aborted the multipart upload; the server leaves the row pending.
+    // The bucket's lifecycle rule aborted the multipart upload. The server ends the row when /complete finds that out
+    // (M11-R200), so the /abort that follows has nothing left to free.
     await setup.fixture.server.storage.abortMultipart(row?.key ?? "", row?.uploadId ?? "");
     const { data } = await setup.client.resume(setup.upload, fourParts()).done;
 
     expect({ sent: setup.sent(), outcome: codeOf(data?.files[0]), rows: await setup.rows() }).toEqual({
       sent: ["POST /complete", "POST /abort", "POST /upload", ...WHOLE_FILE],
       outcome: "done",
-      rows: ["aborted", "completed"],
+      rows: ["rejected", "completed"],
     });
   });
 });
