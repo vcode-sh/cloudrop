@@ -443,25 +443,35 @@ listed, so show the error's message.
 ```tsx
 const { uploads, discarding, discard } = useResumable("files");
 const { resume } = useUpload("files");
+const [problem, setProblem] = useState<string | null>(null);
+const discardEach = async (chosen: readonly ResumableUpload<"files">[]) => {
+  // The example first moves focus to the row that stays.
+  setProblem(null);
+  const answers = await Promise.all(chosen.map((upload) => discard(upload)));
+  setProblem(answers.find((answer) => answer.error)?.error?.message ?? null);
+};
 // For each upload:
 <input
   type="file"
   aria-label={`Pick ${upload.name} again to resume`}
+  className="sr-only"
   onChange={(event) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (file) void resume(upload, file);
   }}
 />
-<button
-  type="button"
+<AttachmentAction
+  id={discardId(upload)}
   aria-label={`Discard ${upload.name}`}
   disabled={discarding.has(upload.id)}
-  onClick={() => void discard(upload)}
+  onClick={() => void discardEach([upload])}
 >
-  …
-</button>
+  <IconTrash />
+</AttachmentAction>
 ```
+
+`discarding` is the hook's own: the component keeps no list of the ids it is discarding.
 
 The example's **Discard all** discards every listed upload the same way, so each is aborted on the server. `forget()`
 deletes the records alone and suits sign-out.

@@ -154,3 +154,14 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing kept: `abort()` on a failed file gives its ticket up, as the Next example's Cancel does.
 - **Status:** in force.
 - **Visible in:** `examples/vite-react/src/components/upload-row.tsx`, `examples/vite-react/src/app.browser.test.ts`.
+
+### M11-R13: the Next example's unfinished-uploads panel uses the hook's `discarding`
+
+- **Decision:** `examples/next/components/upload/unfinished-uploads.tsx` reads `discarding` from `useResumable` and
+  keeps no state of its own for it; the React guide's block for the panel shows that component's code, its
+  `discardEach` included.
+- **Why:** the hook has had `discarding` since 0.5.0, the guide showed it, and the example it names still kept its own
+  set, so the page the guide walks through was not the code the guide showed.
+- **If wrong:** the hook holds an id until the list is read again, which is when the example's own set let go of it.
+- **Status:** in force.
+- **Visible in:** `examples/next/components/upload/unfinished-uploads.tsx`, `docs/guide/react.md#build-your-upload-ui`.
