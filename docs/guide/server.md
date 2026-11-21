@@ -332,7 +332,10 @@ What happens in `/upload`:
    64 KiB.
 2. The body is `{ route, files, metadata, idempotencyKey }`. The route must exist (`UNKNOWN_ROUTE`), the number of
    files must be within `maxFiles` (`TOO_MANY_FILES`), and each file entry needs a name, size and type. File names are
-   normalized to NFC before they are counted (1 to 255 Unicode code points) and stored. `idempotencyKey` is optional:
+   normalized to NFC before they are counted (1 to 255 Unicode code points) and stored. A name with a NUL character,
+   which Postgres cannot store, or with a lone surrogate (text that is not valid Unicode) is refused for that file
+   alone with `INVALID_INPUT`, and the request's other files go on; every other character is kept, control characters
+   included, and reaches the `Content-Disposition` header percent-encoded. `idempotencyKey` is optional:
    16 to 128 letters, digits, `-` or `_` (`INVALID_INPUT` otherwise). The client sends a new one for each ask and the
    same one on every retry of it; without a store it is checked and ignored, with one a retry
    [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client). Never reuse a key for a new

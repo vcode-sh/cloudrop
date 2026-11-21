@@ -11,15 +11,13 @@ import { generatedKey, newFileId, normalizeKey } from "./key.ts";
 import type { PluginFile } from "./plugins.ts";
 
 /**
- * The descriptor with its name in NFC, or null when it is malformed. The name must be well-formed Unicode (a lone
- * surrogate cannot be percent-encoded into Content-Disposition), and its length is counted after NFC, which can
- * lengthen it. The type is checked by the policy, per file.
+ * The descriptor with its name in NFC, or null when it is malformed. The name's length is counted after NFC, which can
+ * lengthen it. What the name and the type say is checked by the policy, per file.
  */
 function readDescriptor(file: unknown): FileDescriptor | null {
   if (
     !isPlainObject(file) ||
     typeof file.name !== "string" ||
-    !file.name.isWellFormed() ||
     typeof file.size !== "number" ||
     !Number.isSafeInteger(file.size) ||
     file.size < 0 ||
@@ -30,6 +28,17 @@ function readDescriptor(file: unknown): FileDescriptor | null {
   const name = file.name.normalize("NFC");
   const length = [...name].length;
   return length > 0 && length <= MAX_NAME_LENGTH ? { name, size: file.size, type: file.type } : null;
+}
+
+/**
+ * Why a name cannot be kept, or null. Two characters cannot: a lone surrogate, which cannot be percent-encoded into
+ * Content-Disposition and which a database stores as another character, and NUL, which a Postgres text column refuses,
+ * failing the reserve of every file of the request. Every other character is kept as it came, control characters
+ * included (macOS names a folder's icon file "Icon\r"): the header carries them percent-encoded (M11-R196).
+ */
+function nameProblem(name: string): string | null {
+  if (!name.isWellFormed()) return "is not valid Unicode (it has a lone surrogate)";
+  return name.includes("\u0000") ? "has a NUL character (U+0000), which cannot be stored" : null;
 }
 
 /** An `/upload` request's idempotency key: the client's random id of one ask, sent again by each retry of it. */
@@ -86,6 +95,8 @@ export function prepareFile(
   descriptor: FileDescriptor,
   context: { request: Request; metadata: unknown; auth: object },
 ): PluginFile | CloudropError {
+  const unusable = nameProblem(descriptor.name);
+  if (unusable) return invalidInput(`This file's name ${unusable}. Rename the file, then add it again.`);
   const type = normalizeType(descriptor.type);
   if (type === null) {
     return new CloudropError("FILE_TYPE_NOT_ALLOWED", "The file's type is not a valid MIME type. Pick another file.");

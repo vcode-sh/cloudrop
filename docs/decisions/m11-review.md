@@ -2011,3 +2011,44 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; `src/server/all-files.test.ts` (an id read from an empty session object).
 - **Visible in:** `src/server/all-files.ts`, `docs/guide/store.md#list-every-owners-files`,
   `docs/decisions/m11-listing.md` (`M11-L1`).
+
+### M11-R196: `/upload` refuses a file name with NUL or a lone surrogate for that file alone; every other text is settled
+
+- **Decision:** A file whose name has a NUL character (U+0000) is rejected in its own ticket with `INVALID_INPUT`:
+  "This file's name has a NUL character (U+0000), which cannot be stored. Rename the file, then add it again." A
+  name with a lone surrogate is rejected the same way ("is not valid Unicode (it has a lone surrogate)"); until now
+  it refused the whole request with the message for a missing name. The other files of the request go on, with or
+  without a store. Nothing else about the request's texts changes, and each is now pinned by a test:
+
+  | Text | NUL | lone surrogate | other C0 controls, DEL, C1 |
+  | --- | --- | --- | --- |
+  | file name | refused, that file | refused, that file | kept as sent |
+  | file type | refused, that file (`FILE_TYPE_NOT_ALLOWED`) | refused, that file | refused, that file |
+  | metadata keys and values | kept | kept | kept |
+  | `idempotencyKey` | request refused | request refused | request refused |
+
+- **Why:** reproduced on Postgres 18.6 through the real handler: `"a\u0000b.txt"` passed `/upload`'s checks, the
+  reserve of the whole request failed (a `text` column cannot hold U+0000), and all three files of the request were
+  answered `SERVER_ERROR`, `retryable: true`, on every retry; SQLite stored the name. No file system can give a file
+  such a name, so refusing it costs no real upload. A lone surrogate cannot be percent-encoded for the header and a
+  database stores it as U+FFFD; real files on Windows can carry one, and one such file among ten should not fail
+  the other nine. Other control characters stay allowed because they worked in 0.5.0 and are safe where they go:
+  macOS names a folder's icon file `Icon\r`; `contentDisposition` writes `_` for every byte outside printable
+  ASCII and for `"` and `\` in `filename`, and percent-encodes the name in `filename*`, so
+  `a\r\nX-Injected: 1".txt` is signed as `filename="a__X-Injected: 1_.txt"; filename*=UTF-8''a%0D%0AX-Injected%3A%201%22.txt`;
+  both databases store them; only `[a-z0-9]{1,16}` of a name's extension reaches the key; cloudrop logs no file
+  name. The type is matched against the RFC 6838 pattern after its parameters are dropped, so nothing but
+  `[a-z0-9!#$&^_.+-]` and one `/` is stored or signed. The metadata reaches the token and the store as
+  `JSON.stringify` wrote it, with U+0000 to U+001F and lone surrogates as `\uXXXX` escapes, which is ASCII a `text`
+  column holds (a `jsonb` column would refuse `\u0000`; the store's is `text`). The key is 16 to 128 of
+  `[A-Za-z0-9_-]`.
+- **If wrong:** an app that wants no control characters in names refuses them in `beforeUpload`, where it sees
+  every name. Not settled here: a route whose own `key` function puts the file's name into the key still fails the
+  whole request with a non-retryable `SERVER_ERROR` for a name with a control character (`Icon\r` among other
+  files), as in 0.5.0, because `normalizeKey` refuses the key and the handler reads that as the route's bug.
+- **Status:** in force. `src/server/upload-texts.test.ts` runs each row of the table through the handler on the fake
+  R2 with the memory store; `src/server/upload-texts.db.integration.test.ts` sends a NUL name, `Icon\r` and metadata
+  with NUL in one request to Postgres (before the fix: three retryable `SERVER_ERROR`s). The lone-surrogate row of
+  `src/server/upload-requests.test.ts` moved there, with its new answer.
+- **Visible in:** `src/server/upload-request.ts` (`nameProblem`), the two tests, `docs/guide/server.md`.
+

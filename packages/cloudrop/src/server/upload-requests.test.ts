@@ -163,12 +163,6 @@ describe("POST /upload: malformed requests from plain JavaScript", () => {
       code: "INVALID_INPUT",
       message: `File 1 ${fileRule}`,
     },
-    {
-      name: "a name with a lone surrogate",
-      body: { route: "files", files: [png(1, "a\ud800.png")] },
-      code: "INVALID_INPUT",
-      message: `File 1 ${fileRule}`,
-    },
     // U+0344 is two code points in NFC: 255 of them are 510 once normalized.
     {
       name: "a name over 255 characters once normalized",
