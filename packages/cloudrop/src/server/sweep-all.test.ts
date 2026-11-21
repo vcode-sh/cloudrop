@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
+import type { CloudropStore } from "./store.ts";
 import type { SweepOptions } from "./sweep.ts";
 
 beforeEach(() => {
@@ -27,6 +28,22 @@ async function work() {
   await fixture.send(revoked.put, hello);
   vi.setSystemTime(PAST_GRACE);
   return { fixture, stuck };
+}
+
+const PROBLEM =
+  "The store's stale answered a cursor that is not <milliseconds>:<id> of its page's last row, or null after the last page.";
+const BAD_CURSOR = {
+  data: null,
+  error: expect.objectContaining({ code: "SERVER_ERROR", message: PROBLEM, retryable: false }),
+};
+
+/** Makes the store one written by hand that numbers its pages: every cursor `stale` answers becomes "page-2". */
+function numberPages(store: Pick<CloudropStore, "stale">): void {
+  const { stale } = store;
+  store.stale = async (input) => {
+    const page = await stale(input);
+    return { ...page, cursor: page.cursor && "page-2" };
+  };
 }
 
 describe("api.sweep with all", () => {
@@ -104,20 +121,28 @@ describe("api.sweep with all", () => {
     // A store written by hand that numbers its pages. The sweep cannot continue from that: with `all` it stopped
     // after the first page as if every row had been seen, with no error (M11-R68).
     const { fixture } = await work();
-    const { stale } = fixture.store;
-    fixture.store.stale = async (input) => {
-      const page = await stale(input);
-      return { ...page, cursor: page.cursor && "page-2" };
-    };
-    const problem =
-      "The store's stale answered a cursor that is not <milliseconds>:<id> of its page's last row, or null after the last page.";
-    expect(await fixture.cloudrop.api.sweep(options)).toEqual({
-      data: null,
-      error: expect.objectContaining({ code: "SERVER_ERROR", message: problem, retryable: false }),
-    });
-    expect(fixture.logger.errors.map((logged) => logged.message)).toEqual([`cloudrop: ${problem}`]);
+    numberPages(fixture.store);
+    expect(await fixture.cloudrop.api.sweep(options)).toEqual(BAD_CURSOR);
+    expect(fixture.logger.errors.map((logged) => logged.message)).toEqual([`cloudrop: ${PROBLEM}`]);
     // The page was refused before any of its rows was handled.
     expect((await fixture.store.raw.files()).filter((row) => row.status === "expired")).toEqual([]);
+  });
+
+  it.for([
+    { name: "in the call that expired a row", options: { limit: 2 } },
+    { name: "with all, on its second page", options: { all: true, limit: 1 } },
+  ])("says so too when it is the cleanup pass that gets such a cursor, $name", async ({ options }) => {
+    // One upload to expire, then two revoked ones for the cleanup pass, which is more than is left of either limit.
+    // The sweep answered what the expire pass had done, with the cursor counted in `failed` and no error (M11-R242).
+    const fixture = storeFixture({ owned });
+    await fixture.single("owned", TEXT);
+    for (let index = 0; index < 2; index++) {
+      const revoked = await fixture.single("owned", TEXT);
+      await fixture.store.end(revoked.id, "pending", "aborted", NOW);
+    }
+    vi.setSystemTime(PAST_GRACE);
+    numberPages(fixture.store);
+    expect(await fixture.cloudrop.api.sweep(options)).toEqual(BAD_CURSOR);
   });
 
   it.for<{ name: string; options: SweepOptions }>([

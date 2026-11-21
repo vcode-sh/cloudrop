@@ -137,10 +137,11 @@ const stoppedAt = (report: SweepReport, cursor: string | null): Result<SweepRepo
 /**
  * A listing that failed. Before any row was handled in this call: the store's error, so a caller looping on the
  * cursor stops. After: what was done, the listing counted in `failed`, and no cursor, so the caller stops all the same
- * and the next sweep starts over.
+ * and the next sweep starts over. A cursor the sweep cannot continue from is not such a failure: no later sweep gets
+ * past it, so it is answered as the error whatever was done before it (M11-R68, M11-R242).
  */
 function listingFailed(report: SweepReport, handled: number, error: CloudropError): Result<SweepReport> {
-  if (handled === 0) return fail(error);
+  if (handled === 0 || !error.retryable) return fail(error);
   report.failed += 1;
   return stoppedAt(report, null);
 }

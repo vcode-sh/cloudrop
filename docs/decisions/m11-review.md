@@ -715,7 +715,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a store whose cursors were another shape and whose backlog never passed one page worked before and
   fails now, loudly, once a second page exists. The bundled entry is 31,988 bytes, 47 more than before this review's
   store fixes (31,940) and 12 under the ceiling.
-- **Status:** in force.
+- **Status:** in force. `M11-R242` makes it hold when the cursor comes from a later page of the call.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `src/server/owner-files.ts`,
   `src/server/store-upload.ts`, `src/server/leftovers.ts`, `src/server/sweep-all.test.ts`.
 
@@ -2844,3 +2844,20 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Changes `M11-R61` ("Calls inside the store's `transaction` are not run again").
 - **Visible in:** `src/store/sql/store.ts`, `src/store/sql/executor.ts`, `src/server/store-complete.ts`,
   `src/store/sql/lock-order.db.integration.test.ts`, `docs/guide/store.md` ("What it guarantees", "Postgres notes").
+
+### M11-R242: the sweep refuses a `stale` cursor it cannot continue from on every page, not only the first
+
+- **Decision:** a `stale` cursor of another shape answers `M11-R68`'s non-retryable `SERVER_ERROR` wherever in a call
+  it arrives: from the cleanup pass after the expire pass handled rows in the same call, and with `all` from any page
+  after the first. `listingFailed` answers the error itself when it is not retryable; a listing the store failed
+  (retryable) after rows were handled is still answered as what was done, counted in `failed`, with no cursor. The
+  rows handled before the cursor stay handled; the report of them is not returned with the error.
+- **Why:** `M11-R68` says "with `all` and without", and its test met the cursor only on a call's first listing. One
+  upload to expire and two revoked ones, `api.sweep({ limit: 2 })` on a store that numbers its pages: the answer was
+  `{ expired: 1, cleaned: 0, failed: 1, cursor: null }` with `error: null`, and the same with `all` and `limit: 1`
+  from its second page. A caller that reads `cursor: null` as "done" ran one page of the cleanup backlog per sweep
+  and was told only by the log, which is what `M11-R68` set out to end.
+- **If wrong:** a caller that sums reports loses the counts of the pages before the refused one; the rows themselves
+  are done and the next sweep does not meet them again.
+- **Status:** in force.
+- **Visible in:** `src/server/sweep.ts` (`listingFailed`), `src/server/sweep-all.test.ts`.
