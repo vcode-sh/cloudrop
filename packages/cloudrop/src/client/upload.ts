@@ -15,6 +15,7 @@ import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
 import type { Records } from "./records.ts";
 import { withRetry } from "./retry.ts";
+import { retryStep } from "./retry-step.ts";
 import type { PutObject } from "./transport.ts";
 
 /** /complete may answer PARTS_MISSING this many times before the file fails (S13). */
@@ -80,6 +81,12 @@ export interface Upload {
    * cancel keeps it.
    */
   mayBeComplete: boolean;
+  /**
+   * A /complete that may have finished the file was followed by the server's word that the ticket is over. The page
+   * then gives the ticket up as any other, and its /abort carries `keep`: without a row the server cannot tell an
+   * object that landed from one a /complete recorded, so it keeps it; with a row, the row decides (M11-R201).
+   */
+  keepStored: boolean;
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
   /**
@@ -103,7 +110,7 @@ export function newUpload(ticket: Ticket, entry: Entry, unlock: () => void, prob
   // A single PUT is part 1 of 1, so one routine sends both kinds.
   const signed = ticket.kind === "single" ? [{ partNumber: 1, ...ticket.put }] : ticket.parts;
   const urls = new Map(signed.map((part) => [part.partNumber, part]));
-  return { ticket, entry, mayBeComplete: false, repairs: 0, dropped: false, unlock, probe, urls };
+  return { ticket, entry, mayBeComplete: false, keepStored: false, repairs: 0, dropped: false, unlock, probe, urls };
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -201,6 +208,12 @@ export async function sendAndComplete(
     // too: the server sends it once it found the upload gone and no object of it stored (server/complete.ts, M3-U83).
     // And NOT_UPLOADED: the bucket holds no object under the key, so /abort has nothing to delete (M11-R80).
     if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD" || code === "NOT_UPLOADED") upload.mayBeComplete = false;
+    // The server's word that the ticket is over ends the doubt too: no /complete can settle it any more, and the
+    // ticket's row or parts still hold the owner's room. What stays of the doubt is `keepStored` (M11-R201).
+    else if (error && retryStep(error) === "new") {
+      upload.keepStored ||= upload.mayBeComplete;
+      upload.mayBeComplete = false;
+    }
     // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16). One
     // the client never sent finished nothing (M11-R82).
     else if (error) upload.mayBeComplete ||= code === "SERVER_ERROR" || (code === "NETWORK_ERROR" && wasSent(error));

@@ -14,13 +14,14 @@ import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
 /**
  * Sends the /abort that frees `upload`'s parts and deletes its own object, once, and gives its ticket up. The record
  * goes at once; the lock only once the server has answered: another tab that took it sooner could complete the upload,
- * and this /abort, with a live token, would then delete the finished object (M3-U73).
+ * and this /abort, with a live token, would then delete the finished object (M3-U73). A ticket whose doubt the server
+ * ended asks to keep an object that landed (`keepStored`, M11-R201).
  */
 export function drop(context: UploadContext, upload: Upload): Promise<void> {
   upload.dropped = true;
   const answered = counted(
     context,
-    context.endpoints.abort(upload.ticket.token).then(() => undefined),
+    context.endpoints.abort(upload.ticket.token, { keep: upload.keepStored }).then(() => undefined),
   );
   letGo(context, upload, answered);
   return answered;

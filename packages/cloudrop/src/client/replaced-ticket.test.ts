@@ -1,27 +1,28 @@
 // Contract: M11-R90 on the real server with a store and a quota that fits the file once, through the real client with
 // its records and locks. Wherever the client asks /upload for a ticket that replaces one it held, the old ticket is
 // given up first, so the bytes its pending row reserved no longer have the new /upload refused until the sweep. A
-// resumed upload that starts over (M3-U74) sends its /abort as a retry that replaces a ticket does (M11-R89), and
-// never for a ticket a /complete may have finished. A retry after pagehide kept the ticket for a resume (M4-F1)
+// resumed upload that starts over (M3-U74) sends its /abort as a retry that replaces a ticket does (M11-R89). For a
+// ticket a /complete may have finished, that /abort asks to keep an object that landed, and is sent only once the
+// server answered that the ticket is over (M11-R201). A retry after pagehide kept the ticket for a resume (M4-F1)
 // discards that upload first, under its lock, so never while another tab resumes it (M11-R91).
 // Oracle: the requests the fixture saw, the file's outcome, and the rows read straight from the store.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type FileOutcome } from "../client.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, type FaultCall } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { fakeIndexedDb } from "../testing/fake-indexeddb.ts";
 import { fakeLocks } from "../testing/fake-locks.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import {
+  bodiesOf,
   FOUR_PARTS,
+  firstOf,
   fourParts,
   gate,
   lockOf,
   partThree,
-  reloaded,
-  serverError,
   unreachable,
 } from "../testing/persist-fixture.ts";
 
@@ -74,9 +75,9 @@ function ownedPage(fault: Fault) {
 }
 
 /** The page before the reload is interrupted with parts 1 and 2 in the bucket; the new client lists that upload. */
-async function reloadedWithQuota() {
+async function reloadedWithQuota(...faults: Fault[]) {
   const held = gate(partThree);
-  const page = ownedPage(held.fault);
+  const page = ownedPage(firstOf(held.fault, ...faults));
   page.client().start("owned", fourParts());
   await held.reached;
   await page.saved();
@@ -118,18 +119,92 @@ describe("a resumed upload that starts over, for an owner whose quota fits the f
   });
 });
 
-describe("a resumed upload that starts over after a /complete that may have finished it", () => {
-  it("sends no /abort: the first probe got no answer, the second was answered UPLOAD_EXPIRED", async () => {
-    const probes = [unreachable, () => serverError(410, "UPLOAD_EXPIRED", "This upload has expired.")];
-    const setup = await reloaded(gate(partThree), (call: FaultCall) =>
-      call.label === "POST /complete" ? probes[call.nth - 1]?.() : undefined,
-    );
-    const { data } = await setup.client.resume(setup.upload, fourParts()).done;
-    await setup.drained();
+describe("a ticket the server calls over after a /complete that may have finished it (M11-R201)", () => {
+  const keepOf = (body: unknown) => (body as { keep?: unknown }).keep;
+  /** The first /complete gets no answer, and the row's deadline passes meanwhile; every later one reaches the server. */
+  const lostThenExpired =
+    (store: () => ReturnType<typeof memoryStore>): Fault =>
+    async (call) => {
+      if (call.label !== "POST /complete" || call.nth > 1) return undefined;
+      const [row] = await store().raw.files();
+      vi.setSystemTime((row?.expiresAt.getTime() ?? Number.NaN) + 1000);
+      return unreachable();
+    };
 
-    expect({ sent: setup.sent(), outcome: codeOf(data?.files[0]) }).toEqual({
-      sent: ["POST /complete", "POST /complete", "POST /upload", ...WHOLE_FILE],
+  it("a resumed upload that starts over gives it up, with keep, so its row no longer holds the quota", async () => {
+    const aborts = bodiesOf("POST /abort");
+    const setup = await reloadedWithQuota(
+      aborts.fault,
+      lostThenExpired(() => setup.store),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // The ticket signs nothing any more, so the probe is the only request it has left.
+    vi.setSystemTime(Date.parse(setup.upload.expiresAt) - 60_000);
+    const { data } = await setup.client.resume(setup.upload, fourParts()).done;
+
+    expect({
+      sent: setup.sent(),
+      keep: aborts.bodies.map(keepOf),
+      outcome: codeOf(data?.files[0]),
+      rows: await setup.rows(),
+    }).toEqual({
+      sent: ["POST /complete", "POST /complete", "POST /abort", "POST /upload", ...WHOLE_FILE],
+      keep: [true],
       outcome: "done",
+      rows: ["aborted", "completed"],
+    });
+  });
+
+  it("a retry gives it up, with keep, before it asks for the new ticket", async () => {
+    const aborts = bodiesOf("POST /abort");
+    const page = ownedPage(
+      firstOf(
+        aborts.fault,
+        lostThenExpired(() => page.store),
+      ),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const job = page.client().start("owned", fourParts());
+    const first = await job.done;
+    const sent = page.from();
+    const outcome = await job.files[0]?.retry();
+
+    expect({
+      first: first.error?.code,
+      sent: sent(),
+      keep: aborts.bodies.map(keepOf),
+      outcome: codeOf(outcome),
+      rows: await page.rows(),
+    }).toEqual({
+      first: "UPLOAD_EXPIRED",
+      sent: ["POST /abort", "POST /upload", ...WHOLE_FILE],
+      keep: [true],
+      outcome: "done",
+      rows: ["aborted", "completed"],
+    });
+  });
+
+  it("a cancel of the failed file gives it up, with keep, so its row no longer holds the quota", async () => {
+    const aborts = bodiesOf("POST /abort");
+    const page = ownedPage(
+      firstOf(
+        aborts.fault,
+        lostThenExpired(() => page.store),
+      ),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const client = page.client();
+    const job = client.start("owned", fourParts());
+    await job.done;
+    const sent = page.from();
+    job.abort();
+    // close() waits for the answer of every /abort a cancel sent.
+    await client.close();
+
+    expect({ sent: sent(), keep: aborts.bodies.map(keepOf), rows: await page.rows() }).toEqual({
+      sent: ["POST /abort"],
+      keep: [true],
+      rows: ["aborted"],
     });
   });
 });

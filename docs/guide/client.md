@@ -272,7 +272,9 @@ so the cancel does not cut that request off. The file stays `completing` until t
 - **`aborted`** for any other answer. No further attempt is made.
 
 A file after a `/complete` that may have succeeded (no answer, or a `SERVER_ERROR`) is kept, never deleted: no `/abort`
-is sent for it.
+is sent for it. Once a later `/complete` has answered that the ticket is over (`UPLOAD_EXPIRED`, for example), a
+cancel does send `/abort`, with `keep: true`: it frees what the ticket still holds and never deletes a file that
+landed.
 
 ### Retry
 
@@ -305,7 +307,10 @@ is sent for it.
 - Before it asks for a new ticket, a retry gives the old one up with `/abort`, as `abort()` of the failed file would,
   and waits for the answer (at most 10 seconds): the parts or the object stored under it are removed, and with a
   [database store](store.md) the bytes it reserved no longer count against the owner's quota when the new `/upload`
-  is checked. A ticket whose `/complete` may have succeeded gets no `/abort`. A multipart ticket the page gave up at
+  is checked. A ticket whose `/complete` may have succeeded is replaced only once the server has answered that it is
+  over, and its `/abort` then carries `keep: true`: a file that did land is never deleted by it. Without a
+  [database store](store.md) that file stays in the bucket beside the new one; with a store the upload's row says
+  whether it was completed. A multipart ticket the page gave up at
   `pagehide` and kept for a [resume](resume.md) is discarded the same way, as `discard()` of its upload would, unless
   another tab resumes it meanwhile.
 - When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload, whatever the

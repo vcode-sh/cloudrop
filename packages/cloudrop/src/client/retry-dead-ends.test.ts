@@ -1,7 +1,8 @@
 // Contract: M11-R80 and M11-R81 on the real server, stateless and with a store. A retry() never sends again a request
 // whose answer cannot change: after /complete refused the file's content and deleted it, the retry asks /upload for a
 // new ticket; after /complete found no object (a proxy answered the PUT for the bucket), it sends the bytes again on
-// the same ticket; and once /complete has answered that a ticket in doubt is over, the next retry leaves it.
+// the same ticket; and once /complete has answered that a ticket in doubt is over, the next retry gives it up, keeping
+// an object that landed (M11-R201).
 // A retry that replaces a ticket gives the old one up first, as abort() of the failed file would (M11-R89), so what it
 // reserved or stored does not stand in the new upload's way; a retry after an /upload that gave no ticket sends that
 // ask's idempotency key again, so the server frees what the lost answers reserved (M11-R92).
@@ -47,9 +48,11 @@ function setup(stored: boolean, fault: Fault = () => undefined) {
 const bytes = (size = 1000) => new File([offsetBytes(size)], "a.bin", { type: "application/octet-stream" });
 const codeOf = (outcome: FileOutcome<unknown> | undefined) =>
   outcome?.status === "done" ? "done" : outcome?.error.code;
+// `keptInDoubt`: the objects left once a ticket whose /complete may have finished the file was given up with `keep`
+// and the file stored again. Without a row nothing proves the first object unrecorded, so it stays; a pending row does.
 const BACKENDS = [
-  { name: "without a store", stored: false },
-  { name: "with a store", stored: true },
+  { name: "without a store", stored: false, keptInDoubt: [1000, 1000] },
+  { name: "with a store", stored: true, keptInDoubt: [1000] },
 ];
 
 beforeEach(() => {
@@ -62,7 +65,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe.each(BACKENDS)("retry $name", ({ stored }) => {
+describe.each(BACKENDS)("retry $name", ({ stored, keptInDoubt }) => {
   it("asks /upload for a new ticket after /complete refused the file's content and deleted it", async () => {
     const { client, sentBy, objects } = setup(stored);
     // A JPEG sent as a PNG: contentChecks() refuses it at /complete, and the server deletes the object.
@@ -119,7 +122,7 @@ describe.each(BACKENDS)("retry $name", ({ stored }) => {
     });
   });
 
-  it("leaves a ticket in doubt once /complete answered that it expired (M3-U30 amended)", async () => {
+  it("gives a ticket in doubt up once /complete answered that it expired (M3-U30 amended, M11-R201)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let expiresAt = "";
     const { state, client, sentBy, objects } = setup(stored, async (call) => {
@@ -147,9 +150,8 @@ describe.each(BACKENDS)("retry $name", ({ stored }) => {
       first: "NETWORK_ERROR",
       // Whatever the clock says, the server's word comes first (M3-U30).
       told: [["POST /complete"], "UPLOAD_EXPIRED"],
-      started: [["POST /upload", "PUT object", "POST /complete"], "done"],
-      // The first ticket's object stays: no /abort is sent for a ticket a /complete may have finished.
-      objects: [1000, 1000],
+      started: [["POST /abort", "POST /upload", "PUT object", "POST /complete"], "done"],
+      objects: keptInDoubt,
     });
   });
 });

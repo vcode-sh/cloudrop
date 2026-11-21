@@ -290,18 +290,21 @@ describe("abort", () => {
     });
   });
 
-  it("sends /abort with keepalive after a cancel or a failure, and discard's /abort with keep without it", async () => {
+  it("sends /abort with keepalive after a cancel or a failure, with keep or not, and discard's without it", async () => {
     const sent: RequestInit[] = [];
     const endpoints = createEndpoints("/api/cloudrop", (_, init) => {
       sent.push(init);
       return Promise.resolve(Response.json({ id: "x" }));
     });
     await endpoints.abort("token");
-    // Keepalive bodies share 64 KiB per document, which a Discard all of many uploads would exceed (M3-U95).
+    // A ticket given up at pagehide after its doubt ended: a closing tab must still deliver it (M11-R201).
     await endpoints.abort("token", { keep: true });
-    expect(sent.map((init) => ({ method: init.method, keepalive: init.keepalive }))).toEqual([
-      { method: "POST", keepalive: true },
-      { method: "POST", keepalive: false },
+    // Keepalive bodies share 64 KiB per document, which a Discard all of many uploads would exceed (M3-U95).
+    await endpoints.abort("token", { keep: true, awaited: true });
+    expect(sent.map((init) => ({ body: init.body, keepalive: init.keepalive }))).toEqual([
+      { body: '{"token":"token"}', keepalive: true },
+      { body: '{"token":"token","keep":true}', keepalive: true },
+      { body: '{"token":"token","keep":true}', keepalive: false },
     ]);
   });
 });

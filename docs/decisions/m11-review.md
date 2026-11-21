@@ -865,7 +865,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** without a store, a `/complete` that finished unheard, followed by an expiry and a retry, stores the
   file twice and runs `onComplete` twice, as the person's own new upload would. `NOT_UPLOADED` after a completion that
   finished unheard means the app deleted the object since; the retry stores it again under the same key.
-- **Status:** in force. Amends `M3-U30`'s "If wrong".
+- **Status:** in force. Amends `M3-U30`'s "If wrong". Amended by `M11-R201`: the answer that says the ticket is over
+  also ends the doubt for a cancel, which then sends `/abort` with `keep`.
 - **Visible in:** `src/client/retry-file.ts` (`needsTicket`), `src/client/upload.ts` (`complete`),
   `src/client/retry-dead-ends.test.ts`.
 
@@ -1026,7 +1027,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   a ticket the server had already ended a second time, as after `abort()` of such a file. A resumed upload that starts
   over (`M3-U74`) still sends no `/abort` for its old ticket: its probe answered that the upload is gone, and the one
   case with a pending row left, parts missing in the ticket's last 15 minutes, ends with the sweep.
-- **Status:** in force. Supersedes `M3-U55` for `retry()`.
+- **Status:** in force. Supersedes `M3-U55` for `retry()`. Amended by `M11-R201`: a ticket a `/complete` may have
+  finished gets its `/abort`, with `keep`, once the server has answered that it is over.
 - **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
   `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
 
@@ -2088,3 +2090,37 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/server/complete-verify.ts`, `src/server/store-complete-gone.test.ts`,
   `src/server/complete-multipart.test.ts`, `src/client/replaced-ticket.test.ts`, `docs/guide/errors.md`,
   `docs/guide/server.md` ("Plugins").
+
+### M11-R201: the server's word that a ticket is over ends the doubt of an earlier `/complete`, and that ticket's `/abort` carries `keep`
+
+- **Decision:** when `/complete` answers that the ticket is over (`new` in `M11-R80`: `UPLOAD_EXPIRED`,
+  `INVALID_TOKEN`, `UNKNOWN_ROUTE`, a refusal for good) for an upload an earlier `/complete` may have finished, the
+  client stops treating the upload as possibly complete and remembers the doubt as `keepStored`
+  (`src/client/upload.ts`). The ticket is then given up like any other: by a resumed upload that starts over
+  (`M11-R90`), by a retry that replaces it (`M11-R89`), by `abort()` of the failed file, by `pagehide`, and when
+  `upload()` fails. Its one `/abort` carries `keep: true` (`drop` in `src/client/file-run.ts`) and is sent with
+  keepalive as any cancel's; only `discard()` sends without it (`awaited`, `M3-U95`). While no such answer has
+  arrived, a ticket in doubt still gets no `/abort` (`M3-S14`, `M3-H16`).
+- **Why:** reproduced three ways on a server with a store and a quota that fits the file once. The first `/complete`
+  got no answer, the ticket's deadline passed, and the second was answered `UPLOAD_EXPIRED`; then (1) a resumed upload
+  started over, (2) `retry()` asked for a new ticket, each answered `QUOTA_EXCEEDED` with the old row still `pending`,
+  and (3) `abort()` of the failed file sent nothing and left the row `pending`. `M11-R90` recorded (1) and left it to
+  the sweep. The `/abort` is safe: the server takes an expired token for it. With a store the row decides, `keep` or
+  not: a `pending` row proves no completion was recorded, and a completed row is answered from the store, never with
+  `UPLOAD_EXPIRED`, and loses nothing to an `/abort`. Without a store `keep` makes the server abort the multipart
+  upload and keep an object that landed (`M3-U94`), since nothing there tells a landed object from a recorded one.
+  The client could have dropped the doubt alone and sent a plain `/abort`, which an expired token also makes harmless;
+  `keep` is there because two servers whose clocks differ can disagree about the expiry, and a plain `/abort` taken
+  by the one that still finds the token live would delete a file the unheard `/complete` recorded.
+- **If wrong:** without a store, a file whose unheard `/complete` did finish stays in the bucket beside the one the
+  new ticket stores, and `onComplete` ran for both, as `M11-R81` already accepts. After `INVALID_TOKEN` the `/abort`
+  is refused and frees nothing. A first `/complete` the server is still working on when the `/abort` arrives: with a
+  store the row decides (ended before the claim, that completion is answered `UPLOAD_EXPIRED` and the sweep removes
+  its object); without one the `/abort` may abort the multipart upload under it, and the file is stored once, by the
+  new ticket. `upload()` no longer keeps the record of such a ticket for a resume: only a new ticket can store it.
+- **Status:** in force. Amends `M11-R89` and `M11-R90` ("a ticket a `/complete` may have finished gets no `/abort`"),
+  `M11-R81` (a cancel after the server's word) and `M3-U94` ("only `discard()` sends `keep`").
+- **Visible in:** `src/client/upload.ts` (`complete`, `keepStored`), `src/client/file-run.ts` (`drop`),
+  `src/client/job-run.ts`, `src/client/endpoints.ts`, `src/client/replaced-ticket.test.ts`,
+  `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Cancel", "Retry"), `docs/guide/resume.md` ("The
+  server is asked first").

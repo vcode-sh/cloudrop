@@ -35,7 +35,7 @@ export async function discard(context: UploadContext, upload: unknown): Promise<
     if (!taken) return fail(taken === false ? uploadInUse() : lockRefused());
     try {
       // The server takes an expired token for /abort, so a record still listed can always be aborted (spec §5.5).
-      const answer = await context.endpoints.abort(record.token, { keep: true });
+      const answer = await context.endpoints.abort(record.token, { keep: true, awaited: true });
       // A token the server refuses for good cannot abort anything, now or later; any other failure may pass on another
       // try, so the record stays for it.
       if (answer.error && retryStep(answer.error) !== "new") return fail(answer.error);

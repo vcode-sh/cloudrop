@@ -46,10 +46,11 @@ export interface Endpoints {
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
   /**
    * POST /abort { token }, once, with keepalive so a closing tab still delivers it, while the keepalive budget lasts
-   * (M11-R87); never rejects. Only discard() reads the result (M3-U93), and only discard() sends `keep` (M3-U94),
-   * without keepalive (M3-U95); the answer's id is ignored.
+   * (M11-R87); never rejects. `keep` asks the server to keep an object that landed: discard() sends it (M3-U94), and
+   * so does a ticket whose doubt the server ended (M11-R201). `awaited` sends without keepalive: discard() alone, which
+   * a live page waits for and whose result it reads (M3-U93, M3-U95). The answer's id is ignored.
    */
-  abort(token: string, options?: { keep: true }): Promise<Result<true>>;
+  abort(token: string, options?: { keep?: boolean; awaited?: boolean }): Promise<Result<true>>;
 }
 
 // How long each call may wait for its whole answer, so a server that never answers cannot hold a file queued,
@@ -210,11 +211,12 @@ export function createEndpoints(
     complete: (token) => post("complete", { token }, { timeoutMs: COMPLETE_TIMEOUT_MS }, readCompleted),
     // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up. discard(), which a live page
     // awaits and may run for many uploads at once, sends without keepalive (M3-U95) and so leaves the budget to cancels.
-    abort: (token, options) =>
+    abort: (token, { keep, awaited } = {}) =>
+      // A `keep` that is not set stays out of the body, as JSON leaves out undefined.
       post(
         "abort",
-        { token, ...options },
-        { keepalive: options?.keep !== true, timeoutMs: ABORT_TIMEOUT_MS },
+        { token, keep: keep || undefined },
+        { keepalive: !awaited, timeoutMs: ABORT_TIMEOUT_MS },
         () => true,
       ),
   };

@@ -117,8 +117,9 @@ export function forgetTicket(context: UploadContext, entry: Entry): void {
 async function startOver(job: Job, entry: Entry): Promise<void> {
   const { upload } = entry;
   // The old ticket is given up first, as a retry gives up the one it replaces (M11-R89, M11-R90): with a store its row
-  // is still pending, whether the bucket lost the upload or the ticket only stopped signing, and holds the owner's
-  // quota against the new /upload, which waits for the /abort's answer. Never after a /complete that may have finished.
+  // may still be pending, as when the ticket only stopped signing or expired, and holds the owner's quota against the
+  // new /upload, which waits for the /abort's answer. Never while a /complete may have finished the file: the probe's
+  // UPLOAD_EXPIRED or INVALID_TOKEN ended that doubt (upload.ts, M11-R201).
   const given = upload && !upload.mayBeComplete ? drop(job.context, upload) : undefined;
   forgetTicket(job.context, entry);
   entry.status = "queued";

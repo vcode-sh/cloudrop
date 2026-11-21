@@ -95,8 +95,9 @@ of R2's two billed operation classes.
   with `/abort`, as a [retry that replaces a ticket](client.md#retry) does. It waits for the answer (at most 10
   seconds), so with a [database store](store.md) the bytes the old ticket reserved no longer count against the owner's
   quota. Then it asks `/upload` once for a new ticket with the record's route and metadata, and sends the whole file
-  under a new key, its `bytes` from 0, with no failure in between. A ticket whose `/complete` may have succeeded gets no
-  `/abort`. When that `/upload` is refused, the file ends `failed` with its error.
+  under a new key, its `bytes` from 0, with no failure in between. After a `/complete` that may have succeeded (no
+  answer, or a `SERVER_ERROR`), that `/abort` carries `keep: true`, so a file that did land is never deleted by it.
+  When that `/upload` is refused, the file ends `failed` with its error.
 - **Any other failure** ends the file `failed` and keeps its record. `retry()` then does what
   [any retry does](client.md#retry): it asks `/complete` again when the failure left the ticket good, such as a network
   or server failure, and asks `/upload` for a new ticket when the server ended the upload, such as a file refused for
