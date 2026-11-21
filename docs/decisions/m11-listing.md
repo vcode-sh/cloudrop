@@ -15,9 +15,9 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
 
 - **Decision:** `api.allFiles({ owner?, status?, route?, name?, type?, order?, limit?, cursor? })` answers the
   `{ items, cursor }` page of `api.files`. Every option may be left out, and so may the argument: `api.allFiles()` is
-  the newest 100 files of every owner. `owner` narrows to one owner in any status; left out (`undefined`), it is every
-  owner, files without an owner included. An `owner` that is present and not an owner (`null`, `""`, over 255
-  characters, with NUL) is refused with `INVALID_INPUT`, never read as "every owner". `status` is one `FileStatus`;
+  the newest 100 files of every owner. `owner` narrows to one owner in any status; with the key left out, it is every
+  owner, files without an owner included. An `owner` that is present and not an owner (`undefined` since `M11-R195`,
+  `null`, `""`, over 255 characters, with NUL) is refused with `INVALID_INPUT`, never read as "every owner". `status` is one `FileStatus`;
   anything else is refused with "status must be one of pending, completing, completed, aborted, rejected, failed,
   expired, deleted." `route`, `name`, `type`, `order`, `limit` and `cursor` are read by the code that reads them for
   `api.files`, so the checks and messages are the same. `AllFilesOptions` is exported from `cloudrop`; the JSDoc of
@@ -26,7 +26,7 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   lost by a bug never lists everyone's files. A separate name makes crossing owners something an app writes on
   purpose. The pilot's admin inventory read cloudrop's table itself for this.
 - **If wrong:** an app that wants several statuses in one listing calls once per status or keeps its own query.
-- **Status:** in force.
+- **Status:** in force; as first written, `owner: undefined` was "every owner" (changed by `M11-R195`).
 - **Visible in:** `src/server/all-files.ts`, `src/server/store-api.ts`, `src/index.ts`, `src/server/all-files.test.ts`,
   `docs/guide/store.md#list-every-owners-files`.
 

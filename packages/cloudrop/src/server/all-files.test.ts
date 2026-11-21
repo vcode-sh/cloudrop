@@ -157,6 +157,19 @@ describe("cloudrop.api.allFiles", () => {
     expect({ data, code: error?.code }).toEqual({ data: null, code: "INVALID_INPUT" });
   });
 
+  it("refuses an owner key whose value is undefined, so a user id lost by a bug never lists every owner", async () => {
+    const { api, pending, nobodys, theirs, mine } = await uploads();
+    const session: { userId?: string } = {};
+    const { data, error } = await api.allFiles({ owner: session.userId, status: "completed" });
+    expect({ data, error: `${error?.code}: ${error?.message}` }).toEqual({
+      data: null,
+      error:
+        "INVALID_INPUT: owner is undefined. Pass the owner's id to list that owner's files, or leave the owner key out to list every owner's files.",
+    });
+    // Only a call without the key crosses owners; another option that is undefined is one left out.
+    expect(idsOf(await api.allFiles({ status: undefined }))).toEqual([pending, nobodys, theirs, mine]);
+  });
+
   it("refuses a status that is not one, naming the eight", async () => {
     const fixture = storeFixture({ owned });
     const { error } = await fixture.cloudrop.api.allFiles({ status: "done" } as unknown as AllFilesOptions);

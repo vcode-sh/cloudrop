@@ -886,18 +886,24 @@ The page is the `{ items, cursor }` of [`api.files`](#list-an-owners-files), and
 
 | Option | What it does |
 | --- | --- |
-| `owner` | Only that owner's files, in any status. Left out: every owner's files, and those of routes without an `owner`. |
+| `owner` | Only that owner's files, in any status. Left out: every owner's files, and those of routes without an `owner`. Leave the key itself out for that: `owner: undefined` is refused with `INVALID_INPUT`. |
 | `status` | Only files in that status: `"pending"`, `"completing"`, `"completed"`, `"aborted"`, `"rejected"`, `"failed"`, `"expired"` or `"deleted"`. Left out: every status. |
 
 ```ts
 // A support tool: everything one user ever uploaded, cancelled and deleted uploads included.
+// Refuse a missing id before the call: this is the method that lists every owner's files when no owner is named.
+if (typeof userId !== "string" || userId === "") return new Response("Name the user.", { status: 400 });
 const page = await cloudrop.api.allFiles({ owner: userId });
 // A moderation queue: the oldest completed files of one route first.
 const queue = await cloudrop.api.allFiles({ status: "completed", route: "attachments", order: "oldest" });
 ```
 
 It is a method of its own and not `api.files` without an owner: `api.files` refuses a missing `owner`, so a user id
-that is `undefined` by a bug never lists everyone's files. A cursor belongs to its listing (the same owner, status,
+that is `undefined` by a bug never lists everyone's files. `api.allFiles` guards the same mistake: `{ owner: undefined
+}`, an `owner` key with no value, is refused with `INVALID_INPUT`, as are `null` and `""`, and only a call without the
+key lists every owner. An optional owner filter is therefore spread in, `{ ...(owner ? { owner } : {}) }`, never
+passed as it is; and check the id yourself as above, so the user sees your message, not cloudrop's. A cursor belongs
+to its listing (the same owner, status,
 route, name, type and order) and to its method: `api.allFiles` refuses a cursor of `api.files`, and `api.files` one of
 `api.allFiles`, with `INVALID_INPUT`. Files uploaded at the same instant page by id, so none is skipped or repeated,
 also when files arrive or leave between two pages. Every backend answers the same files in the same order.

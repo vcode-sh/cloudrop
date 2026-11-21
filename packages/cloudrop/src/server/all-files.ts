@@ -9,7 +9,11 @@ import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listPage } fr
 import type { CloudropStore, FileStatus } from "./store.ts";
 
 export interface AllFilesOptions extends Omit<FilesOptions, "owner"> {
-  /** Only this owner's files, as the route's `owner` callback returned it. Left out: every owner's, and files without one. */
+  /**
+   * Only this owner's files, as the route's `owner` callback returned it. Left out: every owner's, and files without
+   * one. Leave the key itself out for that: `owner: undefined` is refused with `INVALID_INPUT`, so a user id lost by a
+   * bug never lists everyone's files.
+   */
   owner?: string;
   /** Only files in this status, such as `"completed"`. Left out: every status. */
   status?: FileStatus;
@@ -53,6 +57,15 @@ export async function listAllFiles(
     );
   }
   const { owner, status } = given;
+  // A key that is there with no value is an id that got lost on its way here, the mistake this method is kept apart
+  // from api.files for: only a call without the key crosses owners (M11-R195).
+  if (owner === undefined && "owner" in given) {
+    return fail(
+      invalidInput(
+        "owner is undefined. Pass the owner's id to list that owner's files, or leave the owner key out to list every owner's files.",
+      ),
+    );
+  }
   if (owner !== undefined && !isOwnerOrId(owner)) return badOwner();
   if (status !== undefined && !isStatus(status)) {
     return fail(invalidInput(`status must be one of ${STATUSES.join(", ")}.`));

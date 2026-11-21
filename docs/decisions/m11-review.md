@@ -1991,3 +1991,23 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md#upgrading-from-05`.
 
+
+### M11-R195: `api.allFiles` refuses an `owner` key whose value is `undefined`
+
+- **Decision:** `api.allFiles({ owner: undefined })`, with any other options, answers `INVALID_INPUT`: "owner is
+  undefined. Pass the owner's id to list that owner's files, or leave the owner key out to list every owner's
+  files." Only a call whose options have no `owner` key (or no options) lists every owner. Every other option keeps
+  its meaning when `undefined`: left out. The type stays `owner?: string`. The guide's support-tool example checks
+  the id before the call.
+- **Why:** `M11-L1` made `api.allFiles` a method of its own so that an id lost by a bug never lists everyone's
+  files, and then read `{ owner: undefined }` as "every owner": the guide's own example,
+  `api.allFiles({ owner: userId })`, listed every owner's files in every status when `userId` was `undefined`. A
+  present key is an attempt to name an owner; treating its missing value as the widest listing is the unsafe
+  reading, and the two cannot be told apart later (the page looks like any other). TypeScript callers lose nothing
+  they could do before: an optional filter is spread in, `{ ...(owner ? { owner } : {}) }`, and under
+  `exactOptionalPropertyTypes` the compiler already refuses `owner: undefined`.
+- **If wrong:** an app that passed an optional owner straight through gets `INVALID_INPUT` where it got every
+  owner's files; the message names both ways out. `api.allFiles` is new in 0.6.0, so no released caller changes.
+- **Status:** in force; `src/server/all-files.test.ts` (an id read from an empty session object).
+- **Visible in:** `src/server/all-files.ts`, `docs/guide/store.md#list-every-owners-files`,
+  `docs/decisions/m11-listing.md` (`M11-L1`).
