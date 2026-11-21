@@ -106,6 +106,35 @@ describe("upload protocol on live R2", () => {
     });
   });
 
+  // The longest Content-Disposition /upload can sign: 255 emoji, 12 percent-encoded bytes each in filename* and two
+  // "_" each in the fallback, 3,612 bytes in all. R2 must take it as a signed header of the presigned PUT and of
+  // CreateMultipartUpload, or /upload would have to refuse such a name itself (M11-R48).
+  it("stores the longest file name, 255 emoji, on a single PUT and on a multipart upload", async () => {
+    const name = "\u{1f600}".repeat(255);
+    const disposition = `attachment; filename="${"_".repeat(510)}"; filename*=UTF-8''${"%F0%9F%98%80".repeat(255)}`;
+    const upload = await call<UploadResponse>("upload", {
+      route: "live",
+      files: [
+        { name, size: 1000, type: "application/octet-stream" },
+        { name, size: 8 * MiB + 5, type: "application/octet-stream" },
+      ],
+    });
+    const [single, multipart] = upload.body.files as [SingleTicket, MultipartTicket];
+    // A refused CreateMultipartUpload gives a "rejected" ticket. Checked alone and first, so the upload is registered
+    // for teardown before anything else can fail.
+    expect(multipart.kind).toBe("multipart");
+    openUploads.push({ key: multipart.key, uploadId: tokenPayload(multipart.token).uploadId as string });
+    expect(single.kind).toBe("single");
+    expect(await put(single.put, offsetBytes(1000))).toBe(200);
+    expect((await call<CompleteResponse>("complete", { token: single.token })).status).toBe(200);
+    expect((await cloudrop.api.head(single.key)).data?.disposition).toBe(disposition);
+    const [first, last] = multipart.parts as [SignedPart, SignedPart];
+    expect(await put(first, offsetBytes(8 * MiB))).toBe(200);
+    expect(await put(last, offsetBytes(5))).toBe(200);
+    expect((await call<CompleteResponse>("complete", { token: multipart.token })).status).toBe(200);
+    expect((await cloudrop.api.head(multipart.key)).data?.disposition).toBe(disposition);
+  });
+
   it("resumes a multipart upload: complete names the missing part, sign renews it, complete succeeds", async () => {
     const size = 8 * MiB + 5;
     const bytes = offsetBytes(size);

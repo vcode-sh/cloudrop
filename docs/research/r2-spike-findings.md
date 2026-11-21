@@ -763,6 +763,14 @@ through `createRedactor`, never a URL, signature or upload ID. The probe scripts
 | object metadata 2,048 bytes (name + value) | stored and read back exactly; 2,049 refused by the driver before any request | as designed |
 | 300 MiB + 12,345 bytes through the real client in Node, concurrency `auto`, threshold 64 MiB | done in 3.4 s (87 MiB/s): one `/upload`, 19 parts of 16 MiB, one `/complete`, every answer `200`, at most **4** PUTs in flight, the SHA-256 of a full GET equal | per-file parallelism is fixed at 4 (`PARTS_IN_FLIGHT`, spec §6.1); `auto` sizes the pool across files |
 
+**The longest `Content-Disposition`, pinned in the live lane (2026-11-21, `M11-R48`).** The 255-emoji row above is
+the longest header `/upload` can sign: an astral character costs 12 bytes in `filename*` (`%F0%9F%98%80`) and two `_` in
+the fallback, 14 bytes per code point against 10 for a three-byte character and 4 for an ASCII one that needs encoding,
+so 255 of them with `attachment; filename="…"; filename*=UTF-8''…` come to **3,612 bytes**. R2 took that header as a
+signed header of the presigned single `PUT` (`200`) and of `CreateMultipartUpload`, completed both uploads and returned
+the header byte for byte on `HEAD`. `handler.r2.integration.test.ts` ("stores the longest file name, 255 emoji, …") now
+runs this on every `bun run test:live`, so `/upload` neither refuses nor shortens a name.
+
 ### Keys
 
 Keys written by the driver (header-signed `PUT`), then HEAD, `ListObjectsV2` with the key as prefix, a presigned `PUT`

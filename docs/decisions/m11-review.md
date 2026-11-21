@@ -484,3 +484,32 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   (`CompleteData`) already said.
 - **Status:** in force.
 - **Visible in:** `src/server/complete.ts`, `src/server/complete.test.ts`.
+
+### M11-R48: the longest `Content-Disposition` is 3,612 bytes, and R2 takes it
+
+- **Decision:** `/upload` neither refuses nor shortens a file name for the size of its `Content-Disposition`. The live
+  lane now uploads a 255-emoji name as a single `PUT` and as a multipart upload on every run.
+- **Why:** measured on real R2, 2026-11-21: the 3,612-byte header, the longest `/upload` can sign (14 bytes per
+  astral code point), is accepted as a signed header of the presigned `PUT` and of `CreateMultipartUpload`, and `HEAD`
+  returns it byte for byte (`docs/research/r2-spike-findings.md`, "Sizes, names and types"). The hardening pass before
+  0.3.0 had measured it once by hand; nothing held it.
+- **If wrong:** another S3-compatible service with a smaller header limit refuses the upload at the bucket, which the
+  client reports as the storage's refusal; RustFS and Wrangler's local R2 are not measured with this name.
+- **Status:** in force.
+- **Visible in:** `src/server/handler.r2.integration.test.ts`, `docs/research/r2-spike-findings.md`.
+
+### M11-R49: the live lane's two skipped cases are a declared gap, and stay skipped
+
+- **Decision:** `bun run test:live` reports "2 skipped": the contract cases "writes CORS rules that read back as
+  written…" and "writes a lifecycle rule from its fields…". They stay skipped on live R2, through the lane's declared
+  gap `bucketSettingsWrites` (`M9-C4`), whose reason Vitest prints beside each.
+- **Why:** both replace the bucket's whole CORS or lifecycle configuration. The live bucket is the owner's, its CORS
+  rule `cloudrop-browser-tests` serves the browser lane, and AGENTS.md allows changing it only when the owner asks; the
+  lane's Object Read & Write token is also refused the bucket-settings reads the cases check with (spike Q8).
+  AGENTS.md's "fails, never skips" is about a lane whose
+  service or credentials are missing, which this lane does fail on (`beforeAll`); a capability a backend lacks is the
+  one skip the testing rules allow. RustFS runs both cases on every `bun run test:rustfs`.
+- **If wrong:** a regression in the writes that only real R2 shows goes unseen until `cloudrop setup --apply` meets it;
+  `docs/research/r2-spike-findings.md` ("setup writes on R2, 2026-11-21") measured them once by hand.
+- **Status:** in force.
+- **Visible in:** `src/storage/s3-driver.r2.integration.test.ts`, `src/testing/storage-contract/bucket-settings.ts`.
