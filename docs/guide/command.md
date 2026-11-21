@@ -108,8 +108,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   check. When the listing works and the read was refused, the credentials may not read bucket settings, as an R2 object
   token cannot; it names an R2 Admin Read & Write token, or S3's two permissions for the setting. `--replace` (with
   `--apply` or `--dry-run`) writes cloudrop's rules alone instead, replacing what the bucket has, but only when the
-  read was refused (`403`, or a service that does not support it). A read that failed for any other reason, such as a
-  timeout, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
+  read was refused (`403`). A read that failed for any other reason, such as a timeout or a service that does not
+  support it, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
   comments or namespace prefixes): check that bucket's rules by hand.
 
 `--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add or update

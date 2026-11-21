@@ -56,13 +56,13 @@ function unreadable(label: Step["label"], error: CloudropError, replace: boolean
     return `${label}: these credentials may not read the bucket's ${label === "CORS" ? "CORS" : "lifecycle"} ${rules}, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step${admin} or pass --replace to replace every rule with cloudrop's alone.`;
   }
   const failed = `${label}: could not read the current rules: ${error.message} A write replaces every rule, so none was written.`;
-  return replace ? `${failed} --replace applies only when the credentials or the service refuse the read.` : failed;
+  return replace ? `${failed} --replace applies only when the credentials refuse the read.` : failed;
 }
 
 /**
  * A step, or the finding that refuses one: the current rules could not be read, or cloudrop's own rule was edited.
- * --replace covers only a read the credentials or the service refuse (403, 501); any other failure says nothing about
- * the rules, so it never replaces them.
+ * --replace covers only a read the credentials refuse (403): any other failure says nothing about the rules, and a
+ * service that cannot read them (501) cannot write them either (M9-H102), so neither ever replaces them.
  */
 function plan<Rule extends { id?: string }>(
   setting: Setting<Rule>,
@@ -70,8 +70,7 @@ function plan<Rule extends { id?: string }>(
   service: Service,
 ): Step | Finding {
   const { label, ours, describe, read } = setting;
-  const refusedRead = read.error?.code === "STORAGE_DENIED" || read.error?.status === 501;
-  if (read.error && !(replace && refusedRead)) {
+  if (read.error && !(replace && read.error.code === "STORAGE_DENIED")) {
     return { status: "problem", text: unreadable(label, read.error, replace, service) };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);

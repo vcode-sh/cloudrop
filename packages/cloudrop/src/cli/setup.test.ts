@@ -224,14 +224,19 @@ describe("cloudrop setup --apply", () => {
   });
 
   // Wrangler's local R2 answers 501 to the writes as well (M9-C4), so --replace could not act there either.
-  it("reports a service that cannot read bucket settings without offering --replace", async () => {
+  it("neither offers nor applies --replace for a service that cannot read bucket settings", async () => {
     const storage = bucket(FOREIGN);
     const fetch: FetchLike = (input, init) =>
       isSettingsRead(input, init) ? answer(501, "NotImplemented") : storage.fetch(input, init);
-    const result = await run(apply(), { fetch });
-    expect([result.code, result.lines[1]]).toEqual([
+    const [plain, replacing] = [await run(apply(), { fetch }), await run(apply("--replace"), { fetch })];
+    const unsupported =
+      "PROBLEM      CORS: could not read the current rules: The storage service does not support this request. Use R2 or another backend that implements it. A write replaces every rule, so none was written.";
+    expect([plain.code, plain.lines[1], replacing.code, replacing.lines[1], storage.writes]).toEqual([
       1,
-      "PROBLEM      CORS: could not read the current rules: The storage service does not support this request. Use R2 or another backend that implements it. A write replaces every rule, so none was written.",
+      unsupported,
+      1,
+      `${unsupported} --replace applies only when the credentials refuse the read.`,
+      [],
     ]);
   });
 
@@ -272,7 +277,7 @@ describe("cloudrop setup --apply", () => {
     ];
     expect([replacing.code, plain.code, storage.writes]).toEqual([1, 1, []]);
     expect([replacing.lines[1], plain.lines[1]]).toEqual([
-      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the credentials or the service refuse the read.",
+      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the credentials refuse the read.",
       "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written.",
     ]);
   });

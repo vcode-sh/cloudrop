@@ -47,7 +47,8 @@
   read the bucket's CORS rules (R2 object tokens cannot)" with an R2 Admin Read & Write token as the way on, for S3 the
   setting's two permissions (`s3:GetBucketCORS` and `s3:PutBucketCORS`, or `s3:GetLifecycleConfiguration` and
   `s3:PutLifecycleConfiguration`), and `--replace` as the alternative. Any other failed read, a `501` included, no
-  longer mentions `--replace`: Wrangler's local R2, the one `501` measured, refuses the writes too (`M9-C4`). A failed
+  longer mentions `--replace`, and `--replace` no longer acts on a `501`: Wrangler's local R2, the one `501` measured,
+  refuses the writes too (`M9-C4`), so replacing there only turned a refused read into a failed write. A failed
   listing with readable rules changes nothing: the writes need no list permission. Running it beside the reads keeps
   an unreachable endpoint at one timeout (10 s), not two (21 s measured when it ran after).
 - **Why:** measured on 2026-11-21: with the object token, a wrong bucket, a wrong secret and an unroutable endpoint,

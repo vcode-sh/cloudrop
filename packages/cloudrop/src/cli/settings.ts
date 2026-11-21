@@ -101,7 +101,7 @@ const NOT_FOR_R2 = new Map([
 /** The setting that is not set and is the same name in another case, or two edits from it, in the name's service. */
 function meant(upper: string, variables: Variables): string | undefined {
   // CLOUDROP_R2_ENDPOINT is no misspelt CLOUDROP_S3_ENDPOINT: following that advice would change nothing.
-  const service = /^CLOUDROP_(R2|S3)_/.exec(upper)?.[1] as Service | undefined;
+  const service = upper.startsWith("CLOUDROP_R2_") ? "R2" : upper.startsWith("CLOUDROP_S3_") ? "S3" : undefined;
   const scored = (service ? NAMES[service] : KNOWN).map((known) => ({ known, score: distance(upper, known) }));
   const best = scored.sort((a, b) => a.score - b.score)[0];
   return best && best.score <= 2 && !variables(best.known) ? `Did you mean ${best.known}?` : undefined;

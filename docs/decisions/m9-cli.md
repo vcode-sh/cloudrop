@@ -127,7 +127,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   `bucket-setup.md` advises), was silently removed, so the rule now only grows.
 - **If wrong:** the rules can change between the read and the write; S3 has no conditional write for them. R2's answer
   to a reader allowed to see the rules is unmeasured, including whether it keeps IDs.
-- **Status:** amended by `M9-H102` (a refused read is diagnosed by a listing; `--replace` offered only where it acts).
+- **Status:** amended by `M9-H102` (a refused read is diagnosed by a listing; `--replace` is offered, and acts, only
+  after a `403`, no longer after a `501`).
 - **Visible in:** `src/cli/rules.ts`, `src/cli/setup.ts`, `docs/guide/command.md`.
 
 ### M9-C7: cloudrop's rules, and no second abort rule
