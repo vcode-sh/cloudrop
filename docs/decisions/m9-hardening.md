@@ -1,0 +1,114 @@
+# M9-H: hardening before 0.3.0
+
+### M9-H100: an origin that is not exact names the one to use; a pattern is refused
+
+- **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as
+  `http://localhost:3530/`, `HTTP://LOCALHOST:3530` or `https://app.example.com:443`, is refused with the origin to
+  use: `Use http://localhost:3530: an origin is the scheme, host and port, with no path.` A value containing `*` is
+  refused as a pattern ("Name each origin your pages upload from with its own --origin"); anything else keeps the
+  generic message. Exit code 2 as before.
+- **Why:** measured with the packed command on 2026-11-21: `https://*.example.com` passed the check
+  (`new URL(value).origin === value` holds, since URL accepts `*` in a host), so `doctor` checked, and `setup --apply`
+  would have written, an origin no browser sends. The trailing slash and upper case are the usual copy-paste mistakes,
+  and the generic message did not say which part was wrong.
+- **If wrong:** none known; S3's single-`*` origins can still be written by hand.
+- **Status:** in force.
+- **Visible in:** `packages/cloudrop/src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
+
+### M9-H101: a bucket that does not answer names the settings to check
+
+- **Decision:** when the listing that proves the bucket (`M9-C5`) fails, `doctor` (and `setup`, `M9-H102`) adds the
+  settings behind the failure to the storage's message. Unreachable: for R2 the endpoint is built from
+  `CLOUDROP_R2_ACCOUNT_ID` (and `--jurisdiction`), for S3 it is `CLOUDROP_S3_ENDPOINT`. Refused with 401, or 403 other
+  than `RequestTimeTooSkewed` and `ExpiredRequest`: "The storage service refused these credentials (HTTP n)", then the
+  two key variables, the bucket variable, and for R2 the jurisdiction (a hint to pass `--jurisdiction`, or the one
+  given); for S3 `CLOUDROP_S3_REGION`. Any other failure keeps the storage's message, such as "The bucket does not
+  exist."
+- **Why:** measured against `vstack-dev` with an object token on 2026-11-21: a wrong account ID printed "Could not reach
+  the storage service. Check the endpoint and the network connection" after "R2 settings are present and valid", and R2
+  has no endpoint setting; an unknown access key ID got R2's `401`, which the storage maps to "Check the key, size and
+  headers you passed", advice about objects; a wrong secret, a wrong bucket and a wrong jurisdiction all read "Check the
+  access key, its permissions and the bucket name" without a variable. A token scoped to one bucket gets `403`, not
+  `NoSuchBucket`, for a bucket name it does not cover, so the hint keeps the bucket in the list.
+- **If wrong:** the storage's own messages for `401` and `403` are the server's and driver's; the command's wording
+  replaces them only in its own output.
+- **Status:** in force. The storage's mapping of `401` to a generic `STORAGE_ERROR` is reported to the storage layer's
+  owner, not changed here.
+- **Visible in:** `src/cli/bucket-access.ts`, `src/cli/doctor.test.ts`, `docs/guide/command.md`.
+
+### M9-H102: setup lists the bucket before blaming the token, and offers --replace only where it acts
+
+- **Decision:** `setup --apply` and `--dry-run` list the bucket as `doctor` does, beside their reads of the current
+  rules, and use the listing only when a read failed. A failed listing is reported as the one problem (`M9-H101`), since wrong keys, a wrong bucket or no network
+  also fail the reads, and `--replace` could not help. A listing that succeeds means the credentials may not read
+  bucket settings: "these credentials may not read the bucket's CORS rules (R2 object tokens cannot)", with an R2
+  Admin Read & Write token as the way on, and `--replace` as the alternative. A read that failed for another reason
+  (a `5xx`) no longer mentions `--replace`, which would not act on it; a `501` names it beside "Use a service that
+  supports it". A failed listing with readable rules changes nothing: the writes need no list permission. Running it
+  beside the reads keeps an unreachable endpoint at one timeout (10 s), not two (21 s measured when it ran after).
+- **Why:** measured on 2026-11-21: with the object token, a wrong bucket, a wrong secret and an unroutable endpoint,
+  `setup --dry-run` printed "The storage service refused the request. Check the access key ... or pass --replace to
+  replace the rules with cloudrop's alone" for all four, inviting a destructive flag that could not have helped.
+- **If wrong:** credentials that may read bucket settings but not list objects get the read's own message; that is the
+  previous behaviour.
+- **Status:** in force.
+- **Visible in:** `src/cli/setup.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md`.
+
+### M9-H103: a near-miss setting name gets a note; so do settings for two services
+
+- **Decision:** every `CLOUDROP_*` name in the environment or the env file that is not a setting, but is one in another
+  case or at most two edits from a setting that is not set, gets
+  `note  CLOUDROP_R2_BUCKT is not a cloudrop setting. Did you mean CLOUDROP_R2_BUCKET?` (names only, never values).
+  When `CLOUDROP_R2_*` and `CLOUDROP_S3_*` settings are both set, a note says R2 is checked.
+- **Why:** measured on 2026-11-21: a misspelt `CLOUDROP_R2_BUCKT` gave only "CLOUDROP_R2_BUCKET is not set", and
+  lower-case names gave "No storage settings found", with the right values sitting in the file. With both services
+  set, `doctor` checked R2 silently while an app using `s3()` uses the others.
+- **If wrong:** an app's own `CLOUDROP_*` variable two edits from a setting gets a needless note; notes never change the
+  exit code.
+- **Status:** in force.
+- **Visible in:** `src/cli/settings.ts`, `src/cli/doctor.test.ts`, `docs/guide/command.md`.
+
+### M9-H104: an unreadable --env-file says what to do per error; Node's own exit 9 is documented, not worked around
+
+- **Decision:** the command's message for a file it cannot read adds advice by error code: `EISDIR` "Name a file, not a
+  directory.", `EACCES` "Check that you may read it.", anything else "Check the path." (exit code 2, as before). Under
+  Node, a missing file or a directory never reaches the command: Node scans its whole command line for `--env-file`,
+  the script's arguments included, and exits 9 with `node: <path>: not found` or `invalid format`. The guide's exit-code
+  table and Troubleshooting say so; the option keeps its name.
+- **Why:** measured on 2026-11-21 on Node 24.0.0, 24.22.2 and 26.13.0 with a two-line script: Node checks the file and
+  exits before running it, and does not load an existing file into `process.env` (no double read). Bun passes the
+  argument through. Renaming the option would not help a user who types `--env-file`, which Node intercepts either
+  way, and a shebang with Node flags (`env -S node --`) is not portable to npm's Windows shims.
+- **If wrong:** a later Node that stops scanning script arguments makes the guide's note stale; the command's own
+  message then shows instead.
+- **Status:** in force.
+- **Visible in:** `src/cli/settings.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`, `docs/guide/troubleshooting.md`.
+
+### M9-H105: testClient through the app's own mount is a supported use
+
+- **Decision:** `testClient({ ...cloudrop, handler: (request) => app.fetch(request) }, options)` is documented and
+  tested: a handler that calls the app's own fetch runs the mount path and the middleware in front of it, so a wrong
+  mount fails the test (`SERVER_ERROR`, "The upload server sent an answer this client cannot read (HTTP 404)"). The
+  signature already took any `handler`; the guide now promises it.
+- **Why:** `M9-T4` lists the app's mounting among what the test client does not see, and a newcomer's first wrong
+  mount passed every test. Measured with Hono 4.13 in a fresh app from the packed package on 2026-11-21: the spread
+  keeps the route types, and a mount at another path fails the upload.
+- **If wrong:** a `Cloudrop` that gains members `testClient` reads must keep them through a spread; it is a plain
+  object today.
+- **Status:** in force.
+- **Visible in:** `src/testing.guide.test.ts`, `docs/guide/testing-your-app.md` ("Through your app's mount").
+
+### M9-H106: cloudrop/testing under node:test and bun test, measured
+
+- **Decision:** the guide gives the clock for each runner: `t.mock.timers.enable({ apis: ["Date"], now })` in
+  `node:test` and `setSystemTime(date)` in Bun beside Vitest's, and says that faking every timer works too. It warns
+  that Bun's `File` adds `;charset=utf-8` to `text/plain` and `application/json`, which the server refuses with
+  `FILE_TYPE_NOT_ALLOWED`, and the guide's quota example now uses `application/pdf`, which Bun keeps.
+- **Why:** measured on 2026-11-21 with the packed package: the guide's examples pass in `node:test` (Node 24.22, type
+  stripping) and in Bun 1.4.4, except the quota example, whose `text/plain` files Bun turned into
+  `text/plain;charset=utf-8` and the server refused as "not a valid MIME type". Upload, quota, multipart and both
+  clocks passed in all three runners, `vi.useFakeTimers()` and `jest.useFakeTimers()` included.
+- **If wrong:** the server's refusal of a type with parameters is the server's; it is reported to its owner. Once the
+  server accepts `text/plain;charset=utf-8`, the guide's Bun note and the Troubleshooting entry go.
+- **Status:** in force.
+- **Visible in:** `docs/guide/testing-your-app.md`, `docs/guide/troubleshooting.md`, `src/testing.guide.test.ts`.
