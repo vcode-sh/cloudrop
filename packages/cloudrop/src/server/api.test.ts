@@ -184,6 +184,27 @@ describe("api.deletePrefix", () => {
     expect(deleteMany).not.toHaveBeenCalled();
   });
 
+  it("deletes a key R2 lists in another Unicode form of the prefix, as one object (M9-H6)", async () => {
+    // R2 stores "Amélie" in NFC and in NFD as one key and lists it, under either prefix, in the form last written.
+    const nfdKey = "users/Amélie/a.txt";
+    let listed = false;
+    const deleteMany = vi.fn<StorageDriver["deleteMany"]>(async (keys) => ok({ deleted: [...keys], failed: [] }));
+    const fixture = withStorage({
+      list: async () => {
+        const items = listed ? [] : [{ key: nfdKey, size: 1, etag: "e", uploadedAt: new Date() }];
+        listed = true;
+        return ok({ items, nextCursor: null });
+      },
+      deleteMany,
+    });
+    const result = await fixture.cloudrop.api.deletePrefix("users/Amélie/");
+    expect({ deleted: result.data?.deleted, error: result.error, keys: deleteMany.mock.calls }).toEqual({
+      deleted: 1,
+      error: null,
+      keys: [[[nfdKey]]],
+    });
+  });
+
   it("fails instead of looping when deleted keys are listed again", async () => {
     const fixture = withStorage({
       list: async () =>

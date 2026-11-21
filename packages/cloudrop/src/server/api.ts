@@ -74,8 +74,11 @@ async function getUrl(
 
 /** Why a listed page must not be deleted, or undefined when it may. */
 function pageProblem(keys: string[], prefix: string, previous: ReadonlySet<string>): CloudropError | undefined {
-  // A listing that strays outside the prefix is a storage or encoding fault: deleting it could erase other data.
-  if (keys.some((key) => !key.startsWith(prefix))) {
+  // A listing that strays outside the prefix is a storage or encoding fault: deleting it could erase other data. R2
+  // stores the NFC and NFD forms of a key as one object and lists it in the form last written, so the forms are
+  // compared normalized (M9-H6); a byte-exact store only ever lists keys that start with the prefix's own bytes.
+  const folder = prefix.normalize("NFC");
+  if (keys.some((key) => !key.normalize("NFC").startsWith(folder))) {
     return new CloudropError(
       "STORAGE_ERROR",
       "The storage listed keys outside the prefix, so nothing more was deleted.",

@@ -96,6 +96,20 @@ The measurements behind the first range are in
 - **Status:** in force.
 - **Visible in:** `src/storage/storage-error.ts`.
 
+### M9-H6: `deletePrefix` compares keys and the prefix in NFC
+
+- **Decision:** `api.deletePrefix` checks each listed key against the prefix with both normalized to NFC, and deletes
+  the key as listed.
+- **Why:** R2 stores the NFC and NFD forms of a key as one object and lists it, under either form of a prefix, in the
+  form last written (measured 2026-11-21: a key written in NFD came back in NFD for an NFC prefix). The byte check
+  refused such a page as "keys outside the prefix", so a folder with an accented name could never be deleted, and an
+  erasure built on it never finished. Reported by the upload-protocol pass, confirmed on the development bucket and
+  after the fix (the NFD key deleted through the NFC prefix).
+- **If wrong:** none known. A byte-exact store lists only keys that start with the prefix's bytes, so the normalized
+  check refuses nothing it did not refuse before; a combining mark cannot join the prefix's final `/`.
+- **Status:** in force.
+- **Visible in:** `src/server/api.ts`.
+
 ### M9-H50: `pgExecutor` listens for the `error` event of the client it checks out
 
 - **Decision:** `pgExecutor`'s transactions and batches attach a listener for the `error` event to the client they

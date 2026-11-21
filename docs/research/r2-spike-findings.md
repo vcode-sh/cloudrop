@@ -842,6 +842,12 @@ live-test/cloudrop-a43618d161f43970185b9c0bf08d7e1c/  in-flight 412     deleted 
 
 No bucket setting was read or written, and nothing outside these prefixes was touched.
 
+### One key in two Unicode forms, through deletePrefix
+
+Measured by the coordinator on the development bucket: an object put at `<prefix>Ame\u0301lie/a.txt` (NFD) was listed,
+in NFD, both for the NFD prefix and for `<prefix>Am\u00e9lie/` (NFC). `api.deletePrefix` on the NFC folder then
+refused the page as keys outside the prefix; with keys compared in NFC it deleted the object (`M9-H6`).
+
 ### An unknown access key
 
 Measured the same day on the same bucket by the coordinator, with the `r2` driver signing for an access key ID of 32
