@@ -72,20 +72,40 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     const foldedName = [...letters].reduce((sql, l) => `replace(${sql}, '${l.toUpperCase()}', '${l}')`, "name");
     return `instr(${foldedName}, ${b.text(folded)}) > 0`;
   };
-  // `"image/"` is every type of that top-level type; types are ASCII, so lengths in characters are lengths in bytes.
-  const typeMatches = (b: Binder, type: string) =>
-    type.endsWith("/") ? `substr(type, 1, ${b.integer(type.length)}) = ${b.text(type)}` : `type = ${b.text(type)}`;
+  // `"image/"` is every type of that top-level type. Postgres has an operator for "starts with" whose share of the
+  // rows the planner reads from its statistics; an equality on `substr` it prices as one row in 200, and then sorts
+  // every file of the owner instead of reading a page (M11-R192). SQLite has no such operator: types are ASCII, so
+  // lengths in characters are lengths in bytes.
+  const typeMatches = (b: Binder, type: string) => {
+    if (!type.endsWith("/")) return `type = ${b.text(type)}`;
+    if (dialect === "postgres") return `type ^@ ${b.text(type)}`;
+    return `substr(type, 1, ${b.integer(type.length)}) = ${b.text(type)}`;
+  };
 
   // Every owner's rows are read along the `created_at` index, each row checked against the filters. SQLite has no
   // statistics to see that and would read every row of the status or the route and sort them: a `+` before the column
   // keeps it off their indexes (M11-L7). Postgres chooses by its statistics.
   const offItsIndex = (owner: string | null) => (owner === null && dialect === "sqlite" ? "+" : "");
-  // One owner in several statuses is the opposite: Postgres would walk `created_at` past every other owner's rows to
-  // fill the page. So the order is one no index has, and the owner's rows are found by owner and sorted (M11-L6).
-  const listedBy = (owner: string | null, statuses: readonly FileStatus[] | null) => {
-    if (owner === null || statuses?.length === 1) return "created_at";
-    return dialect === "postgres" ? "created_at + interval '0'" : "+created_at";
+  // One owner's rows are the opposite: the owner index finds them, and Postgres must never walk `created_at` past
+  // every other owner's rows to fill the page, which it prices about the same and so chose in one ANALYZE and not in
+  // the next (M11-R190). In exactly one status the rows are a range of the owner index already in the page's order: the
+  // order then leads with the owner, which only that index has, and the owner is compared as a one-element array,
+  // because the planner drops a column it knows to be one value from an order. In several statuses or none the order
+  // is one no index has, and the owner's rows are sorted (M11-L6). The rows and their order are the same in each form.
+  const inOwnerOrder = (owner: string | null, statuses: readonly FileStatus[] | null) =>
+    dialect === "postgres" && owner !== null && statuses?.length === 1;
+  const listedBy = (owner: string | null, statuses: readonly FileStatus[] | null, direction: string) => {
+    if (owner === null || (dialect === "sqlite" && statuses?.length === 1)) return `created_at ${direction}`;
+    if (dialect === "sqlite") return `+created_at ${direction}`;
+    return inOwnerOrder(owner, statuses)
+      ? `owner ${direction}, created_at ${direction}`
+      : `created_at + interval '0' ${direction}`;
   };
+  // The cursor's time reaches Postgres as a subquery in one owner's listing: an index still starts at it, but the
+  // planner cannot count the rows before it, so a later page is planned as the first one was. Counting them, it read
+  // the cursor's range of `created_at` whenever that looked smaller than the owner's rows (M11-R191).
+  const cursorTime = (b: Binder, owner: string | null, time: Date) =>
+    dialect === "postgres" && owner !== null ? `(SELECT ${b.time(time)})` : b.time(time);
 
   async function list({ owner, statuses, route, name, type, order, limit, cursor }: Listing) {
     // `IN ()` is not SQL: no status, no rows.
@@ -95,18 +115,20 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     const off = offItsIndex(owner);
     // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
     const where = [
-      given(owner, (value) => `owner = ${b.text(value)}`),
+      given(owner, (value) =>
+        inOwnerOrder(owner, statuses) ? `owner = ANY (ARRAY[${b.text(value)}])` : `owner = ${b.text(value)}`,
+      ),
       given(statuses, (all) => `${off}status IN (${all.map((status) => b.text(status)).join(", ")})`),
       given(route, (value) => `${off}route = ${b.text(value)}`),
       given(name, (value) => nameContains(b, value)),
       given(type, (value) => typeMatches(b, value)),
       given(cursor, (value) => {
         const start = decodeCursor(value);
-        return `(created_at, ${byteOrder("id")}) ${after} (${b.time(start.time)}, ${b.text(start.id)})`;
+        return `(created_at, ${byteOrder("id")}) ${after} (${cursorTime(b, owner, start.time)}, ${b.text(start.id)})`;
       }),
     ].filter(Boolean);
     const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} ${where.length > 0 ? "WHERE" : ""} ${where.join(" AND ")}
-      ORDER BY ${listedBy(owner, statuses)} ${direction}, ${byteOrder("id")} ${direction}
+      ORDER BY ${listedBy(owner, statuses, direction)}, ${byteOrder("id")} ${direction}
       LIMIT ${b.integer(limit + 1)}`;
     const records = (await run(b.statement(sql))).map(toRecord);
     const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(last.createdAt, last.id));

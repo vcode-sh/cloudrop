@@ -1863,3 +1863,101 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/cli/printed-values.test.ts`, `src/cli/usage.ts`, `src/cli/commands.ts`, `src/cli/settings.ts`,
   `src/cli/variables.ts`, `src/cli/command-fixture.ts`, `docs/guide/command.md#settings`,
   `docs/decisions/m9-cli.md` (`M9-C8`), `docs/decisions/m11-command.md` (`M11-C3`).
+
+### M11-R190: one owner's listing in one status leads its order with the owner, so Postgres never walks `created_at` for it
+
+- **Decision:** On Postgres, a listing that names an owner and exactly one status (`api.files`, the `replace`
+  listing, `api.allFiles({ owner, status })`) is written `owner = ANY (ARRAY[$1]) AND status IN ($2) … ORDER BY owner,
+  created_at, id COLLATE "C"`, each in the page's direction, instead of `owner = $1 … ORDER BY created_at, id`.
+  Several statuses or none keep `M11-L6`'s order. SQLite's statement is unchanged.
+- **Why:** `M11-L5` said `api.files` kept its plan beside the new `(created_at)` index. It does not. For one owner in
+  one status both indexes give the order, and Postgres prices the owner's range (random heap pages) and a walk of
+  `created_at` from the newest row (sequential heap pages) about the same once the owner holds some 2% of the rows,
+  so the plan changed from one ANALYZE to the next; for an owner whose files are old the walk passes every newer
+  file first and grows with the table. `M11-L5`'s best of five after one ANALYZE never met it. Only the order can
+  tell the indexes apart: `(owner, created_at)` is an order the owner index has and `(created_at)` has not. Written
+  `owner = $1` the planner drops the owner from the order as a known constant, which is how the walk became
+  eligible; compared as a one-element array it is no constant to the planner and is still an index condition with
+  the estimate of an equality. Every row has the same owner, so the rows and their order are 0.5.0's.
+  `status = ANY (ARRAY[$2]) … ORDER BY status, created_at`, the other candidate, was rejected: before Postgres 17 an
+  array condition on a second index column is checked row by row, and a recent owner of 15,000 files read 3,098
+  buffers on 16.16 against 46. `M11-L6`'s expression for one status too was rejected: it sorts every file of the
+  owner for each page.
+
+  Measured 2026-11-21, 310,000 files, a page of 100, 20 rounds of `ANALYZE` then `EXPLAIN (ANALYZE, BUFFERS)`, on
+  Postgres 18.6, 17.11 and 16.16 (the same plans and buffers within 1 on each; 18.6 also under
+  `plan_cache_mode = force_generic_plan`). Milliseconds (buffers); "walk" is `created_at_idx`, every round:
+
+  | Listing | 0.5.0 | 0.6.0 schema, before | 0.6.0 schema, after |
+  | --- | --- | --- | --- |
+  | `api.files`, the owner of the oldest 10,000 | 0.07–0.10 (6) | walk, 17.3–19.4 (5,873) | 0.07–0.11 (6) |
+  | … oldest first | 0.05–0.08 (6) | walk, 0.04–0.06 (5) | 0.05–0.07 (6) |
+  | … after a cursor | 0.05–0.09 (6) | walk, 0.04–0.06 (5) | 0.06–0.07 (6) |
+  | … on a route, as `replace` reads it | 0.05–0.09 (8) | walk, 17.0–18.5 (5,876) | 0.07–0.10 (8) |
+  | … on a route 1% of the files have | 0.44–0.60 (169) | 0.34–0.41 (169) | 0.37–0.59 (169) |
+  | … by name | 0.85–0.93 (22) | walk, 18.1–19.0 (5,887) | 0.87–1.12 (22) |
+  | … by type | 0.08–0.15 (22) | walk, 17.5–19.5 (5,887) | 0.11–0.12 (22) |
+  | … by a type's family (`M11-R192`) | 2.80–3.00 (228) | 2.75–2.89 (228) | 0.06–0.08 (7) |
+  | a recent owner of 15,000 | 0.08–0.09 (46) | walk, 0.17–0.21 (52) | 0.06–0.08 (46) |
+  | … after a cursor | 0.08–0.13 (48) | walk, 0.19–0.30 (54) | 0.07–0.12 (48) |
+  | … oldest first, the last page | 0.03–0.06 (21) | walk, 0.08–0.14 (23) | 0.03–0.06 (21) |
+  | `eraseOwner` (every status) | 2.66–2.95 (228) | 2.81–3.10 (228) | 2.71–2.87 (228) |
+  | several statuses, after a cursor (`M11-R191`) | 1.36–2.04 (120) | range of `created_at_idx`, 1.74–1.89 (98) | 1.42–1.77 (120) |
+  | `api.allFiles({ owner })` | 2.55–2.84 (228) | 2.80–2.93 (228) | 2.61–2.92 (228) |
+  | `api.allFiles()` | 31.8–33.4 (5,250) | 0.04–0.05 (6) | 0.04–0.07 (6) |
+
+  On the reviewer's shape (306,000 files, all completed, the oldest 6,000 of one owner) 0.5.0's statement walked
+  `created_at_idx` in 20 of 20 rounds here, 16.8 to 25.6 ms and 5,605 buffers; the reviewer saw it in about half.
+  SQLite 3.53 reads every one of these listings by `owner_status_created_at_idx`, without statistics and after
+  `ANALYZE` (it plans by the averages in `sqlite_stat1`, never by one owner's share), exactly as on a 0.5 schema.
+  No other statement of the store names `created_at`, and none is planned on the index in any round: `reserve` with
+  its supersede, `attach`, `claim`, `release`, `complete` with `replace`, `get`, `end`, `cleaned`, `revoke`,
+  `reconcile`, `usage`, `owners` and the four sweep pages.
+- **If wrong:** where Postgres expects fewer rows than a page it reads the owner's matching rows and sorts them, as
+  in 0.5.0, and that sort now compares the owner, equal in every row, before the time: measured on 10,500 sorted
+  rows, 6.3 ms became 10.5 ms with the same 5,107 buffers. The two listings where 0.5.0 sorted many rows no longer
+  sort (`M11-R191`, `M11-R192`); what is left is an owner whose files are nearly all on a route or in a status that
+  few other files have. A Postgres that folds a one-element array into an equality brings the walk back:
+  `owner-plans.db.integration.test.ts` fails on it.
+- **Status:** in force. `src/store/sql/owner-plans.db.integration.test.ts` reads the plan and the buffers of 18
+  owner listings, 3 listings of every owner and the store's 17 other calls after each of 20 `ANALYZE` runs on
+  310,000 rows (before the fix: 10 of the 18 on `created_at_idx`, `api.files` at 6,092 buffers), and SQLite's plans
+  with and without statistics. `src/store/sql/list-as-0-5.db.integration.test.ts` compares every page of nine
+  listings with 0.5.0's statement on both dialects.
+- **Visible in:** `src/store/sql/reads.ts` (`inOwnerOrder`, `listedBy`), the two tests, `docs/decisions/m11-listing.md`
+  (`M11-L5`, `M11-L6`), `docs/guide/store.md#known-costs`.
+
+### M11-R191: in one owner's listing the cursor's time reaches Postgres as a subquery
+
+- **Decision:** On Postgres, when a listing names an owner, its cursor is compared as `(created_at, id COLLATE "C") <
+  ((SELECT $n::timestamptz), $m)`. Every owner's listing and SQLite keep the plain value.
+- **Why:** with the value in the statement the planner counts the rows before the cursor, assumes they are spread
+  over the owners evenly, and for an owner whose files are old expects almost none: 0.5.0 then read every file of
+  the owner before the cursor and sorted them, and beside the new index the planner read the cursor's range of
+  `created_at_idx` instead, every other owner's rows in it included (`M11-L6`'s several statuses too, whose order no
+  index has). A subquery is one value the planner cannot read, so it assumes a third of the rows, as for the first
+  page, and the range of `created_at` is never the cheaper plan; the owner index still starts at the cursor (`Index
+  Cond: … created_at <= (InitPlan 1).col1`). Measured on the owner of the oldest 6,000 files, the page after its 2,880th: 0.87
+  ms and 69 buffers in 0.5.0, 2.2 to 4.3 ms on `created_at_idx` with `M11-R190` alone, 0.10 ms and 16 buffers with
+  this.
+- **If wrong:** a page after a cursor is planned like a first page, so a filter few of the owner's files pass costs
+  what it costs there.
+- **Status:** in force; the cursor rows of `owner-plans.db.integration.test.ts` (fault probe: with the plain value
+  three of them read `created_at_idx`).
+- **Visible in:** `src/store/sql/reads.ts` (`cursorTime`).
+
+### M11-R192: on Postgres a type's family is matched with `^@`
+
+- **Decision:** `type: "image/"` is `type ^@ $n` on Postgres (starts with), no longer `substr(type, 1, 6) = $n`.
+  SQLite, which has no such operator, keeps `substr`. The rows are the same: both compare the first characters
+  exactly.
+- **Why:** Postgres prices an equality on an expression as one row in 200, so it expected an owner's images to be
+  fewer than a page, read every file of the owner and sorted them: 2.8 ms and 228 buffers for an owner of 10,000,
+  5.6 ms and 5,102 buffers for one of 15,000, in 0.5.0 as well. That sort is the one `M11-R190` makes slower. `^@`
+  has an estimator that reads the column's statistics (10,367 expected of 10,500), so the page is read in index
+  order: 0.06 ms and 7 buffers, 0.08 ms and 90. The operator has had that estimator since Postgres 11.
+- **If wrong:** none known; a family no file has reads the owner's files once, as before.
+- **Status:** in force; the two family rows of `owner-plans.db.integration.test.ts` (fault probe: 228 and 5,162
+  buffers with `substr`), and the family row of `list-as-0-5.db.integration.test.ts` for the rows.
+- **Visible in:** `src/store/sql/reads.ts` (`typeMatches`).
+

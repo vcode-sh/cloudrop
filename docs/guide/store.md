@@ -398,10 +398,13 @@ With [`tables.schema`](#tables-in-another-schema) or table names of your own, pu
 
 ### Upgrading from 0.5
 
-0.6.0 adds one index, on `created_at`, for [`api.allFiles`](#list-every-owners-files). No column changes, and nothing
-but that listing reads the index. A database without it answers the same pages, only slower: each page reads and
-sorts the whole table (about 30 ms a page at 300,000 files on Postgres 18, against 0.05 ms with the index), so an
-upgrade never breaks an app that has not migrated yet, and an app that never calls `api.allFiles` may leave it out.
+0.6.0 adds one index, on `created_at`, for [`api.allFiles`](#list-every-owners-files). No column changes. Only that
+listing without an `owner` reads the index: every other statement of the store, `api.files` and `eraseOwner`
+included, is planned as it was in 0.5 (checked on Postgres 16, 17 and 18 after each of 20 `ANALYZE` runs, and on
+SQLite). Its cost is one more index entry written per upload, and about 3.4 MB per 300,000 files on Postgres. A
+database without it answers the same pages, only slower: each page of every owner's files reads and sorts the whole
+table (about 30 ms a page at 300,000 files on Postgres 18, against 0.05 ms with the index), so an upgrade never
+breaks an app that has not migrated yet, and an app that never calls `api.allFiles` may leave it out.
 
 - **Plain SQL**, on Postgres, SQLite or D1, in a migration:
 
@@ -868,9 +871,10 @@ route, name, type and order) and to its method: `api.allFiles` refuses a cursor 
 `api.allFiles`, with `INVALID_INPUT`. Files uploaded at the same instant page by id, so none is skipped or repeated,
 also when files arrive or leave between two pages. Every backend answers the same files in the same order.
 
-It reads the files in upload order along the `created_at` index and checks each against the options, so its cost is
-the rows it passes to fill a page: see [Known costs](#known-costs). The index is new in 0.6.0
-([Upgrading from 0.5](#upgrading-from-05)); without it the listing answers the same, slower.
+Without `owner` it reads the files in upload order along the `created_at` index and checks each against the options,
+so its cost is the rows it passes to fill a page; with `owner` it finds that owner's files by owner, as `api.files`
+does: see [Known costs](#known-costs). The index is new in 0.6.0 ([Upgrading from 0.5](#upgrading-from-05)); without
+it the listing answers the same, slower.
 
 ## Erase an owner
 
@@ -1107,16 +1111,17 @@ the store, a query being one statement or one batch:
 - **Searching by name or type reads the owner's files.** The `(owner, status, created_at)` index finds an owner's
   completed files in order, and `name` and `type` are checked on each of them, so a search that matches few of an
   owner's many files reads them all to fill a page. No other index is needed, and 0.4.0 needs no migration.
-- **Listing every owner's files reads them in upload order.** `api.allFiles` walks the `created_at` index and checks
-  each file against the options, so a page costs the rows it passes until it is full. Measured on Postgres 18 with
-  300,000 files, a page of 100: no option, a status or a route that most files have, 0.05 ms; a name that 12% of the
-  files have, 1.2 ms; a name that almost no file has reads every file, 0.3 to 0.5 s (0.16 s without the index, which
-  makes this one case slower). With `owner` the owner's files are found by owner and sorted, 5 ms for an owner of
-  16,000 files, or 0.05 ms when a `status` is given too. Postgres picks another index when its statistics say few
-  rows match (a rare status or route: 0.1 ms). SQLite and D1 have no such statistics, so there the walk is fixed: a
-  status or a route that very few files have reads most or all of them (22 to 72 ms at 300,000 files, and D1 bills
-  the rows read). For frequent narrow searches over many files, keep a query and an index of your own, such as a
-  trigram index on Postgres.
+- **Listing every owner's files reads them in upload order.** `api.allFiles` without an `owner` walks the
+  `created_at` index and checks each file against the options, so a page costs the rows it passes until it is full.
+  Measured on Postgres 18 with 300,000 files, a page of 100: no option, a status or a route that most files have,
+  0.05 ms; a name that 12% of the files have, 1.2 ms; a name that almost no file has reads every file, 0.3 to 0.5 s
+  (0.16 s without the index, which makes this one case slower). With `owner` the walk is never used: the owner's
+  files are found by owner and sorted, 5 ms for an owner of 16,000 files, or, when a `status` is given too, read as
+  one page of the owner index like `api.files`, 0.05 to 0.1 ms whatever the owner's share of the table. Without an
+  `owner`, Postgres picks another index when its statistics say few rows match (a rare status or route: 0.1 ms).
+  SQLite and D1 have no such statistics, so there the walk is fixed: a status or a route that very few files have
+  reads most or all of them (22 to 72 ms at 300,000 files, and D1 bills the rows read). For frequent narrow searches
+  over many files, keep a query and an index of your own, such as a trigram index on Postgres.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. A server whose
   clock runs ahead can delay `eraseOwner`'s `done` by that much: a file it wrote looks newer than the run. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.

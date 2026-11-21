@@ -113,11 +113,13 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   | page inside 5,000 files of one instant | 20.6 (10,062) | 0.92 (412) | 1.37 (409) | 0.02 (6) | 24.3 (10,062) |
   | index size | | 3.4 MB | 17.1 MB | 17.1 MB | 5.7 MB |
 
-  One owner's listings are in `M11-L6`. Every existing statement keeps its plan and its time under every candidate:
-  `api.files` (`owner_status_created_at_idx`, 0.05 ms for the owner of 15,898 files, 0.02 ms for a small one), the
-  sweep's `expire` (3.6 to 4.5 ms) and `cleanup` (0.74 to 1.02 ms), `revoke`, `reconcile` and the supersede lookup,
-  with one exception, the listing of one owner in several statuses, which `M11-L6` fixes. The statement also runs
-  under a forced generic plan (a prepared statement) on the same index.
+  One owner's listings are in `M11-L6`. The sweep's `expire` (3.6 to 4.5 ms) and `cleanup` (0.74 to 1.02 ms),
+  `revoke`, `reconcile` and the supersede lookup keep their plan and their time under every candidate. One owner's
+  listings do not, as first written here: the best of five after a single `ANALYZE` showed `api.files` on
+  `owner_status_created_at_idx` (0.05 ms for the owner of 15,898 files, 0.02 ms for a small one), but over repeated
+  `ANALYZE` runs Postgres walks the new index for it as often as not. `M11-L6` fixes the listing in several
+  statuses and `M11-R190` the listing in one, where the plans of every statement are measured over 20 rounds. The
+  statement also runs under a forced generic plan (a prepared statement) on the same index.
 
   SQLite, the same listings, milliseconds:
 
@@ -153,8 +155,9 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   page inside a very large tie sorts the tie (0.9 ms for 5,000 files). An app whose imports write tens of thousands of
   files to one instant, or that searches narrowly and often, adds an index of its own (`(created_at, id COLLATE "C")`,
   a trigram index); the store's statements do not stop it from being used.
-- **Status:** in force. `src/testing/db/fixtures.db.integration.test.ts` pins the index on both dialects, and the
-  Drizzle and Prisma lanes diff their schemas against the DDL.
+- **Status:** in force; its claim that `api.files` keeps its plan was wrong and is corrected above (`M11-R190`).
+  `src/testing/db/fixtures.db.integration.test.ts` pins the index on both dialects, and the Drizzle and Prisma lanes
+  diff their schemas against the DDL.
 - **Visible in:** `src/testing/db/schema.ts`, `src/adapters/drizzle/*-tables.ts`,
   `src/testing/db/prisma/*/cloudrop.prisma`, `docs/guide/store.md`, `examples/next/lib/cloudrop-tables.sql`,
   `examples/hono/drizzle/20261121174715_all_files_index/`.
@@ -165,8 +168,9 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   several statuses, which is `eraseOwner`'s), the statement orders by an expression no index has
   (`created_at + interval '0'` on Postgres, `+created_at` on SQLite) instead of the column. The rows, their order and
   the cursor are the same; only the plan is fixed: the owner's rows are found through
-  `owner_status_created_at_idx` and sorted. An owner with exactly one status keeps the plain order, which that index
-  serves directly.
+  `owner_status_created_at_idx` and sorted. An owner with exactly one status was left with the plain order here, on
+  the belief that the planner would keep reading it from that index; it walks `created_at` for it too, and
+  `M11-R190` gives that listing an order of its own.
 - **Why:** the new index gave Postgres a second way to read these listings: walk `created_at` from the newest row and
   keep the owner's, which it prices as if the owner's rows were spread evenly in time. It chose that for
   `eraseOwner`'s existing listing as soon as the index existed (an owner of 4,297 files: 1,022 buffers before, 1,889
@@ -180,9 +184,13 @@ the same rows, `EXPLAIN QUERY PLAN` and the best of five timed runs, without sta
   the rows first (15.7 ms for that owner).
 - **If wrong:** an owner with hundreds of thousands of files listed without a status sorts them all for each page;
   passing a `status` reads one page from the index (0.05 ms).
-- **Status:** in force. `src/store/sql/list-all.db.integration.test.ts` builds 22,000 rows with such an owner and
-  fails when the order is the plain column (fault probe: it then reads `created_at_idx`).
-- **Visible in:** `src/store/sql/reads.ts` (`listedBy`), `src/store/sql/list-all.db.integration.test.ts`.
+- **Status:** in force for several statuses or none; one status is `M11-R190`'s, and a page after a cursor
+  `M11-R191`'s (with the cursor's value in the statement this listing read the cursor's range of `created_at_idx`).
+  `src/store/sql/list-all.db.integration.test.ts` builds 22,000 rows with such an owner and fails when the order is
+  the plain column (fault probe: it then reads `created_at_idx`); `owner-plans.db.integration.test.ts` reads the
+  plans over 20 `ANALYZE` runs.
+- **Visible in:** `src/store/sql/reads.ts` (`listedBy`), `src/store/sql/list-all.db.integration.test.ts`,
+  `src/store/sql/owner-plans.db.integration.test.ts`.
 
 ### M11-L7: on SQLite a listing of every owner always walks `created_at`
 
