@@ -5,8 +5,9 @@ bucket, browser or network. Your tests call `client.upload()` as your page does,
 bucket. Use it to test what is yours: who `authorize` lets in, the metadata your schema takes, your quotas, what
 `onComplete` returns, and how a large file goes through.
 
-It works in Vitest, Bun's test runner and Node's `node:test`; the examples below are Vitest. They are the repository's
-own tests (`packages/cloudrop/src/testing.guide.test.ts`), so they run as written. This page is for testing an app
+It works in Vitest, Node's `node:test` and Bun's test runner (mind
+[Bun's `File`](#what-differs-from-a-browser-and-a-real-bucket)); the examples below are Vitest. They are the
+repository's own tests (`packages/cloudrop/src/testing.guide.test.ts`), so they run as written. This page is for testing an app
 that uses cloudrop; for the lanes that test cloudrop itself, see [Testing](testing.md).
 
 ## Set up
@@ -146,10 +147,10 @@ test("refuses a file that would take a user past their quota", async () => {
     },
   });
   const client = testClient(cloudrop, { bucket, headers: { cookie: "session=alice" } });
-  const file = (name: string) => new File([new Uint8Array(600)], name, { type: "text/plain" });
+  const file = (name: string) => new File([new Uint8Array(600)], name, { type: "application/pdf" });
 
-  expect((await client.upload("files", file("first.txt"))).error).toBeNull();
-  const { error } = await client.upload("files", file("second.txt"));
+  expect((await client.upload("files", file("first.pdf"))).error).toBeNull();
+  const { error } = await client.upload("files", file("second.pdf"));
 
   expect(error?.code).toBe("QUOTA_EXCEEDED");
   expect((await cloudrop.api.usage("alice")).data).toEqual({ reservedBytes: 0, activeBytes: 600, files: 1 });
@@ -218,6 +219,41 @@ test("uploads a file larger than multipartThreshold in parts and stores every by
 });
 ```
 
+## Through your app's mount
+
+`testClient` reaches `cloudrop.handler` directly, so your route file and the middleware in front of it do not run. To
+run them too, pass a `handler` that calls your app: any app that answers a `Request` with a `Response`, such as Hono's
+`app.fetch`. A handler mounted at the wrong path then fails the test with `SERVER_ERROR` ("The upload server sent an
+answer this client cannot read (HTTP 404)"):
+
+```ts
+// Your app, as your server builds it: here a fetch handler that mounts cloudrop at /api/cloudrop, as Hono's
+// app.on(["POST", "OPTIONS"], "/api/cloudrop/*", (c) => cloudrop.handler(c.req.raw)) does.
+function createApp(cloudrop: { handler(request: Request): Promise<Response> }) {
+  return {
+    fetch: (request: Request) =>
+      new URL(request.url).pathname.startsWith("/api/cloudrop/")
+        ? cloudrop.handler(request)
+        : Promise.resolve(new Response("Not Found", { status: 404 })),
+  };
+}
+
+test("reaches cloudrop through the app's own mount", async () => {
+  const bucket = testBucket();
+  const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { avatar } });
+  const app = createApp(cloudrop);
+  // Every request to the server goes through app.fetch: the mount path and the middleware in front of it run.
+  const client = testClient(
+    { ...cloudrop, handler: (request) => app.fetch(request) },
+    { bucket, headers: { cookie: "session=alice" } },
+  );
+
+  const { error } = await client.upload("avatar", png("me.png"));
+
+  expect(error).toBeNull();
+});
+```
+
 ## What differs from a browser and a real bucket
 
 The client is the real one, so progress, retries, multipart, `abort()` and `close()` run their real code. What a test
@@ -225,8 +261,9 @@ cannot see:
 
 - **Your framework.** The client reaches `cloudrop.handler` directly. Your route file, the adapter
   (`toNextHandler`, `toNodeHandler`) and middleware in front of it, such as a body parser that reads the body first,
-  do not run, so a test passes even when the handler is mounted at the wrong path. Check that the `basePath` of your
-  page's `createCloudropClient`, your mount and `createCloudrop` agree.
+  do not run, so a test passes even when the handler is mounted at the wrong path, unless you test
+  [through your app's mount](#through-your-apps-mount). Check that the `basePath` of your page's
+  `createCloudropClient`, your mount and `createCloudrop` agree.
 - **The page's origin.** The client runs on `http://localhost` and reaches the server there, as a same-origin page:
   each request carries `Origin: http://localhost`, whatever `headers` says. A cross-origin setup and `trustedOrigins`
   are not exercised; see [Deployment](deployment.md) for those.
@@ -243,7 +280,14 @@ cannot see:
 - **R2 itself.** The bucket checks signatures with cloudrop's own signer, so it proves the request is signed as cloudrop
   signs, not that R2 accepts it. cloudrop's own test lanes check that against R2.
 - **The clock.** The server and the bucket read the same clock, so `vi.useFakeTimers({ toFake: ["Date"] })` and
-  `vi.setSystemTime()` fix the date for both.
+  `vi.setSystemTime()` fix the date for both; in `node:test`, `t.mock.timers.enable({ apis: ["Date"], now })`, and in
+  Bun, `setSystemTime(date)` from `bun:test`. Faking every timer works too (`vi.useFakeTimers()`): an upload in
+  process waits on none.
+- **Bun's `File`.** Under `bun test`, `new File(parts, name, { type: "text/plain" })` reads back as
+  `text/plain;charset=utf-8`, and so does `application/json`, where a browser keeps the type as given. The server
+  refuses a type with parameters with `FILE_TYPE_NOT_ALLOWED` ("The file's type is not a valid MIME type"), so test
+  routes that take those types in Vitest or `node:test`. Other types, such as `image/png` or `application/pdf`, are kept
+  as given in Bun too.
 
 ## API
 
@@ -272,7 +316,8 @@ Returns a `CloudropClient`, typed from your server as `createCloudropClient<type
 | `headers` | Headers for every request to the server, never to the bucket: an object such as `{ cookie: "session=alice" }`, or a function, possibly async, that returns them. `origin` is always `http://localhost`. |
 | `basePath` | The server's `basePath`: a path without a trailing slash. Default `"/api/cloudrop"`. |
 
-A missing `bucket`, or a `basePath` that is not a path, throws `INVALID_CONFIG`.
+A missing `bucket`, or a `basePath` that is not a path, throws `INVALID_CONFIG`. A `basePath` other than the server's
+fails each upload with `NOT_FOUND` ("There is no cloudrop endpoint at this path. Check basePath.").
 
 ### `memoryStore(options?)`
 

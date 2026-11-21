@@ -90,10 +90,10 @@ test("refuses a file that would take a user past their quota", async () => {
     },
   });
   const client = testClient(cloudrop, { bucket, headers: { cookie: "session=alice" } });
-  const file = (name: string) => new File([new Uint8Array(600)], name, { type: "text/plain" });
+  const file = (name: string) => new File([new Uint8Array(600)], name, { type: "application/pdf" });
 
-  expect((await client.upload("files", file("first.txt"))).error).toBeNull();
-  const { error } = await client.upload("files", file("second.txt"));
+  expect((await client.upload("files", file("first.pdf"))).error).toBeNull();
+  const { error } = await client.upload("files", file("second.pdf"));
 
   expect(error?.code).toBe("QUOTA_EXCEEDED");
   expect((await cloudrop.api.usage("alice")).data).toEqual({ reservedBytes: 0, activeBytes: 600, files: 1 });
@@ -146,6 +146,32 @@ test("uploads a file larger than multipartThreshold in parts and stores every by
   // Every byte in place; toEqual would compare the 9 MiB one by one and take most of a second.
   expect(stored?.body.every((byte, index) => byte === bytes[index])).toBe(true);
   expect(bucket.pendingUploads()).toBe(0);
+});
+
+// Your app, as your server builds it: here a fetch handler that mounts cloudrop at /api/cloudrop, as Hono's
+// app.on(["POST", "OPTIONS"], "/api/cloudrop/*", (c) => cloudrop.handler(c.req.raw)) does.
+function createApp(cloudrop: { handler(request: Request): Promise<Response> }) {
+  return {
+    fetch: (request: Request) =>
+      new URL(request.url).pathname.startsWith("/api/cloudrop/")
+        ? cloudrop.handler(request)
+        : Promise.resolve(new Response("Not Found", { status: 404 })),
+  };
+}
+
+test("reaches cloudrop through the app's own mount", async () => {
+  const bucket = testBucket();
+  const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { avatar } });
+  const app = createApp(cloudrop);
+  // Every request to the server goes through app.fetch: the mount path and the middleware in front of it run.
+  const client = testClient(
+    { ...cloudrop, handler: (request) => app.fetch(request) },
+    { bucket, headers: { cookie: "session=alice" } },
+  );
+
+  const { error } = await client.upload("avatar", png("me.png"));
+
+  expect(error).toBeNull();
 });
 
 // Each TypeScript block of the guide is a piece of this file, so an example cannot change in one place only.
