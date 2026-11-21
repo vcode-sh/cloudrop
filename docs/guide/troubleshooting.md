@@ -172,8 +172,9 @@ Read & Write token cannot), the storage cannot report them (Wrangler's local R2)
 
 `npx cloudrop doctor --env-file .env.local` prints `node: .env.local: not found` (or `invalid format`) and exits with
 code 9, before any line of the command's own. **The file does not exist, or is a directory.** Node checks every
-`--env-file` on its command line, even one meant for the command, and stops there. Fix the path; Bun runs the command,
-which reports the file itself ([The cloudrop command](command.md#settings)).
+`--env-file` on its command line, even one meant for the command, and stops there. Fix the path. `bunx cloudrop` stops
+the same way when Node is installed, since it starts the command with Node; only Bun itself (`bunx --bun cloudrop`)
+runs the command, which then reports the file by its error code ([The cloudrop command](command.md#settings)).
 
 ## Retries after 429 come too fast
 
