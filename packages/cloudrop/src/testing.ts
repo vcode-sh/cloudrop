@@ -74,6 +74,11 @@ export interface TestClientOptions {
    * own, `http://localhost`, as a browser sends it.
    */
   headers?: ClientOptions["headers"];
+  /**
+   * The client's `account` option: the user the page shows, as the route's `owner` returns it. With a session in
+   * `headers` that names someone else, a route with a store and `owner` refuses the upload with ACCOUNT_CHANGED.
+   */
+  account?: ClientOptions["account"];
   /** The server's `basePath`, a path without a trailing slash. Default "/api/cloudrop". */
   basePath?: string;
 }
@@ -126,7 +131,7 @@ export function testClient<TCloudrop extends InferableCloudrop>(
   cloudrop: TCloudrop & Pick<Cloudrop, "handler">,
   options: TestClientOptions,
 ): CloudropClient<TCloudrop> {
-  const { bucket, headers, basePath = "/api/cloudrop" } = options ?? {};
+  const { bucket, headers, account, basePath = "/api/cloudrop" } = options ?? {};
   if (!bucket) {
     throw new CloudropError(
       "INVALID_CONFIG",
@@ -145,9 +150,13 @@ export function testClient<TCloudrop extends InferableCloudrop>(
     // A browser sets Origin itself on every POST, and a page cannot change it.
     const sent = new Headers(init.headers);
     sent.set("origin", PAGE_ORIGIN);
-    return cloudrop.handler(new Request(url, { method: init.method, headers: sent, body: init.body }));
+    const request = new Request(url, { method: init.method, headers: sent, body: init.body });
+    // happy-dom's Request drops the headers a page may not set, cookie and origin among them, so the handler reads the
+    // headers as they were sent, in every test environment (M11-R1).
+    Object.defineProperty(request, "headers", { value: sent });
+    return cloudrop.handler(request);
   };
-  return createCloudropClient<TCloudrop>({ basePath: server, headers, fetch, persist: false });
+  return createCloudropClient<TCloudrop>({ basePath: server, headers, account, fetch, persist: false });
 }
 
 /**

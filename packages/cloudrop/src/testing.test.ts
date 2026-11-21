@@ -8,6 +8,7 @@ import { contentChecks } from "./plugins.ts";
 import { fakeIndexedDb } from "./testing/fake-indexeddb.ts";
 import { fakeLocks } from "./testing/fake-locks.ts";
 import { JPEG } from "./testing/file-samples.ts";
+import { testClientEnvironmentCases } from "./testing/test-client-environments.ts";
 import { memoryStore, testBucket, testClient } from "./testing.ts";
 
 const secret = "a-test-secret-of-at-least-32-characters";
@@ -18,6 +19,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
+testClientEnvironmentCases("node");
 
 describe("testClient", () => {
   it("reaches the server as a same-origin page does: the Origin header the handler checks, and the URL's own", async () => {

@@ -25,6 +25,7 @@
     "src/testing/storage-contract.ts",
     "src/testing/storage-contract/**",
     "src/testing/store-contract.ts",
-    "src/testing/store-contract/**"
+    "src/testing/store-contract/**",
+    "src/testing/test-client-environments.ts"
   ]
 }

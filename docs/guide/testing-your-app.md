@@ -156,6 +156,35 @@ test("refuses a file that would take a user past their quota", async () => {
 });
 ```
 
+## The account guard
+
+`account` is the client's own [`account` option](client.md#guard-against-a-changed-account): the user the page shows.
+When the session in `headers` names someone else, as after a sign-in in another tab, a route with a store and `owner`
+refuses the upload:
+
+```ts
+test("refuses an upload from a page that shows another account", async () => {
+  const bucket = testBucket();
+  const cloudrop = createCloudrop({
+    storage: bucket.storage,
+    secret,
+    store: memoryStore(),
+    routes: {
+      files: route({ accept: "*/*", maxSize: "1MB", authorize: signedIn }, { owner: ({ userId }) => userId }),
+    },
+  });
+  // A page loaded for alice; `cookie` is the session the browser sends now.
+  const alicesPage = (cookie: string) => testClient(cloudrop, { bucket, headers: { cookie }, account: "alice" });
+
+  expect((await alicesPage("session=alice").upload("files", png("mine.png"))).error).toBeNull();
+  // bob signed in in another tab.
+  const { error } = await alicesPage("session=bob").upload("files", png("late.png"));
+
+  expect(error?.code).toBe("ACCOUNT_CHANGED");
+  expect((await cloudrop.api.usage("bob")).data?.files).toBe(0);
+});
+```
+
 ## `onComplete`
 
 What `onComplete` returns reaches the client as `data.data`:
@@ -268,6 +297,10 @@ cannot see:
   are not exercised; see [Deployment](deployment.md) for those.
 - **Cookies.** A browser sends your session cookie by itself; here `headers` does it, for every request to the server
   and never for the bucket, as the browser does. `headers` can be a function, called before each request.
+- **The test environment.** In Node and in Vitest's `happy-dom` and `jsdom` environments, `cloudrop.handler` reads on
+  `request.headers` every header the client sent, `cookie` and `origin` included. happy-dom's own `Request` drops those
+  two, so code in front of the handler that copies the request (`new Request(request)`, `request.clone()`) loses them
+  there; read the session before the copy, or run such tests in the Node environment.
 - **Bucket CORS.** The test bucket answers every request; a real bucket refuses a browser's `PUT` that its CORS rule
   does not allow. Check the rule on the real bucket with [`checkBucket`](bucket-setup.md).
 - **Upload progress.** Bucket `PUT`s go through `fetch`, not `XMLHttpRequest`, so progress moves a whole part at a
@@ -311,6 +344,7 @@ Returns a `CloudropClient`, typed from your server as `createCloudropClient<type
 | --- | --- |
 | `bucket` | Required: the test bucket the server stores in. |
 | `headers` | Headers for every request to the server, never to the bucket: an object such as `{ cookie: "session=alice" }`, or a function, possibly async, that returns them. `origin` is always `http://localhost`. |
+| `account` | The client's [`account` option](client.md#guard-against-a-changed-account): the user the page shows, as the route's `owner` returns it, or a function that returns it. Default none. |
 | `basePath` | The server's `basePath`: a path without a trailing slash. Default `"/api/cloudrop"`. |
 
 A missing `bucket`, or a `basePath` that is not a path, throws `INVALID_CONFIG`. A `basePath` other than the server's

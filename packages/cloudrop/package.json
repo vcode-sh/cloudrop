@@ -109,6 +109,7 @@
     "drizzle-orm": "1.0.0-rc.5",
     "fast-check": "^4.10.3",
     "happy-dom": "^21.0.4",
+    "jsdom": "^31.0.0",
     "pg": "^8.23.1",
     "postgres": "^4.1.1",
     "prisma": "^7.10.1",

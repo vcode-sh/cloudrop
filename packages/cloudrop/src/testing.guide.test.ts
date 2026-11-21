@@ -99,6 +99,27 @@ test("refuses a file that would take a user past their quota", async () => {
   expect((await cloudrop.api.usage("alice")).data).toEqual({ reservedBytes: 0, activeBytes: 600, files: 1 });
 });
 
+test("refuses an upload from a page that shows another account", async () => {
+  const bucket = testBucket();
+  const cloudrop = createCloudrop({
+    storage: bucket.storage,
+    secret,
+    store: memoryStore(),
+    routes: {
+      files: route({ accept: "*/*", maxSize: "1MB", authorize: signedIn }, { owner: ({ userId }) => userId }),
+    },
+  });
+  // A page loaded for alice; `cookie` is the session the browser sends now.
+  const alicesPage = (cookie: string) => testClient(cloudrop, { bucket, headers: { cookie }, account: "alice" });
+
+  expect((await alicesPage("session=alice").upload("files", png("mine.png"))).error).toBeNull();
+  // bob signed in in another tab.
+  const { error } = await alicesPage("session=bob").upload("files", png("late.png"));
+
+  expect(error?.code).toBe("ACCOUNT_CHANGED");
+  expect((await cloudrop.api.usage("bob")).data?.files).toBe(0);
+});
+
 test("answers the client with what onComplete returned", async () => {
   const saved: string[] = [];
   const bucket = testBucket();
@@ -181,6 +202,6 @@ test("the guide shows this file's code", () => {
   const blocks = [...guide.matchAll(/```ts\n([\s\S]*?)```/g)].map(([, code = ""]) =>
     code.replaceAll('"cloudrop/testing"', '"./testing.ts"').replaceAll('"cloudrop"', '"./index.ts"'),
   );
-  expect(blocks.length).toBeGreaterThanOrEqual(7);
+  expect(blocks.length).toBeGreaterThanOrEqual(8);
   expect(blocks.filter((block) => !source.includes(block))).toEqual([]);
 });
