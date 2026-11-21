@@ -23,8 +23,13 @@ export type Uploads = ReturnType<typeof createUploads>;
 
 const byUser = new Map<string, Uploads>();
 
-/** The uploads of the signed-in user's id, or of `""` signed out; the same object for the same user. */
+/**
+ * The uploads of the signed-in user's id, or of `""` signed out; in a browser, the same object for the same user.
+ * Outside one nothing is kept: this app renders in the browser only, but copied into an app that also renders on a
+ * server, a cached client would stay there for good, one per user, since no effect runs on a server to close it.
+ */
 export function uploadsFor(userId: string): Uploads {
+  if (typeof window === "undefined") return createUploads(userId);
   const known = byUser.get(userId) ?? createUploads(userId);
   byUser.set(userId, known);
   return known;

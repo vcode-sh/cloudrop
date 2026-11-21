@@ -51,9 +51,9 @@ export const { files: cloudropFiles, usage: cloudropUsage } = cloudropPgTables()
 Export it from the schema index (`export * from "./cloudrop"`), as you do for every feature. The time columns are
 `timestamptz(3)`, millisecond precision, the same as `timestamp(name, { withTimezone: true, precision: 3 })`.
 
-The tables are your app's: read them with your own Drizzle queries, which is how you list a user's files (step 6).
-cloudrop's file API has no listing call because you already have the better one, a query you can join and page as
-you like. Write to them only through cloudrop, which keeps each owner's usage in step with their files.
+The tables are your app's. `uploads.api.files({ owner })` lists a user's completed files a page at a time (step 6);
+when you need more, such as a join with your own tables, read them with your own Drizzle queries. Write to them only
+through cloudrop, which keeps each owner's usage in step with their files.
 
 ## 3. Generate and apply the migration
 
@@ -168,13 +168,20 @@ import { createContext, useContext } from "react";
 import type { Uploads as Server } from "@app/uploads"; // types only
 
 function createUploads(userId: string) {
-  const client = createCloudropClient<Server>({ basePath: `${API_ORIGIN}/api/cloudrop`, namespace: userId });
+  // account: what the routes' owner returns for this user ("" signed out); the server compares the two at /upload.
+  const client = createCloudropClient<Server>({
+    basePath: `${API_ORIGIN}/api/cloudrop`,
+    namespace: userId,
+    account: userId,
+  });
   return { client, ...createUploadHooks<Server>({ client }) };
 }
 export type Uploads = ReturnType<typeof createUploads>;
 
 const byUser = new Map<string, Uploads>();
 export function uploadsFor(userId: string): Uploads {
+  // On a server nothing is kept: no effect runs there to close a client, so a cached one would stay for good.
+  if (typeof window === "undefined") return createUploads(userId);
   const known = byUser.get(userId) ?? createUploads(userId);
   byUser.set(userId, known);
   return known;
@@ -183,11 +190,13 @@ export const UploadsContext = createContext(uploadsFor(""));
 export const useUploads = () => useContext(UploadsContext);
 
 // apps/web/src/app.tsx: keyed by the user, so a new user's components mount with that user's hooks.
-const userId = authClient.useSession().data?.user.id ?? "";
+const session = authClient.useSession();
+const userId = session.data?.user.id ?? "";
 useCloseOtherUsers(userId); // from Signed-in users in the React guide
 // React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
 <UploadsContext key={userId} value={uploadsFor(userId)}>
-  {/* the app */}
+  {/* Nothing that uploads while the session loads: until then the hooks are those of "", nobody. */}
+  {!session.isPending && <DropZone />}
 </UploadsContext>;
 
 // In a component:
@@ -198,6 +207,14 @@ const { files, getInputProps } = useUpload("attachments", { multiple: true });
 - `basePath` is absolute: the handler is on the API's origin, not the page's.
 - The client sends cookies with every call to it; the oRPC link and the better-auth client need
   `credentials: "include"` of their own.
+- **`account: userId` guards against a changed account.** A sign-in as someone else in another tab changes the cookie
+  under this page; with `account`, the API refuses this page's next `/upload` with `ACCOUNT_CHANGED` instead of storing
+  the file for the other user ([Guard against a changed account](client.md#guard-against-a-changed-account)). For the
+  same reason the drop zone renders only once the session has loaded: before that the hooks are those of `""`, and a
+  signed-in user's drop would be refused.
+- **Clients are cached in a browser only.** `useCloseOtherUsers` empties `byUser` in an effect, and no effect runs on
+  a server, so an app that also renders there would keep one client per user for good; `uploadsFor` returns an
+  uncached one there ([Signed-in users](react.md#signed-in-users)).
 - **One client per user, with the user's id as `namespace`** ([Resume](resume.md#namespace-and-sign-out)). A client
   lists and resumes only its namespace's records, so the next user of the browser never sees the last one's
   unfinished uploads, even when that user closed the tab or let the session expire without signing out, and the first

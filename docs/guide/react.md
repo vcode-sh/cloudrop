@@ -274,6 +274,8 @@ export type Uploads = ReturnType<typeof createUploads>;
 
 const byUser = new Map<string, Uploads>();
 export function uploadsFor(userId: string): Uploads {
+  // On a server nothing is kept: no effect runs there to close a client, so a cached one would stay for good.
+  if (typeof window === "undefined") return createUploads(userId);
   const known = byUser.get(userId) ?? createUploads(userId);
   byUser.set(userId, known);
   return known;
@@ -295,13 +297,24 @@ export function useCloseOtherUsers(userId: string) {
 
 ```tsx
 // The app's root: keyed by the user, so a new user's components mount with that user's hooks.
-const userId = useSession().data?.user.id ?? ""; // your auth library's session
+const session = useSession(); // your auth library's session
+const userId = session.data?.user.id ?? "";
 useCloseOtherUsers(userId);
 // React 19 renders a context as its provider; on React 18 write <UploadsContext.Provider>.
 <UploadsContext key={userId} value={uploadsFor(userId)}>
-  {/* the app */}
+  {/* Nothing that uploads while the session loads: until then the hooks are those of "", nobody. */}
+  {!session.isPending && <DocumentUploader folderId="inbox" />}
 </UploadsContext>;
 ```
+
+- **Cache clients in a browser only.** `useCloseOtherUsers` is the only thing that empties `byUser`, and an effect
+  never runs on a server. A framework that renders this module on the server too (Next.js, TanStack Start, Remix)
+  would otherwise keep one client per user id it ever rendered for, for as long as the server runs. So `uploadsFor`
+  returns an uncached client there: it is created, sends nothing and is collected with the render.
+- **Render what uploads once the session is known.** While your auth library still loads the session, `userId` is
+  `""`: a file a signed-in user drops then goes through the client of nobody, the server refuses it with
+  `ACCOUNT_CHANGED`, and its row disappears when the user's id remounts the tree. Show the drop zone only after the
+  session has loaded, signed in or not.
 
 Sign out in this order:
 

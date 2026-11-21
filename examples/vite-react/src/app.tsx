@@ -25,8 +25,12 @@ export function App() {
             {!session.isPending && email && <AuthPanel email={email} />}
           </header>
           {!session.isPending && !email && <AuthPanel email={null} />}
-          {/* Shown signed out too: an upload then gets cloudrop's UNAUTHORIZED with the route's message. */}
-          <DropZone />
+          {/*
+            Only once the session is known. While it loads, the hooks are those of "", nobody: a signed-in user's drop
+            would be refused ACCOUNT_CHANGED, and its row would go when the user's id remounts everything. Shown signed
+            out too: an upload then gets cloudrop's UNAUTHORIZED with the route's message.
+          */}
+          {!session.isPending && <DropZone />}
           {email && (
             <>
               <UnfinishedUploads />

@@ -97,3 +97,48 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing to migrate; the types never allowed null.
 - **Status:** in force.
 - **Visible in:** `packages/cloudrop/src/react.ts`, `packages/cloudrop/src/react.test.ts`.
+
+### M11-R8: the Signed-in recipe caches a user's client in a browser only
+
+- **Decision:** `uploadsFor(userId)` of the Signed-in recipe (`docs/guide/react.md`, `docs/guide/hono.md`, and
+  `examples/vite-react/src/lib/upload.ts`, which the guides mirror) returns an uncached client and hooks when
+  `typeof window === "undefined"`, and keeps its per-user map only in a browser.
+- **Why:** the map is emptied only by `useCloseOtherUsers`, an effect, and no effect runs on a server. An app that
+  server-renders the module with the user's id (Next.js, TanStack Start) kept one client per user for as long as the
+  server ran. A client that starts no upload attaches no listener and holds no timer (`client/lifecycle.ts` adds its
+  listeners only while a file runs), so the uncached one is collected with the render.
+- **If wrong:** a server render creates one client per call instead of one per user; it sends nothing. The Vite
+  example renders in the browser only, so the guard never runs there; it is kept so the example and the guides are
+  the same code.
+- **Status:** in force.
+- **Visible in:** `docs/guide/react.md#signed-in-users`, `docs/guide/hono.md`, `examples/vite-react/src/lib/upload.ts`.
+
+### M11-R9: an example and a recipe render what uploads only once the session is known
+
+- **Decision:** `examples/vite-react` renders its drop zone once `session.isPending` is false, signed in or out, and
+  the roots shown in the React and Hono guides do the same.
+- **Why:** while the session loads the user id is `""`, so the hooks are those of the client with `account: ""`. A
+  signed-in user's drop in that window was refused `ACCOUNT_CHANGED` (`M10-A`), and its row vanished when the user's
+  id remounted the tree. `examples/next` has no accounts and a module-level factory, so it has no such window.
+- **If wrong:** the drop zone appears a moment later, after the session request.
+- **Status:** in force.
+- **Visible in:** `examples/vite-react/src/app.tsx`, `docs/guide/react.md#signed-in-users`, `docs/guide/hono.md`.
+
+### M11-R10: the Hono guide's client passes `account`
+
+- **Decision:** step 7 of `docs/guide/hono.md` creates the client with `account: userId` beside `namespace`, with a
+  bullet that says what it guards.
+- **Why:** the example and the React guide pass it; the Hono guide's copy did not, so an app built from that page had
+  no guard against a sign-in in another tab.
+- **If wrong:** nothing: the option is ignored on a route without a store and `owner`.
+- **Status:** in force.
+- **Visible in:** `docs/guide/hono.md`.
+
+### M11-R11: the Hono guide says `api.files` lists a user's files
+
+- **Decision:** the schema step of `docs/guide/hono.md` no longer says cloudrop's file API has no listing call. It
+  names `uploads.api.files({ owner })` and keeps the app's own Drizzle queries for joins.
+- **Why:** the sentence predates `api.files` and contradicted step 6 of the same page.
+- **If wrong:** nothing.
+- **Status:** in force.
+- **Visible in:** `docs/guide/hono.md`.
