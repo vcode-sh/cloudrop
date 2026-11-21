@@ -240,11 +240,12 @@ describe("postgres only", () => {
     await db.createTables();
   });
 
-  test("creates the six indexes of spec §3 beside the primary key, none of them unique on key", async () => {
+  test("creates the seven indexes of spec §3 and M11-L5 beside the primary key, none of them unique on key", async () => {
     const rows = await db.query(
       "SELECT replace(indexdef, current_schema() || '.', '') AS def FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname COLLATE \"C\"",
     );
     expect(rows.map((row) => row.def)).toEqual([
+      "CREATE INDEX cloudrop_files_created_at_idx ON cloudrop_files USING btree (created_at)",
       "CREATE INDEX cloudrop_files_key_idx ON cloudrop_files USING btree (key)",
       "CREATE INDEX cloudrop_files_owner_status_created_at_idx ON cloudrop_files USING btree (owner, status, created_at)",
       "CREATE UNIQUE INDEX cloudrop_files_pkey ON cloudrop_files USING btree (id)",
@@ -310,13 +311,14 @@ describe("sqlite only", () => {
   const db = useSqliteDatabase({ file: true });
   beforeEach(() => db.createTables());
 
-  test("creates the six indexes of spec §3 beside the primary keys, none of them unique on key", async () => {
+  test("creates the seven indexes of spec §3 and M11-L5 beside the primary keys, none of them unique on key", async () => {
     // "<index> [UNIQUE] (<columns in key order>)" from SQLite's own catalog, for both tables.
     const rows = await db.query(`SELECT list.name || iif(list."unique", ' UNIQUE', '') || ' (' ||
         (SELECT group_concat(name, ', ') FROM (SELECT name FROM pragma_index_info(list.name) ORDER BY seqno)) || ')' AS def
       FROM (SELECT 'cloudrop_files' AS name UNION ALL SELECT 'cloudrop_usage') AS tables, pragma_index_list(tables.name) AS list
       ORDER BY list.name`);
     expect(rows.map((row) => row.def)).toEqual([
+      "cloudrop_files_created_at_idx (created_at)",
       "cloudrop_files_key_idx (key)",
       "cloudrop_files_owner_status_created_at_idx (owner, status, created_at)",
       "cloudrop_files_route_request_key_idx (route, request_key)",

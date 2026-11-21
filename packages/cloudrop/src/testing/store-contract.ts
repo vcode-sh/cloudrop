@@ -7,6 +7,8 @@ import { atomicityCases } from "./store-contract/atomicity.ts";
 import { claimCases } from "./store-contract/claim.ts";
 import { endCases } from "./store-contract/end.ts";
 import { listCases } from "./store-contract/list.ts";
+import { listAllCases } from "./store-contract/list-all.ts";
+import { listAllPageCases } from "./store-contract/list-all-pages.ts";
 import { listFilterCases } from "./store-contract/list-filters.ts";
 import { replaceCases } from "./store-contract/replace.ts";
 import { reserveCases } from "./store-contract/reserve.ts";
@@ -87,6 +89,8 @@ export function describeStoreContract(name: string, setup: SetupStore): void {
     staleCases(suite);
     listCases(suite);
     listFilterCases(suite);
+    listAllCases(suite);
+    listAllPageCases(suite);
     replaceCases(suite);
     usageCases(suite);
     atomicityCases(suite);

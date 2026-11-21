@@ -39,6 +39,7 @@ describe("cloudrop.api without a store", () => {
     ["usage", (api) => api.usage("u1")],
     ["revokeUploads", (api) => api.revokeUploads({ owner: "u1" })],
     ["files", (api) => api.files({ owner: "u1" })],
+    ["allFiles", (api) => api.allFiles()],
     ["deleteFile", (api) => api.deleteFile("id")],
     ["eraseOwner", (api) => api.eraseOwner("u1")],
     ["reconcile", (api) => api.reconcile()],

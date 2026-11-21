@@ -3,6 +3,7 @@
 
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
+import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
 import type { ServerConfig } from "./config.ts";
 import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
 import { removeDeleted } from "./leftovers.ts";
@@ -17,6 +18,12 @@ export interface StoreFileApi {
   file(id: string): Promise<Result<FileRecord | null>>;
   /** An owner's completed files, newest or oldest first, optionally by route, name and type, a page at a time. */
   files(options: FilesOptions): Promise<Result<FilesPage>>;
+  /**
+   * The files of every owner, in any status, newest or oldest first, optionally by owner, status, route, name and
+   * type, a page at a time. It crosses owners: call it only behind your app's own admin check, never with options a
+   * visitor chose.
+   */
+  allFiles(options?: AllFilesOptions): Promise<Result<FilesPage>>;
   /** An owner's counters, with or without a quota. */
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
@@ -136,6 +143,7 @@ export function storeApi(
         isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
       ),
     files: (options) => withStore("files", (store) => listFiles(config, store, options)),
+    allFiles: (options) => withStore("allFiles", (store) => listAllFiles(config, store, options)),
     usage: (owner) =>
       withStore("usage", async (store) =>
         isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),

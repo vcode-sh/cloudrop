@@ -2,7 +2,7 @@
 // that bring a row to a given status through the store's own methods.
 
 import type { TestContext } from "vitest";
-import type { CloudropStore, EndedStatus, FileStatus, NewFile } from "../../server/store.ts";
+import type { CloudropStore, EndedStatus, FileRecord, FileStatus, NewFile } from "../../server/store.ts";
 import type { StoreGap, StoreTarget } from "../store-contract.ts";
 import type { RawFileRow, RawTables, RawUsageRow } from "../store-rows.ts";
 
@@ -66,6 +66,9 @@ const PATHS: Record<FileStatus, ("completing" | "completed" | EndedStatus)[]> = 
   expired: ["expired"],
 };
 
+/** What a case asks `listAll` for; whatever it leaves out is none: every owner, any status, newest first, 10 a page. */
+export type ListAllOptions = Partial<Parameters<NonNullable<CloudropStore<unknown>["listAll"]>>[0]>;
+
 /** The backend as the cases see it; read inside a case, after setup. */
 export interface StoreSuite {
   readonly target: StoreTarget;
@@ -80,6 +83,8 @@ export interface StoreSuite {
   seed(owner: string | null, files: readonly NewFile[], expiresAt?: Date): Promise<void>;
   /** Brings a reserved row to `status` through the store at `now`, the way the server does. */
   advance(id: string, status: FileStatus, now: Date): Promise<void>;
+  /** The store's `listAll`, which every store under the contract must have. */
+  listAll(options?: ListAllOptions): Promise<{ records: FileRecord[]; cursor: string | null }>;
 }
 
 export function storeSuite(connected: () => StoreTarget): StoreSuite {
@@ -134,5 +139,10 @@ export function storeSuite(connected: () => StoreTarget): StoreSuite {
       if (outcomes.some((outcome) => outcome !== "reserved")) throw new Error(`Seeding failed: ${outcomes.join(", ")}`);
     },
     advance,
+    listAll(options) {
+      const none = { owner: null, status: null, route: null, name: null, type: null, cursor: null };
+      const query = { ...none, order: "newest", limit: 10, ...options } as const;
+      return provided(store().listAll?.bind(store()), "listAll")(query);
+    },
   };
 }

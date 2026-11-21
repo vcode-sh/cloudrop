@@ -1,11 +1,12 @@
 // api.files (M8-A1, M10-D1, M10-D2): an owner's completed files, newest or oldest first, optionally filtered by route,
-// name and type, a page at a time, straight from the store's rows.
+// name and type, a page at a time, straight from the store's rows. api.allFiles (all-files.ts) reads its options, its
+// cursors and the store's page through the same code (M11-L).
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
-import { MAX_NAME_LENGTH } from "../protocol/types.ts";
 import type { ServerConfig } from "./config.ts";
-import type { CloudropStore, FileRecord } from "./store.ts";
+import { type FileFilters, readFilters } from "./files-filters.ts";
+import type { CloudropStore, FileRecord, FileStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 import { MAX_OWNER_LENGTH } from "./store-upload.ts";
 
@@ -37,18 +38,13 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 /** The last time an ISO string without a sign names, which is how Postgres is given a time: 9999-12-31T23:59:59.999Z. */
 const LAST_TIME_MS = 253_402_300_799_999;
-/** A type, or a top-level type and its slash, as `/upload` stores types (lower case, RFC 6838 names). */
-const TYPE_FILTER = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(?:[a-z0-9][a-z0-9!#$&^_.+-]{0,63})?$/;
-/** A cursor of a filtered or oldest-first listing: the listing's fingerprint, a dot, then the store's cursor. */
-const FILTERED_CURSOR = /^(?:([0-9a-f]{8})\.)?(.*)$/s;
+/** A cursor that carries its listing's mark: the mark, a dot, then the store's cursor. */
+const MARKED_CURSOR = /^(?:((?:all\.)?[0-9a-f]{8})\.)?(.*)$/s;
 
-/** The listing the store is asked for, every option checked. */
-interface FilesQuery {
-  owner: string;
-  route: string | null;
-  name: string | null;
-  type: string | null;
-  order: "newest" | "oldest";
+/** The listing the store is asked for, every option checked. `api.allFiles` may leave the owner and the status null. */
+interface FilesQuery extends FileFilters {
+  owner: string | null;
+  status: FileStatus | null;
   limit: number;
   cursor: string | null;
 }
@@ -76,108 +72,78 @@ export function isStoreCursor(cursor: string): boolean {
   return match !== null && Number(match[1]) <= LAST_TIME_MS && isOwnerOrId(match[2]);
 }
 
-/**
- * Which listing a cursor belongs to: FNV-1a of its route, name, type and order, so a cursor passed with other filters is
- * refused instead of paging a listing it was not made for. The default listing has none, so its cursors stay the plain
- * store cursors of 0.3.
- */
-function fingerprint({ route, name, type, order }: Pick<FilesQuery, "route" | "name" | "type" | "order">): string {
-  if (route === null && name === null && type === null && order === "newest") return "";
-  const text = JSON.stringify([route, name, type, order]);
+/** FNV-1a of the options' JSON, as eight hex digits. */
+function fingerprint(options: readonly unknown[]): string {
+  const text = JSON.stringify(options);
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 /**
- * The name filter as `/upload` checks and stores names: well-formed, in NFC, at most 255 characters once normalized. Or
- * null for none: an empty name filters nothing.
+ * Which listing a cursor belongs to, so a cursor passed with other options is refused instead of paging a listing it
+ * was not made for. `api.files`: the fingerprint of its route, name, type and order, and none for the default listing,
+ * whose cursors stay the plain store cursors of 0.3. `api.allFiles`: `all.` and the fingerprint of every option, the
+ * owner and status included. No mark of one is ever a mark of the other, whatever the options (M11-L3).
  */
-function readName(name: unknown): Result<string | null> {
-  if (name === undefined || name === "") return ok(null);
-  const normalized = typeof name === "string" && name.isWellFormed() ? name.normalize("NFC") : "\u0000";
-  if ([...normalized].length <= MAX_NAME_LENGTH && !normalized.includes("\u0000")) return ok(normalized);
-  return fail(
-    invalidInput(
-      `name must be text of at most ${MAX_NAME_LENGTH} characters, without NUL (U+0000) or lone surrogates.`,
-    ),
-  );
-}
-
-function readType(type: unknown): Result<string | null> {
-  if (type === undefined) return ok(null);
-  const lower = typeof type === "string" ? type.toLowerCase() : "";
-  if (TYPE_FILTER.test(lower)) return ok(lower);
-  return fail(invalidInput('type must be a type such as "application/pdf", or a top-level type such as "image/".'));
-}
-
-function readFilters(
-  config: ServerConfig,
-  given: Record<string, unknown>,
-): Result<Pick<FilesQuery, "route" | "name" | "type" | "order">> {
-  const { route, order = "newest" } = given;
-  if (route !== undefined && (typeof route !== "string" || !config.routes.has(route))) {
-    const names = [...config.routes.keys()].map((name) => JSON.stringify(name)).join(", ");
-    return fail(invalidInput(`route must be one of this server's routes: ${names}.`));
-  }
-  if (order !== "newest" && order !== "oldest") return fail(invalidInput('order must be "newest" or "oldest".'));
-  const name = readName(given.name);
-  if (name.error) return name;
-  const type = readType(given.type);
-  return type.error ? type : ok({ route: route ?? null, name: name.data, type: type.data, order });
+function markOf({ owner, status, route, name, type, order }: Omit<FilesQuery, "limit" | "cursor">, all: boolean) {
+  if (all) return `all.${fingerprint([owner, status, route, name, type, order])}`;
+  if (route === null && name === null && type === null && order === "newest") return "";
+  return fingerprint([route, name, type, order]);
 }
 
 /** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing than `mark`'s. */
 function readCursor(cursor: unknown, mark: string): Result<string | null> {
   if (cursor === undefined) return ok(null);
-  const [, given = "", position = ""] = (typeof cursor === "string" && FILTERED_CURSOR.exec(cursor)) || [];
+  const [, given = "", position = ""] = (typeof cursor === "string" && MARKED_CURSOR.exec(cursor)) || [];
   if (!isStoreCursor(position)) {
     return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
   }
   if (given !== mark) {
     return fail(
       invalidInput(
-        "cursor belongs to a listing with another route, name, type or order. Pass the options of the page that returned it, or leave cursor out to start again.",
+        `cursor belongs to a listing with another ${mark.startsWith("all.") ? "owner, status, " : ""}route, name, type or order. Pass the options of the page that returned it, or leave cursor out to start again.`,
       ),
     );
   }
   return ok(position);
 }
 
-/** The listing the store is asked for, and the fingerprint its cursors carry. */
-function readOptions(config: ServerConfig, given: unknown): Result<{ query: FilesQuery; mark: string }> {
-  if (!isPlainObject(given)) {
-    return fail(invalidInput("files takes { owner }, and optionally route, name, type, order, limit and cursor."));
-  }
-  const { owner, limit = DEFAULT_LIMIT } = given;
-  if (!isOwnerOrId(owner)) return badOwner();
+/** The listing the store is asked for, and the mark its cursors carry. `scope` is the owner and status, already read. */
+function readOptions(
+  config: ServerConfig,
+  given: Record<string, unknown>,
+  scope: Pick<FilesQuery, "owner" | "status">,
+  all: boolean,
+): Result<{ query: FilesQuery; mark: string }> {
+  const { limit = DEFAULT_LIMIT } = given;
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
   const filters = readFilters(config, given);
   if (filters.error) return filters;
-  const mark = fingerprint(filters.data);
+  const mark = markOf({ ...scope, ...filters.data }, all);
   const cursor = readCursor(given.cursor, mark);
-  return cursor.error ? cursor : ok({ query: { owner, limit, ...filters.data, cursor: cursor.data }, mark });
+  return cursor.error ? cursor : ok({ query: { ...scope, limit, ...filters.data, cursor: cursor.data }, mark });
 }
 
 const foldAscii = (text: string): string => text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
 
 /**
- * Whether the store answered what it was asked: the owner's completed files, inside the filters, in order. A store
- * written for 0.3 ignores name, type and order and still compiles (M10-D1), so its unfiltered page is refused here
- * instead of reaching an app as if it were the filtered one. Order is seen only within a page, so a page of one file
- * cannot show it.
+ * Whether the store answered what it was asked: files of the owner and in the status, when the listing names them,
+ * inside the filters, in order. A store written for 0.3 ignores name, type and order and still compiles (M10-D1), so
+ * its unfiltered page is refused here instead of reaching an app as if it were the filtered one. Order is seen only
+ * within a page, so a page of one file cannot show it.
  */
 function answersQuery(query: FilesQuery, records: readonly FileRecord[]): boolean {
-  const { owner, route, name, type, order } = query;
+  const { owner, status, route, name, type, order } = query;
   const folded = name === null ? null : foldAscii(name);
   return records.every((record, index) => {
     const previous = records[index - 1]?.createdAt.getTime();
     const time = record.createdAt.getTime();
     return (
-      record.owner === owner &&
-      record.status === "completed" &&
+      (owner === null || record.owner === owner) &&
+      (status === null || record.status === status) &&
       (route === null || record.route === route) &&
       (folded === null || foldAscii(record.name).includes(folded)) &&
       (type === null || (type.endsWith("/") ? record.type.startsWith(type) : record.type === type)) &&
@@ -186,24 +152,44 @@ function answersQuery(query: FilesQuery, records: readonly FileRecord[]): boolea
   });
 }
 
-export async function listFiles(
+/**
+ * One page of a listing: its options read, the store asked through `read` (its `method`), and the answer checked
+ * (M10-D11) before it reaches the caller.
+ */
+export async function listPage(
   config: ServerConfig,
-  store: CloudropStore<unknown>,
-  given: unknown,
+  given: Record<string, unknown>,
+  scope: Pick<FilesQuery, "owner" | "status">,
+  method: "list" | "listAll",
+  read: (query: FilesQuery) => Promise<{ records: FileRecord[]; cursor: string | null }>,
 ): Promise<Result<FilesPage>> {
-  const options = readOptions(config, given);
+  const options = readOptions(config, given, scope, method === "listAll");
   if (options.error) return options;
   const { query, mark } = options.data;
-  const page = await storeCall(config.logger, `list the files of ${query.owner}`, () =>
-    store.list({ ...query, statuses: ["completed"] }),
-  );
+  const whose = query.owner === null ? "every owner" : `owner ${query.owner}`;
+  const page = await storeCall(config.logger, `list the files of ${whose}`, () => read(query));
   if (page.error) return page;
   if (!answersQuery(query, page.data.records)) {
     config.logger.error(
-      `cloudrop: the store's list answered files outside the owner, route, name, type or order asked for (owner ${query.owner}). A store written by hand must apply every option list receives.`,
+      `cloudrop: the store's ${method} answered files outside the owner, status, route, name, type or order asked for (${whose}). A store written by hand must apply every option ${method} receives.`,
     );
     return fail(new CloudropError("SERVER_ERROR", "The store listed files that do not match this listing's options."));
   }
   const cursor = page.data.cursor === null || mark === "" ? page.data.cursor : `${mark}.${page.data.cursor}`;
   return ok({ items: page.data.records, cursor });
+}
+
+export async function listFiles(
+  config: ServerConfig,
+  store: CloudropStore<unknown>,
+  given: unknown,
+): Promise<Result<FilesPage>> {
+  if (!isPlainObject(given)) {
+    return fail(invalidInput("files takes { owner }, and optionally route, name, type, order, limit and cursor."));
+  }
+  const { owner } = given;
+  if (!isOwnerOrId(owner)) return badOwner();
+  return listPage(config, given, { owner, status: "completed" }, "list", ({ status: _status, ...query }) =>
+    store.list({ ...query, owner, statuses: ["completed"] }),
+  );
 }

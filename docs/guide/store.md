@@ -241,7 +241,7 @@ Use the tool you query with:
   ```
 
   On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`.
-  `api.files({ owner })` lists a user's files; for anything else, read the tables freely
+  `api.files({ owner })` lists a user's files and `api.allFiles()` every owner's; for anything else, read the tables freely
   (`db.select().from(cloudropFiles)`): they are your app's. Write to them only through the store, which keeps the
   usage counters in step with the files.
 - **Everyone else:** run the SQL below in a migration. On D1: `wrangler d1 migrations create DB cloudrop`, paste the
@@ -285,6 +285,8 @@ CREATE INDEX "cloudrop_files_status_claimed_at_idx" ON "cloudrop_files" (status,
 CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files" (status, cleaned_at, ended_at);
 
 CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
+
+CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
 
@@ -333,6 +335,8 @@ CREATE INDEX "cloudrop_files_status_claimed_at_idx" ON "cloudrop_files" (status,
 CREATE INDEX "cloudrop_files_status_cleaned_at_ended_at_idx" ON "cloudrop_files" (status, cleaned_at, ended_at);
 
 CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
+
+CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
 
 CREATE INDEX "cloudrop_files_key_idx" ON "cloudrop_files" (key);
 
@@ -388,6 +392,40 @@ DROP INDEX "cloudrop_files_owner_status_idx";
 
 On a large Postgres table, `CREATE INDEX CONCURRENTLY` (outside a transaction) avoids blocking uploads while it builds.
 With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in both statements.
+
+### Upgrading from 0.5
+
+0.6.0 adds one index, on `created_at`, for [`api.allFiles`](#list-every-owners-files). No column changes, and nothing
+but that listing reads the index. A database without it answers the same pages, only slower: each page reads and
+sorts the whole table (about 30 ms a page at 300,000 files on Postgres 18, against 0.05 ms with the index), so an
+upgrade never breaks an app that has not migrated yet, and an app that never calls `api.allFiles` may leave it out.
+
+- **Plain SQL**, on Postgres, SQLite or D1, in a migration:
+
+  ```sql
+  CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
+  ```
+
+- **Drizzle:** `cloudropPgTables()` and `cloudropSqliteTables()` declare the index, so `drizzle-kit generate` writes
+  the migration, with no question to answer:
+
+  ```sql
+  CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" ("created_at");
+  ```
+
+- **Prisma:** add `@@index([createdAt])` to your `CloudropFile` model, as the shipped models have it, and
+  `prisma migrate dev` writes:
+
+  ```sql
+  CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files"("created_at");
+  ```
+
+On a large Postgres table a plain `CREATE INDEX` blocks uploads while it builds. Build it first, by hand and outside a
+transaction, with `CREATE INDEX CONCURRENTLY IF NOT EXISTS "cloudrop_files_created_at_idx" ON "cloudrop_files"
+(created_at);`, then add `IF NOT EXISTS` to the statement in the migration, which finds the index there and does
+nothing. With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in the
+statement. A store you wrote yourself also needs the new `listAll` method before `api.allFiles` works with it; every
+other call works without.
 
 ### Tables in another schema
 
@@ -775,6 +813,54 @@ const page = await cloudrop.api.files({ owner: userId, name: search, type: "imag
 The cursor is opaque and belongs to its listing: pass it back with the same `route`, `name`, `type` and `order`, or the
 call answers `INVALID_INPUT`. Every backend answers the same files: Postgres, SQLite, D1 and the testing memory store.
 
+## List every owner's files
+
+`api.allFiles` lists the files of **every** owner, in any status: an admin inventory, a moderation queue, a support
+tool. It crosses owners, so call it only behind your app's own admin check, and never with options a visitor chose
+without that check:
+
+```ts
+// An admin inventory: your app's own check first, then one page.
+export async function GET(request: Request) {
+  if (!(await isAdmin(request))) return new Response("Forbidden", { status: 403 });
+  const query = new URL(request.url).searchParams;
+  const { data, error } = await cloudrop.api.allFiles({
+    status: "completed",
+    name: query.get("search") ?? undefined,
+    limit: 50,
+    cursor: query.get("cursor") ?? undefined,
+  });
+  if (error) return Response.json({ error: error.message }, { status: error.code === "INVALID_INPUT" ? 400 : 500 });
+  // data.items: FileRecord[] of every owner, newest upload first. data.cursor: the next page; null on the last one.
+  return Response.json(data);
+}
+```
+
+The page is the `{ items, cursor }` of [`api.files`](#list-an-owners-files), and `route`, `name`, `type`, `order`,
+`limit` and `cursor` mean what they mean there. Two options are its own, and every option may be left out:
+
+| Option | What it does |
+| --- | --- |
+| `owner` | Only that owner's files, in any status. Left out: every owner's files, and those of routes without an `owner`. |
+| `status` | Only files in that status: `"pending"`, `"completing"`, `"completed"`, `"aborted"`, `"rejected"`, `"failed"`, `"expired"` or `"deleted"`. Left out: every status. |
+
+```ts
+// A support tool: everything one user ever uploaded, cancelled and deleted uploads included.
+const page = await cloudrop.api.allFiles({ owner: userId });
+// A moderation queue: the oldest completed files of one route first.
+const queue = await cloudrop.api.allFiles({ status: "completed", route: "attachments", order: "oldest" });
+```
+
+It is a method of its own and not `api.files` without an owner: `api.files` refuses a missing `owner`, so a user id
+that is `undefined` by a bug never lists everyone's files. A cursor belongs to its listing (the same owner, status,
+route, name, type and order) and to its method: `api.allFiles` refuses a cursor of `api.files`, and `api.files` one of
+`api.allFiles`, with `INVALID_INPUT`. Files uploaded at the same instant page by id, so none is skipped or repeated,
+also when files arrive or leave between two pages. Every backend answers the same files in the same order.
+
+It reads the files in upload order along the `created_at` index and checks each against the options, so its cost is
+the rows it passes to fill a page: see [Known costs](#known-costs). The index is new in 0.6.0
+([Upgrading from 0.5](#upgrading-from-05)); without it the listing answers the same, slower.
+
 ## Erase an owner
 
 For an account deletion or an erasure request: everything an owner uploaded goes, driven by the owner's rows, so it
@@ -829,6 +915,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | --- | --- |
 | `file(id)` | The file's row (`FileRecord`: status, key, owner, size, result, times), or `null`. |
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
+| `allFiles({ owner?, status?, route?, name?, type?, order?, limit?, cursor? })` | The files of every owner, in any status, a page at a time, for your admin tools ([above](#list-every-owners-files)). It crosses owners: call it behind your own admin check. |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
 | `deleteFile(id, { context? })` | Deletes a completed file and answers `{ id, deleted, cleaned }` ([below](#what-deletefile-answers)): the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Idempotent. `NOT_FOUND` for a file that never completed; the hook's own error when [`onDelete` refuses](#refuse-a-deletion). |
@@ -958,6 +1045,16 @@ as required.
 - **Searching by name or type reads the owner's files.** The `(owner, status, created_at)` index finds an owner's
   completed files in order, and `name` and `type` are checked on each of them, so a search that matches few of an
   owner's many files reads them all to fill a page. No other index is needed, and 0.4.0 needs no migration.
+- **Listing every owner's files reads them in upload order.** `api.allFiles` walks the `created_at` index and checks
+  each file against the options, so a page costs the rows it passes until it is full. Measured on Postgres 18 with
+  300,000 files, a page of 100: no option, a status or a route that most files have, 0.05 ms; a name that 12% of the
+  files have, 1.2 ms; a name that almost no file has reads every file, 0.3 to 0.5 s (0.16 s without the index, which
+  makes this one case slower). With `owner` the owner's files are found by owner and sorted, 5 ms for an owner of
+  16,000 files, or 0.05 ms when a `status` is given too. Postgres picks another index when its statistics say few
+  rows match (a rare status or route: 0.1 ms). SQLite and D1 have no such statistics, so there the walk is fixed: a
+  status or a route that very few files have reads most or all of them (22 to 72 ms at 300,000 files, and D1 bills
+  the rows read). For frequent narrow searches over many files, keep a query and an index of your own, such as a
+  trigram index on Postgres.
 - **Clock skew.** The lease and the grace periods are minutes, far above normal skew between servers. A server whose
   clock runs ahead can delay `eraseOwner`'s `done` by that much: a file it wrote looks newer than the run. Keep server
   clocks in sync (NTP), as SigV4 signing already requires.

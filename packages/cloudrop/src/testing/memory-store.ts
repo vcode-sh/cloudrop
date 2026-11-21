@@ -28,6 +28,7 @@ export type MemoryWrite =
 
 export interface MemoryStore extends CloudropStore<MemoryTx> {
   transaction: NonNullable<CloudropStore<MemoryTx>["transaction"]>;
+  listAll: NonNullable<CloudropStore<MemoryTx>["listAll"]>;
   /** The tables, read past the store. */
   readonly raw: RawTables;
   /**

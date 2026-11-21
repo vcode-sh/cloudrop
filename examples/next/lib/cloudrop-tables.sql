@@ -31,6 +31,8 @@ CREATE INDEX IF NOT EXISTS "cloudrop_files_status_cleaned_at_ended_at_idx" ON "c
 
 CREATE INDEX IF NOT EXISTS "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (owner, status, created_at);
 
+CREATE INDEX IF NOT EXISTS "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
+
 CREATE INDEX IF NOT EXISTS "cloudrop_files_key_idx" ON "cloudrop_files" (key);
 
 CREATE INDEX IF NOT EXISTS "cloudrop_files_route_request_key_idx" ON "cloudrop_files" (route, request_key);

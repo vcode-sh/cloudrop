@@ -16,7 +16,7 @@ export interface Write {
 }
 
 type Atomic = <T>(method: string, body: (write: Write) => T) => Promise<T>;
-type Methods = Omit<CloudropStore<never>, "transaction">;
+type Methods = Omit<CloudropStore<never>, "transaction"> & Required<Pick<CloudropStore<never>, "listAll">>;
 
 const ZERO: OwnerUsage = { reservedBytes: 0, activeBytes: 0, files: 0 };
 const RESERVING: ReadonlySet<FileStatus> = new Set(["pending", "completing"]);

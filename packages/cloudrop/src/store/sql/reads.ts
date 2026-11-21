@@ -1,7 +1,7 @@
 // The store methods that are one statement on both dialects: they touch one table, so the only differences are the
 // placeholders (the binder's) and the collation of keyset comparisons.
 
-import type { CloudropStore, FileRecord } from "../../server/store.ts";
+import type { CloudropStore, FileRecord, FileStatus } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlDialect, type SqlExecutor, type SqlStatement } from "./executor.ts";
 import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage } from "./records.ts";
@@ -19,7 +19,14 @@ export type StoreMethods = Omit<CloudropStore<never>, "transaction">;
 type SingleStatementMethods = Pick<
   StoreMethods,
   "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "list" | "owners"
->;
+> &
+  Required<Pick<StoreMethods, "listAll">>;
+
+/** What `list` and `listAll` read: `owner` null is every owner, `statuses` null every status. */
+type Listing = Omit<Parameters<StoreMethods["list"]>[0], "owner" | "statuses"> & {
+  owner: string | null;
+  statuses: readonly FileStatus[] | null;
+};
 
 /** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
 export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
@@ -35,6 +42,9 @@ export function selectRecord(dialect: SqlDialect, files: string, id: string): Sq
   const b = binder(dialect);
   return b.statement(`SELECT ${RECORD_COLUMNS} FROM ${files} WHERE id = ${b.text(id)}`);
 }
+
+/** One condition of a statement, or none when its value is null. */
+const given = <T>(value: T | null, sql: (value: T) => string): string => (value === null ? "" : sql(value));
 
 /** A keyset page: `limit + 1` rows were asked for, so a row beyond the page means another page follows. */
 function page<T>(rows: T[], limit: number, cursorOf: (last: T) => string) {
@@ -56,6 +66,43 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
   // `"image/"` is every type of that top-level type; types are ASCII, so lengths in characters are lengths in bytes.
   const typeMatches = (b: Binder, type: string) =>
     type.endsWith("/") ? `substr(type, 1, ${b.integer(type.length)}) = ${b.text(type)}` : `type = ${b.text(type)}`;
+
+  // Every owner's rows are read along the `created_at` index, each row checked against the filters. SQLite has no
+  // statistics to see that and would read every row of the status or the route and sort them: a `+` before the column
+  // keeps it off their indexes (M11-L7). Postgres chooses by its statistics.
+  const offItsIndex = (owner: string | null) => (owner === null && dialect === "sqlite" ? "+" : "");
+  // One owner in several statuses is the opposite: Postgres would walk `created_at` past every other owner's rows to
+  // fill the page. So the order is one no index has, and the owner's rows are found by owner and sorted (M11-L6).
+  const listedBy = (owner: string | null, statuses: readonly FileStatus[] | null) => {
+    if (owner === null || statuses?.length === 1) return "created_at";
+    return dialect === "postgres" ? "created_at + interval '0'" : "+created_at";
+  };
+
+  async function list({ owner, statuses, route, name, type, order, limit, cursor }: Listing) {
+    // `IN ()` is not SQL: no status, no rows.
+    if (statuses?.length === 0) return { records: [], cursor: null };
+    const b = binder(dialect);
+    const [direction, after] = order === "newest" ? ["DESC", "<"] : ["ASC", ">"];
+    const off = offItsIndex(owner);
+    // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
+    const where = [
+      given(owner, (value) => `owner = ${b.text(value)}`),
+      given(statuses, (all) => `${off}status IN (${all.map((status) => b.text(status)).join(", ")})`),
+      given(route, (value) => `${off}route = ${b.text(value)}`),
+      given(name, (value) => nameContains(b, value)),
+      given(type, (value) => typeMatches(b, value)),
+      given(cursor, (value) => {
+        const start = decodeCursor(value);
+        return `(created_at, ${byteOrder("id")}) ${after} (${b.time(start.time)}, ${b.text(start.id)})`;
+      }),
+    ].filter(Boolean);
+    const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} ${where.length > 0 ? "WHERE" : ""} ${where.join(" AND ")}
+      ORDER BY ${listedBy(owner, statuses)} ${direction}, ${byteOrder("id")} ${direction}
+      LIMIT ${b.integer(limit + 1)}`;
+    const records = (await run(b.statement(sql))).map(toRecord);
+    const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(last.createdAt, last.id));
+    return { records: kept, cursor: next };
+  }
 
   return {
     async attach(id, uploadId, now) {
@@ -109,24 +156,8 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
       return { records: kept, cursor: next };
     },
 
-    async list({ owner, statuses, route, name, type, order, limit, cursor }) {
-      // `IN ()` is not SQL: no status, no rows.
-      if (statuses.length === 0) return { records: [], cursor: null };
-      const b = binder(dialect);
-      const start = cursor === null ? null : decodeCursor(cursor);
-      const [direction, after] = order === "newest" ? ["DESC", "<"] : ["ASC", ">"];
-      // Bound in the order they appear: SQLite's `?` placeholders take their values by position.
-      const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE owner = ${b.text(owner)}
-        AND status IN (${statuses.map((status) => b.text(status)).join(", ")})
-        ${route === null ? "" : `AND route = ${b.text(route)}`}
-        ${name === null ? "" : `AND ${nameContains(b, name)}`}
-        ${type === null ? "" : `AND ${typeMatches(b, type)}`}
-        ${start ? `AND (created_at, ${byteOrder("id")}) ${after} (${b.time(start.time)}, ${b.text(start.id)})` : ""}
-        ORDER BY created_at ${direction}, ${byteOrder("id")} ${direction} LIMIT ${b.integer(limit + 1)}`;
-      const records = (await run(b.statement(sql))).map(toRecord);
-      const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(last.createdAt, last.id));
-      return { records: kept, cursor: next };
-    },
+    list,
+    listAll: ({ status, ...rest }) => list({ ...rest, statuses: status === null ? null : [status] }),
 
     async owners(cursor, limit) {
       const b = binder(dialect);

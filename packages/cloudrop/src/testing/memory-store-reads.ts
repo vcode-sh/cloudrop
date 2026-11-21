@@ -1,10 +1,18 @@
-// The memory store's methods that only read: rows as records, and the keyset pages of `stale`, `list` and `owners`.
+// The memory store's methods that only read: rows as records, and the keyset pages of `stale`, `list`, `listAll` and
+// `owners`.
 
 import type { CloudropStore, FileRecord, FileStatus } from "../server/store.ts";
 import type { MemoryTables } from "./memory-store-methods.ts";
 import type { RawFileRow } from "./store-rows.ts";
 
-type ReadMethods = Pick<CloudropStore<never>, "get" | "stale" | "list" | "owners">;
+type Store = CloudropStore<never>;
+type ReadMethods = Pick<Store, "get" | "stale" | "list" | "owners"> & Required<Pick<Store, "listAll">>;
+
+/** What `list` and `listAll` read: `owner` null is every owner, `statuses` null every status. */
+type Listing = Omit<Parameters<Store["list"]>[0], "owner" | "statuses"> & {
+  owner: string | null;
+  statuses: readonly FileStatus[] | null;
+};
 
 const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
 
@@ -49,6 +57,19 @@ function matchesFilters(row: RawFileRow, name: string | null, type: string | nul
 }
 
 export function readMethods({ files, usage }: MemoryTables): ReadMethods {
+  const list = async ({ owner, statuses, route, name, type, order, limit, cursor }: Listing) => {
+    const newest = order === "newest";
+    const after = cursor === null ? () => true : listedAfter(cursor, newest);
+    const rows = [...files.values()]
+      .filter((row) => (owner === null || row.owner === owner) && (statuses?.includes(row.status) ?? true))
+      .filter((row) => (route === null || row.route === route) && matchesFilters(row, name, type) && after(row))
+      .sort(newest ? newestFirst : (a, b) => newestFirst(b, a));
+    const kept = rows.slice(0, limit);
+    const last = kept.at(-1);
+    const next = rows.length > limit && last ? `${last.createdAt.getTime()}:${last.id}` : null;
+    return { records: kept.map(toRecord), cursor: next };
+  };
+
   return {
     get: async (id) => {
       const row = files.get(id);
@@ -71,20 +92,8 @@ export function readMethods({ files, usage }: MemoryTables): ReadMethods {
       return { records: found.records.map(toRecord), cursor: found.cursor };
     },
 
-    list: async ({ owner, statuses, route, name, type, order, limit, cursor }) => {
-      const newest = order === "newest";
-      const after = cursor === null ? () => true : listedAfter(cursor, newest);
-      const rows = [...files.values()]
-        .filter(
-          (row) => row.owner === owner && statuses.includes(row.status) && (route === null || row.route === route),
-        )
-        .filter((row) => matchesFilters(row, name, type) && after(row))
-        .sort(newest ? newestFirst : (a, b) => newestFirst(b, a));
-      const kept = rows.slice(0, limit);
-      const last = kept.at(-1);
-      const next = rows.length > limit && last ? `${last.createdAt.getTime()}:${last.id}` : null;
-      return { records: kept.map(toRecord), cursor: next };
-    },
+    list,
+    listAll: ({ status, ...rest }) => list({ ...rest, statuses: status === null ? null : [status] }),
 
     owners: async (cursor, limit) => {
       const found = page([...usage.keys()].sort(), (owner) => owner, cursor, limit);

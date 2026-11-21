@@ -1,0 +1,1 @@
+CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" ("created_at");

@@ -83,6 +83,19 @@ export interface OwnerUsage {
   files: number;
 }
 
+/** The filters, order and page that `list` and `listAll` share; `list`'s documentation says what each means. */
+interface ListQuery {
+  route: string | null;
+  name: string | null;
+  type: string | null;
+  order: "newest" | "oldest";
+  limit: number;
+  cursor: string | null;
+}
+
+/** One page of rows, and the cursor of the next page or null. */
+type RecordPage = { records: FileRecord[]; cursor: string | null };
+
 /**
  * A database store. Each method is one atomic unit: either everything it describes is written, or it throws and nothing
  * is. Methods throw only on a database failure; every expected outcome is in the return value, and the server answers
@@ -183,7 +196,7 @@ export interface CloudropStore<TTx = never> {
     claimedBefore: Date;
     limit: number;
     cursor: string | null;
-  }): Promise<{ records: FileRecord[]; cursor: string | null }>;
+  }): Promise<RecordPage>;
   /**
    * One page of an owner's rows in any of `statuses` (none: an empty page), ordered by `created_at`, then id: both
    * descending for `"newest"`, ascending for `"oldest"`, ids in byte order. Each filter that is not null narrows it:
@@ -195,16 +208,13 @@ export interface CloudropStore<TTx = never> {
    * last page. A cursor is `<milliseconds>:<id>`, the last row's `created_at` and id (the file API refuses any other
    * before calling the store).
    */
-  list(input: {
-    owner: string;
-    statuses: readonly FileStatus[];
-    route: string | null;
-    name: string | null;
-    type: string | null;
-    order: "newest" | "oldest";
-    limit: number;
-    cursor: string | null;
-  }): Promise<{ records: FileRecord[]; cursor: string | null }>;
+  list(input: ListQuery & { owner: string; statuses: readonly FileStatus[] }): Promise<RecordPage>;
+  /**
+   * `list` across owners, for `api.allFiles` (M11-L): `owner` null is every owner, rows without one included, and
+   * `status` null every status; given, each narrows to that one. Optional, so a store written before 0.6 still
+   * compiles: without it `api.allFiles` answers `INVALID_CONFIG`.
+   */
+  listAll?(input: ListQuery & { owner: string | null; status: FileStatus | null }): Promise<RecordPage>;
   /** Sets `cleaned_at = now` on a row that has none; a cleaned or missing row is left as it is. */
   cleaned(id: string, now: Date): Promise<void>;
   /** The owner's counters; zeros for an owner the store has never counted. */

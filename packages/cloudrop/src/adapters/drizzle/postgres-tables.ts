@@ -119,6 +119,7 @@ export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropP
       index(`${names.files}_status_claimed_at_idx`).on(t.status, t.claimedAt),
       index(`${names.files}_status_cleaned_at_ended_at_idx`).on(t.status, t.cleanedAt, t.endedAt),
       index(`${names.files}_owner_status_created_at_idx`).on(t.owner, t.status, t.createdAt),
+      index(`${names.files}_created_at_idx`).on(t.createdAt),
       index(`${names.files}_key_idx`).on(t.key),
       index(`${names.files}_route_request_key_idx`).on(t.route, t.requestKey),
     ],

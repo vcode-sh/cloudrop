@@ -15,7 +15,7 @@ export interface StoreOptions {
   /**
    * A database store, such as `sqlStore(...)` from `cloudrop/adapters/sql`. With one, `/upload` writes a row per file
    * before anything is signed, `onComplete` runs once per file, `/abort` never deletes a completed file, and `api`
-   * gains `file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep`.
+   * gains `file`, `files`, `allFiles`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep`.
    */
   store?: CloudropStore<unknown>;
   /**
