@@ -51,6 +51,8 @@ export interface StoreTarget {
     renamed: { store: CloudropStore<unknown>; raw: RawTables };
     /** A store whose files table lacks `column`. */
     missingColumn: { store: CloudropStore<unknown>; table: string; column: string };
+    /** A store over tables that were never created; `table` is its files table. */
+    missingTable: { store: CloudropStore<unknown>; table: string };
   };
   /** Runs after every case, also a failed one: drop or empty what setup created. */
   teardown(): Promise<void>;

@@ -12,6 +12,8 @@ import type { SqliteTestDatabase } from "./sqlite.ts";
 
 export const RENAMED: TableNames = { files: "renamed_files", usage: "renamed_usage" };
 const BROKEN: TableNames = { files: "broken_files", usage: "broken_usage" };
+/** Never created. */
+const ABSENT: TableNames = { files: "absent_files", usage: "absent_usage" };
 /** Dropped from the broken files table: a column in the middle, so the schema check must look past the first. */
 const DROPPED = "result";
 
@@ -95,6 +97,7 @@ export function sqlStoreTarget(
       tables: {
         renamed: { store: storeOver(inSchema(RENAMED)), raw: rawTables(db, inSchema(RENAMED)) },
         missingColumn: { store: storeOver(inSchema(BROKEN)), table: BROKEN.files, column: DROPPED },
+        missingTable: { store: storeOver(inSchema(ABSENT)), table: ABSENT.files },
       },
       // Postgres and D1 drop the tables at the next setup or with the file; SQLite's fixture closes the database.
       teardown: async () => {},

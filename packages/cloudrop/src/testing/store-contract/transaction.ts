@@ -82,4 +82,19 @@ export function transactionCases(suite: StoreSuite): void {
       message: expect.stringMatching(new RegExp(`${table}.*${column}|${column}.*${table}`)),
     });
   });
+
+  it("tables that were never created fail with INVALID_CONFIG naming the files table, on every call", async (ctx) => {
+    const { target } = suite;
+    skipWithout(ctx, "tables");
+    const { store, table } = provided(target.tables, "tables").missingTable;
+    const missing = {
+      code: "INVALID_CONFIG",
+      message: expect.stringMatching(
+        new RegExp(`^The table (?:"\\w+"\\.)?"${table}" does not exist\\. Create the store's tables`),
+      ),
+    };
+    await expect(store.get("f-1")).rejects.toMatchObject(missing);
+    // A failed check is not remembered as passed: the next call checks again.
+    await expect(store.usage("u-1")).rejects.toMatchObject(missing);
+  });
 }

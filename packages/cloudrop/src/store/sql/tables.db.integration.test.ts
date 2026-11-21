@@ -1,9 +1,11 @@
 // `tables.schema` on Postgres: the store contract with every table in a schema of its own, through the sql adapter's
 // node-postgres executor and through Drizzle, while the search path holds empty tables of the same names, so a
-// statement that left the schema out would write or read the wrong table. Below it, the rows only a schema can break.
+// statement that left the schema out would write or read the wrong table. Below it, the rows only a schema can break,
+// and what a role without rights on the tables is told (M11-R62).
 
 import { drizzle } from "drizzle-orm/node-postgres";
-import { beforeEach, describe, expect, test } from "vitest";
+import pg from "pg";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { cloudropPgTables, drizzleStore } from "../../adapters/drizzle.ts";
 import { pgExecutor, sqlStore } from "../../adapters/sql.ts";
 import { useAppSchema, usePostgresDatabase } from "../../testing/db/postgres.ts";
@@ -83,5 +85,78 @@ describe("Postgres, tables in a schema", () => {
         message: `The table "${schema}"."cloudrop_files" does not exist. Create the store's tables as the cloudrop docs show, or pass their names in { tables }.`,
       });
     });
+  });
+});
+
+describe("Postgres, a role's rights on the tables", () => {
+  const db = usePostgresDatabase();
+  let role: string;
+  let pool: pg.Pool;
+  // Registered before the role exists, and run before the fixture drops its schema.
+  afterAll(async () => {
+    await pool?.end();
+    await db.query(`DROP OWNED BY ${role}`);
+    await db.query(`DROP ROLE ${role}`);
+  });
+  beforeAll(async () => {
+    role = `${db.schema}_role`;
+    await db.query(`CREATE ROLE ${role}`);
+    // Every connection of this pool acts as the role, in the fixture's schema.
+    const options = `-c search_path=${db.schema} -c role=${role}`;
+    pool = new pg.Pool({ connectionString: process.env.CLOUDROP_POSTGRES_URL, options, max: 2 });
+  });
+  beforeEach(async () => {
+    await db.reset();
+    await db.createTables();
+    await db.query(`GRANT USAGE ON SCHEMA ${db.schema} TO ${role}`);
+  });
+
+  test("a role without rights on the tables is told so, with the grants, and not that the tables are missing", async () => {
+    await expect(sqlStore(pgExecutor(pool)).get("f-1")).rejects.toMatchObject({
+      code: "INVALID_CONFIG",
+      message:
+        'The database role may not read the table "cloudrop_files" (permission denied). Grant it what the store needs: GRANT SELECT, INSERT, UPDATE ON "cloudrop_files" TO <role>; GRANT SELECT, INSERT, UPDATE, DELETE ON "cloudrop_usage" TO <role>; and, for tables outside the public schema, GRANT USAGE ON SCHEMA <schema> TO <role>;',
+      cause: expect.objectContaining({ code: "42501" }),
+    });
+  });
+
+  test("the grants that message names are enough for every method of the store", async () => {
+    await db.query(`GRANT SELECT, INSERT, UPDATE ON cloudrop_files TO ${role}`);
+    await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON cloudrop_usage TO ${role}`);
+    const store = sqlStore(pgExecutor(pool));
+    const page = { route: null, name: null, type: null, order: "newest", limit: 10, cursor: null } as const;
+    const reserve = (id: string, requestKey: string | null) =>
+      store.reserve({ owner: "u-1", limit: 100, expiresAt: NOW, requestKey, files: [{ ...file, id }] }, NOW);
+    const key = "request-key-0000000001";
+    expect([await reserve("f-1", null), await reserve("f-2", key), await reserve("f-3", key)]).toEqual([
+      ["reserved"],
+      ["reserved"],
+      ["reserved"],
+    ]);
+    expect(await store.attach("f-1", "upload-1", NOW)).toBe(true);
+    expect(await store.claim("f-1", "claim-a", NOW, 60_000)).toEqual({ kind: "claimed" });
+    expect(await store.release("f-1", "claim-a", NOW)).toBe(true);
+    await store.claim("f-1", "claim-b", NOW, 60_000);
+    expect((await store.complete("f-1", "claim-b", null, NOW, { replace: true })).changed).toBe(true);
+    expect(await store.revoke("u-1", NOW)).toBe(1);
+    await store.cleaned("f-3", NOW);
+    expect((await store.end("f-1", "completed", "deleted", NOW)).changed).toBe(true);
+    const stale = { before: new Date(NOW.getTime() + 1), claimedBefore: NOW, limit: 10, cursor: null };
+    const read = [
+      await store.stale({ kind: "expire", ...stale }),
+      await store.stale({ kind: "cleanup", ...stale }),
+      await store.list({ ...page, owner: "u-1", statuses: ["aborted"] }),
+      await store.listAll?.({ ...page, owner: null, status: "deleted" }),
+    ];
+    expect(read.map((found) => found?.records.map((record) => record.id))).toEqual([
+      [],
+      ["f-1", "f-2"],
+      ["f-3", "f-2"],
+      ["f-1"],
+    ]);
+    expect(await store.owners(null, 10)).toEqual({ owners: ["u-1"], cursor: null });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    // An owner without a usage row: reconcile inserts a marked row and deletes it again, the one DELETE the store runs.
+    expect([await store.reconcile("u-1"), await store.reconcile("nobody")]).toEqual([false, false]);
   });
 });

@@ -114,7 +114,10 @@ with a stable `file.id`. What it cannot do without a record of its own:
 Every adapter builds the same store over one SQL core; pick the one that matches how your app reaches its database.
 Each method of the store is one atomic unit (one statement on Postgres, one batch on SQLite), and the store checks
 its tables on its first call: a missing table or column is logged as `INVALID_CONFIG` naming it, and clients get a
-retryable `SERVER_ERROR` until the tables are fixed.
+retryable `SERVER_ERROR` until the tables are fixed. On Postgres, a role that may not read the tables is told that
+instead, with the grants the store needs: `SELECT, INSERT, UPDATE` on the files table, `SELECT, INSERT, UPDATE,
+DELETE` on the usage table, and `USAGE` on their schema when it is not `public`. Any other failure of that first
+read, such as a database that is down, is logged as the driver reported it.
 
 | Adapter | Databases | Completions | Limits |
 | --- | --- | --- | --- |

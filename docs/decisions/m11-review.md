@@ -1340,6 +1340,32 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/store.ts`, `src/store/sql/executor.ts`,
   `src/store/sql/lock-order.db.integration.test.ts`, `src/store/sql/store.test.ts`, `docs/guide/store.md`.
 
+### M11-R62: the schema check blames the schema only when the database says so
+
+- **Decision:** `checkSchema` reads a failed read's error (`isMissingFromSchema`, `isPermissionDenied`, through the
+  same chain of `code`, `originalCode`, `cause` and Prisma's `meta` as the other checks). Postgres `42P01` and
+  `42703`, and SQLite's and D1's "no such table" and "no such column", answer the same `INVALID_CONFIG` as before,
+  naming the table and its first missing column. Postgres `42501` answers `INVALID_CONFIG` "The database role may not
+  read the table "cloudrop_files" (permission denied). Grant it what the store needs: GRANT SELECT, INSERT, UPDATE ON
+  "cloudrop_files" TO <role>; GRANT SELECT, INSERT, UPDATE, DELETE ON "cloudrop_usage" TO <role>; and, for tables
+  outside the public schema, GRANT USAGE ON SCHEMA <schema> TO <role>;", with the driver's error as `cause`. Any other
+  failure is thrown as the driver reported it; the `SELECT 1` that asked whether the database answers at all is gone.
+- **Why:** the check took any failure of its probes for a missing table, so a role with no rights on the tables was
+  told "The table "cloudrop_files" does not exist. Create the store's tables…" with the cause `permission denied`,
+  and so was a read cancelled by a statement timeout while `SELECT 1` still answered. The grants in the message are
+  the least the store needs, proven by a role with exactly those running every method on Postgres 18.6: it never
+  deletes a file's row, and deletes a usage row only in `reconcile`. The message holds the table names the app
+  configured and no role, host or connection string; the driver's `permission denied for table …` stays in `cause`,
+  which goes to the logger.
+- **If wrong:** a driver that reports a missing table in another form than these makes the first call throw the
+  driver's error instead of `INVALID_CONFIG`; the contract runs "tables that were never created" and "a files table
+  missing a column" on node-postgres, postgres.js, Drizzle, Prisma (Postgres and better-sqlite3), node:sqlite and D1.
+  The check only reads, so a role that may read but not write passes it and fails its first write with the driver's
+  `permission denied`.
+- **Status:** in force.
+- **Visible in:** `src/store/sql/tables.ts`, `src/store/sql/executor.ts`, `src/store/sql/store.test.ts`,
+  `src/store/sql/tables.db.integration.test.ts`, `src/testing/store-contract/transaction.ts`, `docs/guide/store.md`.
+
 ### M11-R66: a page of sweep work is one index range per status
 
 - **Decision:** the SQL store's `stale` reads each status on its own, `status = '…' AND <time> < before`, ordered by
