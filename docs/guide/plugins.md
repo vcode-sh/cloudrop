@@ -55,8 +55,11 @@ At `/complete`, a file whose **first bytes show**:
    any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF); a ZIP sent as
    `application/pdf` passes for the same reason, while one sent as an image or a font does not.
 5. **For a file the browser could not type, a type the route does not accept.** Such a file is sent as
-   `application/octet-stream`, which is not a contradiction; the content's own type must then be in `accept`. An
-   OLE compound file has no type of its own to ask for (see [Containers](#containers)) and passes as sent.
+   `application/octet-stream`, which is not a contradiction; the content's own type must then be in `accept`. For a
+   container, an Office file or XML, a type the route names counts when the content can be that type. A script's own
+   types are the script types: a route that takes `text/plain` or `text/html` does not take an untyped script, with
+   or without `allow`. An OLE compound file has no type of its own to ask for (see [Containers](#containers)) and
+   passes as sent.
 
 A file whose first bytes match none of the formats below passes as the type it was sent as, which the route accepted
 and rule 1 and 2 let through. Plain text, CSV, JSON and most text formats have no signature, so they pass this way.

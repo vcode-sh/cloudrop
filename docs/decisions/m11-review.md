@@ -3194,3 +3194,43 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; amends `M11-R136`.
 - **Visible in:** `src/plugins/sniff.ts` (`OLE`), `src/plugins/content-checks.ts`,
   `src/plugins/content-checks-legacy.test.ts`, `docs/guide/plugins.md` (rule 5, Containers, Limits).
+
+### M11-R255: untyped, a script is judged by the script types alone; the untyped table against 0.5.0
+
+- **Decision:** `text/*` moves from the `#!` script's `agrees` (the types the content can be) to its `loose` (the
+  types it does not contradict). Sent as a text type, an allowed script passes as before (`M11-R134`). Sent
+  untyped, the route's text entries no longer stand for types the script could be: it is refused unless `allow`
+  names a script type, and then accepted only where the route's `accept` takes a script type, `*/*` or `text/*`,
+  as in 0.5.0. The route's entries still count for content whose bytes cannot say which type it is: a container
+  (`M11-R133`), an Office file (its folder names the application, not the type) and XML (its root names no `+xml`
+  type).
+- **Why:** reproduced: with `accept: ["text/html", "application/octet-stream"]` and `allow: ["text/html"]`, an
+  untyped `#!/bin/sh` file passed, and so did one on `accept: ["text/plain", …]` with `allow: ["text/plain"]` or
+  `allow: ["text/x-shellscript"]`; 0.5.0 refused all three. `M11-R133` words the rule for "a ZIP or an Office file",
+  but the code counted the route's entries for every kind whose `agrees` held a wildcard, and the script's held
+  `text/*`. Allowing web pages is not allowing scripts, and "the content's own type must be in `accept`" means the
+  type the bytes show: a script is not HTML because the route takes HTML.
+- **The table.** `contentChecks()` of 0.5.0 and of this commit were run on the same 19,375 cells: 31 files sent
+  untyped, 25 `accept` shapes, 25 `allow`/`deny` shapes. Every cell that changed, with its entry:
+
+  | Untyped file | `accept` and lists | 0.5.0 | 0.6.0 | Entry |
+  |---|---|---|---|---|
+  | A `#!` line behind a byte order mark or blank lines | every shape; with `allow` of a script type, every route that names no script type | passes (no type shown) | refused | `M11-R136` |
+  | WebM, Matroska, MP4, 3GP | `deny: ["audio/*"]`, on a route that takes one of its types | passes | refused | `M11-R136` |
+  | Ogg | `deny: ["video/*"]`, the same | passes | refused | `M11-R136` |
+  | OLE compound file | `deny: ["application/x-ole-storage"]` | passes (no type shown) | refused | `M11-R254` |
+  | Windows program | `allow: ["application/x-msdownload"]`, `accept` of `*/*` or `application/*` | refused | passes | `M11-R134` |
+  | ZIP that names no package (an empty one too) | `accept` names an Office, `application/vnd.ms-*` or `+zip` type; no `deny` of ZIP or of that type | refused | passes | `M11-R133` |
+  | Word, PowerPoint, OpenDocument, EPUB | `accept` names `application/x-zip-compressed` | refused | passes | `M11-R253` |
+  | XML with a root other than `svg` | `accept` names a `+xml` type and `allow` names an XML type | refused | passes | `M11-R134`, this entry |
+
+  Nothing else changed: an untyped OLE file passes on every other shape again (`M11-R254`), and a `#!` script at
+  the start of the file answers as in 0.5.0 on all 625 shapes.
+- **If wrong:** an app that relied on `allow: ["text/plain"]` or `allow: ["text/html"]` to take untyped scripts
+  (possible in no release) names a script type in both lists. The XML row stays looser than 0.5.0: with an XML type
+  allowed and a `+xml` type in `accept`, an untyped XML document passes whatever its root is, as the same file sent
+  as that type always did.
+- **Status:** in force; narrows `M11-R133`'s "the route's own entries count" to content that can be the entry's
+  type.
+- **Visible in:** `src/plugins/sniff-text.ts` (`SCRIPT`), `src/plugins/content-checks-allow.test.ts`,
+  `docs/guide/plugins.md` (rule 5).

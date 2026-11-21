@@ -144,3 +144,32 @@ describe("contentChecks: allow at /complete covers the content by any of its nam
     });
   });
 });
+
+const UNTYPED = "application/octet-stream";
+
+// The route's entries stand for the types an untyped container can be (M11-R133). A script is no container: "text/*"
+// is what it does not contradict once scripts are allowed, never what it is.
+describe("contentChecks: an untyped script is judged as a script on a route that takes text (M11-R255)", () => {
+  it.for([
+    {
+      name: "is refused where only web pages are allowed",
+      accept: ["text/html", UNTYPED],
+      allow: ["text/html"],
+      reason: "refused",
+    },
+    {
+      name: "is not accepted where scripts are allowed and the route names no script type",
+      accept: ["text/plain", UNTYPED],
+      allow: ["text/x-shellscript"],
+      reason: "not-accepted",
+    },
+  ])("$name", async ({ accept, allow, reason }) => {
+    const outcome = await contentOutcome({ accept, file: { name: "run", type: "" }, body: SCRIPT, options: { allow } });
+    expect(outcome.error).toEqual({
+      code: "FILE_TYPE_NOT_ALLOWED",
+      message: "This file is a script, which this upload does not accept. Pick another file.",
+      retryable: false,
+      content: { declared: UNTYPED, detected: "text/x-shellscript", reason },
+    });
+  });
+});

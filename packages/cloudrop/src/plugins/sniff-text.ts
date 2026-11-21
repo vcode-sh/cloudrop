@@ -18,15 +18,19 @@ export const HTML: Sniffed = {
 const SVG = kind("image/svg+xml", "an SVG image");
 const XML: Sniffed = { ...kind("application/xml", "an XML document", "text/xml", "*+xml"), loose };
 /**
- * A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type, and with
- * the types freedesktop.org's shared-mime-info gives shell, Perl, Ruby and PHP scripts.
+ * A script by its "#!" line, under the types freedesktop.org's shared-mime-info gives shell, Perl, Ruby and PHP
+ * scripts. A script is text in any language, so once scripts are allowed it contradicts no text type; a text type is
+ * still not what it is, and a route that names one does not thereby take an untyped script (M11-R255).
  */
-export const SCRIPT: Sniffed = kind(
-  "text/x-shellscript",
-  "a script",
-  ..."text/x-sh text/* application/x-sh application/x-shellscript".split(" "),
-  ..."application/x-perl application/x-ruby application/x-php".split(" "),
-);
+export const SCRIPT: Sniffed = {
+  ...kind(
+    "text/x-shellscript",
+    "a script",
+    ..."text/x-sh application/x-sh application/x-shellscript".split(" "),
+    ..."application/x-perl application/x-ruby application/x-php".split(" "),
+  ),
+  loose: ["text/*"],
+};
 
 /**
  * WHATWG MIME Sniffing §7.1, the rules for identifying an unknown MIME type (Living Standard, 19 October 2026): the two
