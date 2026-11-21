@@ -609,6 +609,36 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   /complete, which a retry finishes"), in both modes.
 - **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.
 
+### M11-R110: every command the output prints is complete, quoted and runnable as printed
+
+- **Decision:** one module (`src/cli/commands.ts`) builds every printed command.
+  - A cloudrop command the output tells the reader to run next repeats the run's `--origin`, `--env-file`, `--var`
+    and `--jurisdiction`, each as one word of a POSIX shell (plain text as it is, anything else in single quotes), ends
+    its line, and starts with the runner that started the command: `bunx` or `pnpm exec` when
+    `npm_config_user_agent` starts with `bun/` or `pnpm/`, `npx` otherwise. The usage line says the same. The dry
+    run's last line and the plain `setup`'s last paragraph print the `--apply` command instead of describing it.
+  - A Wrangler command starts with the runner too (`npx wrangler …`), as Cloudflare's documentation writes it.
+  - A Wrangler or AWS CLI command names the bucket and the S3 endpoint by value, once the storage settings are all
+    set and valid, and `<bucket>` and `<endpoint>` until then, with a sentence that says to replace them. Beside the
+    commands the output says that each tool signs in on its own, with the variables that do it.
+- **Why:** each printed command failed when pasted. After `doctor --origin X --env-file e2e.env` the suggested
+  `cloudrop setup --origin X --apply` answered "No storage settings found"; without `--jurisdiction` it targeted the
+  default endpoint; a bare `cloudrop` is `command not found` in a project that installed the package; and
+  `--origin 'https://a.example$(id)'`, which the URL parser takes as an origin, was printed as shell text. After
+  `--env-file`, `"$CLOUDROP_R2_BUCKET"` was empty in the reader's shell. The runner is measured (2026-11-21):
+  `npx` and `npm run` set `npm/11…`, `bunx` and `bun run` set `bun/1.4.4 …` and start the bin with Node, `pnpm exec`
+  sets `pnpm/12…`, and a direct start sets nothing. The test splits each printed command with a real `sh` and reads
+  it back through `parseArgs`.
+- **If wrong:** a bucket name and an S3 endpoint are printed, which `M9-C8` kept out of the output; neither grants
+  access, and both are printed only after the presets' own checks accepted them (an endpoint with a user name or
+  password is refused there). The quoting is POSIX: in PowerShell a word with a single quote, and in `cmd` any quoted
+  word, needs requoting, which the guide says. Yarn's runner is not detected and gets `npx`.
+- **Status:** in force. Supersedes the `"$NAME"` form of `M9-C8` and `M11-C4`; `M11-C4`'s rule that messages name the
+  app's variable stands.
+- **Visible in:** `src/cli/commands.ts`, `src/cli/commands.test.ts`, `src/cli/doctor.ts`, `src/cli/setup.ts`,
+  `src/cli/instructions.ts`, `src/cli/usage.ts`, `src/cli/run.ts`, `docs/guide/command.md#settings`,
+  `docs/guide/bucket-setup.md`.
+
 ### M11-R111: one origin rule for the server and the command, and `ws:`, `wss:` and `ftp:` are no page's origin
 
 - **Decision:** the command reads `--origin` with `originProblem` of `src/server/origins.ts`, the function
@@ -732,3 +762,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none known.
 - **Status:** in force.
 - **Visible in:** `src/cli/variables.ts`, `src/cli/env-file.ts`, `src/cli/variables.test.ts`.
+
+### M11-R118: `--jurisdiction` is for R2 alone, and is given once
+
+- **Decision:** `--jurisdiction` with settings that select S3 is a usage error (exit 2) that names the S3 variables
+  found; a second `--jurisdiction` is a usage error too.
+- **Why:** with S3 settings the option changed nothing and said nothing, and of two the last won silently. Either
+  hides a mistake about which bucket is being checked or written.
+- **If wrong:** a script that passes `--jurisdiction` for every environment, S3 ones included, now exits 2 there.
+- **Status:** in force.
+- **Visible in:** `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md#settings`.
+
+### M11-R119: `cloudrop --version` prints the package's version
+
+- **Decision:** `--version` and `-v`, as the first argument, print the version and exit 0. `src/cli.ts` imports
+  `package.json` with `{ type: "json" }`; the build keeps the one string (`var version = "…"`), not the manifest.
+- **Why:** `cloudrop --version` answered `Unknown command "--version"`, and a bug report needs the number. A build-time
+  constant would have left the source bin, which the tests run under Node and Bun, without one.
+- **If wrong:** a bundler that stops tree-shaking a JSON import would put the whole manifest into `dist/cli.js`, about
+  3 kB; nothing imports that file.
+- **Status:** in force.
+- **Visible in:** `src/cli.ts`, `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
+

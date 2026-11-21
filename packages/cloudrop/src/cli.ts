@@ -4,6 +4,7 @@
 // cli.test.ts runs this file under Node and Bun. Files are read through process.getBuiltinModule, which both provide
 // (M9-C9).
 
+import manifest from "../package.json" with { type: "json" };
 import { runCommand } from "./cli/run.ts";
 
 interface NodeProcess {
@@ -20,6 +21,7 @@ const nodeProcess = (globalThis as unknown as { process: NodeProcess }).process;
 nodeProcess.exitCode = await runCommand({
   argv: nodeProcess.argv.slice(2),
   env: nodeProcess.env,
+  version: manifest.version,
   readFile: (path) => nodeProcess.getBuiltinModule("node:fs").readFileSync(path, "utf8"),
   fetch: (input, init) => globalThis.fetch(input, init),
   stdout: nodeProcess.stdout,

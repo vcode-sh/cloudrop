@@ -68,17 +68,20 @@ describe("cloudrop setup without --apply", () => {
     );
     expect(result.lines).toEqual(
       expect.arrayContaining([
-        '  wrangler r2 bucket cors set "$CLOUDROP_R2_BUCKET" --file cors.json',
-        '  wrangler r2 bucket lifecycle add "$CLOUDROP_R2_BUCKET" cloudrop-abort-incomplete --abort-multipart-days 1',
-        '  aws s3api put-bucket-cors --bucket "$CLOUDROP_S3_BUCKET" --cors-configuration file://cors-s3.json --endpoint-url "$CLOUDROP_S3_ENDPOINT"',
+        "  npx wrangler r2 bucket cors set <bucket> --file cors.json",
+        "  npx wrangler r2 bucket lifecycle add <bucket> cloudrop-abort-incomplete --abort-multipart-days 1",
+        "  aws s3api put-bucket-cors --bucket <bucket> --cors-configuration file://cors-s3.json --endpoint-url <endpoint>",
+        "Replace <bucket> with the bucket's name and <endpoint> with the service's S3 endpoint: the command prints them only once the storage settings are all set and valid.",
       ]),
     );
   });
 
   it("prints only R2's commands for R2 settings, with the jurisdiction", async () => {
     const result = await run(["setup", "--origin", ORIGIN, "--jurisdiction", "eu"]);
-    expect(result.lines).toContain('  wrangler r2 bucket cors list "$CLOUDROP_R2_BUCKET" --jurisdiction eu');
-    expect(result.lines).not.toContain("Commands for S3-compatible services:");
+    expect(result.lines).toContain("  npx wrangler r2 bucket cors list acme-uploads-7f3 --jurisdiction eu");
+    expect(result.lines.filter((line) => line.startsWith("Commands for "))).toEqual([
+      "Commands for R2. Wrangler signs in on its own, not with cloudrop's keys (npx wrangler login, or CLOUDFLARE_API_TOKEN):",
+    ]);
   });
 });
 
@@ -236,7 +239,7 @@ describe("cloudrop setup --apply", () => {
     const replaced = await run(apply("--replace"), { env, fetch: writesAccepted });
     expect([replaced.code, replaced.lines.at(-1)]).toEqual([
       0,
-      `Done. Check the bucket with cloudrop doctor --origin ${ORIGIN}.`,
+      `Done. Check the bucket: npx cloudrop doctor --origin ${ORIGIN}`,
     ]);
   });
 
@@ -336,7 +339,7 @@ describe("cloudrop setup --apply", () => {
     expect(result.lines.slice(1)).toEqual([
       `dry run      CORS: would add rule "cloudrop-uploads" for ${ORIGIN} and keep 1 other rule ("public-reads").`,
       'dry run      Lifecycle: would add rule "cloudrop-abort-incomplete" (aborts incomplete multipart uploads after 1 day, whole bucket) and keep 1 other rule ("expire-logs").',
-      "Dry run: nothing was written. To write, run it with --apply and without --dry-run.",
+      `Dry run: nothing was written. To write: npx cloudrop setup --origin ${ORIGIN} --apply`,
     ]);
   });
 

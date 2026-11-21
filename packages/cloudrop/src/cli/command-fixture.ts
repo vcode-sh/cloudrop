@@ -124,6 +124,7 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
   const code = await runCommand({
     argv,
     env,
+    version: "1.2.3",
     fetch: fetch ?? (() => Promise.reject(new Error("This test's command must not reach the network."))),
     readFile: (path) => {
       const file = files[path] ?? { error: "ENOENT" };
@@ -146,7 +147,10 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
   const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
     (value): value is string => typeof value === "string" && value !== "",
   );
-  const leaked = values.filter((value) => prints(stdout, value) || prints(stderr, value));
+  // A Wrangler or AWS CLI command names the bucket and the endpoint, which are not secrets (M11-R110): everything
+  // outside those commands is checked for them too.
+  const checked = `${stdout}\n${stderr}`.replaceAll(/\b(wrangler r2 bucket|aws s3api) .*$/gm, "");
+  const leaked = values.filter((value) => prints(checked, value));
   if (leaked.length > 0) throw new Error(`The command printed a setting's value (${leaked.length} of them).`);
   return { code, stdout, stderr, lines: stdout.split("\n").slice(0, -1) };
 }

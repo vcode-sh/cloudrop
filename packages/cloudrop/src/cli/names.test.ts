@@ -29,8 +29,8 @@ describe("cloudrop doctor with --var", () => {
       "ok           R2 settings are present and valid (R2_BUCKET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY).",
       "ok           UPLOAD_TOKEN_SECRET is set.",
       "ok           The bucket answers, and these credentials may list it.",
-      'NOT CHECKED  CORS: These storage credentials may not read the bucket\'s CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket cors list "$R2_BUCKET"',
-      'NOT CHECKED  Lifecycle: These storage credentials may not read the bucket\'s lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket lifecycle list "$R2_BUCKET"',
+      "NOT CHECKED  CORS: These storage credentials may not read the bucket's CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket cors list acme-uploads-7f3",
+      "NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket lifecycle list acme-uploads-7f3",
       "No problems found. 2 checks could not run; see above.",
     ]);
     expect(result.code).toBe(0);
@@ -107,15 +107,15 @@ describe("cloudrop doctor with --var", () => {
     expect(result.code).toBe(1);
   });
 
-  it("prints the AWS CLI commands with the app's bucket and endpoint variables", async () => {
+  it("prints the AWS CLI commands for the bucket and endpoint the app's variables hold", async () => {
     const fetch: FetchLike = (input) =>
       /\?(cors|lifecycle)=$/.test(String(input))
         ? answers(403, "AccessDenied")()
         : Promise.resolve(new Response("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>"));
     const result = await doctor({ env: APP_S3_ENV, fetch });
-    expect(result.lines.slice(4, 6).map((line) => line.slice(line.indexOf("By hand:")))).toEqual([
-      'By hand: aws s3api get-bucket-cors --bucket "$STORAGE_S3_BUCKET" --endpoint-url "$STORAGE_S3_ENDPOINT"',
-      'By hand: aws s3api get-bucket-lifecycle-configuration --bucket "$STORAGE_S3_BUCKET" --endpoint-url "$STORAGE_S3_ENDPOINT"',
+    expect(result.lines.slice(4, 6).map((line) => line.slice(line.indexOf("By hand")))).toEqual([
+      "By hand, with the AWS CLI's own credentials and region: aws s3api get-bucket-cors --bucket acme-s3-uploads --endpoint-url https://s3.us-east-1.amazonaws.com",
+      "By hand, with the AWS CLI's own credentials and region: aws s3api get-bucket-lifecycle-configuration --bucket acme-s3-uploads --endpoint-url https://s3.us-east-1.amazonaws.com",
     ]);
   });
 
@@ -160,25 +160,26 @@ describe("cloudrop doctor with --var", () => {
       "ok           R2 settings are present and valid (R2_BUCKET, CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID, CLOUDROP_R2_SECRET_ACCESS_KEY).",
     );
     expect(result.lines[4]).toBe(
-      `PROBLEM      CORS: The bucket's CORS rules do not let ${ORIGIN} upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: cloudrop setup --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET --apply`,
+      `PROBLEM      CORS: The bucket's CORS rules do not let ${ORIGIN} upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: npx cloudrop setup --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET --apply`,
     );
   });
 });
 
 describe("cloudrop setup with --var", () => {
-  it("prints the commands with the app's variables", async () => {
-    const result = await setup({ env: {} });
-    expect(result.lines).toEqual(
+  it("prints the commands for the bucket and endpoint the app's variables hold", async () => {
+    const [r2, s3] = [await setup(), await setup({ env: APP_S3_ENV })];
+    expect(r2.lines).toEqual(
       expect.arrayContaining([
-        '  wrangler r2 bucket cors list "$R2_BUCKET"',
-        '  wrangler r2 bucket cors set "$R2_BUCKET" --file cors.json',
-        '  wrangler r2 bucket lifecycle add "$R2_BUCKET" cloudrop-abort-incomplete --abort-multipart-days 1',
-        '  aws s3api put-bucket-cors --bucket "$STORAGE_S3_BUCKET" --cors-configuration file://cors-s3.json --endpoint-url "$STORAGE_S3_ENDPOINT"',
-        '  aws s3api put-bucket-lifecycle-configuration --bucket "$STORAGE_S3_BUCKET" --lifecycle-configuration file://lifecycle.json --endpoint-url "$STORAGE_S3_ENDPOINT"',
+        "  npx wrangler r2 bucket cors list acme-uploads-7f3",
+        "  npx wrangler r2 bucket cors set acme-uploads-7f3 --file cors.json",
+        "  npx wrangler r2 bucket lifecycle add acme-uploads-7f3 cloudrop-abort-incomplete --abort-multipart-days 1",
       ]),
     );
-    expect(result.lines.at(-1)).toMatch(
-      /^The commands read the bucket from R2_BUCKET or STORAGE_S3_BUCKET in your shell\. /,
+    expect(s3.lines).toEqual(
+      expect.arrayContaining([
+        "  aws s3api put-bucket-cors --bucket acme-s3-uploads --cors-configuration file://cors-s3.json --endpoint-url https://s3.us-east-1.amazonaws.com",
+        "  aws s3api put-bucket-lifecycle-configuration --bucket acme-s3-uploads --lifecycle-configuration file://lifecycle.json --endpoint-url https://s3.us-east-1.amazonaws.com",
+      ]),
     );
   });
 
@@ -187,7 +188,7 @@ describe("cloudrop setup with --var", () => {
     const dryRun = await setup({ fetch: storage.fetch }, "--dry-run");
     expect([dryRun.code, dryRun.lines.at(-1), storage.writes]).toEqual([
       0,
-      "Dry run: nothing was written. To write, run it with --apply and without --dry-run.",
+      `Dry run: nothing was written. To write: npx cloudrop setup --origin ${ORIGIN} ${APP_VARS.join(" ")} --apply`,
       [],
     ]);
     const applied = await setup({ fetch: storage.fetch }, "--apply");
@@ -201,7 +202,7 @@ describe("cloudrop setup with --var", () => {
       fetch: bucket(EMPTY).fetch,
     });
     expect(result.lines.at(-1)).toBe(
-      `Done. Check the bucket with cloudrop doctor --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET; R2 can take up to 30 seconds to apply a change.`,
+      `Done. R2 can take up to 30 seconds to apply a change. Check the bucket: npx cloudrop doctor --origin ${ORIGIN} --var CLOUDROP_R2_BUCKET=R2_BUCKET`,
     );
   });
 

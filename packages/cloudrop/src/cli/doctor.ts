@@ -4,19 +4,28 @@
 
 import type { BucketCheck } from "../server/bucket-check.ts";
 import { checkBucket } from "../server/bucket-check.ts";
-import type { FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
-import { type CommandOptions, sameArguments } from "./args.ts";
-import { type BucketSettings, reachBucket } from "./bucket-access.ts";
-import { aws, wrangler } from "./instructions.ts";
-import type { Settings } from "./names.ts";
+import type { CommandOptions } from "./args.ts";
+import { reachBucket } from "./bucket-access.ts";
+import { aws, cloudropCommand, type Runner, type Target, targetOf, wrangler } from "./commands.ts";
+import type { Service, Settings } from "./names.ts";
 import { count, type Finding, type Output, plural, printFindings } from "./report.ts";
-import { readStorage, secretFinding, serviceOf } from "./settings.ts";
+import { type StorageSettings, secretFinding } from "./settings.ts";
 
-/** How to read a setting by hand, for a check the credentials could not run. */
-function byHand({ service, jurisdiction, name }: BucketSettings, setting: "cors" | "lifecycle"): string {
-  if (service === "R2") return ` By hand: ${wrangler(`${setting} list <bucket>`, jurisdiction, name)}`;
-  return ` By hand: ${aws(setting === "cors" ? "get-bucket-cors" : "get-bucket-lifecycle-configuration", name)}`;
+/** The bucket being checked, and what a printed command needs to name it. */
+interface Checked {
+  service: Service;
+  target: Target;
+  runner: Runner;
+}
+
+/** How to read a setting by hand, for a check the credentials could not run: with the tool's own sign-in. */
+function byHand({ service, target, runner }: Checked, jurisdiction: string | undefined, setting: "cors" | "lifecycle") {
+  if (service === "R2") {
+    return ` By hand, with Wrangler's own sign-in: ${wrangler(runner, `${setting} list <bucket>`, target, jurisdiction)}`;
+  }
+  const call = setting === "cors" ? "get-bucket-cors" : "get-bucket-lifecycle-configuration";
+  return ` By hand, with the AWS CLI's own credentials and region: ${aws(call, target)}`;
 }
 
 function ruleFinding(label: string, check: BucketCheck, hint: { fix: string; byHand: string }): Finding {
@@ -25,36 +34,41 @@ function ruleFinding(label: string, check: BucketCheck, hint: { fix: string; byH
   return { status: "problem", text: `${label}: ${check.message}${hint.fix}` };
 }
 
-async function bucketFindings(driver: S3Driver, bucket: BucketSettings, options: CommandOptions): Promise<Finding[]> {
-  const answered = await reachBucket(driver, bucket);
+async function bucketFindings(
+  driver: S3Driver,
+  checked: Checked,
+  options: CommandOptions,
+  settings: Settings,
+): Promise<Finding[]> {
+  const { jurisdiction } = options;
+  const answered = await reachBucket(driver, { service: checked.service, jurisdiction, name: settings.name });
   if (answered.status === "problem") {
     return [answered, { status: "unknown", text: "CORS and lifecycle rules: the bucket did not answer." }];
   }
   const report = await checkBucket({ storage: driver, routes: new Map(), store: undefined }, options.origins);
   if (report.error) return [answered, { status: "problem", text: `Bucket rules: ${report.error.message}` }];
-  const apply = ` Run: cloudrop setup ${sameArguments(options)} --apply`;
+  const fix = ` Run: ${cloudropCommand(checked.runner, "setup", options, "--apply")}`;
   return [
     answered,
-    ruleFinding("CORS", report.data.cors, { fix: apply, byHand: byHand(bucket, "cors") }),
-    ruleFinding("Lifecycle", report.data.lifecycle, { fix: apply, byHand: byHand(bucket, "lifecycle") }),
+    ruleFinding("CORS", report.data.cors, { fix, byHand: byHand(checked, jurisdiction, "cors") }),
+    ruleFinding("Lifecycle", report.data.lifecycle, { fix, byHand: byHand(checked, jurisdiction, "lifecycle") }),
   ];
 }
 
 export async function doctor(
   options: CommandOptions,
   settings: Settings,
+  storage: StorageSettings,
   notes: Finding[],
-  { fetch, out }: { fetch: FetchLike; out: Output },
+  { out, runner }: { out: Output; runner: Runner },
 ): Promise<number> {
-  const service = serviceOf(settings) ?? "storage";
   out.write(
-    `cloudrop doctor: checking ${service} settings, the bucket and its rules for ${options.origins.join(", ")}.\n`,
+    `cloudrop doctor: checking ${storage.service ?? "storage"} settings, the bucket and its rules for ${options.origins.join(", ")}.\n`,
   );
-  const storage = readStorage(settings, { jurisdiction: options.jurisdiction, fetch });
   const findings = [...notes, ...storage.findings, secretFinding(settings)];
   if (storage.driver && storage.service) {
-    const bucket = { service: storage.service, jurisdiction: options.jurisdiction, name: settings.name };
-    findings.push(...(await bucketFindings(storage.driver, bucket, options)));
+    const checked = { service: storage.service, target: targetOf(settings, storage), runner };
+    findings.push(...(await bucketFindings(storage.driver, checked, options, settings)));
   } else {
     findings.push({ status: "unknown", text: "The bucket and its rules: fix the settings above first." });
   }
@@ -62,9 +76,7 @@ export async function doctor(
   const problems = count(findings, "problem");
   const unknown = count(findings, "unknown");
   if (problems > 0) {
-    out.write(
-      `${plural(problems, "problem")} found. Fix ${problems === 1 ? "it" : "them"}, then run cloudrop doctor again.\n`,
-    );
+    out.write(`${plural(problems, "problem")} found. Fix ${problems === 1 ? "it" : "them"}, then run doctor again.\n`);
     return 1;
   }
   out.write(

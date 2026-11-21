@@ -103,8 +103,10 @@ describe("cloudrop --var", () => {
   });
 
   it("accepts --var=SETTING=NAME, for doctor and for setup", async () => {
-    const setup = await run(["setup", `--origin=${ORIGIN}`, "--var=CLOUDROP_R2_BUCKET=R2_BUCKET"], { env: {} });
-    expect(setup.lines).toContain('  wrangler r2 bucket cors list "$R2_BUCKET"');
+    const setup = await run(["setup", `--origin=${ORIGIN}`, "--var=CLOUDROP_R2_BUCKET=R2_BUCKET"], {
+      env: { ...ENV, CLOUDROP_R2_BUCKET: undefined, R2_BUCKET: "renamed-bucket-name" },
+    });
+    expect(setup.lines).toContain("  npx wrangler r2 bucket cors list renamed-bucket-name");
     const checked = await run(["doctor", "--origin", ORIGIN, "--var=CLOUDROP_R2_BUCKET=R2_BUCKET"], {
       env: { R2_BUCKET: ENV.CLOUDROP_R2_BUCKET },
     });

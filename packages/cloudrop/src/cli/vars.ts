@@ -4,7 +4,7 @@
 
 import { nearest, SETTINGS } from "./names.ts";
 
-// A name a shell can expand: the commands the output prints read the bucket as "$NAME".
+// A name a shell can set and the output can print: letters, digits and "_", not starting with a digit.
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** A pair for `setting` with a likely name for an app's variable: the setting's own without its prefix. */

@@ -63,6 +63,11 @@ describe("cloudrop usage", () => {
       message: "--replace works only with --apply or --dry-run.",
     },
     {
+      name: "a jurisdiction given twice",
+      argv: ["setup", "--origin", ORIGIN, "--jurisdiction", "eu", "--jurisdiction=fedramp"],
+      message: "--jurisdiction is given twice. A bucket has one jurisdiction: give it once.",
+    },
+    {
       name: "an unknown jurisdiction",
       argv: ["setup", "--origin", ORIGIN, "--jurisdiction", "us"],
       message: '--jurisdiction must be "eu" or "fedramp". Leave it out for a bucket in the default location.',
@@ -71,7 +76,7 @@ describe("cloudrop usage", () => {
     const result = await run(argv);
     expect([result.code, result.stdout]).toEqual([2, ""]);
     expect(result.stderr.split("\n")[0]).toBe(message);
-    expect(result.stderr).toContain("Usage: cloudrop <doctor|setup> --origin <origin> [options]");
+    expect(result.stderr).toContain("Usage: npx cloudrop <doctor|setup> --origin <origin> [options]");
   });
 
   // The server's trustedOrigins takes these (M11-R41), and the command reads an origin with the server's own rule.
@@ -92,8 +97,13 @@ describe("cloudrop usage", () => {
     expect([result.code, result.stderr, result.lines[0]]).toEqual([
       0,
       "",
-      "Usage: cloudrop <doctor|setup> --origin <origin> [options]",
+      "Usage: npx cloudrop <doctor|setup> --origin <origin> [options]",
     ]);
+  });
+
+  it.each(["--version", "-v"])("prints the package's version and exits 0 for %s", async (flag) => {
+    const result = await run([flag]);
+    expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "1.2.3\n"]);
   });
 
   // The path is not repeated: text typed after --env-file by mistake may be a setting's value (M11-R115).
@@ -167,11 +177,23 @@ describe("cloudrop usage", () => {
     expect([result.code, result.stdout, result.stderr.split("\n")[0]]).toEqual([2, "", message]);
   });
 
+  // Only R2 has jurisdictions: on S3 settings the option changed nothing and said nothing.
+  it("refuses --jurisdiction for S3 settings, naming the variables that make them S3", async () => {
+    const result = await run(["doctor", "--origin", ORIGIN, "--jurisdiction", "eu"], {
+      env: { CLOUDROP_S3_BUCKET: "acme-s3-uploads", CLOUDROP_S3_REGION: "us-east-1" },
+    });
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      2,
+      "",
+      "--jurisdiction is for an R2 bucket, and the settings found are for S3 (CLOUDROP_S3_REGION and CLOUDROP_S3_BUCKET). Leave it out.\n",
+    ]);
+  });
+
   it("accepts --name=value", async () => {
     const result = await run(["setup", `--origin=${ORIGIN}`, "--env-file=.env", "--jurisdiction=eu"], {
       files: { ".env": "" },
     });
     expect([result.code, result.lines[0]]).toEqual([0, `cloudrop setup: the bucket rules for ${ORIGIN}.`]);
-    expect(result.lines).toContain('  wrangler r2 bucket cors list "$CLOUDROP_R2_BUCKET" --jurisdiction eu');
+    expect(result.lines).toContain("  npx wrangler r2 bucket cors list acme-uploads-7f3 --jurisdiction eu");
   });
 });

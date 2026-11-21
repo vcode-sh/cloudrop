@@ -47,7 +47,7 @@ Setting CORS replaces the bucket's whole policy. Read the current rules first an
 `cloudrop setup --apply` merge them):
 
 ```bash
-wrangler r2 bucket cors list <bucket>
+npx wrangler r2 bucket cors list <bucket>
 ```
 
 Write the rules to `cors.json` in R2's format, a `rules` array:
@@ -71,7 +71,7 @@ Write the rules to `cors.json` in R2's format, a `rules` array:
 Then apply it:
 
 ```bash
-wrangler r2 bucket cors set <bucket> --file cors.json
+npx wrangler r2 bucket cors set <bucket> --file cors.json
 ```
 
 Wrangler needs to be signed in to your Cloudflare account. Pass `--jurisdiction eu` (or `fedramp`) for a bucket in a
@@ -163,13 +163,13 @@ aborts incomplete multipart uploads removes them.
 On R2, new buckets get a 7-day rule by default. Check what yours has:
 
 ```bash
-wrangler r2 bucket lifecycle list <bucket>
+npx wrangler r2 bucket lifecycle list <bucket>
 ```
 
 Add one if it is missing, for the whole bucket:
 
 ```bash
-wrangler r2 bucket lifecycle add <bucket> abort-incomplete-uploads --abort-multipart-days 1
+npx wrangler r2 bucket lifecycle add <bucket> abort-incomplete-uploads --abort-multipart-days 1
 ```
 
 On S3 and other services, set it with [the AWS CLI](#set-both-rules-with-the-aws-cli).

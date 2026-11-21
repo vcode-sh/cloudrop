@@ -11,7 +11,8 @@ npx cloudrop setup  --origin https://app.example.com --dry-run      # shows what
 npx cloudrop setup  --origin https://app.example.com --apply        # adds them, keeping every other rule
 ```
 
-`bunx cloudrop` works the same way. `--origin` names an origin your pages upload from (the page's, not your API's) and
+`bunx cloudrop` and `pnpm exec cloudrop` work the same way, and `npx cloudrop --version` prints the package's version.
+`--origin` names an origin your pages upload from (the page's, not your API's) and
 is required; repeat it for each origin. An origin is exactly what the browser sends: scheme, host and port, in lower
 case, with no path, not even a trailing `/`, and no `*`. Given `http://localhost:5173/`, the command answers with the
 origin to use instead, `http://localhost:5173`; it refuses a pattern such as `https://*.example.com`, which no browser
@@ -42,12 +43,14 @@ S3-compatible service, and `CLOUDROP_SECRET`. When any `CLOUDROP_R2_*` variable 
   tab; a carriage return alone ends no line; and `NAME=` followed by spaces alone takes the next line as its value.
 - **On Node, a missing `--env-file` stops before the command runs.** Node itself checks every `--env-file` on its
   command line, the command's own included, and exits with code 9 and `node: .env.local: not found` (or
-  `invalid format` for a directory). Check the path. Bun runs the command, which reports the file with exit code 2.
+  `invalid format` for a directory). Check the path. `npx`, `pnpm exec` and `bunx` all start the command with Node when
+  Node is installed, so all three stop this way. Only under Bun itself (`bunx --bun cloudrop`, or no Node installed)
+  does the command run and report the file, with exit code 2 and its error code.
 - `--var <SETTING>=<NAME>` reads a setting from a variable of your own, such as
   `--var CLOUDROP_R2_BUCKET=R2_BUCKET`; repeat it for each setting. See
   [Your own variable names](#your-own-variable-names).
 - `--jurisdiction eu` (or `fedramp`) selects the endpoint of an R2 bucket in a jurisdiction, as `r2({ jurisdiction })`
-  does.
+  does. It is for R2 only: with S3 settings it is a usage error, and so is giving it twice.
 
 A name that is not a setting but looks like one, such as `CLOUDROP_R2_BUCKT` or `cloudrop_secret`, gets a `note` naming
 the setting it was probably meant to be, among the settings of the service its name names. `CLOUDROP_R2_ENDPOINT` and
@@ -58,8 +61,20 @@ The command never prints a setting's value, only the name of its variable. It do
 wrong place either, since that may be a value: an argument it does not know is repeated only when it is shaped like an
 option's name (`CLOUDROP_SECRET=...` after the command is named up to its `=`, anything else by its position), an
 origin with a user name or password is refused without being repeated, and an `--env-file` it cannot read is reported
-by its error code, not its path. The commands it prints name the bucket as
-`"$CLOUDROP_R2_BUCKET"` (or `"$CLOUDROP_S3_BUCKET"`), so they work in a shell that has the variable set.
+by its error code, not its path.
+
+**The commands it prints run as printed**, in the directory you ran it in:
+
+- A cloudrop command it tells you to run next (`npx cloudrop setup ... --apply` from `doctor`, `npx cloudrop doctor ...`
+  from `setup --apply`) repeats this run's `--origin`, `--env-file`, `--var` and `--jurisdiction`, each quoted for a
+  POSIX shell, and starts the way you started it: `bunx` under Bun's runner, `pnpm exec` under pnpm's, `npx` otherwise.
+  Under PowerShell or `cmd`, check the quoting of an argument with a space or a quote in it.
+- A Wrangler or AWS CLI command names the bucket and, for S3, the endpoint by value: neither is a secret, and a
+  variable from `--env-file` is not set in your shell. While the storage settings are not all set and valid it prints
+  `<bucket>` and `<endpoint>` for you to replace.
+- **Wrangler and the AWS CLI sign in on their own**, not with cloudrop's settings: Wrangler with `npx wrangler login` or
+  `CLOUDFLARE_API_TOKEN`, the AWS CLI with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_DEFAULT_REGION` (the
+  bucket's keys and region) or a profile.
 
 ## Your own variable names
 
@@ -83,9 +98,8 @@ npx cloudrop doctor --origin https://app.example.com \
 name of your variable, made of letters, digits and `_` and not starting with a digit. It is the variable's name, never
 its value.
 
-- **The output names your variable**, never the cloudrop setting it stands for: `R2_BUCKET is not set`,
-  `wrangler r2 bucket cors list "$R2_BUCKET"`. A command the output tells you to run next, such as
-  `cloudrop setup ... --apply`, repeats your `--var` pairs.
+- **The output names your variable**, never the cloudrop setting it stands for: `R2_BUCKET is not set`. A command the
+  output tells you to run next, such as `npx cloudrop setup ... --apply`, repeats your `--var` pairs.
 - **A setting with `--var` is read only from your variable**, in the environment and in `--env-file`. When its
   cloudrop name is set as well, a `note` says that it is not read. A setting without `--var` keeps its cloudrop name.
 - **The service is chosen by your variables**: R2 when a variable of any R2 setting is set, otherwise S3. With the
@@ -130,8 +144,8 @@ cloudrop doctor: checking R2 settings, the bucket and its rules for http://local
 ok           R2 settings are present and valid (CLOUDROP_R2_*).
 ok           CLOUDROP_SECRET is set.
 ok           The bucket answers, and these credentials may list it.
-NOT CHECKED  CORS: These storage credentials may not read the bucket's CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket cors list "$CLOUDROP_R2_BUCKET"
-NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket lifecycle list "$CLOUDROP_R2_BUCKET"
+NOT CHECKED  CORS: These storage credentials may not read the bucket's CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket cors list my-bucket
+NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket lifecycle list my-bucket
 No problems found. 2 checks could not run; see above.
 ```
 
@@ -155,7 +169,7 @@ of [Bucket setup](bucket-setup.md): `PUT`, `GET` and `HEAD` from your origins wi
 `ETag` and `Retry-After` exposed, and an abort of incomplete multipart uploads after 1 day across the bucket.
 
 Setting CORS with Wrangler or the AWS CLI replaces every rule the bucket has. List the current rules first and add the
-ones you keep to the file, or use `--apply`.
+ones you keep to the file, or use `--apply`: the output ends with that command, ready to run.
 
 With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and `PutBucketLifecycleConfiguration`):
 
@@ -183,7 +197,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   comments or namespace prefixes): check that bucket's rules by hand.
 
 `--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add or update
-and which rules it would keep. R2 can take up to 30 seconds to apply a change; run `doctor` afterwards to check.
+and which rules it would keep, and ends with the command that writes. `--apply` ends with the `doctor` command that
+checks the result; R2 can take up to 30 seconds to apply a change.
 
 Wrangler's local R2 cannot read or write bucket settings (it answers `501`), and needs no CORS rule.
 
@@ -193,7 +208,7 @@ Wrangler's local R2 cannot read or write bucket settings (it answers `501`), and
 | --- | --- |
 | `0` | Nothing is wrong: every check passed or could not run, or `setup` printed, wrote or would write the rules. |
 | `1` | `doctor` found a problem, or `setup` could not read, could not write, or found the settings incomplete. |
-| `2` | A usage error: an unknown command or option, a missing `--origin`, a value that is not an exact origin, a `--var` pair that cannot work, `--replace` without `--apply` or `--dry-run`, or an `--env-file` that cannot be read. |
+| `2` | A usage error: an unknown command or option, a missing `--origin`, a value that is not an exact origin, a `--var` pair that cannot work, `--replace` without `--apply` or `--dry-run`, `--jurisdiction` twice or with S3 settings, or an `--env-file` that cannot be read. |
 | `9` | Node's own, not the command's: an `--env-file` that does not exist or is a directory (see [Settings](#settings)). |
 
-In CI, `cloudrop doctor` fails the job on a problem and passes when it could only not check something.
+In CI, `npx cloudrop doctor` fails the job on a problem and passes when it could only not check something.

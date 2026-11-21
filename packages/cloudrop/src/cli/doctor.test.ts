@@ -41,7 +41,7 @@ describe("cloudrop doctor", () => {
     expect(result.code).toBe(1);
     expect(result.lines).toContain("PROBLEM      CLOUDROP_R2_BUCKET is not set. Set it to the bucket's name.");
     expect(result.lines).toContain("NOT CHECKED  The bucket and its rules: fix the settings above first.");
-    expect(result.lines.at(-1)).toBe("1 problem found. Fix it, then run cloudrop doctor again.");
+    expect(result.lines.at(-1)).toBe("1 problem found. Fix it, then run doctor again.");
   });
 
   it("says where to start when no storage variable is set", async () => {
@@ -208,8 +208,8 @@ describe("cloudrop doctor", () => {
       await doctor({ env: S3_ENV, fetch: refused }),
       await doctor({ env: S3_ENV, fetch: empty }),
     ];
-    expect(denied.lines[5]?.split(" By hand:")[0]).toBe(
-      "NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules. Check them with credentials that may read bucket settings, or in the service's console.",
+    expect(denied.lines[5]).toBe(
+      "NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules. Check them with credentials that may read bucket settings, or in the service's console. By hand, with the AWS CLI's own credentials and region: aws s3api get-bucket-lifecycle-configuration --bucket acme-s3-uploads --endpoint-url https://s3.us-east-1.amazonaws.com",
     );
     expect(missing.lines[5]?.split(" Run:")[0]).toBe(
       "PROBLEM      Lifecycle: No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored. Add one.",
@@ -250,8 +250,8 @@ describe("cloudrop doctor", () => {
     const result = await doctor({ fetch: bucket().fetch });
     expect(result.code).toBe(0);
     expect(result.lines.slice(4)).toEqual([
-      'NOT CHECKED  CORS: These storage credentials may not read the bucket\'s CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket cors list "$CLOUDROP_R2_BUCKET"',
-      'NOT CHECKED  Lifecycle: These storage credentials may not read the bucket\'s lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand: wrangler r2 bucket lifecycle list "$CLOUDROP_R2_BUCKET"',
+      "NOT CHECKED  CORS: These storage credentials may not read the bucket's CORS rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket cors list acme-uploads-7f3",
+      "NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules (R2 object tokens cannot). Check it with an admin read token or in the dashboard. By hand, with Wrangler's own sign-in: npx wrangler r2 bucket lifecycle list acme-uploads-7f3",
       "No problems found. 2 checks could not run; see above.",
     ]);
   });
@@ -262,7 +262,7 @@ describe("cloudrop doctor", () => {
     });
     expect(result.code).toBe(1);
     expect(result.lines[4]).toBe(
-      "PROBLEM      CORS: The bucket's CORS rules do not let http://localhost:5173 upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: cloudrop setup --origin https://app.example.com --origin http://localhost:5173 --apply",
+      "PROBLEM      CORS: The bucket's CORS rules do not let http://localhost:5173 upload. Add a rule that allows PUT from there with the headers content-type, content-disposition, if-none-match, x-amz-meta-cloudrop-id and exposes ETag. Run: npx cloudrop setup --origin https://app.example.com --origin http://localhost:5173 --apply",
     );
   });
 

@@ -3,14 +3,15 @@
 // says that replacing them is intended (M9-C6).
 
 import type { CloudropError, Result } from "../errors.ts";
-import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
+import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
-import { type CommandOptions, sameArguments } from "./args.ts";
+import type { CommandOptions } from "./args.ts";
 import { reachBucket } from "./bucket-access.ts";
+import { cloudropCommand, type Runner } from "./commands.ts";
 import type { Service, Settings } from "./names.ts";
 import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
-import { readStorage } from "./settings.ts";
+import type { StorageSettings } from "./settings.ts";
 
 /** What setup does to one setting, once its current rules are read and cloudrop's merged in. */
 interface Step {
@@ -153,12 +154,12 @@ const isStep = (step: Step | Finding): step is Step => !isFinding(step);
 export async function applySetup(
   options: CommandOptions,
   settings: Settings,
+  storage: StorageSettings,
   notes: Finding[],
-  { fetch, out }: { fetch: FetchLike; out: Output },
+  { out, runner }: { out: Output; runner: Runner },
 ): Promise<number> {
   const mode = options.dryRun ? "showing what --apply would change" : "adding cloudrop's rules";
   out.write(`cloudrop setup: ${mode} for ${options.origins.join(", ")}.\n`);
-  const storage = readStorage(settings, { jurisdiction: options.jurisdiction, fetch });
   if (!storage.driver || !storage.service) {
     printFindings(out, [...notes, ...storage.findings]);
     out.write("Nothing was written. Fix the settings above, then run the command again.\n");
@@ -189,10 +190,12 @@ export async function applySetup(
     out.write("Some rules were not written; see above.\n");
     return 1;
   }
-  out.write(
-    options.dryRun
-      ? "Dry run: nothing was written. To write, run it with --apply and without --dry-run.\n"
-      : `Done. Check the bucket with cloudrop doctor ${sameArguments(options)}${storage.service === "R2" ? "; R2 can take up to 30 seconds to apply a change" : ""}.\n`,
-  );
+  if (options.dryRun) {
+    const write = cloudropCommand(runner, "setup", options, "--apply", ...(options.replace ? ["--replace"] : []));
+    out.write(`Dry run: nothing was written. To write: ${write}\n`);
+    return 0;
+  }
+  const wait = storage.service === "R2" ? " R2 can take up to 30 seconds to apply a change." : "";
+  out.write(`Done.${wait} Check the bucket: ${cloudropCommand(runner, "doctor", options)}\n`);
   return 0;
 }

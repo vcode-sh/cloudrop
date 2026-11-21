@@ -1,47 +1,51 @@
 // `cloudrop setup` without --apply: the rules in the formats Wrangler and the AWS CLI read, and the commands that set
-// them, as docs/guide/bucket-setup.md describes. Commands name the bucket through its variable, never by value: the
-// variable the command itself reads it from, so they work in the shell that ran it (M11-C4).
+// them, as docs/guide/bucket-setup.md describes.
 
-import type { NameOf, Service } from "./names.ts";
+import { aws, type Runner, type Target, wrangler } from "./commands.ts";
+import type { Service } from "./names.ts";
 import type { Output } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE_ID } from "./rules.ts";
 
 const json = (value: unknown): string => JSON.stringify(value, null, 2);
 
-/** A wrangler command for the bucket, with the jurisdiction when it has one. */
-export function wrangler(args: string, jurisdiction: string | undefined, name: NameOf): string {
-  const bucket = `"$${name("CLOUDROP_R2_BUCKET")}"`;
-  return `wrangler r2 bucket ${args.replace("<bucket>", bucket)}${jurisdiction ? ` --jurisdiction ${jurisdiction}` : ""}`;
-}
-
-/** An AWS CLI call for the bucket at the endpoint the S3 endpoint setting names. */
-export function aws(call: string, name: NameOf, args = ""): string {
-  return `aws s3api ${call} --bucket "$${name("CLOUDROP_S3_BUCKET")}"${args} --endpoint-url "$${name("CLOUDROP_S3_ENDPOINT")}"`;
-}
-
-function r2Commands(jurisdiction: string | undefined, name: NameOf): string[] {
+function r2Commands(runner: Runner, target: Target, jurisdiction: string | undefined): string[] {
   return [
-    wrangler("cors list <bucket>", jurisdiction, name),
-    wrangler("cors set <bucket> --file cors.json", jurisdiction, name),
-    wrangler(`lifecycle add <bucket> ${LIFECYCLE_RULE_ID} --abort-multipart-days ${ABORT_DAYS}`, jurisdiction, name),
+    wrangler(runner, "cors list <bucket>", target, jurisdiction),
+    wrangler(runner, "cors set <bucket> --file cors.json", target, jurisdiction),
+    wrangler(
+      runner,
+      `lifecycle add <bucket> ${LIFECYCLE_RULE_ID} --abort-multipart-days ${ABORT_DAYS}`,
+      target,
+      jurisdiction,
+    ),
   ];
 }
 
-const s3Commands = (name: NameOf): string[] => [
-  aws("get-bucket-cors", name),
-  aws("put-bucket-cors", name, " --cors-configuration file://cors-s3.json"),
-  aws("get-bucket-lifecycle-configuration", name),
-  aws("put-bucket-lifecycle-configuration", name, " --lifecycle-configuration file://lifecycle.json"),
+const s3Commands = (target: Target): string[] => [
+  aws("get-bucket-cors", target),
+  aws("put-bucket-cors", target, " --cors-configuration file://cors-s3.json"),
+  aws("get-bucket-lifecycle-configuration", target),
+  aws("put-bucket-lifecycle-configuration", target, " --lifecycle-configuration file://lifecycle.json"),
 ];
+
+/** What to put in place of the placeholders, for the services whose commands are printed. */
+function placeholderNote(service: Service | undefined): string {
+  const endpoint = service === "R2" ? "" : " and <endpoint> with the service's S3 endpoint";
+  return `Replace <bucket> with the bucket's name${endpoint}: the command prints ${endpoint ? "them" : "it"} only once the storage settings are all set and valid.`;
+}
 
 interface Instructions {
   origins: string[];
   service: Service | undefined;
   jurisdiction?: string;
-  name: NameOf;
+  runner: Runner;
+  target: Target;
+  /** The cloudrop command that adds the rules and keeps the others. */
+  apply: string;
 }
 
-export function printInstructions(out: Output, { origins, service, jurisdiction, name }: Instructions): void {
+export function printInstructions(out: Output, instructions: Instructions): void {
+  const { origins, service, jurisdiction, runner, target, apply } = instructions;
   const rule = corsRule(origins);
   const r2Format = {
     rules: [
@@ -81,10 +85,19 @@ export function printInstructions(out: Output, { origins, service, jurisdiction,
     `CORS rule, S3 format. Save it as cors-s3.json for aws s3api put-bucket-cors:\n${json(s3Format)}`,
     `Lifecycle rule. Save it as lifecycle.json for aws s3api put-bucket-lifecycle-configuration:\n${json(lifecycle)}`,
   ];
-  if (service !== "S3") sections.push(`Commands for R2:\n${indent(r2Commands(jurisdiction, name))}`);
-  if (service !== "R2") sections.push(`Commands for S3-compatible services:\n${indent(s3Commands(name))}`);
+  // Neither tool reads cloudrop's settings, so a command printed for it runs only once the tool is signed in.
+  if (service !== "S3") {
+    const signIn = `Wrangler signs in on its own, not with cloudrop's keys (${runner} wrangler login, or CLOUDFLARE_API_TOKEN):`;
+    sections.push(`Commands for R2. ${signIn}\n${indent(r2Commands(runner, target, jurisdiction))}`);
+  }
+  if (service !== "R2") {
+    const signIn =
+      "The AWS CLI uses its own credentials and region, not cloudrop's settings (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_DEFAULT_REGION, or a profile):";
+    sections.push(`Commands for S3-compatible services. ${signIn}\n${indent(s3Commands(target))}`);
+  }
+  if (target.placeholders) sections.push(placeholderNote(service));
   sections.push(
-    `The commands read the bucket from ${name("CLOUDROP_R2_BUCKET")} or ${name("CLOUDROP_S3_BUCKET")} in your shell. Setting CORS, and setting lifecycle rules with the AWS CLI, replaces every rule the bucket has: list them first and add the ones you keep to the file, or run this command with --apply, which keeps them.`,
+    `Setting CORS, and setting lifecycle rules with the AWS CLI, replaces every rule the bucket has: list them first and add the ones you keep to the file. Or let cloudrop add its rules and keep the others:\n${indent([apply])}`,
   );
   out.write(`${sections.join("\n\n")}\n`);
 }
