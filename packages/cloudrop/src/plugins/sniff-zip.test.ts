@@ -97,3 +97,59 @@ describe("sniff: Office files from writers that cannot seek back (M11-R132)", ()
     expect(typeOf(input)).toBe("application/zip");
   });
 });
+
+// APPNOTE §4.3.9.2: a data descriptor's sizes are 8 bytes each in ZIP64 format, which "MAY be used regardless of the
+// size of a file". Two writers use it for every entry, however small (file-samples.ts, streamedZipEntry).
+describe("sniff: Office files whose data descriptors hold 8-byte sizes (M11-R212)", () => {
+  it.for([
+    {
+      name: "a workbook as Apache POI's SXSSFWorkbook writes it",
+      input: bytes(
+        streamedZipEntry("[Content_Types].xml", TYPES, { zip64: "poi" }),
+        streamedZipEntry("_rels/.rels", RELS, { zip64: "poi" }),
+        streamedZipEntry("docProps/app.xml", PROPS, { zip64: "poi" }),
+        streamedZipEntry("xl/workbook.xml", BODY, { zip64: "poi" }),
+      ),
+      type: EXCEL,
+    },
+    {
+      name: "a document as Apache Commons Compress writes it with Zip64Mode.Always",
+      input: bytes(
+        streamedZipEntry("[Content_Types].xml", TYPES, { zip64: "extra" }),
+        streamedZipEntry("word/document.xml", BODY, { zip64: "extra" }),
+      ),
+      type: WORD,
+    },
+    {
+      name: "8-byte sizes without the descriptor's signature",
+      input: bytes(
+        streamedZipEntry("_rels/.rels", RELS, { zip64: "poi", signature: false }),
+        streamedZipEntry("ppt/presentation.xml", BODY, { zip64: "poi", signature: false }),
+      ),
+      type: POWERPOINT,
+    },
+    {
+      name: "8-byte sizes after an entry with 4-byte ones",
+      input: bytes(
+        streamedZipEntry("[Content_Types].xml", TYPES),
+        streamedZipEntry("_rels/.rels", RELS, { zip64: "poi" }),
+        streamedZipEntry("word/document.xml", BODY),
+      ),
+      type: WORD,
+    },
+  ])("finds the Office folder in $name", ({ input, type }) => {
+    expect(typeOf(input)).toBe(type);
+  });
+
+  // The descriptor is the entry's last 24 bytes: signature, crc-32, then the compressed size, whose upper half is
+  // bytes 12 to 9 from the end.
+  const beyond4GiB = streamedZipEntry("a.bin", TYPES, { zip64: "poi" });
+  beyond4GiB[beyond4GiB.length - 12] = 1;
+  it.for([
+    { name: "is not the entry's", first: streamedZipEntry("a.bin", TYPES, { zip64: "poi", size: TYPES.length + 1 }) },
+    { name: "is the entry's in its lower half only", first: beyond4GiB },
+  ])("reads an 8-byte descriptor whose size $name as a ZIP archive", ({ first }) => {
+    const input = bytes(first, streamedZipEntry("word/document.xml", BODY, { zip64: "poi" }));
+    expect(typeOf(input)).toBe("application/zip");
+  });
+});

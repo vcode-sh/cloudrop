@@ -1098,7 +1098,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   which any ZIP with a `word/` entry already is. An Office file whose first Office entry starts past the first 4 KiB
   still reads as a ZIP.
 - **Status:** in force; `src/plugins/sniff-zip.test.ts` (each first entry, with and without the signature, a header
-  inside an entry's data, a descriptor of another size, an Office folder past 4 KiB).
+  inside an entry's data, a descriptor of another size, an Office folder past 4 KiB). Amended by `M11-R212`: ZIP64
+  descriptors are read, since writers use them for small entries too.
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/testing/file-samples.ts`, `docs/guide/plugins.md`.
 
 ### M11-R133: a container is the type it was sent as, when it can be that type
@@ -2327,3 +2328,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   1.4 s of a quadratic one; a machine 200 times slower than this one would fail it for a linear pattern.
 - **Status:** in force.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`.
+
+### M11-R212: the ZIP walk reads data descriptors with 8-byte sizes
+
+- **Decision:** `afterStreamed` (`src/plugins/sniff-containers.ts`) takes a local file header for the next entry when
+  a data descriptor ends before it in either form of PKWARE APPNOTE 6.3.10 §4.3.9: two sizes of 4 bytes, or two of 8
+  in ZIP64 format (§4.3.9.2), each with or without the signature. For the 8-byte form the lower half of the
+  compressed size must be the distance from the entry's data and the upper half zero, which is every entry that fits
+  in the bytes read. The form is not chosen by the header's ZIP64 extra field, as §4.3.9.2 would have it: both are
+  tried.
+- **Why:** `M11-R132` left these out because "a writer uses them for entries of 4 GiB". The APPNOTE says ZIP64 format
+  "MAY be used regardless of the size of a file", and two writers do, read from their sources on 2026-11-21. Apache
+  POI's `SXSSFWorkbook`, the streaming writer for large workbooks, has `zip64Mode = Zip64Mode.Always` ("Always became
+  the default in POI 5.0.0") and then writes through its own `Zip64Impl`: `writeLFH` puts version 4.5, flag bit 3,
+  zero sizes and no extra field, and `writeDAT` the signature, the crc-32 and two 8-byte sizes. Apache Commons
+  Compress's `ZipArchiveOutputStream` with `Zip64Mode.Always` writes `FF FF FF FF` for both sizes in the header, a
+  ZIP64 extra field, and 8-byte sizes in `writeDataDescriptor` when the entry has that field. Reproduced with entries
+  built as each writes them: the walk stopped at the first entry, so every such `.xlsx` read as a plain ZIP. POI's
+  header has no extra field, so the header cannot say which form follows; trying both is what reads its files.
+- **If wrong:** two more byte patterns can make an entry's data look like the end of the entry: the worst outcome is
+  still a ZIP read as an Office file, as in `M11-R132`. A ZIP64 entry from a writer that can seek back, with
+  `FF FF FF FF` in the header, no bit 3 and its real sizes in the ZIP64 extra field (Commons Compress with
+  `Zip64Mode.Always` on a file), still ends the walk, and such a file reads as a plain ZIP: reading that field did not
+  fit in the entry's 6 kB (5.96 kB with this change, 5.89 kB before).
+- **Status:** in force. Amends `M11-R132` ("ZIP64 descriptors (8-byte sizes) are not read").
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff-zip.test.ts`, `src/testing/file-samples.ts`,
+  `docs/guide/plugins.md`.

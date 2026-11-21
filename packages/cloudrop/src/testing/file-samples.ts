@@ -47,14 +47,26 @@ const u32le = (value: number) => [value & 0xff, (value >>> 8) & 0xff, (value >>>
  * A ZIP entry as a writer that cannot seek back writes it (PKWARE APPNOTE §4.4.4, bit 3 of the general purpose flag):
  * crc-32 and sizes are zero in the local file header, and follow the deflated data in a data descriptor (§4.3.9), with
  * the signature most writers put before it unless `signature` is false. `deflated` is the entry's compressed data.
+ * `zip64` writes the descriptor's two sizes in 8 bytes each (§4.3.9.2), as one of two writers does, read from their
+ * sources on 2026-11-21: "poi" is Apache POI's SXSSFWorkbook since 5.0.0 (Zip64Impl.writeLFH and writeDAT: version 4.5,
+ * sizes zero, no extra field); "extra" is Apache Commons Compress with Zip64Mode.Always (ZipArchiveOutputStream: sizes
+ * FF FF FF FF in the header and a ZIP64 extra field holding two zero sizes).
  */
 export function streamedZipEntry(
   name: string,
   deflated: Uint8Array,
-  { signature = true, size = deflated.length }: { signature?: boolean; size?: number } = {},
+  options: { signature?: boolean; size?: number; zip64?: "poi" | "extra" } = {},
 ): Uint8Array<ArrayBuffer> {
-  // Version 2.0, flags: bit 3 and bit 11 (UTF-8 names), method 8 (deflate), then time, date, crc-32 and both sizes.
-  const header = [0x50, 0x4b, 3, 4, 20, 0, 0x08, 0x08, 8, 0, 0, 0, 0x21, 0, ...new Array(12).fill(0)];
-  const descriptor = [...(signature ? [0x50, 0x4b, 7, 8] : []), 0xde, 0xad, 0xbe, 0xef, ...u32le(size), ...u32le(size)];
-  return bytes(header, [name.length, 0, 0, 0], name, deflated, descriptor);
+  const { signature = true, size = deflated.length, zip64 } = options;
+  const sizes = new Array(8).fill(zip64 === "extra" ? 0xff : 0);
+  const extra = zip64 === "extra" ? [1, 0, 16, 0, ...new Array(16).fill(0)] : [];
+  // The version needed, flags (bit 3, and bit 11 for UTF-8 names), method 8 (deflate), time, date, crc-32, both sizes.
+  const header = [0x50, 0x4b, 3, 4, zip64 ? 45 : 20, 0, 0x08, zip64 === "poi" ? 0 : 0x08, 8, 0, 0, 0, 0x21, 0];
+  const wide = zip64 ? [0, 0, 0, 0] : [];
+  const descriptor = [
+    ...(signature ? [0x50, 0x4b, 7, 8] : []),
+    ...[0xde, 0xad, 0xbe, 0xef],
+    ...[...u32le(size), ...wide, ...u32le(size), ...wide],
+  ];
+  return bytes(header, [0, 0, 0, 0], sizes, [name.length, 0, extra.length, 0], name, extra, deflated, descriptor);
 }

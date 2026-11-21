@@ -119,13 +119,22 @@ const PACKAGE_TYPE = /^application\/(?:vnd\.oasis\.opendocument\.[a-z.-]{1,64}|e
  * Where the entry after a streamed one starts. Bit 3 of the general purpose flag (PKWARE APPNOTE 6.3.10 §4.4.4) leaves
  * the sizes zero in the local file header and puts them after the data in a data descriptor (§4.3.9), which Java's
  * ZipOutputStream, Apache Commons Compress (so Apache POI) and Node's archiver write for every deflated entry, with a
- * signature the format does not require (§4.3.9.3). The next entry is the first local file header behind a descriptor,
- * signed or not, whose compressed size is the distance from `data`; those bytes anywhere else are the entry's data.
+ * signature the format does not require (§4.3.9.3). Its two sizes take 4 bytes each, or 8 in ZIP64 format (§4.3.9.2),
+ * which POI's SXSSFWorkbook writes for every entry without saying so in the header (M11-R212). The next entry is the
+ * first local file header behind a descriptor, of either width, signed or not, whose compressed size is the distance
+ * from `data`; those bytes anywhere else are the entry's data.
  */
 function afterStreamed(bytes: Uint8Array, data: number): number {
   for (let at = data + 12; at + 4 <= bytes.length; at++) {
-    const size = uint32LE(bytes, at - 8);
-    if (startsWith(bytes, LOCAL_FILE, at) && (size === at - 12 - data || size === at - 16 - data)) return at;
+    if (!startsWith(bytes, LOCAL_FILE, at)) continue;
+    for (const width of [4, 8]) {
+      // The compressed size stands two sizes before the header, behind the crc-32 and, with a signature, 4 bytes more.
+      const size = at - 2 * width;
+      const signature = size - 4 - data - uint32LE(bytes, size);
+      // Within the bytes read, the upper half of an 8-byte size is zero.
+      const upperHalf = width === 8 ? uint32LE(bytes, size + 4) : 0;
+      if ((signature === 0 || signature === 4) && upperHalf === 0) return at;
+    }
   }
   return bytes.length;
 }
