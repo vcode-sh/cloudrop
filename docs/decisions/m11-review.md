@@ -369,7 +369,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   accepted but never matched; the guide tells the reader to check the header in the shell's network inspector. The
   `chrome-extension://` and `moz-extension://` values are from memory of those browsers' behaviour, with no page found
   that states the header. A host outside `[a-z0-9.-]` (an IPv6 literal, an underscore) is refused.
-- **Status:** in force.
+- **Status:** in force. Amended by `M11-R230`: the text must also be a URL the parser reads, so a port over 65535 or
+  with leading zeros is refused, and `http`, `https`, `ws`, `wss` and `ftp` text never reaches the pattern.
 - **Visible in:** `src/server/origins.ts`, `src/server/handler-cors.test.ts`, `src/server/config.test.ts`,
   `docs/guide/server.md#what-an-origin-is`, `docs/guide/deployment.md#a-webview-or-a-browser-extension`.
 
@@ -1221,7 +1222,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** an app whose shell really sends `ws://…` or `ftp://…` as its origin is refused at start-up
   (`INVALID_CONFIG`) and by the command (exit 2); none is known. The command's messages lose "with its own --origin"
   and gain "in lowercase", the server's wording.
-- **Status:** in force. Extends `M11-R41`.
+- **Status:** in force. Extends `M11-R41`. Amended by `M11-R230`: `ws`, `wss` and `ftp` text the URL parser refuses
+  (`ws://256.1.1.1`) is refused the same way.
 - **Visible in:** `src/server/origins.ts`, `src/server/config.test.ts`, `src/cli/args.ts`, `src/cli/run.test.ts`,
   `docs/guide/command.md`, `docs/guide/server.md#what-an-origin-is`.
 
@@ -2547,3 +2549,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; the text follows the code and its tests.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md` ("Known costs", "What changes for the client").
+
+### M11-R230: text the URL parser refuses is no origin, under any scheme
+
+- **Decision:** `originProblem` (the server's `trustedOrigins` and `api.checkBucket`, and the command's `--origin`)
+  accepts nothing the URL parser refuses. An `http` or `https` origin is valid only as the parser's own origin of the
+  text, as in 0.5.0, less the hosts and patterns `M9-H100` and `M11-R176` refuse. `ws`, `wss`, `ftp` and `file` are
+  never origins. Only a URL the parser reads and gives the origin `null` may be an app's own scheme (`M11-R41`), and
+  then only as the text the parser writes for it, so its port is at most 65535 and has no leading zeros
+  (`app://localhost:08100` is refused with `Use app://localhost:8100`). Text written as `scheme://host[:port]` that
+  the parser refuses is answered "is not an origin: its host or port is not valid. Check the host's spelling and that
+  the port is at most 65535."; `ws`, `wss` and `ftp` text keeps "is not a page's origin", and any other text keeps the
+  message it had.
+- **Why:** since `M11-R41` a string the parser refused fell through to the pattern for an app's own scheme, which
+  excluded only `file:`. So `https://app.example.com:99999`, `http://localhost:80800`, `https://1.2.3.4.5`,
+  `ws://256.1.1.1` and `ftp://999999999999` were origins; 0.5.0 refused all five. A port typo in `trustedOrigins`
+  started the server silently with an entry no request matches, and `--origin` wrote a CORS rule that allows nobody.
+  The parser's refusal is the evidence: a browser builds a page's origin with the same parser, so it can send none of
+  these. Checked by a property test against 0.5.0's rule (`URL.canParse(o) && new URL(o).origin === o`) over
+  generated `http` and `https` text: of 400,000 samples 31,756 were accepted by 0.5.0 and 368,244 refused, the new
+  rule agrees on every one and accepts each as the same text, and the rule before this entry accepted 13,977 of the
+  refused ones. The generator leaves out `*`, the punctuation `M11-R176` names and empty labels, which 0.5.0 took and
+  those two entries refuse on purpose.
+- **If wrong:** a webview that sends an origin with a port over 65535 or with leading zeros is refused at start-up
+  and by the command; the URL standard allows neither. The new sentence names the port's limit for a host typo too
+  (`https://1.2.3.4.5`), which reads past the fault.
+- **Status:** in force. Amends `M11-R41` (the pattern alone no longer decides) and `M11-R111`.
+- **Visible in:** `src/server/origins.ts`, `src/server/origins.test.ts`, `src/server/origins-fuzz.test.ts`,
+  `docs/guide/server.md#what-an-origin-is`.

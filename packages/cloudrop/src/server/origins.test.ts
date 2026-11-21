@@ -33,3 +33,35 @@ describe("the host of an origin", () => {
     );
   });
 });
+
+const NOT_VALID =
+  "is not an origin: its host or port is not valid. Check the host's spelling and that the port is at most 65535.";
+const NO_PAGE =
+  "is not a page's origin: a page is loaded over http or https, or over an app's own scheme. Name the origin of the page that uploads, such as https://app.example.com.";
+
+// 0.5.0 refused each of these, since the URL parser reads none of them. An entry with such a typo matches no request,
+// and a CORS rule written for it allows nobody (M11-R230).
+describe("text the URL parser refuses", () => {
+  it.each([
+    { origin: "https://app.example.com:99999", problem: NOT_VALID },
+    { origin: "http://localhost:80800", problem: NOT_VALID },
+    { origin: "https://1.2.3.4.5", problem: NOT_VALID },
+    { origin: "ws://256.1.1.1", problem: NO_PAGE },
+    { origin: "ftp://999999999999", problem: NO_PAGE },
+    { origin: "app://localhost:65536", problem: NOT_VALID },
+  ])("is no origin under any scheme: $origin", ({ origin, problem }) => {
+    expect(originProblem(origin)).toBe(`${JSON.stringify(origin)} ${problem}`);
+  });
+});
+
+describe("the port of an app's own scheme", () => {
+  it("may be the highest there is", () => {
+    expect(originProblem("app://localhost:65535")).toBeNull();
+  });
+
+  it("is written as the webview sends it, without leading zeros", () => {
+    expect(originProblem("app://localhost:08100")).toBe(
+      '"app://localhost:08100" is not an origin. Use app://localhost:8100: an origin is the scheme, host and port, with no path.',
+    );
+  });
+});

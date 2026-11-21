@@ -16,6 +16,12 @@ const APP_ORIGIN = /^(?!file:)[a-z][a-z0-9+.-]*:\/\/[a-z0-9.-]+(:\d{1,5})?$/;
  */
 const PAGE_SCHEME = /^https?:/;
 
+/** The special schemes no page is loaded over, read from text the parser refused as from an origin it gave. */
+const NO_PAGE_SCHEME = /^(wss?|ftp):/i;
+
+/** Text already written as lowercase scheme://host[:port], whatever its host and port are worth. */
+const WRITTEN_AS_ORIGIN = /^[a-z][a-z0-9+.-]*:\/\/[a-z0-9._:[\]-]+$/;
+
 /**
  * The hosts a browser loads a page from: an address, or a name of letters, digits, "-" and "_" in parts joined by
  * single dots, with or without a last dot. The URL standard forbids fewer characters in a host
@@ -29,25 +35,59 @@ const NOT_TEXT = 'pass a list of origins as text, such as ["https://app.example.
 
 const EXAMPLE = "such as https://app.example.com.";
 
+/** What is wrong, then what to write instead. */
+type Fault = [wrong: string, fix: string];
+
+const NO_PAGE: Fault = [
+  "is not a page's origin: a page is loaded over http or https, or over an app's own scheme.",
+  `Name the origin of the page that uploads, ${EXAMPLE}`,
+];
+
+const NOT_ORIGIN: Fault = [
+  "is not an origin.",
+  `Write it in lowercase as scheme://host[:port] with no path, ${EXAMPLE}`,
+];
+
+const use = (origin: string): Fault => [
+  "is not an origin.",
+  `Use ${origin}: an origin is the scheme, host and port, with no path.`,
+];
+
+/**
+ * Text the URL parser refuses is no origin under any scheme, an app's own included: the parser refuses a port over
+ * 65535 and a host that is no name and no address, and nothing sends either (M11-R230).
+ */
+function unreadFault(value: string): Fault {
+  if (NO_PAGE_SCHEME.test(value)) return NO_PAGE;
+  return WRITTEN_AS_ORIGIN.test(value)
+    ? [
+        "is not an origin: its host or port is not valid.",
+        "Check the host's spelling and that the port is at most 65535.",
+      ]
+    : NOT_ORIGIN;
+}
+
+/**
+ * A URL whose origin the parser gives as "null": file:, data:, and an app's own scheme, which alone is an origin, as
+ * the text the parser writes for it (a port loses its leading zeros).
+ */
+function appFault(value: string, url: URL): Fault | null {
+  if (!APP_ORIGIN.test(value)) return NOT_ORIGIN;
+  const sent = `${url.protocol}//${url.host}`;
+  return sent === value ? null : use(sent);
+}
+
 /** What is wrong with `value` as an origin and what to write instead, or null when a page can have it. */
-function originFault(value: string): [wrong: string, fix: string] | null {
+function originFault(value: string): Fault | null {
   // A browser never sends a pattern, so one matches no request (URL accepts "*" in a host).
   if (value.includes("*")) {
     return ["is a pattern, not an origin.", `Name each origin your pages upload from, ${EXAMPLE}`];
   }
-  // "null" is the origin of a URL without one (file:, data:, an app's own scheme) and of text that is no URL.
-  const url = URL.canParse(value) ? new URL(value) : undefined;
-  const origin = url?.origin ?? "null";
-  if (url === undefined || origin === "null") {
-    if (APP_ORIGIN.test(value)) return null;
-    return ["is not an origin.", `Write it in lowercase as scheme://host[:port] with no path, ${EXAMPLE}`];
-  }
-  if (!PAGE_SCHEME.test(origin)) {
-    return [
-      "is not a page's origin: a page is loaded over http or https, or over an app's own scheme.",
-      `Name the origin of the page that uploads, ${EXAMPLE}`,
-    ];
-  }
+  if (!URL.canParse(value)) return unreadFault(value);
+  const url = new URL(value);
+  const { origin } = url;
+  if (origin === "null") return appFault(value, url);
+  if (!PAGE_SCHEME.test(origin)) return NO_PAGE;
   // Before any correction is offered, so that no such host is named as the origin to use.
   if (!PAGE_HOST.test(url.hostname)) {
     return [
@@ -56,8 +96,7 @@ function originFault(value: string): [wrong: string, fix: string] | null {
     ];
   }
   // Naming the origin also corrects a host a browser sends differently: lowercase, and punycode for other scripts.
-  if (origin === value) return null;
-  return ["is not an origin.", `Use ${origin}: an origin is the scheme, host and port, with no path.`];
+  return origin === value ? null : use(origin);
 }
 
 /**
