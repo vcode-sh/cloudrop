@@ -2377,3 +2377,14 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/decisions/m11-content.md`, `m11-command.md`, `m9-cli.md`, `m9-hardening.md`, `m3-uploader.md`,
   `m4-dx.md`, `m5-store.md`, `m11-review.md`.
+
+### M11-R214: the store guide's `deleteFile` row names the `NOT_FOUND` of a file that completes during the call
+
+- **Decision:** the row for `deleteFile` in `docs/guide/store.md` ("File operations") says that `NOT_FOUND` is also
+  the answer for a file whose completion is recorded while the call runs, that the file then stays completed with its
+  object, and that a second call deletes it.
+- **Why:** `M11-R150` changed that answer and left the row saying `NOT_FOUND` "for a file that never completed", which
+  such a file is not by the time the caller reads the answer.
+- **If wrong:** nothing: one row, and `src/server/store-delete-race.test.ts` holds the behaviour.
+- **Status:** in force. Completes `M11-R150`.
+- **Visible in:** `docs/guide/store.md` ("File operations").
