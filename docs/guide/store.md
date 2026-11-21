@@ -616,6 +616,9 @@ onDelete: async ({ tx, file, owner, reason, context, request }) => {
 },
 ```
 
+That `request` has its body already read, as every hook's does: read its headers and `url`, since `request.json()`
+throws ([Server](server.md#the-requests-body-is-already-read)).
+
 cloudrop does not read `context`; check its shape in the hook, as it is whatever your code passed. Only completed files run it: an upload that never completed was never
 yours, so `/abort`, `revokeUploads`, a refusal and the sweep run nothing, and neither does `api.delete(key)`, which
 removes an object and leaves its row. `onDelete` needs a store (`INVALID_CONFIG` otherwise), and a file whose route is
