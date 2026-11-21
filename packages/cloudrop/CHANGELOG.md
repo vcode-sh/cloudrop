@@ -6,6 +6,115 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+In short: four things the first production app could not do with 0.5.0 are now built in (a deletion says what it
+did, a hook can say no to a deletion, a refused file says what it really is, and the command reads your own variable
+names), and you can list every owner's files. Then every part of the library was read again, file by file, by
+reviewers who had to prove each problem with a failing test; everything they proved is fixed below.
+
+### Added
+
+- **`api.allFiles()`:** the files of every owner, in any status, a page at a time, for an admin inventory or a support
+  tool: `{ owner?, route?, status?, name?, type?, order?, limit?, cursor? }`. It is a method of its own, so an `owner`
+  that a bug left `undefined` can never widen `api.files`; an `owner` key that is present but `undefined`, `null` or
+  empty is refused. One new index serves it (`cloudrop_files_created_at_idx`); the listing answers the same pages
+  without it, only slower, so nothing breaks before you migrate. A store written by hand needs the new optional
+  `listAll`, or `api.allFiles` answers `INVALID_CONFIG`. Guide:
+  [List every owner's files](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#list-every-owners-files),
+  [Upgrading from 0.5](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#upgrading-from-05) (`M11-L1` to `M11-L9`).
+- **`api.deleteFile` says what it did:** it answers `{ id, deleted, cleaned }`. `deleted` is true when this call
+  deleted the file and false when it already was; `cleaned` is true once the bucket holds nothing of it. Guide:
+  [What `deleteFile` answers](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#what-deletefile-answers) (`M11-D1`, `M11-D2`).
+- **`onDelete` can refuse:** return a `CloudropError` and the file is kept, the hook's writes through `tx` are undone,
+  nothing is logged as an error and the caller gets your error: `api.deleteFile` answers it, `api.eraseOwner` counts
+  the file in the new `refused`, and a replacing `/complete` sends it to the client. A thrown error is still a failure.
+  Guide: [Refuse a deletion](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#refuse-a-deletion) (`M11-D3` to `M11-D8`).
+- **A refused file says what it is:** a `FILE_TYPE_NOT_ALLOWED` from `contentChecks()` carries
+  `error.content = { declared, detected?, reason }` (`"mismatch"`, `"refused"` or `"not-accepted"`) on the server, in
+  the client and in the React hooks, so an app can say "this is a JPEG" in its own language. Guide:
+  [Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md) (`M11-K1` to `M11-K6`).
+- **The command reads your own variable names:** `--var CLOUDROP_R2_BUCKET=R2_BUCKET`, repeatable, for `doctor` and
+  `setup`; every message then names your variable. Also `--version`. Guide:
+  [The cloudrop command](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/command.md) (`M11-C1` to `M11-C6`).
+- **`trustedOrigins` takes an app's own scheme,** such as `capacitor://localhost` or `tauri://localhost`, as the exact
+  `Origin` a webview sends (`M11-R41`); the command's `--origin` reads origins by the same rule (`M11-R111`).
+- `testClient` takes `account`, so the account guard can be tested (`M11-R3`).
+- Types `DeletedFile`, `AllFilesOptions` and `ContentRefusal`.
+
+### Changed
+
+- **`api.deleteFile` no longer answers a storage error once the row is deleted:** it answers success with
+  `cleaned: false`, logs the failure, and the sweep removes the object. A JavaScript `onDelete` that returns a value
+  other than a `CloudropError` now fails the deletion (it was ignored). `deleteFile` answers `NOT_FOUND` for a file
+  whose `/complete` is recorded during the call (`M11-D2`, `M11-D3`, `M11-R150`).
+- **`retry()` follows one table** and never repeats a request that cannot succeed: after a refusal that ended the
+  upload (`FILE_TYPE_NOT_ALLOWED`, a hook's refusal, `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD`, `ALREADY_EXISTS` and others) it
+  asks for a new ticket; after `NOT_UPLOADED` it sends the bytes again. Before asking for a new ticket the client now
+  gives the old one up (`/abort`), so with a quota the retry is not refused by its own earlier reservation; a resumed
+  upload that starts over does the same. Apps that count requests will see the extra `/abort`. Guide:
+  [Retry](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/client.md#retry) (`M11-R80` to `M11-R94`).
+- **Stricter configuration, refused when the server starts or the call is made:** a pattern in `trustedOrigins` such as
+  `https://*.example.org` (it never matched any request before), an origin with a user name, a host a browser cannot
+  load, or the schemes `ws`, `wss` and `ftp`; `completionLeaseMs` and `graceMs` above 30 days (`M11-R40`, `M11-R63`,
+  `M11-R111`, `M11-R176`).
+- **Stricter requests:** metadata nested more than 32 levels is `INVALID_METADATA`; a file name with NUL is
+  `INVALID_INPUT` for that file alone; an owner or file id with a broken Unicode character (a lone surrogate) is
+  refused; an `OPTIONS` that is not a preflight for `POST` answers 405, not 403 (`M11-R42`, `M11-R46`, `M11-R60`,
+  `M11-R196`).
+- **Every `api` call reads a key or a prefix in NFC,** as `/upload` stores them. On S3-compatible services, a key
+  another tool wrote in another Unicode form is reached through the storage driver, not `api` (`M11-R44`).
+- **The storage drivers trust less:** an answer that is not the storage service's (a web page with status 200, a body
+  where none belongs) is an error instead of an empty listing; redirects are never followed; response bodies are read
+  up to a bound. `400 RequestTimeout` is now retried (`M11-R20` to `M11-R23`).
+- **`contentChecks()`:** a container that can be audio or video (WebM, MP4, Ogg, Matroska) is judged as the type it was
+  sent as, so `deny: ["video/*"]` no longer refuses a voice recording; `allow` lets a refused kind through under any of
+  its names, at both steps; an MP3 needs two frame headers; an old Office or installer file (OLE) sent without a type
+  is refused; a bare `<!--` reads as a web page, as browsers read it (`M11-R131` to `M11-R136`).
+- **The `cloudrop` command:** the commands it suggests are complete and quoted (`npx cloudrop … --env-file …`), and
+  they name the bucket and the S3 endpoint by value; nothing else is printed by value, never a key or a secret.
+  `--env-file` is read exactly as Node reads it, and may be repeated. `doctor` judges the CORS rule the service really
+  answers with (the first that matches, measured on R2), and `setup --apply` places cloudrop's rule before a rule that
+  would answer in its place. `--jurisdiction` twice, or with S3 settings, is a usage error (`M11-R110` to `M11-R120`,
+  `M11-R170` to `M11-R177`).
+- **`cloudrop/testing`:** the test bucket now behaves as R2 was measured to: one object for a key written in two
+  Unicode forms, `401` for an unknown access key, and answers to CORS preflights. The memory store orders ids and
+  owners by bytes, as SQL does (`M11-R26`, `M11-R65`, `M11-R172`).
+- **Postgres:** statements that lock several rows lock them in one order, and a call ended by a deadlock or a
+  serialization failure is run once more; the sweep's reads are one index range per status (a page went from 12 ms to
+  0.12 ms on 360,000 rows) (`M11-R61`, `M11-R66`).
+- **React:** `useUpload` follows a changed factory or route without a remount; `useResumable` never shows another
+  route's records (`M11-R4`, `M11-R5`).
+- The bundled server entry's size ceiling goes from 32 kB to the value the owner sets for this release; it measures
+  about 34 kB (`M11-R100`).
+
+### Fixed
+
+- **A deletion could skip `onDelete`:** `api.deleteFile` called while that file's `/complete` was in flight deleted
+  the file without running the hook (`M11-R150`).
+- **`doctor` said CORS was ok** while an earlier rule in the bucket answered uploads instead of cloudrop's
+  (`M11-R170`); its suggested commands failed when pasted after `--env-file` or `--jurisdiction` (`M11-R110`).
+- **Uploads refused with `QUOTA_EXCEEDED` by their own earlier attempt:** a retry or a resume that needed a new ticket
+  left the old reservation in place (`M11-R89` to `M11-R92`).
+- **With the test guide's examples:** `testClient` lost `cookie` and `origin` under happy-dom, and every request
+  answered `SERVER_ERROR` under jsdom 26 (`M11-R1`, `M11-R2`).
+- **Postgres:** a retried `/upload` of 30 or more files racing `revokeUploads` could deadlock (`M11-R61`); two owners
+  whose ids differ only in a broken character were stored as one (`M11-R60`); a missing table permission was reported
+  as a missing table (`M11-R62`).
+- **Storage:** an `s3()` endpoint that answered a web page looked like an empty bucket, so `deletePrefix` reported a
+  verified erasure (`M11-R20`); a copy of an object over 5 GiB whose stored headers held non-ASCII bytes failed its
+  signature (`M11-R25`); a wrong-typed checksum or bucket rule threw instead of answering an error (`M11-R24`).
+- **`contentChecks()`:** an Office file written by a streaming ZIP writer read as a plain ZIP (`M11-R132`); a WebM
+  whose DocType was `constructor` made `/complete` fail for ever (`M11-R130`); text such as `<a,b>` read as a web page
+  (`M11-R131`); a refusal could not end a row a crashed request had left completing (`M11-R138`).
+- **The client:** `done` rejected and the file stayed queued where `crypto.getRandomValues` is missing; a hostile list
+  argument threw; a `/complete` that never left the page stopped a later cancel from cleaning up; mass cancels could
+  pass the browser's 64 KiB limit for requests sent while a page closes (`M11-R82` to `M11-R87`).
+- **The server:** a plugin hook returning `null` answered 500; a preflight for a header with `_` in its name was
+  refused; `/complete` could fail after `onComplete` ran when its result could not be read twice (`M11-R45` to
+  `M11-R47`).
+- **Guides:** the signed-in recipe kept one client per user on a server that renders pages (`M11-R8`); a hook's
+  `request` has its body already read (`M11-R43`); `eraseOwner` needs the sweep to finish for a crashed completion
+  (`M11-R153`); on Workers with D1, sweep one bounded round per run (`M11-R70`).
+
 ## 0.5.0 - 2026-11-21
 
 In short: when your app deletes a file, its `onDelete` hook now hears who asked and why, so the audit row can say it.

@@ -36,7 +36,8 @@ Load the matching skill from `.claude/skills/` before the work:
   through `bun run test:browser`, which needs Docker and Playwright's Chromium headless shell.
 - Public calls return `{ data, error }`. Error messages say what happened and what to do next; they never contain
   credentials, presigned URLs or raw storage responses. The handler answers every request, never throws, and sends a
-  client only the error's code, message, `retryable` and part numbers; everything else goes to the logger.
+  client only the error's code, message, `retryable`, part numbers and a type refusal's `content` (`M11-K3`); everything
+  else goes to the logger.
 - The server trusts only the upload token after `/upload`: never a key, size, type or upload ID from a request body.
 - Never print, log or commit credentials, and never log a presigned URL.
 - Live R2 tests write only under `live-test/cloudrop-<random>/` and delete what they create.
