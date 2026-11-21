@@ -254,3 +254,42 @@ describe("api.deletePrefix", () => {
     expect((await fixture.cloudrop.api.deletePrefix("users/42/")).error).toBe(down);
   });
 });
+
+// /upload stores every key in NFC, so the same text passed to cloudrop.api must name the same object on a store that
+// compares keys byte for byte, as the fake and S3 do (M11-R44). "Zoé" is written here with a combining accent (NFD).
+describe("api keys in another Unicode form", () => {
+  const NFC = "users/Zo\u00e9/";
+  const NFD = "users/Zoe\u0301/";
+
+  it("deletes the folder /upload wrote when deletePrefix is given its NFD form", async () => {
+    const { cloudrop, storage } = serverFixture({ files });
+    await storage.put(`${NFC}a.txt`, "x");
+    expect((await cloudrop.api.deletePrefix(NFD)).data?.deleted).toBe(1);
+    expect((await storage.list("users/")).data?.items).toEqual([]);
+  });
+
+  it("signs and builds URLs for the NFC key", async () => {
+    const signed = await serverFixture({ files }).cloudrop.api.getUrl(`${NFD}a.txt`);
+    const plain = await serverFixture({ files }, { publicUrl: true }).cloudrop.api.getUrl(`${NFD}a.txt`);
+    expect([new URL(signed.data?.url ?? "").pathname, plain.data?.url]).toEqual([
+      "/uploads/users/Zo%C3%A9/a.txt",
+      `${PUBLIC_URL}/users/Zo%C3%A9/a.txt`,
+    ]);
+  });
+
+  it("writes, reads, copies and deletes the NFC key", async () => {
+    const { cloudrop, storage } = serverFixture({ files });
+    const keys = async () => (await storage.list("users/")).data?.items.map((item) => item.key);
+    await cloudrop.api.put(`${NFD}a.txt`, "x");
+    await cloudrop.api.copy(`${NFD}a.txt`, `${NFD}b.txt`);
+    const written = await keys();
+    const size = (await cloudrop.api.head(`${NFD}b.txt`)).data?.size;
+    await cloudrop.api.delete(`${NFD}a.txt`);
+    await cloudrop.api.deleteMany([`${NFD}b.txt`]);
+    expect({ written, size, left: await keys() }).toEqual({
+      written: [`${NFC}a.txt`, `${NFC}b.txt`],
+      size: 1,
+      left: [],
+    });
+  });
+});

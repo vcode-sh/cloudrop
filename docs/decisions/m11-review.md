@@ -427,6 +427,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/server/route-context.ts`, `src/server/plugins.ts`, `src/server/delete-context.ts`,
   `src/server/upload-authorize.test.ts`, `docs/guide/server.md#the-requests-body-is-already-read`.
 
+### M11-R44: every `api` call reads a key or prefix in NFC
+
+- **Decision:** `api.getUrl`, `head`, `put`, `delete`, `deleteMany`, `copy` (both keys) and `deletePrefix` normalize
+  the key or prefix to NFC before the storage sees it, as `/upload` normalizes every key it stores. Nothing is refused
+  for its form. `deletePrefix` still deletes each key as the storage listed it (`M9-H6`).
+- **Why:** `/upload` stores `users/Zoé/a.txt` in NFC whatever form the route's `prefix` returned, but
+  `api.deletePrefix("users/Zoé/")` with the text in NFD listed another byte sequence on a byte-exact store (`s3()`, the
+  fake) and answered `{ deleted: 0, verifiedAt }` while the file stayed: an erasure that reports done and is not.
+  `api.getUrl` signed a URL to an object that does not exist. The same string must name the same object in the route
+  and in `api`; a refusal naming the NFC form would be louder, but would surface in production on the first user whose
+  name or file name arrives decomposed (macOS), in a call whose error an app may not check.
+- **If wrong:** keys written by other tools. On R2 the two forms are one object, so nothing changes. On a store that
+  compares bytes, an object another tool wrote under a key or prefix that is not NFC is out of reach of `cloudrop.api`:
+  `api.delete` of it deletes nothing and succeeds, as a delete of any missing key does. The storage driver the app
+  passed to `createCloudrop` sends keys as given (`storage.head`, `storage.delete`, `storage.list`), and the guide
+  says so. A key whose NFC form is longer than 1,024 bytes is refused by the driver's own check, as before.
+- **Status:** in force.
+- **Visible in:** `src/server/api.ts`, `src/server/api.test.ts`, `docs/guide/server.md#file-api`.
+
 ### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
 
 - **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC

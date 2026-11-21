@@ -657,6 +657,13 @@ folder you name.
 `getUrl` signs at the start of an `expiresIn` window and the URL stays valid for two windows, so every viewer in one
 window gets the same, cacheable URL.
 
+**Keys are read in NFC.** `/upload` stores every key in Unicode's NFC form, and every `api` call that takes a key or a
+prefix normalizes it the same way, so `"users/Zoé/"` names the same folder however the text was typed or wherever it
+came from (macOS file names and some keyboards produce the decomposed form, NFD). What that means for an object
+another tool wrote under a key that is not NFC: on R2 nothing, since R2 keeps both forms as one object; on S3 and
+other stores that compare keys byte for byte, `api` cannot reach that object. Call the storage driver for it, which
+sends a key exactly as given: `storage.head(key)`, `storage.delete(key)`, `storage.list(prefix)`.
+
 ### checkBucket
 
 ```ts

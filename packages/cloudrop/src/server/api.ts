@@ -12,6 +12,11 @@ import { readOrigins } from "./origins.ts";
 import { nowSeconds } from "./presign.ts";
 import { type StoreFileApi, storeApi } from "./store-api.ts";
 
+/**
+ * Every key and prefix is read in NFC, the Unicode form `/upload` stores keys in. An object another tool wrote under a
+ * key in another form is out of reach here on a store that compares keys byte for byte (S3; R2 keeps the forms as one
+ * object): reach it through the storage driver, which sends a key as it is.
+ */
 export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy">, StoreFileApi {
   /**
    * A URL to read the object. With the storage's publicUrl and no options: the plain public URL. Otherwise a presigned
@@ -79,10 +84,9 @@ async function getUrl(
 /** Why a listed page must not be deleted, or undefined when it may. */
 function pageProblem(keys: string[], prefix: string, previous: ReadonlySet<string>): CloudropError | undefined {
   // A listing that strays outside the prefix is a storage or encoding fault: deleting it could erase other data. R2
-  // stores the NFC and NFD forms of a key as one object and lists it in the form last written, so the forms are
-  // compared normalized (M9-H6); a byte-exact store only ever lists keys that start with the prefix's own bytes.
-  const folder = prefix.normalize("NFC");
-  if (keys.some((key) => !key.normalize("NFC").startsWith(folder))) {
+  // stores the NFC and NFD forms of a key as one object and lists it in the form last written, so each key is compared
+  // in NFC, the prefix's form (M9-H6); a byte-exact store only ever lists keys that start with the prefix's own bytes.
+  if (keys.some((key) => !key.normalize("NFC").startsWith(prefix))) {
     return new CloudropError(
       "STORAGE_ERROR",
       "The storage listed keys outside the prefix, so nothing more was deleted.",
@@ -149,6 +153,12 @@ async function deletePrefix(
   );
 }
 
+/**
+ * A key or prefix in NFC, the form `/upload` stores every key in, so the same text names the same object in every call
+ * on a store that compares keys byte for byte (M11-R44). Anything but text goes on to the storage's own check.
+ */
+const nfc = (key: string): string => (typeof key === "string" ? key.normalize("NFC") : key);
+
 export function createFileApi(config: ServerConfig): FileApi {
   const { storage } = config;
   // Every call waits for the environment's settings, so a server missing one answers INVALID_CONFIG everywhere.
@@ -159,13 +169,13 @@ export function createFileApi(config: ServerConfig): FileApi {
   // Arrow wrappers, not storage.head and friends: an unbound driver method would lose a `this` it relies on.
   return {
     ...storeApi(config, whenReady),
-    getUrl: (key, options) => whenReady(() => getUrl(storage, key, options)),
-    head: (key) => whenReady(() => storage.head(key)),
-    put: (key, body, options) => whenReady(() => storage.put(key, body, options)),
-    delete: (key) => whenReady(() => storage.delete(key)),
-    deleteMany: (keys) => whenReady(() => storage.deleteMany(keys)),
-    copy: (from, to) => whenReady(() => storage.copy(from, to)),
-    deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, prefix)),
+    getUrl: (key, options) => whenReady(() => getUrl(storage, nfc(key), options)),
+    head: (key) => whenReady(() => storage.head(nfc(key))),
+    put: (key, body, options) => whenReady(() => storage.put(nfc(key), body, options)),
+    delete: (key) => whenReady(() => storage.delete(nfc(key))),
+    deleteMany: (keys) => whenReady(() => storage.deleteMany(Array.isArray(keys) ? keys.map(nfc) : keys)),
+    copy: (from, to) => whenReady(() => storage.copy(nfc(from), nfc(to))),
+    deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, nfc(prefix))),
     checkBucket: async (given) => {
       const options = given ?? {};
       // The origins are echoed in the report, so only exact origins may reach it.
