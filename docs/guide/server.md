@@ -603,6 +603,7 @@ must be exactly that text. `createCloudrop` throws `INVALID_CONFIG` for anything
 | `"https://*.example.com"`, `"*"` | never a pattern | Refused. List each origin; there are no wildcards. |
 | `"https://bücher.example"` | `https://xn--bcher-kva.example` | Refused; the message names the punycode form, which is what to list. |
 | `"null"`, `"file://"`, `"data:..."` | `null`, which every sandboxed frame and local file shares | Refused: trusting `null` would trust them all. |
+| `"ws://app.example.com"`, `"wss://..."`, `"ftp://..."` | never: no page is loaded over these | Refused. Name the origin of the page that uploads. |
 | `"capacitor://localhost"`, `"tauri://localhost"`, `"chrome-extension://<id>"` | the same text | Accepted (below). |
 
 **Webviews and extensions.** A page inside an app shell or a browser extension has an origin with the app's own

@@ -1,10 +1,11 @@
 // The command line of `cloudrop`: two commands, a handful of options, `--name value` or `--name=value`.
 
+import { originProblem } from "../server/origins.ts";
 import { readVar } from "./vars.ts";
 
 export interface CommandOptions {
   command: "doctor" | "setup";
-  /** Exact origins, such as https://app.example.com: checked here, since they are echoed in the output. */
+  /** Exact origins, such as https://app.example.com: checked by the server's own rule, since they are echoed. */
   origins: string[];
   /** Every --env-file, in the order given: a later file's value replaces an earlier one's. */
   envFiles: string[];
@@ -54,20 +55,6 @@ Exit codes: 0 nothing is wrong, 1 a problem was found or a write failed, 2 a usa
 
 const SETUP_FLAGS = { "--apply": "apply", "--dry-run": "dryRun", "--replace": "replace" } as const;
 const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--var", "--jurisdiction"]);
-
-/** What is wrong with an origin, naming the exact origin when the value is a URL that has one (M9-H100). */
-function originProblem(value: string): string | null {
-  // A browser never sends a pattern, so a rule or a check for one matches no page (URL accepts * in a host).
-  if (value.includes("*")) {
-    return `"${value}" is a pattern, not an origin. Name each origin your pages upload from with its own --origin, such as https://app.example.com.`;
-  }
-  // "null" is the origin of a URL without one (file:, data:), never a page's to name.
-  const origin = URL.canParse(value) ? new URL(value).origin : "null";
-  if (origin !== "null" && origin === value) return null;
-  return origin === "null"
-    ? `"${value}" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.`
-    : `"${value}" is not an origin. Use ${origin}: an origin is the scheme, host and port, with no path.`;
-}
 
 /** Sets one option that takes a value; returns what is wrong with it, if anything. */
 function setValue(options: CommandOptions, name: string, value: string): string | null {

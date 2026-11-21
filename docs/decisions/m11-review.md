@@ -609,6 +609,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   /complete, which a retry finishes"), in both modes.
 - **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.
 
+### M11-R111: one origin rule for the server and the command, and `ws:`, `wss:` and `ftp:` are no page's origin
+
+- **Decision:** the command reads `--origin` with `originProblem` of `src/server/origins.ts`, the function
+  `trustedOrigins` and `api.checkBucket` use, and prints its message as it is; the command's own copy of the rule is
+  gone. That rule now refuses a URL whose scheme is `ws`, `wss` or `ftp`: "is not a page's origin: a page is loaded over
+  http or https, or over an app's own scheme."
+- **Why:** the command's copy predated `M11-R41`, so `--origin capacitor://localhost`, `tauri://localhost` and
+  `chrome-extension://<id>` exited 2 with "Write it as scheme://host[:port]", which is how they are written, and an app
+  the server accepted could not have its bucket checked or set up. The same copy, and the server's rule, took
+  `ws://a.example` and `ftp://a.example`: the URL standard lists six special schemes (`ftp`, `file`, `http`, `https`,
+  `ws`, `wss`, <https://url.spec.whatwg.org/#special-scheme>) and its origin algorithm returns a tuple origin for all
+  but `file` (<https://url.spec.whatwg.org/#origin>), but a document is fetched over `http` and `https` alone, so no
+  page sends such an `Origin`. A CORS rule written for one allows nobody.
+- **If wrong:** an app whose shell really sends `ws://…` or `ftp://…` as its origin is refused at start-up
+  (`INVALID_CONFIG`) and by the command (exit 2); none is known. The command's messages lose "with its own --origin"
+  and gain "in lowercase", the server's wording.
+- **Status:** in force. Extends `M11-R41`.
+- **Visible in:** `src/server/origins.ts`, `src/server/config.test.ts`, `src/cli/args.ts`, `src/cli/run.test.ts`,
+  `docs/guide/command.md`, `docs/guide/server.md#what-an-origin-is`.
+
 ### M11-R112: `--env-file` is read by Node's own parser, ported step for step
 
 - **Decision:** `parseEnvFile` (`src/cli/env-file.ts`) is a port of `Dotenv::ParseContent` in Node's

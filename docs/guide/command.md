@@ -17,6 +17,11 @@ case, with no path, not even a trailing `/`, and no `*`. Given `http://localhost
 origin to use instead, `http://localhost:5173`; it refuses a pattern such as `https://*.example.com`, which no browser
 sends: name each origin.
 
+The command reads `--origin` with the rule the server reads `trustedOrigins` with
+([What an origin is](server.md#what-an-origin-is)), so what one takes the other takes. An app's own scheme is an origin
+too: `capacitor://localhost`, `tauri://localhost`, `chrome-extension://<id>`. `ws://`, `wss://` and `ftp://` are
+refused: no page is loaded over them.
+
 ## Settings
 
 The command reads the same variables as the library: `CLOUDROP_R2_ACCOUNT_ID`, `CLOUDROP_R2_BUCKET`,

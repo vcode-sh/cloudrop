@@ -26,19 +26,25 @@ describe("cloudrop usage", () => {
       name: "a wildcard origin",
       argv: ["setup", "--origin", "https://*.example.com"],
       message:
-        '"https://*.example.com" is a pattern, not an origin. Name each origin your pages upload from with its own --origin, such as https://app.example.com.',
+        '"https://*.example.com" is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.',
     },
     {
       name: "the opaque origin null",
       argv: ["doctor", "--origin", "null"],
       message:
-        '"null" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.',
+        '"null" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
     },
     {
       name: "something that is not a URL",
       argv: ["doctor", "--origin", "localhost:3530"],
       message:
-        '"localhost:3530" is not an origin. Write it as scheme://host[:port] with no path, such as https://app.example.com.',
+        '"localhost:3530" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
+    },
+    {
+      name: "a scheme no page is loaded over",
+      argv: ["doctor", "--origin", "ws://app.example.com"],
+      message:
+        "\"ws://app.example.com\" is not a page's origin: a page is loaded over http or https, or over an app's own scheme. Name the origin of the page that uploads, such as https://app.example.com.",
     },
     {
       name: "an unknown option",
@@ -67,6 +73,19 @@ describe("cloudrop usage", () => {
     expect(result.stderr.split("\n")[0]).toBe(message);
     expect(result.stderr).toContain("Usage: cloudrop <doctor|setup> --origin <origin> [options]");
   });
+
+  // The server's trustedOrigins takes these (M11-R41), and the command reads an origin with the server's own rule.
+  it.each(["capacitor://localhost", "tauri://localhost", "chrome-extension://abcdefghijklmnopabcdefghijklmnop"])(
+    "takes %s, an app's own scheme, as an origin",
+    async (origin) => {
+      const result = await run(["setup", "--origin", origin], { env: {} });
+      expect([result.code, result.stderr, result.lines[0]]).toEqual([
+        0,
+        "",
+        `cloudrop setup: the bucket rules for ${origin}.`,
+      ]);
+    },
+  );
 
   it("prints the usage on stdout and exits 0 for --help", async () => {
     const result = await run(["--help"]);
