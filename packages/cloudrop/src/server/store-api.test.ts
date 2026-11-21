@@ -355,19 +355,24 @@ describe("cloudrop.api.files", () => {
         },
       },
     );
-    await uploadAt(fixture, "owned", 1);
-    await uploadAt(fixture, "owned", 2);
+    const older = await uploadAt(fixture, "owned", 1);
+    const newer = await uploadAt(fixture, "owned", 2);
     const { api } = fixture.cloudrop;
-    expect((await api.files({ owner: "u1" })).data?.items).toHaveLength(2);
-    expect((await api.files({ owner: "u1", name: "hello" })).data?.items).toHaveLength(2);
-    for (const options of [{ type: "image/" }, { name: "report" }, { order: "oldest" as const }]) {
+    const listed = async (options: Omit<FilesOptions, "owner">) => {
       const { data, error } = await api.files({ owner: "u1", ...options });
-      expect({ data, code: error?.code, retryable: error?.retryable }).toEqual({
-        data: null,
-        code: "SERVER_ERROR",
-        retryable: false,
-      });
-    }
+      return error ? `${error.code}, retryable: ${error.retryable}` : data.items.map((file) => file.id);
+    };
+    // A page that happens to answer the listing is taken: both files are named hello.txt.
+    expect([await listed({}), await listed({ name: "hello" })]).toEqual([
+      [newer, older],
+      [newer, older],
+    ]);
+    const refused = "SERVER_ERROR, retryable: false";
+    expect([
+      await listed({ type: "image/" }),
+      await listed({ name: "report" }),
+      await listed({ order: "oldest" }),
+    ]).toEqual([refused, refused, refused]);
   });
 
   it.for([

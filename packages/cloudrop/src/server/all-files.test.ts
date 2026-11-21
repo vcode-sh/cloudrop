@@ -140,21 +140,23 @@ describe("cloudrop.api.allFiles", () => {
     { name: "options that are not an object", options: "u1" },
     { name: "an empty owner", options: { owner: "" } },
     { name: "an owner that is null", options: { owner: null } },
-    { name: "an owner over 255 characters", options: { owner: "x".repeat(256) } },
     { name: "a status that is null", options: { status: null } },
-    { name: "a list of statuses", options: { status: ["completed"] } },
-    { name: "a route the server does not have", options: { route: "avatars" } },
-    { name: "a name with a NUL character", options: { name: "a\u0000" } },
-    { name: "an accept pattern for a type", options: { type: "image/*" } },
-    { name: "an order that is not newest or oldest", options: { order: "latest" } },
+    // The filters, the limit and the cursor are api.files's own (owner-files.ts), refused in its tests: one row here
+    // shows this method reads them too.
     { name: "a limit of 0", options: { limit: 0 } },
-    { name: "a limit over 1000", options: { limit: 1001 } },
-    { name: "a cursor no listing returned", options: { cursor: "page-2" } },
-    { name: "a marked cursor without a position", options: { cursor: "all.0123abcd." } },
   ])("refuses $name with INVALID_INPUT", async ({ options }) => {
     const fixture = storeFixture({ owned });
     const { data, error } = await fixture.cloudrop.api.allFiles(options as AllFilesOptions);
     expect({ data, code: error?.code }).toEqual({ data: null, code: "INVALID_INPUT" });
+  });
+
+  // The position is read before the mark: a cursor without one was made by no page, whatever listing its mark names.
+  it("refuses a marked cursor without a position as one no page returned", async () => {
+    const fixture = storeFixture({ owned });
+    const { error } = await fixture.cloudrop.api.allFiles({ cursor: "all.0123abcd." });
+    expect(`${error?.code}: ${error?.message}`).toBe(
+      "INVALID_INPUT: cursor must be one an earlier page of files returned. Leave it out for the first page.",
+    );
   });
 
   it("refuses an owner key whose value is undefined, so a user id lost by a bug never lists every owner", async () => {
@@ -193,10 +195,10 @@ describe("cloudrop.api.allFiles", () => {
   });
 
   it.for([
-    { name: "the owner", options: { owner: "u2" } },
-    { name: "the status", options: { status: "pending" } },
-    { name: "the order", options: { order: "oldest" } },
-  ] as const)("refuses the page of a store whose listAll ignores $name", async ({ options }) => {
+    { name: "the owner", options: { owner: "u2" }, whose: "owner u2" },
+    { name: "the status", options: { status: "pending" }, whose: "every owner" },
+    { name: "the order", options: { order: "oldest" }, whose: "every owner" },
+  ] as const)("refuses the page of a store whose listAll ignores $name", async ({ options, whose }) => {
     const store = memoryStore();
     const ignoring = { ...store, listAll: () => store.listAll({ ...EVERYTHING }) };
     const fixture = storeFixture({ owned, other, files }, { store: ignoring });
@@ -209,7 +211,7 @@ describe("cloudrop.api.allFiles", () => {
       retryable: false,
     });
     expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
-      expect.stringContaining("cloudrop: the store's listAll answered files outside the owner, status, route,"),
+      `cloudrop: the store's listAll answered files outside the owner, status, route, name, type or order asked for (${whose}). A store written by hand must apply every option listAll receives.`,
     ]);
   });
 });
