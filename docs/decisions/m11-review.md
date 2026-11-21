@@ -960,3 +960,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel"),
   `src/client/cancel-completing.test.ts`.
 
+### M11-R87: `/abort` uses keepalive only within a byte budget
+
+- **Decision:** each client counts the bytes of its request bodies in flight with `keepalive` and sends an `/abort`
+  with it only while they stay within 56 KiB (`KEEPALIVE_BUDGET_BYTES`, `src/client/keepalive.ts`); an `/abort` beyond
+  that goes as an ordinary request. A body counts from its `fetch` until its answer was read or the request failed.
+  `discard()` still sends without keepalive (`M3-U95`).
+- **Why:** measured in Chromium 159.0.8154.6 (Playwright's headless shell) on 2026-11-21 with
+  `spikes/keepalive/measure.mjs`, two runs with the same numbers. The cap is 65,536 bytes of keepalive bodies in
+  flight together, and a request beyond it is refused before it reaches the network (`TypeError: Failed to fetch`, no
+  network event): of 230 POSTs of 285 bytes sent in one tick, 1 was refused; of 160 of 420 bytes, 4; of 500 of 420
+  bytes, 344; of ten of 12,288 bytes, a token at its largest, 5. One body of 65,536 bytes passed and one of 65,537 was
+  refused. The bytes come back once the answers are read, and stay counted while an answer is left unread. The same
+  230 and 500 requests all passed without keepalive, and all passed sent as the client now sends them. Before this,
+  `close({ abort: true })` and `job.abort()` over that many files left the last tickets unaborted with nothing said:
+  an `/abort`'s failure is not reported. 56 KiB leaves 8 KiB of the cap for the page's own beacons.
+- **If wrong:** on `pagehide` the `/abort`s beyond the budget are ordinary requests the browser may drop, so those
+  uploads wait for the lifecycle rule, the sweep or the ticket's expiry, as all of them beyond the cap did before. Two
+  clients of one page count apart and can pass the cap together; a page whose own keepalive requests hold more than
+  8 KiB can too. A failed network (`net::ERR_NETWORK_CHANGED` while Docker networks came and went) fails requests the
+  same way to the page, which the script reports apart.
+- **Status:** in force. Firefox and Safari were not measured; the Fetch standard sets the same 64 KiB.
+- **Visible in:** `src/client/keepalive.ts`, `src/client/endpoints.ts` (`send`),
+  `src/client/endpoints-keepalive.test.ts`, `spikes/keepalive/measure.mjs`,
+  `docs/guide/client.md` ("Close the client").
+

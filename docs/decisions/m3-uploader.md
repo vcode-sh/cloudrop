@@ -1633,6 +1633,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   network errors although the server is fine. `discard()` is awaited on a live page, so keepalive buys nothing; a record
   that outlives a closed tab is listed again and discarded again harmlessly.
 - **If wrong:** the examples' Discard all would run its discards one after another instead, slower for many uploads.
-- **Status:** in force (M4b final fix round). Not measured in a browser; the cap is the standard's.
+- **Status:** in force (M4b final fix round). Not measured in a browser then; measured in Chromium for `M11-R87`,
+  which also bounds the cancels' own keepalive bytes.
 - **Source:** M4b final review M3, controller brief 2026-11-18.
 - **Visible in:** `client/endpoints.ts` (`abort`), `client/endpoints.test.ts`.

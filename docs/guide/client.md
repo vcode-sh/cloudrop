@@ -410,7 +410,10 @@ await client.forget(); // then delete the user's unfinished uploads
 - **Every file of every route stops,** queued, uploading, paused, failed or waiting for its ticket, in any phase. A file
   waiting for its ticket ends `aborted` at once, and its `/upload`, if in flight, is cancelled.
 - **`close({ abort: true })`,** at sign-out, cancels each file as `abort()` does: its `/abort` goes with its own
-  upload token and `keepalive`, so a reload right after does not stop it, and the records of those uploads go.
+  upload token and `keepalive`, so a reload right after does not stop it, and the records of those uploads go. A
+  browser lets a page have 64 KiB of `keepalive` request bodies in flight and refuses the rest unsent, so the client
+  sends about the first 56 KiB of `/abort`s that way (some 130 to 200 files) and the others as ordinary requests,
+  which a reload can stop: await `close()` before you navigate.
 - **`close()` without options,** when another user signed in in another tab, stops each file as closing the tab would.
   A multipart upload sends no `/abort` and keeps its record, which the same user [resumes](resume.md) on a new client
   after signing in again, in this page or after a reload. A single `PUT`, which cannot resume, is cancelled, and so is

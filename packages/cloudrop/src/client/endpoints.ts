@@ -15,6 +15,7 @@ import {
 import { type Account, encodeAccount } from "./account.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
 import { aborted, accountFailed, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
+import { createKeepaliveBudget } from "./keepalive.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
@@ -44,9 +45,9 @@ export interface Endpoints {
   /** POST /complete { token }, without the caller's signal: a cancel must not cut off a /complete the server may finish. */
   complete(token: string): Promise<Result<CompleteResponse<unknown>>>;
   /**
-   * POST /abort { token }, once, with keepalive so a closing tab still delivers it; never rejects. Only discard() reads
-   * the result (M3-U93), and only discard() sends `keep` (M3-U94), without keepalive (M3-U95); the answer's id is
-   * ignored.
+   * POST /abort { token }, once, with keepalive so a closing tab still delivers it, while the keepalive budget lasts
+   * (M11-R87); never rejects. Only discard() reads the result (M3-U93), and only discard() sends `keep` (M3-U94),
+   * without keepalive (M3-U95); the answer's id is ignored.
    */
   abort(token: string, options?: { keep: true }): Promise<Result<true>>;
 }
@@ -102,6 +103,7 @@ export function createEndpoints(
   // Built once, so without a function no request waits before fetch: pagehide's keepalive /abort is sent within the
   // event (M3-U33).
   const fixedHeaders = jsonHeaders(typeof serverHeaders === "function" ? undefined : serverHeaders);
+  const budget = createKeepaliveBudget();
   /** The account header of an /upload, after the app's headers so that it wins; none for null or undefined. */
   async function accountHeader(signal: AbortSignal): Promise<Record<string, string>> {
     const value = typeof account === "function" ? await Promise.race([account(), rejectOnAbort(signal)]) : account;
@@ -127,6 +129,7 @@ export function createEndpoints(
     if (signal?.aborted) stop();
     // What a failure means depends on how far the request got: no headers, no account, or no answer.
     let failure: (cause: unknown) => CloudropError = headersFailed;
+    let reserved = 0;
     try {
       // A request cancelled before it starts calls no headers function, which may refresh a token over the network.
       if (controller.signal.aborted) throw cancelled();
@@ -138,20 +141,25 @@ export function createEndpoints(
       failure = accountFailed;
       const headers = endpoint === "upload" ? { ...given, ...(await accountHeader(controller.signal)) } : given;
       failure = serverUnreachable;
+      const text = JSON.stringify(body);
+      // Beyond the budget the request goes without keepalive: sent while the page lives, which one the browser refuses
+      // is not (M11-R87). A token is ASCII, so the text's length is its bytes.
+      reserved = budget.take(keepalive, text.length);
       // "include": a page on a trusted origin sends its session cookie, which authorize may read (S8).
       const response = await fetch(`${basePath}/${endpoint}`, {
         method: "POST",
         headers,
-        body: JSON.stringify(body),
+        body: text,
         credentials: "include",
         signal: controller.signal,
-        keepalive,
+        keepalive: reserved > 0,
       });
       // A body cut off on the way counts as no answer: for /complete, the server may have finished.
       return ok({ response, text: await response.text() });
     } catch (cause) {
       return fail(signal?.aborted ? aborted() : failure(cause));
     } finally {
+      budget.give(reserved);
       clearTimeout(timeout);
       signal?.removeEventListener("abort", stop);
     }
@@ -200,9 +208,8 @@ export function createEndpoints(
     signParts: (token, parts, signal) =>
       post("sign", { token, parts }, { signal }, (json) => readSignedParts(json, parts)),
     complete: (token) => post("complete", { token }, { timeoutMs: COMPLETE_TIMEOUT_MS }, readCompleted),
-    // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up. A browser allows a document
-    // 64 KiB of keepalive bodies in flight together, and a token may be 12 KiB, so discard(), which a live page awaits and
-    // may run for many uploads at once, sends without keepalive (M3-U95).
+    // A failed /abort changes nothing for a cancelled upload; the lifecycle rule cleans up. discard(), which a live page
+    // awaits and may run for many uploads at once, sends without keepalive (M3-U95) and so leaves the budget to cancels.
     abort: (token, options) =>
       post(
         "abort",
