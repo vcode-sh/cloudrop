@@ -115,7 +115,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
 | Word, Excel, PowerPoint | the Office Open XML types | a ZIP with an entry under `word/`, `xl/` or `ppt/` among the entries in the first 4 KiB | ECMA-376 Part 1 |
 | OpenDocument, EPUB | the type in the archive | a ZIP whose first entry `mimetype` names it | ODF 1.3 Part 2 §3.3; EPUB OCF 3.3 §4.2.1 |
-| Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0` where the offset at `0x3C` points, or a DOS header with fewer than 512 bytes on its last page, at least one page and a header that fits | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
+| Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0`, `NE`, `LE` or `LX` where the offset at `0x3C` points (past the first 4 KiB, a file long enough to hold it), or a DOS header with fewer than 512 bytes on its last page and a header of at least two paragraphs that fits in its pages | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
 | Linux program | `application/x-executable` | `7F 45 4C 46` | System V ABI, ELF header |
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
 | Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/` | `execve(2)` |
@@ -135,9 +135,10 @@ Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitesp
 - **Archives are not opened.** A ZIP of programs passes as a ZIP. There is no virus scanning.
 - **`deny` sees what the first bytes show.** A ZIP behind a one-byte prefix, which ZIP readers still open, shows no
   ZIP signature.
-- **A text file that starts with `#!` and a path is refused as a script,** even on a route that takes `text/*`. A
-  route that takes source code adds `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type,
-  such as `text/x-python` or `text/plain`.
+- **A text file that starts with `#!` and a path is refused as a script,** even on a route that takes `text/*`, and
+  so is other text that opens with `#!/`, such as a list of hash-bang URLs. A route that takes source code adds
+  `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type, such as `text/x-python` or
+  `text/plain`, or as `application/x-sh`, `application/x-perl`, `application/x-ruby` or `application/x-php`.
 - **Text that starts like a web page is refused.** A Markdown file that opens with `<p align="center">`, `<div>` or a
   `<!--` comment reads as HTML, as a browser would read it.
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An
