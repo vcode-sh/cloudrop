@@ -84,8 +84,9 @@ with a stable `file.id`. What it cannot do without a record of its own:
 - **`onComplete` once, exactly once for database work on Postgres with a transaction.** With a store built with
   `transaction: true` (Postgres only, on any of the three adapters), the claim on the file, your `onComplete`'s writes
   through `tx` and the completion's record commit together, or not at all. A crash, a throw or a timeout rolls
-  everything back, and the next `/complete` runs `onComplete` again from a clean state. Writes through anything other
-  than `tx` (your global database client, an API call) are outside that guarantee.
+  everything back, and the next `/complete` runs `onComplete` again from a clean state; after a deadlock that Postgres
+  broke, the same `/complete` runs it once more itself ([Postgres notes](#postgres-notes)). Writes through anything
+  other than `tx` (your global database client, an API call) are outside that guarantee.
 - **Otherwise, once per file under a lease.** On SQLite and D1, and with any store built without `transaction: true`,
   a `/complete` claims the file for `completionLeaseMs` while `onComplete` runs. Another `/complete` of the same file
   is answered busy, and the client retries. `onComplete` runs again in three cases only:
@@ -1120,12 +1121,19 @@ the store, a query being one statement or one batch:
 ## Postgres notes
 
 - **Isolation:** READ COMMITTED, the default. See [`onComplete` with `tx`](#oncomplete-with-tx).
-- **Deadlocks:** the store's own statements lock a file's row before its owner's usage row, and several file rows in
-  byte order of id, so they never deadlock each other. A transaction of your own over these tables can: lock in that
-  order too. A store call that Postgres ends to break a deadlock or a serialization conflict (`40P01`, `40001`) is run
-  once more; if that fails too, the call answers a retryable `SERVER_ERROR` with nothing written, so check `error`
-  after `revokeUploads` at sign-out. A completion in a transaction (`transaction: true`) is not run again: it rolls
-  back and the client's `/complete` retries.
+- **Deadlocks:** the store's own statements lock a file's row before its owner's usage row. Where one needs several
+  file rows, a retried `/upload` takes them in byte order of id, `revokeUploads` takes only the rows nobody holds and
+  then waits for the others one at a time, and a `replace` completion takes its owner's turn first. So the requests
+  cloudrop's client sends never deadlock each other. A client of your own can still build one: it completes two files
+  of one `/upload` while it asks that `/upload` again with the same `idempotencyKey`. A transaction of your own over
+  these tables can too: lock a file's row before the usage row, and never wait for a second file row. A store call
+  that Postgres ends to break a deadlock or a serialization conflict (`40P01`, `40001`) is run once more. So is a
+  completion in a transaction (`transaction: true`): everything it wrote rolled back, `onComplete`'s and `onDelete`'s
+  writes through `tx` included, and both hooks run again, which is why whatever else they do must be
+  [safe to repeat](server.md#make-hooks-idempotent). A deadlock that ends one of your own statements inside
+  `onComplete` is `onComplete`'s throw: the completion rolls back and the client's `/complete` retries. If the second
+  run fails too, the call answers a retryable `SERVER_ERROR`; check `error` after `revokeUploads` at sign-out and
+  call it again, since the uploads it had already ended stay ended.
 - **Tables outside `public`:** pass `tables: { schema: "app" }`, or set the search path; see
   [Tables in another schema](#tables-in-another-schema).
 - **Connection pools:** with `transaction: true`, a completion holds one connection and the file's row lock for the

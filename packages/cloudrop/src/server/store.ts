@@ -179,7 +179,7 @@ export interface CloudropStore<TTx = never> {
    */
   end(id: string, from: FileStatus, to: EndedStatus, now: Date, options?: { cleaned?: boolean }): Promise<Transition>;
   /** Ends every `pending` row of one owner as `aborted`, releasing their reserved bytes. `completing` and later rows
-   *  stay. Answers how many rows changed. */
+   *  stay. Answers how many rows changed. May be several units, each ending rows with their bytes (M11-R240). */
   revoke(owner: string, now: Date): Promise<number>;
   /**
    * One page of sweep work, ordered by its time column, then id. `"expire"`: `pending` rows with `expires_at < before`,

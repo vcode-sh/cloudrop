@@ -125,7 +125,11 @@ async function withLease(completion: Completion, store: CloudropStore<unknown>):
   return { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.data.replaced };
 }
 
-/** With a transaction: the claim, onComplete's writes through `tx` and the completion commit or roll back together. */
+/**
+ * With a transaction: the claim, onComplete's writes through `tx` and the completion commit or roll back together. The
+ * store may run the callback again after an attempt the database rolled back (sqlStore does after a deadlock,
+ * M11-R241), so every path through it sets `attempt` anew.
+ */
 async function inTransaction(
   completion: Completion,
   transaction: NonNullable<CloudropStore<unknown>["transaction"]>,

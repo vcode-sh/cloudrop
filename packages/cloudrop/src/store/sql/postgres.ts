@@ -1,16 +1,17 @@
 // The Postgres statements of the methods that write both tables or must decide in one step. Each is one statement:
 // data-modifying CTEs run with the statement, so the files change and its usage change commit together, and a guarded
 // UPDATE that waited for a row lock re-reads the row before it applies (READ COMMITTED), which is what makes a claim
-// exclusive. reconcile alone is a batch: the usage row made to exist and locked first, so the recount takes a snapshot
-// after it.
+// exclusive. Two are more: reconcile is a batch, the usage row made to exist and locked first, so the recount takes a
+// snapshot after it; revoke is a statement and then one for each row another transaction held (postgres-revoke.ts).
 
 import type { FileStatus, NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { isUniqueViolation, runStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
 import { replacingComplete } from "./postgres-replace.ts";
+import { revoking } from "./postgres-revoke.ts";
 import { type GuardedWrites, type SqlContext, selectRecord } from "./reads.ts";
-import { INSERT_COLUMNS, RECORD_COLUMNS, toSafeInteger } from "./records.ts";
+import { INSERT_COLUMNS, RECORD_COLUMNS } from "./records.ts";
 
 const INPUT_COLUMNS = "ord integer, id text, route text, key text, name text, type text, size bigint, metadata text";
 
@@ -30,9 +31,10 @@ const inputJson = (files: readonly NewFile[]): string =>
   );
 
 /**
- * The condition of an update that ends several pending rows: the rows that match `where`, each locked in byte order of
- * id before any is changed. Two statements that lock the same rows in different orders, one along an index and one out
- * of a hash join, deadlock (40P01); in one order the second waits at the first row they share (M11-R61).
+ * The condition of the update that supersedes an attempt's pending rows: the rows that match `where`, each locked in
+ * byte order of id before any is changed. Two statements that lock the same rows in different orders, one along an
+ * index and one out of a hash join, deadlock (40P01); in one order the second waits at the first row they share
+ * (M11-R61). It waits for a row another statement holds, such as the attempt's own attach, and so supersedes it too.
  */
 const pendingInOrder = (files: string, where: string): string =>
   `status = 'pending' AND id IN (
@@ -82,6 +84,16 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
     const [current] = await runStatement(executor, selectRecord("postgres", files, id));
     return transition(false, current);
   }
+
+  const end: GuardedWrites["end"] = async (id, from, to, now, options) => {
+    const b = binder("postgres");
+    const at = b.time(now);
+    const cleaned = options?.cleaned ? `, cleaned_at = ${at}` : "";
+    const update = `UPDATE ${files} SET status = ${b.text(to)}, ended_at = ${at}, updated_at = ${at}${cleaned}
+      WHERE id = ${b.text(id)} AND status = ${b.text(from)}`;
+    const released = releaseFrom(from, "changed.size");
+    return transitionRow(update, released && `${released}, updated_at = ${at}`, id, from, b);
+  };
 
   return {
     async reserve({ owner, limit, expiresAt, requestKey, files: accepted }, now) {
@@ -182,31 +194,8 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
       return { ...(await transitionRow(update, set, id, "completing", b)), replaced: [] };
     },
 
-    async end(id, from, to, now, options) {
-      const b = binder("postgres");
-      const at = b.time(now);
-      const cleaned = options?.cleaned ? `, cleaned_at = ${at}` : "";
-      const update = `UPDATE ${files} SET status = ${b.text(to)}, ended_at = ${at}, updated_at = ${at}${cleaned}
-        WHERE id = ${b.text(id)} AND status = ${b.text(from)}`;
-      const released = releaseFrom(from, "changed.size");
-      return transitionRow(update, released && `${released}, updated_at = ${at}`, id, from, b);
-    },
-
-    async revoke(owner, now) {
-      const b = binder("postgres");
-      const [who, at] = [b.text(owner), b.time(now)];
-      const sql = `WITH revoked AS (
-          UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
-          WHERE ${pendingInOrder(files, `owner = ${who}`)} RETURNING size
-        ),
-        counted AS (
-          UPDATE ${usage} SET reserved_bytes = reserved_bytes - (SELECT sum(size) FROM revoked), updated_at = ${at}
-          WHERE owner = ${who} AND EXISTS (SELECT 1 FROM revoked)
-        )
-        SELECT count(*) AS revoked FROM revoked`;
-      const [row] = await runStatement(executor, b.statement(sql));
-      return toSafeInteger(row?.revoked, "revoked");
-    },
+    end,
+    revoke: revoking(context, end),
 
     async reconcile(owner) {
       /** A statement whose one parameter is the owner. */

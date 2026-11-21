@@ -3,7 +3,7 @@
 
 import { configError } from "../../errors.ts";
 import type { CloudropStore } from "../../server/store.ts";
-import { isConflict, isLockTimeout, type SqlExecutor } from "./executor.ts";
+import { isLockTimeout, onceMoreAfterConflict, type SqlExecutor } from "./executor.ts";
 import { postgresWrites } from "./postgres.ts";
 import { type SqlContext, type StoreMethods, singleStatementMethods } from "./reads.ts";
 import { sqliteWrites } from "./sqlite.ts";
@@ -39,18 +39,15 @@ function methodsOver(context: SqlContext): StoreMethods {
 
 /**
  * The same methods, each waiting for `ready` first. A call that Postgres ended to break a deadlock or a serialization
- * conflict (40P01, 40001) runs once more: it is one atomic unit and rolled back whole. The store's own statements lock
- * rows in one order and cannot deadlock each other; an app's own transaction over these tables can (M11-R61).
+ * conflict (40P01, 40001) runs once more: it wrote nothing. The store's own statements cannot deadlock each other for
+ * the requests cloudrop's client sends (M11-R240); an app's own transaction over these tables can (M11-R61).
  */
 function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMethods {
   const checked: Record<string, (...args: never[]) => Promise<unknown>> = {};
   for (const [name, method] of Object.entries(methods) as [string, (...args: never[]) => Promise<unknown>][]) {
     checked[name] = async (...args) => {
       await ready();
-      return method(...args).catch((error: unknown) => {
-        if (!isConflict(error)) throw error;
-        return method(...args);
-      });
+      return onceMoreAfterConflict(() => method(...args));
     };
   }
   // Every key of `methods` was copied with its own signature, only deferred.
@@ -58,12 +55,14 @@ function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMet
 }
 
 /**
- * A store over SQL tables. Each method is one atomic unit (one statement on Postgres, one batch on SQLite). The schema
+ * A store over SQL tables. Each method is one atomic unit (one statement on Postgres, one batch on SQLite), but
+ * Postgres's `revoke`, which ends each row a completion holds in a unit of its own once that row is free. The schema
  * is checked once, on the first call, and a missing table or column fails that call with `INVALID_CONFIG`. With
  * `transaction: true` the store has `transaction` too, from the executor's: inside it a claim waits at most 2 seconds for
  * Postgres's row lock, so an overlapping `/complete` answers `busy` instead of waiting for `onComplete` to finish; the
- * app's own statements through `tx` keep the lock timeout their session had. Postgres must run at its default
- * isolation, READ COMMITTED: claims, quota and reconcile rely on its re-reading of a row they waited for.
+ * app's own statements through `tx` keep the lock timeout their session had. A transaction Postgres ends as a conflict
+ * runs once more, `onComplete` with it. Postgres must run at its default isolation, READ COMMITTED: claims, quota and
+ * reconcile rely on its re-reading of a row they waited for.
  */
 export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlStoreOptions = {}): CloudropStore<TTx> {
   const { dialect } = executor;
@@ -91,43 +90,48 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
     ...store,
     async transaction<T>(run: (tx: TTx, store: StoreMethods) => Promise<T>): Promise<T> {
       await ready();
-      let timedOut = false;
-      let answer: { value: T } | undefined;
-      try {
-        return await transaction<T>(async (inner, tx) => {
-          const methods = methodsOver({ executor: inner, dialect, tables });
-          // The cap covers the claim alone: onComplete's own statements through tx then run at whatever lock timeout
-          // the session had, restored exactly (a session-level SET included, which DEFAULT would drop). Another
-          // /complete holding the row lock past the cap makes the row busy, not broken. The CTE is materialized so the
-          // saved value is read before set_config changes it. Transaction mode is Postgres only (checked above).
-          const claim: StoreMethods["claim"] = async (...args) => {
-            const [row] = await inner.query(
-              `WITH before AS MATERIALIZED (SELECT current_setting('lock_timeout') AS saved)
-               SELECT saved, set_config('lock_timeout', '${LOCK_TIMEOUT}', true) FROM before`,
-              [],
-            );
-            let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
-            try {
-              outcome = await methods.claim(...args);
-            } catch (error) {
-              if (!isLockTimeout(error)) throw error;
-              timedOut = true;
-              return { kind: "busy" };
-            }
-            await inner.query("SELECT set_config('lock_timeout', $1::text, true)", [String(row?.saved)]);
-            return outcome;
-          };
-          const value = await run(tx, { ...methods, claim });
-          answer = { value };
-          return value;
-        });
-      } catch (error) {
-        // postgres.js fails a transaction in which any statement failed, even the claim answered as busy above. That
-        // transaction rolled back with nothing written, which is what node-postgres does silently, so run's answer
-        // stands.
-        if (timedOut && answer && isLockTimeout(error)) return answer.value;
-        throw error;
-      }
+      // A transaction Postgres ended as a conflict rolled back whole, the writes `run` made through tx included, so it
+      // runs once more from the start, as every other call of the store does (M11-R241).
+      return onceMoreAfterConflict(async () => {
+        let timedOut = false;
+        let answer: { value: T } | undefined;
+        try {
+          return await transaction<T>(async (inner, tx) => {
+            const methods = methodsOver({ executor: inner, dialect, tables });
+            // The cap covers the claim alone: onComplete's own statements through tx then run at whatever lock
+            // timeout the session had, restored exactly (a session-level SET included, which DEFAULT would drop).
+            // Another /complete holding the row lock past the cap makes the row busy, not broken. The CTE is
+            // materialized so the saved value is read before set_config changes it. Transaction mode is Postgres
+            // only (checked above).
+            const claim: StoreMethods["claim"] = async (...args) => {
+              const [row] = await inner.query(
+                `WITH before AS MATERIALIZED (SELECT current_setting('lock_timeout') AS saved)
+                 SELECT saved, set_config('lock_timeout', '${LOCK_TIMEOUT}', true) FROM before`,
+                [],
+              );
+              let outcome: Awaited<ReturnType<StoreMethods["claim"]>>;
+              try {
+                outcome = await methods.claim(...args);
+              } catch (error) {
+                if (!isLockTimeout(error)) throw error;
+                timedOut = true;
+                return { kind: "busy" };
+              }
+              await inner.query("SELECT set_config('lock_timeout', $1::text, true)", [String(row?.saved)]);
+              return outcome;
+            };
+            const value = await run(tx, { ...methods, claim });
+            answer = { value };
+            return value;
+          });
+        } catch (error) {
+          // postgres.js fails a transaction in which any statement failed, even the claim answered as busy above.
+          // That transaction rolled back with nothing written, which is what node-postgres does silently, so run's
+          // answer stands.
+          if (timedOut && answer && isLockTimeout(error)) return answer.value;
+          throw error;
+        }
+      });
     },
   };
 }

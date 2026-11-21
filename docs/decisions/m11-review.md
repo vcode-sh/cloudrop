@@ -562,7 +562,10 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   from Postgres at READ COMMITTED, which the store requires (`M5-T78`); it is rerun for databases that speak
   Postgres's protocol and report conflicts that way. Should the replaced rows ever be locked in bulk by another
   statement, `replace` needs the same ordered subquery.
-- **Status:** in force.
+- **Status:** in force for the superseding reserve and for the rerun. Changed by `M11-R240`: `revoke` no longer
+  locks its rows in id order, it takes the rows nobody holds; the audit above is replaced by that entry's, because
+  "`reserve` and `revoke` never want them" was untrue of a row either had waited for. Changed by `M11-R241`: a
+  transaction the store runs is run again too.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/store.ts`, `src/store/sql/executor.ts`,
   `src/store/sql/lock-order.db.integration.test.ts`, `src/store/sql/store.test.ts`, `docs/guide/store.md`.
 
@@ -2759,3 +2762,85 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   release's own measurement may differ by a few hundredths of a kB.
 - **Status:** in force. Continues `M11-R213`.
 - **Visible in:** the files named above.
+
+### M11-R240: a revoke on Postgres never waits for a file row while it holds another
+
+- **Decision:** `revoke` on Postgres is one statement for the owner's pending rows that no other transaction holds
+  (`FOR UPDATE SKIP LOCKED`, with its usage change), then one statement of its own for each pending row that was
+  held: the store's `end` from `pending` to `aborted`, which waits for the row's holder and ends the row only if it
+  is still pending. The count answered is the sum. `revoke` is therefore several atomic units, each ending rows with
+  their bytes; a call that fails part-way has ended some uploads, and a second call ends the rest. What
+  `revokeUploads` promises is unchanged: every upload of the owner that was pending when the call began is ended,
+  unless a completion that held it committed; a completion in a transaction is waited for, and its upload is ended if
+  it rolls back. The superseding reserve keeps `M11-R61`'s ordered, waiting lock. The audit, each statement with the
+  locks it takes in order (Postgres):
+  - `reserve` without a key: the usage row (`FOR UPDATE`), then its new rows, which nobody else can hold.
+  - `reserve` with a key: the attempt's pending rows in byte order of id, waiting for each, then the usage row, then
+    its new rows.
+  - `attach`, `release`, `cleaned`, and `claim` under a lease: one file row. `claim` in a transaction: one file row,
+    held until that transaction ends, through `onComplete`.
+  - `complete` without `replace`, and `end` (the sweep's, `deleteFile`'s and `eraseOwner`'s only writes, one row at a
+    time): one file row, then the usage row.
+  - `complete` with `replace`: the advisory lock of the owner and route, its own row (held since the claim in a
+    transaction), the owner's other completed rows on the route, the usage row.
+  - `revoke`: the owner's pending rows nobody holds, without waiting, then the usage row; then, one statement each,
+    one file row and the usage row.
+  - `reconcile`: the usage row only (made to exist, locked, recounted); it reads file rows without locking them.
+
+  The usage row is every statement's last lock, so its holder waits for nothing. Only two statements wait for a file
+  row while they hold one: a superseding reserve (a), and a replacing completion (b), which waits only for completed
+  rows. Two of (a) take the same rows in the same order. Two of (b) for one owner and route take turns on the advisory
+  lock, and a row one of them holds as its own is not completed for the other. Every other holder of a row that (a) or
+  (b) waits for is a one-row statement or a revoke, which wait for nothing but the usage row. That leaves (a) against
+  (b): (a) holds a row (b) wants only if a file of the ask being retried completed while the retry ran, and (a) then
+  waits for another file of that ask whose completion is in flight. That needs a client that holds the tickets of an
+  `/upload` and asks it again with the same `idempotencyKey`; cloudrop's client repeats an ask only when the answer
+  never arrived (`src/client/launch.ts`), so it has no ticket for those rows. Postgres ends one of the three after
+  its `deadlock_timeout`, and the store runs it again (`M11-R61`, `M11-R241`).
+  SQLite and D1 cannot deadlock: they run one writer at a time, each of the store's batches is one write transaction
+  that takes the database's single write lock when it begins and holds no other lock, and there are no row locks.
+- **Why:** Postgres keeps the lock of a row a statement waited for and then passed over because the row no longer
+  matched, until the statement's transaction ends (its `SELECT` documentation, "The Locking Clause": such rows "will
+  be locked, although they will not be returned"). With `transaction: true` on a `replace` route, a revoke that saw
+  uploads X and Y pending waited for X's completion, passed over X once it committed as completed, kept X's lock and
+  waited for Y; Y's completion held Y and wanted X as a row to replace. Measured on Postgres 18.6 with the test of
+  this entry, on the code before it: 38 `40P01` in 600 races of two replacing completions and a revoke, 39 s; with
+  the interleaving forced, the second completion failed with `40P01` every time. After: 0 in 3,000 races, 1.5 s for
+  1,000. 0.5.0 had the deadlock too: its revoke was a plain `UPDATE … WHERE owner = … AND status = 'pending'`, which
+  keeps a passed-over row's lock in the same way; the forced interleaving against that statement ended the second
+  completion with `40P01` as well (the random race did not show it, 0 in 600, because that `UPDATE` usually ends
+  both rows before either completion claims one). Skipping held rows for good was rejected: a pending row held for
+  an instant by `/upload`'s `attach`, or by a completion that then rolls back, would stay live after a sign-out. So
+  was `SKIP LOCKED` in the superseding reserve: a retry that met the lost attempt's `attach` would leave that file's
+  bytes reserved, and could be refused over the quota, where 0.5.0 waited a millisecond and freed them; the one cycle
+  left there needs a client cloudrop does not ship and costs that client's own requests a second.
+- **If wrong:** a revoke of an owner with many uploads being completed at once runs one statement for each of them,
+  where it ran one in all. A custom store's `revoke` may stay one unit: the contract allows several, it does not ask
+  for them. `claim` answers `busy` for a row a revoke ended while the claim waited for it (`outcomes.ts`,
+  `claimOutcome` reads the statement's snapshot); the client's next `/complete` then answers `UPLOAD_EXPIRED`. That
+  was so before this entry and is left as it is.
+- **Status:** in force. Replaces the audit of `M11-R61`.
+- **Visible in:** `src/store/sql/postgres-revoke.ts`, `src/store/sql/postgres.ts`, `src/store/sql/store.ts`,
+  `src/server/store.ts` (`revoke`), `src/store/sql/lock-order.db.integration.test.ts`, `docs/guide/store.md`
+  ("Postgres notes").
+
+### M11-R241: a completion in a transaction that Postgres ends as a conflict runs once more
+
+- **Decision:** `sqlStore`'s `transaction` runs its callback again, once, when the transaction ended with `40P01` or
+  `40001` (`onceMoreAfterConflict`, the same rule as every other call of the store). For a `/complete` with
+  `transaction: true` that is the claim, `onComplete`, `onDelete` for the files a `replace` route is about to delete,
+  and the record, all again in a new transaction; a second conflict answers the retryable `SERVER_ERROR` and the
+  error log of any store failure. A conflict that ends one of the app's own statements inside `onComplete` is that
+  hook's throw, as before: logged as `onComplete`'s failure, rolled back, and retried by the client.
+- **Why:** the transaction rolled back whole, with the hooks' writes through `tx`, so the only effects of the first
+  run that remain are the ones the guide already asks to be safe to repeat ("Make hooks idempotent"), and the
+  client's retry of that `/complete` would run the same hooks again anyway. Before this entry 8 of 400 races
+  answered `/complete` with a `SERVER_ERROR` and an error log for a deadlock the store itself had caused; `M11-R240`
+  removes that cause, and this entry covers what is left (an app's own transaction over these tables, a database
+  that reports serialization conflicts at commit). Measured through node-postgres, postgres.js, Drizzle and Prisma:
+  each rejected the transaction with an error `isConflict` reads, and each answers the completion on its second run.
+- **If wrong:** a hook with an effect that is not safe to repeat repeats it one request earlier than the client's
+  retry would have. The rerun costs a second claim after a wait of at least `deadlock_timeout`.
+- **Status:** in force. Changes `M11-R61` ("Calls inside the store's `transaction` are not run again").
+- **Visible in:** `src/store/sql/store.ts`, `src/store/sql/executor.ts`, `src/server/store-complete.ts`,
+  `src/store/sql/lock-order.db.integration.test.ts`, `docs/guide/store.md` ("What it guarantees", "Postgres notes").

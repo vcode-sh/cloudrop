@@ -112,3 +112,10 @@ export const isUniqueViolation = (error: unknown): boolean => hasCode(error, "23
  * rolled it back whole.
  */
 export const isConflict = (error: unknown): boolean => hasCode(error, "40P01") || hasCode(error, "40001");
+
+/** Runs one atomic unit, and once more when Postgres ended it as a conflict: it was rolled back whole. */
+export const onceMoreAfterConflict = <T>(unit: () => Promise<T>): Promise<T> =>
+  unit().catch((error: unknown) => {
+    if (!isConflict(error)) throw error;
+    return unit();
+  });
