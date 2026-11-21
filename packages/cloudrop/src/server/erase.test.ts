@@ -42,7 +42,7 @@ describe("cloudrop.api.eraseOwner", () => {
     const open = await upload(fixture, "owned", false);
     const { api } = fixture.cloudrop;
     expect(await api.eraseOwner("u1")).toEqual({
-      data: { revoked: 1, deleted: 1, cleaned: 1, failed: 0, waiting: 1, done: false },
+      data: { revoked: 1, deleted: 1, refused: 0, cleaned: 1, failed: 0, waiting: 1, done: false },
       error: null,
     });
     expect([
@@ -57,13 +57,14 @@ describe("cloudrop.api.eraseOwner", () => {
     expect((await api.eraseOwner("u1")).data?.done).toBe(false);
     at(2 * HOUR + 15 * MINUTE + HOUR);
     expect(await api.eraseOwner("u1")).toEqual({
-      data: { revoked: 0, deleted: 0, cleaned: 1, failed: 0, waiting: 0, done: true },
+      data: { revoked: 0, deleted: 0, refused: 0, cleaned: 1, failed: 0, waiting: 0, done: true },
       error: null,
     });
     expect(await stored(fixture, open.key)).toBe(false);
     expect((await api.eraseOwner("u1")).data).toEqual({
       revoked: 0,
       deleted: 0,
+      refused: 0,
       cleaned: 0,
       failed: 0,
       waiting: 0,
@@ -206,7 +207,7 @@ describe("cloudrop.api.eraseOwner", () => {
     const fixture = storeFixture({ owned });
     await upload(fixture, "owned");
     const report = await fixture.cloudrop.api.eraseOwner("u1", { signal: AbortSignal.abort() });
-    expect(report.data).toEqual({ revoked: 0, deleted: 0, cleaned: 0, failed: 0, waiting: 0, done: false });
+    expect(report.data).toEqual({ revoked: 0, deleted: 0, refused: 0, cleaned: 0, failed: 0, waiting: 0, done: false });
     expect((await fixture.store.raw.files())[0]?.status).toBe("completed");
   });
 

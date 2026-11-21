@@ -2,6 +2,7 @@
 // expectTypeOf and every expect-error directive is an assertion; each `it` names the contract its block pins.
 
 import { describe, expectTypeOf, it } from "vitest";
+import { CloudropError } from "../errors.ts";
 import type { RouteResult } from "../protocol/types.ts";
 import type { Cloudrop } from "./cloudrop.ts";
 import { route, routeFor } from "./route.ts";
@@ -81,6 +82,16 @@ const audited = txRoute(
 describe("store route types", () => {
   it("onDelete is typed like onComplete: the store's tx only on its own routes", () => {
     void [deleted, audited];
+  });
+
+  it("onDelete returns nothing or a CloudropError, from a plain or an async function", () => {
+    const policy = { accept: "*/*", maxSize: 1, authorize: () => ({}) };
+    route(policy, { onDelete: () => new CloudropError("FORBIDDEN", "Kept.") });
+    route(policy, {
+      onDelete: async ({ owner }) => (owner === null ? undefined : new CloudropError("FORBIDDEN", "Kept.")),
+    });
+    // @ts-expect-error: any other value is the hook's bug, and a failure at run time.
+    route(policy, { onDelete: () => "kept" });
   });
 
   it("owner sees the authorize context and no file, and returns a string or null", () => {

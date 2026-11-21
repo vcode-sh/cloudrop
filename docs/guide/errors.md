@@ -83,6 +83,10 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `NOT_FOUND` | 404 | No | There is no cloudrop endpoint at the requested path. | Check that `basePath` matches on the server and the client. |
 | `INVALID_INPUT` | 400 | No | The request body is malformed: not a JSON object, no route name, no files, a bad file entry, an `idempotencyKey` that is not 16 to 128 letters, digits, `-` or `_`, wrong part numbers. The Node adapter also answers it for a request it cannot read. | Use the cloudrop client, or fix the request your own client sends. |
 
+With a database store, a [`replace: true`](store.md#one-file-per-owner-replace) route's `onDelete` can
+[refuse the replacement](store.md#refuse-a-deletion): `/complete` then answers the `CloudropError` the hook returned,
+with the status this table gives its code.
+
 ## Client errors
 
 These come from `cloudrop/client`. The first five never come from the server.
@@ -125,16 +129,20 @@ them into `RATE_LIMITED` or `STORAGE_ERROR` before a browser sees them (see [How
 
 ## Database store file API errors
 
-With a [database store](store.md), `cloudrop.api.file`, `usage`, `revokeUploads`, `deleteFile`, `reconcile` and `sweep`
-answer these. Without a store each answers `INVALID_CONFIG`: "api.<name> needs a database store. Pass store to
-createCloudrop."
+With a [database store](store.md), `cloudrop.api.file`, `files`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`,
+`reconcile` and `sweep` answer these. Without a store each answers `INVALID_CONFIG`: "api.<name> needs a database store.
+Pass store to createCloudrop."
 
 | Code | Retryable | What it means | What to do |
 | --- | --- | --- | --- |
 | `NOT_FOUND` | No | `deleteFile` found no completed file with this id: it never completed, or the store has no row for it. | Check the id; it is the `file.id` the upload returned. |
 | `INVALID_INPUT` | No | An id or owner that is not 1 to 255 characters, a sweep `limit` outside 1 to 1,000, or a `graceMs` under 15 minutes. | Fix the argument; the message names it. |
-| `SERVER_ERROR` | Yes | The database failed or could not be reached ("The server could not reach its upload records."). The server log has the database's error. | Try again. A sweep leaves a failed row for its next run and counts it in `failed`. |
-| `STORAGE_ERROR`, `RATE_LIMITED` | Varies | `deleteFile` or `sweep` could not delete an object or abort a multipart upload. | As in the driver table above. The row stays as it was, so calling again finishes the work. |
+| `SERVER_ERROR` | Yes | The database failed or could not be reached ("The server could not reach its upload records."), or the route's `onDelete` threw in `deleteFile` ("onDelete failed for route …, so the file was kept."). The server log has the error. | Try again. A sweep leaves a failed row for its next run and counts it in `failed`, as `eraseOwner` does. |
+| The code your `onDelete` returned | As you set it | `deleteFile` only: the route's [`onDelete` refused](store.md#refuse-a-deletion) by returning this `CloudropError`. The file was kept and nothing was logged. | Show the message. `eraseOwner` counts such a file in `refused` instead of answering an error. |
+
+A storage failure is not an answer of these calls. `deleteFile` answers success with `cleaned: false` once the file's
+row is deleted, `sweep` and `eraseOwner` count the file in `failed`, and each logs the storage error with the file's
+id; the next sweep, or the next call, finishes the work.
 
 ## Configuration errors
 

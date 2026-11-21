@@ -28,6 +28,8 @@ export interface EraseReport {
   revoked: number;
   /** Completed files deleted: their rows are `deleted` and their bytes released. */
   deleted: number;
+  /** Completed files kept because their route's `onDelete` refused; still completed, they count in `waiting` too. */
+  refused: number;
   /** Ended uploads whose key this run checked once their URLs and the grace had run out: it holds nothing of theirs. */
   cleaned: number;
   /** Files this run could not handle (a storage or database error, logged with the file's id). */
@@ -74,10 +76,14 @@ function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSig
   return graceMs.error ? graceMs : ok({ graceMs: graceMs.data, signal, context: options.context });
 }
 
-/** A completed file: ended as deleted now, after its route's onDelete, so the `deleted` pass removes its object. */
+/**
+ * A completed file: ended as deleted now, after its route's onDelete, so the `deleted` pass removes its object. One the
+ * hook refused stays completed, and the live pass counts it as waiting.
+ */
 async function deleteOne({ config, store, context, report }: Eraser, record: FileRecord): Promise<void> {
   const ended = await deleteCompleted(config, store, record.id, { reason: "erased", context });
-  if (ended.error) report.failed += 1;
+  if (ended.refused) report.refused += 1;
+  else if (ended.error) report.failed += 1;
   else if (ended.data.changed) report.deleted += 1;
 }
 
@@ -184,7 +190,7 @@ export async function eraseOwner(
   if (!isOwnerOrId(owner)) return badOwner();
   const options = readOptions(given);
   if (options.error) return options;
-  const report: EraseReport = { revoked: 0, deleted: 0, cleaned: 0, failed: 0, waiting: 0, done: false };
+  const report: EraseReport = { revoked: 0, deleted: 0, refused: 0, cleaned: 0, failed: 0, waiting: 0, done: false };
   if (options.data.signal?.aborted) return ok(report);
   const startedAt = Date.now();
   const revoked = await storeCall(config.logger, `revoke the uploads of ${owner}`, () =>

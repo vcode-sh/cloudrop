@@ -23,9 +23,10 @@ export interface StoreFileApi {
   revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
   /**
    * Deletes a completed file: its route's `onDelete` runs, with `context` if you pass one (such as who asked and why),
-   * its row becomes `deleted`, its bytes are released and its object removed. Idempotent.
+   * its row becomes `deleted`, its bytes are released and its object removed. Idempotent: `deleted` says whether this
+   * call deleted it. When `onDelete` returns a `CloudropError`, the file is kept and that error is the answer.
    */
-  deleteFile(id: string, options?: DeleteFileOptions): Promise<Result<{ id: string }>>;
+  deleteFile(id: string, options?: DeleteFileOptions): Promise<Result<DeletedFile>>;
   /**
    * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
    * what ended uploads left. Idempotent; run it again, such as with each sweep, until it reports done.
@@ -40,6 +41,19 @@ export interface StoreFileApi {
 export interface DeleteFileOptions {
   /** Passed to the route's `onDelete` as `context`, as it is: who asked for the deletion and why, for an audit row. */
   context?: unknown;
+}
+
+/** What `api.deleteFile` did. */
+export interface DeletedFile {
+  id: string;
+  /** True when this call deleted the file; false when it was deleted already. */
+  deleted: boolean;
+  /**
+   * True when the file's row is marked cleaned: the bucket was checked once the file's URLs and the grace after them
+   * had run out, and holds nothing of it. False while the sweep still has to check again, also after a failure to remove
+   * the object, which is logged.
+   */
+  cleaned: boolean;
 }
 
 const OWNERS_PAGE = 100;
@@ -57,18 +71,18 @@ async function deleteFile(
   store: CloudropStore<unknown>,
   id: string,
   given: unknown,
-): Promise<Result<{ id: string }>> {
+): Promise<Result<DeletedFile>> {
   const options = given ?? {};
   if (!isPlainObject(options)) return fail(invalidInput("deleteFile takes the file id and optionally { context }."));
   const ended = await deleteCompleted(config, store, id, { reason: "deleted", context: options.context });
-  if (ended.error) return ended;
-  const { changed, record } = ended.data;
+  // Also onDelete's refusal: the error as the hook returned it, without the mark deleteCompleted answers it with.
+  if (ended.error) return fail(ended.error);
+  const { changed: deleted, record } = ended.data;
   if (record?.status !== "deleted") return fail(notCompleted());
   // Deleted and cleaned before: nothing is left to do. Deleted but not cleaned: an earlier call stopped in between, or
   // the file's URLs could still put it back, and the key is checked again.
-  if (!changed && record.cleanedAt !== null) return ok({ id });
-  const removed = await removeDeleted(config, store, record);
-  return removed.error ? removed : ok({ id });
+  const cleaned = (!deleted && record.cleanedAt !== null) || (await removeDeleted(config, store, record, "deleted"));
+  return ok({ id, deleted, cleaned });
 }
 
 async function reconcile(

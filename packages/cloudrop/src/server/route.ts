@@ -163,12 +163,14 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
   afterComplete?: (context: AfterCompleteContext<TAuth, TMetadata, TResult>) => Awaitable<void>;
   /**
    * With a store: runs when `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes one of the
-   * route's completed files; a throw keeps the file (store guide for each caller). With a transaction it runs inside
-   * it, and writes through `tx` commit once, with the deletion; the hook itself may run more than once, so keep other
-   * effects idempotent. Without one, at least once, before the deletion. `context` is what the caller passed to
-   * `api.deleteFile` or `api.eraseOwner`; a replacement gets the replacing upload's `request` instead.
+   * route's completed files. Return a `CloudropError` to refuse: the file is kept and the caller answers that error; a
+   * throw keeps it too, as a failure (store guide). With a transaction it runs inside it, and writes through `tx`
+   * commit once, with the deletion; the hook itself may run more than once, so keep other effects idempotent. Without
+   * one, at least once, before the deletion. `context` is what the caller passed to `api.deleteFile` or
+   * `api.eraseOwner`; a replacement gets the replacing upload's `request` instead.
    */
-  onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void>;
+  // biome-ignore lint/suspicious/noConfusingVoidType: `undefined` would refuse every hook that is an async function.
+  onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void | CloudropError>;
 }
 
 /**

@@ -93,8 +93,8 @@ async function resultToStore(
 }
 
 /**
- * Without a transaction: claim under a lease, and hand the row back at once when onComplete, or onDelete for a file it
- * is about to replace, fails in-process.
+ * Without a transaction: claim under a lease, and hand the row back at once when onComplete fails in-process, or
+ * onDelete for a file it is about to replace fails or refuses.
  */
 async function withLease(completion: Completion, store: CloudropStore<unknown>): Promise<Attempt> {
   const { calls, file, config, route } = completion;
@@ -166,15 +166,7 @@ async function inTransaction(
  * left to the sweep, whose cleanup pass finds the row deleted and not cleaned.
  */
 async function removeReplaced({ config }: Completion, store: CloudropStore<unknown>, replaced: readonly FileRecord[]) {
-  for (const record of replaced) {
-    const removed = await removeDeleted(config, store, record);
-    if (removed.error) {
-      config.logger.error(
-        `cloudrop: could not remove the replaced file ${record.id} from the bucket. The sweep removes it later.`,
-        removed.error,
-      );
-    }
-  }
+  for (const record of replaced) await removeDeleted(config, store, record, "replaced");
 }
 
 /** Best effort and at most once, after the completion is recorded: a throw is logged and the answer stands. */

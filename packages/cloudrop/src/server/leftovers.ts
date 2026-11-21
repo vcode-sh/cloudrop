@@ -57,17 +57,29 @@ export function settledAt(record: FileRecord, graceMs: number): number {
 }
 
 /**
- * Removes what a `deleted` row left, and marks the row cleaned only when that check is final under the default grace.
- * Otherwise `cleaned_at` stays null, so the sweep's cleanup pass checks the key again once the grace has passed.
+ * Removes what a `deleted` row left, and answers whether the row is now marked cleaned: only when that check is final
+ * under the default grace. Otherwise `cleaned_at` stays null, so the sweep's cleanup pass checks the key again once the
+ * grace has passed. A failure never fails the caller, as the row is deleted either way (M11-D2): it is logged, a
+ * storage one here as the `what` file's, and the sweep finishes the work.
  */
 export async function removeDeleted(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   record: FileRecord,
-): Promise<Result<void>> {
+  what: "deleted" | "replaced",
+): Promise<boolean> {
   const checked = await removeLeftovers(config, record);
-  if (checked.error) return checked;
+  if (checked.error) {
+    config.logger.error(
+      `cloudrop: could not remove the ${what} file ${record.id} from the bucket. The sweep removes it later.`,
+      checked.error,
+    );
+    return false;
+  }
   const checkedAt = checked.data;
-  if (checkedAt.getTime() < settledAt(record, DEFAULT_GRACE_MS)) return ok(undefined);
-  return storeCall(config.logger, `mark file ${record.id} cleaned`, () => store.cleaned(record.id, checkedAt));
+  if (checkedAt.getTime() < settledAt(record, DEFAULT_GRACE_MS)) return false;
+  const marked = await storeCall(config.logger, `mark file ${record.id} cleaned`, () =>
+    store.cleaned(record.id, checkedAt),
+  );
+  return !marked.error;
 }

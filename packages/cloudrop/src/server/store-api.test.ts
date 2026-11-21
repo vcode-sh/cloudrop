@@ -8,6 +8,9 @@ import type { FilesOptions } from "./owner-files.ts";
 import { route } from "./route.ts";
 
 const HOUR = 3_600_000;
+/** When a check of the bucket for a file completed at NOW is final: a URL signed as the completion claimed the file
+ *  works 15 minutes more, then the default grace, an hour. */
+const SETTLED = NOW.getTime() + 15 * 60_000 + HOUR;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -71,10 +74,12 @@ describe("cloudrop.api with a store", () => {
     expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
   });
 
-  it("deleteFile ends a completed file, deletes its object and releases its bytes, and again does nothing more", async () => {
+  it("deleteFile ends a completed file, deletes its object and releases its bytes, and says which call deleted it", async () => {
     const { fixture, ticket } = await completed();
-    expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
-    expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+    const { id } = ticket;
+    const { api } = fixture.cloudrop;
+    expect(await api.deleteFile(id)).toEqual({ data: { id, deleted: true, cleaned: false }, error: null });
+    expect(await api.deleteFile(id)).toEqual({ data: { id, deleted: false, cleaned: false }, error: null });
     const [row] = await fixture.store.raw.files();
     // Completed a moment ago, so a PUT with one of its URLs could still land: cleaned_at stays null for the sweep.
     expect([row?.status, row?.endedAt, row?.cleanedAt, (await fixture.storage.head(ticket.key)).data]).toEqual([
@@ -86,31 +91,86 @@ describe("cloudrop.api with a store", () => {
     expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
   });
 
-  it("deleteFile marks a file cleaned once its URLs and the grace after them have passed", async () => {
+  it("deleteFile marks a file cleaned once its URLs and the grace after them have passed, and then looks no more", async () => {
     const { fixture, ticket } = await completed();
-    // A URL signed as the completion claimed the file works 15 minutes more; then the default grace, an hour.
-    const settled = NOW.getTime() + 15 * 60_000 + HOUR;
-    vi.setSystemTime(settled - 1);
-    await fixture.cloudrop.api.deleteFile(ticket.id);
+    const { id } = ticket;
+    const { api } = fixture.cloudrop;
+    vi.setSystemTime(SETTLED - 1);
+    expect((await api.deleteFile(id)).data).toEqual({ id, deleted: true, cleaned: false });
     expect((await fixture.store.raw.files())[0]?.cleanedAt).toBeNull();
-    vi.setSystemTime(settled);
-    await fixture.cloudrop.api.deleteFile(ticket.id);
-    expect((await fixture.store.raw.files())[0]?.cleanedAt).toEqual(new Date(settled));
+    vi.setSystemTime(SETTLED);
+    expect((await api.deleteFile(id)).data).toEqual({ id, deleted: false, cleaned: true });
+    expect((await fixture.store.raw.files())[0]?.cleanedAt).toEqual(new Date(SETTLED));
+    const before = fixture.storageCalls.length;
+    expect((await api.deleteFile(id)).data).toEqual({ id, deleted: false, cleaned: true });
+    expect(fixture.storageCalls.slice(before)).toEqual([]);
   });
 
-  it("deleteFile finishes a deletion an earlier call left half done", async () => {
+  it("deleteFile of a file whose URLs and grace ran out before answers deleted and cleaned at once", async () => {
     const { fixture, ticket } = await completed();
-    // The network drops the first DELETE the server sends.
+    vi.setSystemTime(SETTLED);
+    const { data } = await fixture.cloudrop.api.deleteFile(ticket.id);
+    expect(data).toEqual({ id: ticket.id, deleted: true, cleaned: true });
+  });
+
+  // The row is deleted, so the file is gone for its owner whatever the bucket answers (M11-D2).
+  it("deleteFile answers success when the object cannot be removed, logs it, and a later call removes it", async () => {
+    const { fixture, ticket } = await completed();
+    const { id } = ticket;
+    const { api } = fixture.cloudrop;
     const { fetch } = fixture.fake;
-    fixture.fake.fetch = (input, init) => {
-      if (init?.method !== "DELETE") return fetch(input, init);
-      fixture.fake.fetch = fetch;
-      return Promise.reject(new TypeError("network down"));
+    fixture.fake.fetch = (input, init) =>
+      init?.method === "DELETE" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
+    // Past the grace, where a check that worked would be final.
+    vi.setSystemTime(SETTLED);
+    expect(await api.deleteFile(id)).toEqual({ data: { id, deleted: true, cleaned: false }, error: null });
+    // The same for a call that finds the row deleted by an earlier one.
+    expect(await api.deleteFile(id)).toEqual({ data: { id, deleted: false, cleaned: false }, error: null });
+    const logged = {
+      message: `cloudrop: could not remove the deleted file ${id} from the bucket. The sweep removes it later.`,
+      error: expect.objectContaining({ code: "STORAGE_UNREACHABLE" }),
     };
-    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error?.code).toBe("STORAGE_UNREACHABLE");
-    expect((await fixture.store.raw.files())[0]?.cleanedAt).toBeNull();
-    expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+    expect(fixture.logger.errors).toEqual([logged, logged]);
+    expect([
+      (await fixture.store.raw.files())[0]?.cleanedAt,
+      (await fixture.storage.head(ticket.key)).data?.size,
+    ]).toEqual([null, 5]);
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    fixture.fake.fetch = fetch;
+    expect((await api.deleteFile(id)).data).toEqual({ id, deleted: false, cleaned: true });
     expect((await fixture.storage.head(ticket.key)).data).toBeNull();
+  });
+
+  it("deleteFile answers success when the store fails to mark the deleted file cleaned, and a later call marks it", async () => {
+    const { fixture, ticket } = await completed();
+    const { id } = ticket;
+    const { api } = fixture.cloudrop;
+    vi.setSystemTime(SETTLED);
+    fixture.store.injectFailure("cleaned", 0);
+    expect(await api.deleteFile(id)).toEqual({ data: { id, deleted: true, cleaned: false }, error: null });
+    expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
+      `cloudrop: the store failed to mark file ${id} cleaned.`,
+    ]);
+    expect((await api.deleteFile(id)).data).toEqual({ id, deleted: false, cleaned: true });
+  });
+
+  it("deleteFile answers a retryable SERVER_ERROR when the store fails to delete, and keeps the file", async () => {
+    const { fixture, ticket } = await completed();
+    const { api } = fixture.cloudrop;
+    fixture.store.injectFailure("end", 0);
+    expect(await api.deleteFile(ticket.id)).toEqual({
+      data: null,
+      error: expect.objectContaining({
+        code: "SERVER_ERROR",
+        retryable: true,
+        message: "The server could not reach its upload records. Try again in a moment.",
+      }),
+    });
+    expect([(await api.file(ticket.id)).data?.status, (await fixture.storage.head(ticket.key)).data?.size]).toEqual([
+      "completed",
+      5,
+    ]);
+    expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, deleted: true, cleaned: false });
   });
 
   it("deleteFile keeps another upload's object stored under the same key since", async () => {

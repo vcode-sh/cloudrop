@@ -11,6 +11,7 @@ import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import pg from "pg";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { CloudropError } from "../errors.ts";
 import { complete } from "../testing/complete-fixture.ts";
 import { untilOneWaits, usePostgresDatabase } from "../testing/db/postgres.ts";
 import { rawTables } from "../testing/db/raw-tables.ts";
@@ -266,7 +267,7 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     const replacing = complete(fixture, next.token);
     await lockWaiter();
     held.open();
-    expect(await deleting).toEqual({ data: { id: previous.id }, error: null });
+    expect(await deleting).toEqual({ data: { id: previous.id, deleted: true, cleaned: false }, error: null });
     // The replacement found its file deleted by then: it rolls back and asks for a retry, which completes.
     expect((await replacing).body.error).toEqual({ code: "SERVER_ERROR", message: RETRY, retryable: true });
     expect((await complete(fixture, next.token)).status).toBe(200);
@@ -300,6 +301,66 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect([(await rawTables(db).files())[0]?.status, await appRows()]).toEqual([
       "deleted",
       [{ file_id: ticket.id, owner: "u1 deleted" }],
+    ]);
+  });
+
+  // A returned CloudropError refuses (M11-D3): the rollback a throw gets, on a real transaction, with nothing logged.
+  test("an onDelete that refuses rolls its writes back, for deleteFile and for a replacement, and answers its error", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    const refusal = new CloudropError("FORBIDDEN", "An administrator's file may not be deleted.");
+    let refusing = true;
+    const files = store.route(
+      { accept: "*/*", maxSize: "1GB", replace: true, authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onComplete: async ({ tx, file }) => {
+          await tx.insert(appUploads).values({ fileId: file.id, owner: "completed" });
+        },
+        onDelete: async ({ tx, file }) => {
+          await tx
+            .insert(appUploads)
+            .values({ fileId: file.id, owner: "deleted" })
+            .onConflictDoUpdate({
+              target: appUploads.fileId,
+              set: { owner: "deleted" },
+            });
+          return refusing ? refusal : undefined;
+        },
+      },
+    );
+    const fixture = serverFixture({ files }, { store });
+    const upload = async () => {
+      const ticket = await fixture.single("files", TEXT);
+      await fixture.send(ticket.put, hello);
+      return ticket;
+    };
+    const previous = await upload();
+    expect((await complete(fixture, previous.token)).status).toBe(200);
+    const next = await upload();
+    /** Each file's status, then what the app's row of it says. */
+    const state = async () => {
+      const rows = await db.query("SELECT file_id, owner FROM app_uploads");
+      const app = Object.fromEntries(rows.map((row) => [row.file_id, row.owner]));
+      const status = Object.fromEntries((await rawTables(db).files()).map((row) => [row.id, row.status]));
+      return [previous, next].map(({ id }) => [status[id], app[id]]);
+    };
+    expect((await fixture.cloudrop.api.deleteFile(previous.id)).error).toBe(refusal);
+    const refused = await complete(fixture, next.token);
+    expect([refused.status, refused.body.error]).toEqual([
+      403,
+      { code: "FORBIDDEN", message: "An administrator's file may not be deleted.", retryable: false },
+    ]);
+    // Neither hook's write stayed: not onDelete's change of the previous file's row, nor onComplete's row of the next.
+    expect(await state()).toEqual([
+      ["completed", "completed"],
+      ["pending", undefined],
+    ]);
+    expect(fixture.logger.errors).toEqual([]);
+    refusing = false;
+    expect((await complete(fixture, next.token)).status).toBe(200);
+    expect(await state()).toEqual([
+      ["deleted", "deleted"],
+      ["completed", "completed"],
     ]);
   });
 });

@@ -386,8 +386,9 @@ it runs once per file, and on a store built with `transaction: true` its writes 
 
 With a store, `onDelete({ file, owner, reason })` runs when one of the route's completed files is deleted by
 `api.deleteFile`, a `replace: true` completion or `api.eraseOwner`, so an audit trail or a pointer of yours follows the
-file. A throw keeps the file. With `transaction: true` it runs inside the deletion's transaction with `tx`; otherwise
-before the deletion, at least once. See [`onDelete`](store.md#ondelete).
+file. A throw keeps the file, as a failure; a `CloudropError` it returns keeps the file as a refusal, and the caller
+answers that error. With `transaction: true` it runs inside the deletion's transaction with `tx`; otherwise before the
+deletion, at least once. See [`onDelete`](store.md#ondelete).
 
 ### Plugin hooks
 

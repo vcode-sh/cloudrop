@@ -149,7 +149,8 @@ attachments: store.route(
 - To list a user's files, call `uploads.api.files({ owner: userId })`, a page at a time, or select from
   `cloudropFiles` with your app's Drizzle where `owner` is the user and `status` is `completed`: the tables are yours.
   To delete one, check its owner with `uploads.api.file(id)`, then call `uploads.api.deleteFile(id)`, which removes the
-  object and frees its bytes in the quota. The example's oRPC router `files` (`list`, `delete`, `avatar`) does both.
+  object, frees its bytes in the quota and answers `{ id, deleted, cleaned }`. The example's oRPC router `files`
+  (`list`, `delete`, `avatar`) does both.
 - Protect the RPC router against cross-site requests. oRPC accepts a `multipart/form-data` body, which a page on
   another origin of the same site can post without a preflight, and the browser sends the `SameSite=Lax` session
   cookie with it. Add oRPC's pair: `SimpleCsrfProtectionHandlerPlugin` from `@orpc/server/plugins` on the

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
-import { type MemoryStore, type MemoryTx, memoryStore } from "../testing/memory-store.ts";
+import { deleting, MODES } from "../testing/delete-fixture.ts";
+import { memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, leaseStore, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
-import type { DeleteContext } from "./delete-context.ts";
-import { route, routeFor } from "./route.ts";
+import { route } from "./route.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -13,71 +13,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-type Mode = "transaction" | "lease";
-const MODES: Mode[] = ["transaction", "lease"];
-
-/** One onDelete call as the hook saw it. */
-interface Seen {
-  id: string;
-  owner: string | null;
-  reason: string;
-  status: string;
-  tx: boolean;
-  /** What the caller passed as context. */
-  context?: unknown;
-  /** Whether it got the replacing upload's request. */
-  request: boolean;
-}
-
-/**
- * A server whose "files" route (one file per owner with `replace`) records each onDelete call, writes an app row through
- * `tx` when it has one, and throws while `failing` is set, or with `unique` for a file it already ran for (as an
- * audit insert keyed by the file would). `pause` stops the next call until the test opens it.
- */
-function deleting(mode: Mode, options: { replace?: boolean; inherited?: boolean } = {}) {
-  const memory = memoryStore();
-  // A store whose methods live on its prototype and whose transaction reads `this`, as a class's would.
-  const backing: MemoryStore = options.inherited
-    ? Object.create(memory, {
-        transaction: {
-          value(this: unknown, run: Parameters<MemoryStore["transaction"]>[0]) {
-            if (this !== backing) throw new TypeError("Cannot read private member #pool from an object");
-            return memory.transaction(run);
-          },
-        },
-      })
-    : memory;
-  const seen: Seen[] = [];
-  const state = { failing: false, unique: false, pause: undefined as (() => Promise<void>) | undefined };
-  const onDelete = async ({ file, owner, reason, tx, context, request }: DeleteContext & { tx?: MemoryTx }) => {
-    const pause = state.pause;
-    state.pause = undefined;
-    await pause?.();
-    const again = seen.some((call) => call.id === file.id);
-    seen.push({ id: file.id, owner, reason, status: file.status, tx: tx !== undefined, context, request: !!request });
-    tx?.write(`${reason} ${file.id}`);
-    if (state.failing) throw new Error("The audit table is down.");
-    if (state.unique && again) throw new Error("duplicate key value violates unique constraint");
-  };
-  const policy = { accept: "*/*", maxSize: 1024, replace: options.replace, authorize: () => ({ userId: "u1" }) };
-  const callbacks = { owner: ({ userId }: { userId: string }) => userId, onDelete };
-  const files =
-    mode === "transaction" ? routeFor<{ tx: MemoryTx }>(backing)(policy, callbacks) : route(policy, callbacks);
-  const fixture = storeFixture({ files }, { store: mode === "transaction" ? backing : leaseStore(memory) });
-  const upload = async () => {
-    const ticket = await fixture.single("files", TEXT);
-    await fixture.send(ticket.put, hello);
-    return ticket;
-  };
-  const uploaded = async () => {
-    const ticket = await upload();
-    expect((await complete(fixture, ticket.token)).status).toBe(200);
-    return ticket;
-  };
-  const status = async (id: string) => (await fixture.cloudrop.api.file(id)).data?.status;
-  const stored = async (key: string) => (await fixture.storage.head(key)).data !== null;
-  return { fixture, memory, seen, state, upload, uploaded, status, stored };
-}
+/** What deleteFile answers beside the id, inside the hour and a quarter in which the file's URLs could put it back. */
+const first = { deleted: true, cleaned: false };
+const again = { deleted: false, cleaned: false };
 
 const kept = {
   code: "SERVER_ERROR",
@@ -94,8 +32,8 @@ describe("onDelete with api.deleteFile", () => {
       const ticket = await uploaded();
       const { api } = fixture.cloudrop;
       const context = { actorId: "admin-1", why: "spam" };
-      expect(await api.deleteFile(ticket.id, { context })).toEqual({ data: { id: ticket.id }, error: null });
-      expect(await api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+      expect((await api.deleteFile(ticket.id, { context })).data).toEqual({ id: ticket.id, ...first });
+      expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...again });
       const tx = mode === "transaction";
       expect(seen).toEqual([
         { id: ticket.id, owner: "u1", reason: "deleted", status: "completed", tx, context, request: false },
@@ -128,21 +66,21 @@ describe("onDelete with api.deleteFile", () => {
   it("transaction: works on a store whose methods are inherited, as a class's are", async () => {
     const { fixture, memory, uploaded, status } = deleting("transaction", { inherited: true });
     const ticket = await uploaded();
-    expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...first });
     expect([await status(ticket.id), memory.appRows()]).toEqual(["deleted", [`deleted ${ticket.id}`]]);
   });
 
   it("transaction: two deletions at once commit onDelete's writes once", async () => {
     const { fixture, memory, seen, state, uploaded } = deleting("transaction");
     const ticket = await uploaded();
-    const first = gate();
-    state.pause = first.pass;
+    const paused = gate();
+    state.pause = paused.pass;
     const { api } = fixture.cloudrop;
     const slow = api.deleteFile(ticket.id);
-    await first.arrived;
-    expect((await api.deleteFile(ticket.id)).error).toBeNull();
-    first.open();
-    expect((await slow).error).toBeNull();
+    await paused.arrived;
+    expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...first });
+    paused.open();
+    expect((await slow).data).toEqual({ id: ticket.id, ...again });
     // Both ran, but the slow one found the row already deleted and rolled its writes back.
     expect(seen.map((call) => call.id)).toEqual([ticket.id, ticket.id]);
     expect(memory.appRows()).toEqual([`deleted ${ticket.id}`]);
@@ -154,16 +92,52 @@ describe("onDelete with api.deleteFile", () => {
     const { fixture, memory, state, uploaded, status } = deleting(mode);
     const ticket = await uploaded();
     state.unique = true;
-    const first = gate();
-    state.pause = first.pass;
+    const paused = gate();
+    state.pause = paused.pass;
     const { api } = fixture.cloudrop;
     const slow = api.deleteFile(ticket.id);
-    await first.arrived;
-    expect(await api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
-    first.open();
-    expect(await slow).toEqual({ data: { id: ticket.id }, error: null });
+    await paused.arrived;
+    expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...first });
+    paused.open();
+    expect(await slow).toEqual({ data: { id: ticket.id, ...again }, error: null });
     expect(await status(ticket.id)).toBe("deleted");
     expect(memory.appRows()).toEqual(mode === "transaction" ? [`deleted ${ticket.id}`] : []);
+  });
+
+  it.for(MODES)(
+    "%s: a store failure after onDelete answers a retryable SERVER_ERROR and keeps the file",
+    async (mode) => {
+      const { fixture, memory, uploaded, status } = deleting(mode);
+      const ticket = await uploaded();
+      const { api } = fixture.cloudrop;
+      memory.injectFailure("end", 0);
+      expect((await api.deleteFile(ticket.id)).error).toEqual(
+        expect.objectContaining({
+          code: "SERVER_ERROR",
+          retryable: true,
+          message: "The server could not reach its upload records. Try again in a moment.",
+        }),
+      );
+      expect([await status(ticket.id), memory.appRows()]).toEqual(["completed", []]);
+      expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...first });
+    },
+  );
+
+  it.for(MODES)("%s: a file whose route the server no longer has is deleted without any hook", async (mode) => {
+    const { memory, seen, uploaded } = deleting(mode);
+    const ticket = await uploaded();
+    // A later deploy on the same database: "files" is gone, and another route has an onDelete of its own.
+    const ran: string[] = [];
+    const renamed = route(
+      { accept: "*/*", maxSize: 1024, authorize: () => ({}) },
+      { owner: () => "u1", onDelete: ({ file }) => void ran.push(file.id) },
+    );
+    const later = storeFixture({ renamed }, { store: mode === "transaction" ? memory : leaseStore(memory) });
+    expect(await later.cloudrop.api.deleteFile(ticket.id)).toEqual({
+      data: { id: ticket.id, ...first },
+      error: null,
+    });
+    expect([(await later.cloudrop.api.file(ticket.id)).data?.status, ran, seen]).toEqual(["deleted", [], []]);
   });
 
   it("without any onDelete on the server, deleteFile makes only the store call it made before onDelete", async () => {
@@ -202,6 +176,7 @@ describe("onDelete with api.eraseOwner", () => {
     expect((await api.eraseOwner("u1", { context })).data).toEqual({
       revoked: 0,
       deleted: 0,
+      refused: 0,
       cleaned: 0,
       failed: 1,
       // Still completed, so also a live file the run could not prove gone.
@@ -264,7 +239,7 @@ describe("onDelete with replace", () => {
     await paused.arrived;
     expect((await complete(fixture, next.token)).status).toBe(200);
     paused.open();
-    expect(await deletion).toEqual({ data: { id: previous.id }, error: null });
+    expect(await deletion).toEqual({ data: { id: previous.id, ...again }, error: null });
     expect([await status(previous.id), memory.appRows()]).toEqual(["deleted", [`replaced ${previous.id}`]]);
   });
 

@@ -102,7 +102,8 @@ with a stable `file.id`. What it cannot do without a record of its own:
   the deleted object, so a resumed client does not upload it again.
 - **`onDelete` with the deletion.** A route's [`onDelete`](#ondelete) runs for each completed file `deleteFile`,
   `replace` or `eraseOwner` deletes: with `transaction: true` inside the deletion's transaction, exactly once for
-  writes through `tx`; otherwise before the deletion, at least once. A throw keeps the file.
+  writes through `tx`; otherwise before the deletion, at least once. A throw keeps the file, and so does a
+  `CloudropError` the hook returns, which [refuses the deletion](#refuse-a-deletion).
 - **A hard quota.** Concurrent uploads of one owner cannot pass their limit.
 - **`/abort` never deletes a completed file**, and an ended row refuses `/sign` and `/complete`.
 - **The sweep deletes only what it may.** It removes an object only when the object's `cloudrop-id` names a row that
@@ -586,17 +587,60 @@ no longer among your `routes` is deleted without one.
 | --- | --- | --- |
 | When | Inside the deletion's transaction, before cloudrop locks the file and the owner's counters. | Before the deletion is recorded. |
 | How often | Exactly once for writes through `tx`. Two deletions of one file at once may both run it, but the one that finds the file already deleted rolls its writes back. | At least once, like `onComplete` under a lease: again after a deletion that failed after it is retried, and twice when two calls delete the file at once. Make it idempotent by `file.id`. |
-| A throw | Rolls back the deletion and everything written through `tx`. | Keeps the file: the deletion is not recorded. |
+| A throw, or a [refusal](#refuse-a-deletion) | Rolls back the deletion and everything written through `tx`. | Keeps the file: the deletion is not recorded. What the hook wrote before it stays. |
 
-A throw is logged, the file stays, and the call answers:
+### Refuse a deletion
 
-- **`api.deleteFile`:** a retryable `SERVER_ERROR`, "onDelete failed for route "files", so the file was kept. Its error
-  is in the server log; fix it and try again."
-- **`api.eraseOwner`:** the file counts in `failed`, and `waiting` as it is still completed; the run goes on with the
-  next file and reports `done: false`, and the next run tries it again.
-- **A replacing `/complete`:** the retryable `SERVER_ERROR` a throw in `onComplete` gives. The new file is not
-  recorded (with a transaction, `onComplete`'s writes roll back too), the previous one stays, and the client's retry
-  runs both hooks again.
+To keep a file, **return** a `CloudropError` from `onDelete`. The file stays completed, with its bytes and its object,
+nothing is logged, and the caller gets your error: its `code`, `message` and `retryable`. The rule is checked inside
+the hook, under the locks the hook takes, so it needs no second check before the call that could go stale:
+
+```ts
+import { CloudropError } from "cloudrop";
+
+onDelete: async ({ tx, file, owner, context }) => {
+  const by = context as { actorId: string } | undefined;
+  // Locks the owner's row, so their role cannot change before the deletion commits.
+  const [user] = await tx.select().from(users).where(eq(users.id, owner ?? "")).for("update");
+  if (user?.role === "admin" && by?.actorId !== owner) {
+    return new CloudropError("FORBIDDEN", "This file belongs to an administrator. Only they can delete it.");
+  }
+  await tx.insert(auditEvents).values({ action: "file-deleted", actorId: by?.actorId ?? owner, fileId: file.id });
+},
+```
+
+```ts
+const { data, error } = await cloudrop.api.deleteFile(id, { context: { actorId: session.user.id } });
+if (error?.code === "FORBIDDEN") return forbidden(error.message); // the hook's refusal, not an outage
+```
+
+A throw keeps the file too, but as a failure. What each caller answers:
+
+| Caller | A refusal: `onDelete` returned a `CloudropError` | A failure: `onDelete` threw, or returned anything else |
+| --- | --- | --- |
+| `api.deleteFile` | That error, as it is. | A retryable `SERVER_ERROR`, "onDelete failed for route "files", so the file was kept. Its error is in the server log; fix it and try again." |
+| `api.eraseOwner` | The file counts in `refused`, and in `waiting` as it is still completed. The run goes on with the next file and reports `done: false`; the next run asks the hook again. | The file counts in `failed` and in `waiting`. The run goes on and reports `done: false`; the next run tries it again. |
+| A replacing `/complete` | The client gets that error, with the HTTP status of its code (`FORBIDDEN` is 403). The new file is not recorded and the previous one stays. | The retryable `SERVER_ERROR` a throw in `onComplete` gives. The new file is not recorded, the previous one stays, and the client's retry runs both hooks again. |
+| The server log | Nothing. | The error, with the route and the file's id. |
+
+- **Only a returned error refuses.** A thrown `CloudropError` is a failure like any other throw, so an error from a
+  cloudrop call that your hook rethrows never passes for your refusal. Any other returned value is a failure too,
+  logged with its type: a string, `false`, `null`, the result of a query in an arrow function without braces, or a
+  `CloudropError` made by a second installed copy of cloudrop. Up to 0.5.0 a returned value was ignored.
+- **A replacing `/complete`.** With a transaction the whole completion rolls back, `onComplete`'s writes through `tx`
+  included. Under a lease `onComplete` has already run and what it wrote stays, as after a throw; the claim is handed
+  back, so a later `/complete` runs both hooks again without waiting. The client ends the file with your error, as
+  for any `/complete` error that is not retryable; with `retryable: true` it tries `/complete` again first. Use a code
+  the handler sends ([endpoint errors](errors.md#upload-endpoint-errors)), such as `FORBIDDEN`: a client's own code,
+  such as `ABORTED`, reaches the browser as the generic `SERVER_ERROR`. Avoid `SERVER_ERROR` itself: the client reads
+  it as a completion that may have finished, and keeps the upload instead of cancelling it.
+- **A refusal is the hook's answer to that caller.** When another call deletes the file while your hook refuses, the
+  refused caller still gets the refusal, not the answer for a file already deleted, and with a transaction what the
+  hook wrote rolls back. `eraseOwner` counts such a file in `refused`, and `done` follows the owner's rows as always.
+- **Refuse before you write, without `tx`.** Under a lease, and in a plain `route()` on a store with a transaction
+  (it gets no `tx`), cloudrop cannot undo what the hook wrote before it refused.
+
+### A replacement whose files change meanwhile
 
 A replacing completion runs `onDelete`, after `onComplete`, for the owner's files it is about to replace, then records
 the completion. When the owner's files change in between (another upload on the route completes, or a `deleteFile`
@@ -604,8 +648,8 @@ takes the previous file):
 
 - **with a transaction**, the completion rolls back and the client is asked to retry, which lists the files again;
 - **without one**, a file that completed in between is replaced too, and its `onDelete` runs right after the record,
-  where a throw is only logged. A crash, or a database answer lost after the commit, between the record and that run
-  skips it.
+  where a throw is only logged, and so is a refusal: the file is deleted already and cannot be kept. A crash, or a
+  database answer lost after the commit, between the record and that run skips it.
 
 When `onDelete` throws because another deletion got there first (an audit row keyed by the file already exists), the
 file is deleted all the same, and the call answers as it does for a file already deleted.
@@ -739,7 +783,7 @@ needs no knowledge of your key layout.
 ```ts
 // Stop the owner's access first (delete the account or its sessions), then run it, now and on a schedule, until done.
 const { data, error } = await cloudrop.api.eraseOwner(userId);
-// data: { revoked, deleted, cleaned, failed, waiting, done }
+// data: { revoked, deleted, refused, cleaned, failed, waiting, done }
 if (data?.done) await markErased(userId); // your app's record
 ```
 
@@ -751,6 +795,7 @@ own. It reports:
 | --- | --- |
 | `revoked` | Unfinished uploads ended in this run. |
 | `deleted` | Completed files deleted in this run. |
+| `refused` | Completed files kept because their route's [`onDelete` refused](#refuse-a-deletion). Still completed, they count in `waiting` too, so the owner is not `done` until the hook lets them go. |
 | `cleaned` | Ended uploads whose key this run checked once their URLs and the grace had run out. |
 | `failed` | Files a storage or database error kept from being handled; each is logged with its id. |
 | `waiting` | Files that cannot be proven yet: a completion still under way, an upload that started while it ran, or an ended upload whose URLs, or the grace after them, have not run out. What they had stored was removed. |
@@ -786,13 +831,36 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
-| `deleteFile(id, { context? })` | Deletes a completed file: the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
-| `eraseOwner(owner, { graceMs?, signal?, context? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)); `context` reaches each file's [`onDelete`](#ondelete). |
+| `deleteFile(id, { context? })` | Deletes a completed file and answers `{ id, deleted, cleaned }` ([below](#what-deletefile-answers)): the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Idempotent. `NOT_FOUND` for a file that never completed; the hook's own error when [`onDelete` refuses](#refuse-a-deletion). |
+| `eraseOwner(owner, { graceMs?, signal?, context? })` | Removes everything an owner uploaded, and reports `{ revoked, deleted, refused, cleaned, failed, waiting, done }`: when that is proven, and which files an `onDelete` refused ([above](#erase-an-owner)); `context` reaches each file's [`onDelete`](#ondelete). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |
 
 `api.delete(key)` still deletes an object by key, but leaves the row and the owner's usage as they were: use
 `deleteFile` for uploaded files.
+
+### What `deleteFile` answers
+
+```ts
+const { data, error } = await cloudrop.api.deleteFile(id);
+// data: { id, deleted, cleaned }
+if (data?.deleted) await notifyOwner(id); // only the call that deleted the file
+```
+
+| Field | Meaning |
+| --- | --- |
+| `deleted` | `true` when this call moved the file from completed to deleted; `false` when it was deleted already, by an earlier call, a replacement or `eraseOwner`. Of two calls at once exactly one answers `true`. |
+| `cleaned` | `true` when the file's row is marked cleaned: the bucket was checked once the file's URLs and the grace after them had run out, and holds nothing of it. `false` while the sweep still has to check again. |
+
+- **`cleaned: false` is the usual first answer.** A `PUT` with one of the file's URLs can still land for 15 minutes
+  after the upload completed, and gets an hour more to finish. Within that 1 hour 15 minutes the object is removed and
+  the row is left for the sweep to check once more; a file completed longer ago answers `cleaned: true` at once.
+- **Once the row is deleted, the call succeeds.** The file is gone for its owner, its bytes released. When the object
+  then cannot be removed, or the row cannot be marked cleaned, the failure is logged with the file's id and the answer
+  is `cleaned: false`: the sweep removes the object, and so does another `deleteFile`.
+- **An error means the file was not deleted by this call**: `NOT_FOUND`, your `onDelete`'s refusal, or a retryable
+  `SERVER_ERROR` when the hook threw or the database failed. After a database failure the deletion may have been
+  committed all the same, and the call that follows then answers `deleted: false`.
 
 ## The sweep
 
