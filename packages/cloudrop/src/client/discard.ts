@@ -6,6 +6,7 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
+import { tryRead } from "./arguments.ts";
 import { lockRefused, notListed, uploadInUse } from "./failures.ts";
 import { lockUpload } from "./locks.ts";
 import { expiresSoon } from "./records.ts";
@@ -13,7 +14,8 @@ import { retryStep } from "./retry-step.ts";
 import { claim, type UploadContext } from "./upload.ts";
 
 export async function discard(context: UploadContext, upload: unknown): Promise<Result<{ aborted: boolean }>> {
-  const { id, expiresAt } = (upload ?? {}) as { id?: unknown; expiresAt?: unknown };
+  const listed = (upload ?? {}) as { id?: unknown; expiresAt?: unknown };
+  const [id, expiresAt] = tryRead(() => [listed.id, listed.expiresAt]) ?? [];
   if (typeof id !== "string") return fail(invalidInput("Pass discard() an upload from resumable()."));
   // Claimed before the first await, as a resume claims (M4-F22): resumable() leaves it out from now on.
   const release = claim(context, id);

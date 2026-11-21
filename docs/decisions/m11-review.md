@@ -904,3 +904,22 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   with `UPLOAD_EXPIRED` and `retry()` starts it again.
 - **Status:** in force.
 - **Visible in:** `src/client/launch.ts`, `src/client/launch.test.ts`.
+
+### M11-R84: a hostile argument is `INVALID_INPUT`, never a throw
+
+- **Decision:** `start()`, `upload()`, `resume()`, `discard()` and `forget()` read what the caller passed through
+  `tryRead` (`src/client/arguments.ts`), so a getter or a proxy that throws is answered as `INVALID_INPUT`: "An
+  argument threw an error while it was read. Pass plain values: a route name, File objects and options." for
+  `start()` and `upload()`, each other call's own message otherwise. A list of files is read entry by entry and refused
+  at the first that is no `File`, before anything is copied.
+- **Why:** reproduced: `upload("files", { length: Infinity })` and `start("files", { length: 2 ** 32 })` threw
+  `RangeError: Invalid array length` out of the call, and `{ length: 2 ** 32 - 1 }` ran `Array.from` out of memory
+  (the test worker died with it), because the list was copied before it was checked. A `length` getter that threw
+  left `upload()` twice, once from the check and once from telling a list from a file. Public calls return
+  `{ data, error }`; a `RangeError` from inside the library says nothing a caller can act on.
+- **If wrong:** none known. A list with a hole is refused as before, with the message for a list that holds something
+  other than files.
+- **Status:** in force.
+- **Visible in:** `src/client/arguments.ts`, `src/client/resume.ts`, `src/client/discard.ts`,
+  `src/client/arguments.test.ts`.
+

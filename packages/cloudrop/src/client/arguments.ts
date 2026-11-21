@@ -10,9 +10,23 @@ export interface Arguments {
   signal: AbortSignal;
 }
 
+/**
+ * What `read` returns, or undefined when it threw: reading a caller's value runs the caller's code (a getter, a proxy),
+ * and its throw must not leave a call that answers with an error (M11-R84).
+ */
+export function tryRead<T>(read: () => T): T | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
+}
+
 /** A list of files as a caller passes it: an array, `input.files`, or any other object with a numeric `length`. */
 export const isList = (value: unknown): value is ArrayLike<unknown> =>
-  typeof value === "object" && value !== null && "length" in value && typeof value.length === "number";
+  tryRead(
+    () => typeof value === "object" && value !== null && "length" in value && typeof value.length === "number",
+  ) === true;
 
 const refuse = (message: string) => fail(invalidInput(message));
 
@@ -28,19 +42,26 @@ function encodesAsJson(value: unknown): boolean {
 function readFiles(files: unknown): Result<File[]> {
   if (files instanceof File) return ok([files]);
   if (!isList(files)) return refuse('Pass the file as a File, such as one from <input type="file">.');
-  const list = Array.from(files);
-  if (!list.every((file) => file instanceof File)) {
-    return refuse('Pass the files as File objects, such as input.files from <input type="file" multiple>.');
+  // Read one by one and refused at the first that is no File, never copied first: Array.from throws for a length of
+  // Infinity or 2 ** 32 and runs out of memory just below it (M11-R84).
+  const list: File[] = [];
+  const { length } = files;
+  for (let index = 0; index < length; index++) {
+    const file = files[index];
+    if (!(file instanceof File)) {
+      return refuse('Pass the files as File objects, such as input.files from <input type="file" multiple>.');
+    }
+    list.push(file);
   }
   return list.length === 0 ? refuse("Pass at least one file to upload.") : ok(list);
 }
 
-export function readArguments(route: unknown, files: unknown, options: unknown): Result<Arguments> {
+function read(route: unknown, files: unknown, options: unknown): Result<Arguments> {
   if (typeof route !== "string" || route === "") {
     return refuse('Name the upload route as text, such as upload("avatar", file).');
   }
-  const read = readFiles(files);
-  if (read.error) return read;
+  const listed = readFiles(files);
+  if (listed.error) return listed;
   if (options !== undefined && !isPlainObject(options)) {
     return refuse("Pass the upload options as an object, such as { metadata, signal }.");
   }
@@ -55,5 +76,12 @@ export function readArguments(route: unknown, files: unknown, options: unknown):
       "options.metadata must be JSON data, such as objects, strings and numbers: it holds a value JSON cannot encode, such as a BigInt or a circular reference.",
     );
   }
-  return ok({ route, files: read.data, metadata, signal });
+  return ok({ route, files: listed.data, metadata, signal });
+}
+
+export function readArguments(route: unknown, files: unknown, options: unknown): Result<Arguments> {
+  return (
+    tryRead(() => read(route, files, options)) ??
+    refuse("An argument threw an error while it was read. Pass plain values: a route name, File objects and options.")
+  );
 }

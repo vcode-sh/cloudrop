@@ -4,7 +4,7 @@
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
-import { readArguments } from "./arguments.ts";
+import { readArguments, tryRead } from "./arguments.ts";
 import type { Ticket } from "./endpoints.ts";
 import { type Entry, settle } from "./entry.ts";
 import { notResumable, notSameFile, uploadInUse } from "./failures.ts";
@@ -43,7 +43,7 @@ export async function resumable(context: UploadContext, route?: string): Promise
 export async function forget(context: UploadContext, options: unknown): Promise<Result<{ forgotten: number }>> {
   const all = options !== undefined;
   // Exactly { all: true }: forget(userId) would otherwise look as if it forgot that user.
-  if (all && !(isPlainObject(options) && options.all === true && Object.keys(options).length === 1)) {
+  if (all && !tryRead(() => isPlainObject(options) && options.all === true && Object.keys(options).length === 1)) {
     return fail(
       invalidInput(
         "Call forget() for this client's unfinished uploads, or forget({ all: true }) for every one in this browser.",
@@ -183,7 +183,7 @@ export function resumeJob(
   file: unknown,
   options: unknown,
 ): UploadJob<unknown> {
-  const id = (upload as { id?: unknown } | null | undefined)?.id;
+  const id = tryRead(() => (upload as { id?: unknown } | null | undefined)?.id);
   // The options as start() reads them. The route and the metadata come from the record once it is read.
   const args =
     typeof id === "string" && file instanceof File
