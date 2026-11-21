@@ -2516,8 +2516,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   name's extension, so every name in the table gets a ticket there, and the stored `Content-Disposition` carries
   each name as `M11-R196` says: `filename` with `_` for what is not printable ASCII, `filename*` percent-encoded
   (`a%C2%A0b.txt`, `%20a.txt%20`, `a%2Fb.txt`).
-- **If wrong:** a route whose own part of the key has an empty or dot part answers a name that has one too with
-  `INVALID_INPUT`, not a 500; every plain name still gets the 500 that shows the bug. Two things a name can still do
+- **If wrong:** a route whose own part of the key has an empty or dot part, or a control character, answers a name
+  that has the same with `INVALID_INPUT`, not a 500; every plain name still gets the 500 that shows the bug. Two things a name can still do
   to a key stay the route's bug: a key over 1024 bytes (a name of 255 four-byte characters is 1020 bytes; ext4 and
   APFS cap a real name at 255 bytes and NTFS at 255 UTF-16 units, 765 bytes) and a lone surrogate a route makes by cutting a name inside a character
   (`file.name.slice(0, 50)`). A `prefix` that starts with `/` because the name does is refused as the route's, by
