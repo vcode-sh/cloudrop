@@ -1030,3 +1030,18 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
   `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
 
+### M11-R130: a name read from a file is never looked up on a plain object
+
+- **Decision:** the EBML DocType table is a `Map`, as the ISO BMFF brand table already was, so a DocType of
+  `constructor`, `toString` or `__proto__` is no type. Every lookup in `src/plugins/**` whose key comes from the file
+  is a `Map`, a `Set`, a list or a pattern. `src/plugins/sniff-fuzz.test.ts` runs more than 20,000 inputs (each
+  signature's start before random bytes, cut at every length up to 64, and each sample with one byte changed) through
+  `sniff` and through `afterVerify`, and both must answer: a type or none, a pass or a refusal.
+- **Why:** `DOC_TYPES["constructor"]` answered `Object`'s constructor, which `checkContent` then read as a detection
+  and threw a `TypeError`. An `afterVerify` that throws keeps the object and answers a retryable `500`, so a 20-byte
+  file made every `/complete` of it fail for ever, with an error logged each time (review finding G4, reproduced).
+  `sniff` is not wrapped in a `try`: a caught bug would pass the file as sent, which is the wrong answer to hide.
+- **If wrong:** a later table keyed by file content and written as an object literal brings it back; the fuzz inputs
+  include DocTypes named like inherited members, and a new format adds its start to `PREFIXES`.
+- **Status:** in force.
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.test.ts`, `src/plugins/sniff-fuzz.test.ts`.

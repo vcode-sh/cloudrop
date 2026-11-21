@@ -173,6 +173,11 @@ describe("sniff: Matroska and WebM (RFC 8794 EBML DocType)", () => {
   ])("reads DocType $docType", ({ docType, type }) => {
     expect(typeOf(ebml(docType))).toBe(type);
   });
+
+  // A DocType is the file's own text: one named like a member every object inherits is no type (M11-R130).
+  it.for(["constructor", "toString", "__proto__", "hasOwnProperty"])("reads no type from DocType %s", (docType) => {
+    expect(sniff(ebml(docType))).toBeNull();
+  });
 });
 
 describe("sniff: ZIP-based office formats", () => {

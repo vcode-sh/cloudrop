@@ -48,11 +48,14 @@ function sniffIsoBmff(bytes: Uint8Array): Sniffed | null {
   return { ...major, agrees: [...agrees] };
 }
 
-/** EBML DocType values: WebM (webmproject.org container guidelines) and Matroska (RFC 9559 §4.2). */
-const DOC_TYPES: Readonly<Record<string, Sniffed>> = {
-  webm: kind("video/webm", "a WebM video", "audio/webm"),
-  matroska: kind("video/x-matroska", "a Matroska video", "audio/x-matroska", "video/matroska", "audio/matroska"),
-};
+/**
+ * EBML DocType values: WebM (webmproject.org container guidelines) and Matroska (RFC 9559 §4.2). A Map, as BRANDS is:
+ * the name comes from the file, and a plain object would answer "constructor" with a function (M11-R130).
+ */
+const DOC_TYPES: ReadonlyMap<string, Sniffed> = new Map([
+  ["webm", kind("video/webm", "a WebM video", "audio/webm")],
+  ["matroska", kind("video/x-matroska", "a Matroska video", "audio/x-matroska", "video/matroska", "audio/matroska")],
+]);
 
 /**
  * An EBML header (ID 1A 45 DF A3, RFC 8794 §8) and its DocType element (ID 42 82, §11.2.6) with a one-byte size, found
@@ -63,7 +66,7 @@ function sniffEbml(bytes: Uint8Array): Sniffed | null {
   for (let at = 4; at + 3 < Math.min(bytes.length, 64); at++) {
     const size = bytes[at + 2] ?? 0;
     if (bytes[at] === 0x42 && bytes[at + 1] === 0x82 && size & 0x80) {
-      return DOC_TYPES[latin1(bytes, at + 3, at + 3 + (size & 0x7f))] ?? null;
+      return DOC_TYPES.get(latin1(bytes, at + 3, at + 3 + (size & 0x7f))) ?? null;
     }
   }
   return null;
