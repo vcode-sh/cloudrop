@@ -6,7 +6,7 @@ import type { Result } from "../errors.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
 import type { CommandOptions } from "./args.ts";
-import { count, type Finding, type Output, plural, printFindings, ruleName, ruleNames } from "./report.ts";
+import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
 import { readStorage, type Variables } from "./settings.ts";
 
@@ -16,12 +16,14 @@ interface Step {
   ruleId: string;
   /** What cloudrop's rule does, for the output. */
   describe: string;
-  change: Merged<unknown>["change"];
+  change: "add" | "update" | "none";
   kept: { id?: string }[];
   /** True when the current rules could not be read and --replace allowed writing cloudrop's alone. */
   replacing: boolean;
-  /** Why nothing changes, when another rule already does the job. */
-  covered?: string;
+  /** Why nothing changes, when that is the case. */
+  reason?: string;
+  /** What cloudrop's rule gains, for an update. */
+  added?: string;
   write(): Promise<Result<void>>;
 }
 
@@ -31,20 +33,20 @@ interface Setting<Rule> {
   describe: string;
   read: Result<Rule[]>;
   merge(current: readonly Rule[], ours: Rule): Merged<Rule>;
-  covered(rule: Rule): string;
   write(rules: Rule[]): Promise<Result<void>>;
 }
 
 /**
- * A step, or the finding that refuses one because the current rules could not be read. --replace covers only a read
- * the credentials or the service refuse (403, 501): a failure that may pass, such as a timeout, never replaces rules.
+ * A step, or the finding that refuses one: the current rules could not be read, or cloudrop's own rule was edited.
+ * --replace covers only a read the credentials or the service refuse (403, 501); any other failure says nothing about
+ * the rules, so it never replaces them.
  */
 function plan<Rule extends { id?: string }>(setting: Setting<Rule>, replace: boolean): Step | Finding {
   const { label, ours, describe, read } = setting;
   const refusedRead = read.error?.code === "STORAGE_DENIED" || read.error?.status === 501;
   if (read.error && !(replace && refusedRead)) {
     const next = replace
-      ? "--replace applies only when the rules may not be read, and this failure may pass: run the command again."
+      ? "--replace applies only when the credentials or the service refuse the read."
       : "Use credentials that may read and change bucket settings, or pass --replace to replace the rules with cloudrop's alone.";
     return {
       status: "problem",
@@ -52,14 +54,17 @@ function plan<Rule extends { id?: string }>(setting: Setting<Rule>, replace: boo
     };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
+  const { change, kept, reason, added } = merged;
+  if (change === "blocked") return { status: "problem", text: `${label}: ${reason}` };
   return {
     label,
     ruleId: ours.id,
     describe,
-    change: merged.change,
-    kept: merged.kept,
+    change,
+    kept,
     replacing: read.error !== null,
-    covered: merged.coveredBy && setting.covered(merged.coveredBy),
+    reason,
+    added,
     write: () => setting.write(merged.rules),
   };
 }
@@ -70,16 +75,17 @@ function describeChange(step: Step, dryRun: boolean): string {
     const verb = dryRun ? "would replace" : "replaced";
     return `${label}: ${verb} every rule with "${ruleId}" ${describe} (--replace: the current rules could not be read).`;
   }
-  const verb = step.change === "add" ? (dryRun ? "would add" : "added") : dryRun ? "would update" : "updated";
   const keeps =
     kept.length > 0 ? ` and ${dryRun ? "keep" : "kept"} ${plural(kept.length, "other rule")} (${ruleNames(kept)})` : "";
-  return `${label}: ${verb} rule "${ruleId}" ${describe}${keeps}.`;
+  if (step.change === "update") {
+    return `${label}: ${dryRun ? "would add" : "added"} ${step.added} to rule "${ruleId}"${keeps}.`;
+  }
+  return `${label}: ${dryRun ? "would add" : "added"} rule "${ruleId}" ${describe}${keeps}.`;
 }
 
 async function carryOut(step: Step, dryRun: boolean): Promise<Finding> {
   if (step.change === "none") {
-    const why = step.covered ?? `rule "${step.ruleId}" is already up to date`;
-    return { status: "ok", text: `${step.label}: ${why}; nothing to change.` };
+    return { status: "ok", text: `${step.label}: ${step.reason}; nothing to change.` };
   }
   if (dryRun) return { status: "dry run", text: describeChange(step, true) };
   const written = await step.write();
@@ -99,7 +105,6 @@ async function planBoth(driver: S3Driver, options: CommandOptions): Promise<(Ste
         describe: `for ${origins}`,
         read: cors,
         merge: mergeCors,
-        covered: (rule) => `${ruleName(rule)} is the same as cloudrop's`,
         write: driver.putBucketCors,
       },
       options.replace,
@@ -111,8 +116,6 @@ async function planBoth(driver: S3Driver, options: CommandOptions): Promise<(Ste
         describe: `(aborts incomplete multipart uploads after ${days}, whole bucket)`,
         read: lifecycle,
         merge: mergeLifecycle,
-        covered: (rule) =>
-          `${ruleName(rule)} already aborts incomplete multipart uploads after ${plural(rule.abortIncompleteMultipartUploadDays ?? 0, "day")}`,
         write: driver.putBucketLifecycle,
       },
       options.replace,

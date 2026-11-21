@@ -119,7 +119,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     return { help: false, error: `Unknown command "${command}". Use doctor or setup.` };
   }
   const options: CommandOptions = { command, origins: [], apply: false, dryRun: false, replace: false };
-  const error = readOptions(options, rest);
+  const error =
+    readOptions(options, rest) ??
+    (options.replace && !options.apply && !options.dryRun ? "--replace works only with --apply or --dry-run." : null);
   if (error) return { help: false, error };
   // The same origin twice would only repeat it in the rule.
   options.origins = [...new Set(options.origins)];

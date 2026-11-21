@@ -109,6 +109,44 @@ describe("cloudrop setup --apply", () => {
     expect(await storage.cors()).toEqual([uploadsFor(ORIGIN, local), publicReads]);
   });
 
+  it("only adds to its own rule: origins and headers someone added to it stay", async () => {
+    const staging = "https://staging.example.com";
+    const edited = `<CORSRule><ID>cloudrop-uploads</ID><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedOrigin>${staging}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedHeader>Content-Type</AllowedHeader><AllowedHeader>x-amz-checksum-crc32c</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>600</MaxAgeSeconds></CORSRule>`;
+    const storage = bucket({ cors: `<CORSConfiguration>${edited}</CORSConfiguration>`, lifecycle: FOREIGN.lifecycle });
+    const dryRun = await run(apply("--dry-run"), { fetch: storage.fetch });
+    expect(dryRun.lines[1]).toBe(
+      'dry run      CORS: would add methods GET, HEAD; headers content-disposition, if-none-match, x-amz-meta-cloudrop-id; exposed headers Retry-After to rule "cloudrop-uploads".',
+    );
+    expect((await run(apply(), { fetch: storage.fetch })).code).toBe(0);
+    expect(await storage.cors()).toEqual([
+      {
+        id: "cloudrop-uploads",
+        allowedOrigins: [ORIGIN, staging],
+        allowedMethods: ["PUT", "GET", "HEAD"],
+        allowedHeaders: [
+          "Content-Type",
+          "x-amz-checksum-crc32c",
+          "content-disposition",
+          "if-none-match",
+          "x-amz-meta-cloudrop-id",
+        ],
+        exposeHeaders: ["ETag", "Retry-After"],
+        maxAgeSeconds: 600,
+      },
+    ]);
+  });
+
+  it("will not touch its own lifecycle rule once someone disabled it, and writes nothing", async () => {
+    const disabled =
+      "<LifecycleConfiguration><Rule><ID>cloudrop-abort-incomplete</ID><Filter><Prefix></Prefix></Filter><Status>Disabled</Status><AbortIncompleteMultipartUpload><DaysAfterInitiation>1</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>";
+    const storage = bucket({ cors: FOREIGN.cors, lifecycle: disabled });
+    const result = await run(apply(), { fetch: storage.fetch });
+    expect([result.code, storage.writes]).toEqual([1, []]);
+    expect(result.lines[1]).toBe(
+      'PROBLEM      Lifecycle: rule "cloudrop-abort-incomplete" exists but does not abort incomplete multipart uploads across the whole bucket, so someone changed it (disabled it, or gave it a prefix). setup does not change an edited rule: fix or delete it by hand, then run setup again.',
+    );
+  });
+
   it("leaves lifecycle rules alone when another rule already aborts uploads across the bucket", async () => {
     const r2Default =
       "<LifecycleConfiguration><Rule><ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>";
@@ -164,7 +202,7 @@ describe("cloudrop setup --apply", () => {
     const result = await run(apply("--replace"), { fetch: readsFail });
     expect([result.code, storage.writes]).toEqual([1, []]);
     expect(result.lines[1]).toBe(
-      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the rules may not be read, and this failure may pass: run the command again.",
+      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the credentials or the service refuse the read.",
     );
   });
 
@@ -174,7 +212,27 @@ describe("cloudrop setup --apply", () => {
     const result = await run(apply(), { fetch: storage.fetch });
     expect(storage.writes).toEqual(["PUT ?lifecycle="]);
     expect(result.lines[1]).toBe(
-      "ok           CORS: a rule without an ID is the same as cloudrop's; nothing to change.",
+      `ok           CORS: a rule without an ID already allows uploads from ${ORIGIN} as cloudrop's rule does; nothing to change.`,
+    );
+  });
+
+  it("with --dry-run and --replace, writes nothing either", async () => {
+    const storage = bucket();
+    const result = await run(apply("--dry-run", "--replace"), { fetch: storage.fetch });
+    expect([result.code, storage.writes]).toEqual([0, []]);
+    expect(result.lines[1]).toBe(
+      `dry run      CORS: would replace every rule with "cloudrop-uploads" for ${ORIGIN} (--replace: the current rules could not be read).`,
+    );
+  });
+
+  it("prints a rule ID's control characters as escapes", async () => {
+    const storage = bucket({
+      cors: "<CORSConfiguration><CORSRule><ID>evil&#x1b;[2J&#10;ok</ID><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>",
+      lifecycle: FOREIGN.lifecycle,
+    });
+    const result = await run(apply("--dry-run"), { fetch: storage.fetch });
+    expect(result.lines[1]).toBe(
+      `dry run      CORS: would add rule "cloudrop-uploads" for ${ORIGIN} and keep 1 other rule ("evil\\u001b[2J\\u000aok").`,
     );
   });
 

@@ -26,6 +26,25 @@ const WHAT_TO_SET: Record<string, string> = {
   CLOUDROP_S3_SECRET_ACCESS_KEY: "the secret access key of the service's credentials",
 };
 
+/** The file's values, or what is wrong with it, by its path, an error code and a line number only. */
+function readEnvFile(
+  path: string,
+  readFile: (path: string) => string,
+): { values: Record<string, string> } | { error: string } {
+  let text: string;
+  try {
+    text = readFile(path);
+  } catch (error) {
+    // Only the code: a message could quote the file.
+    const code = (error as { code?: unknown } | null)?.code;
+    return { error: `Cannot read ${path} (${typeof code === "string" ? code : "unknown error"}). Check the path.` };
+  }
+  const { values, unclosed } = parseEnvFile(text);
+  const [line] = unclosed;
+  if (line === undefined) return { values };
+  return { error: `Line ${line} of ${path} opens a quote it does not close. Close it; a value spans one line.` };
+}
+
 /**
  * The environment with an env file under it: a variable set in the environment wins, as with Node's --env-file. A
  * notes entry names each cloudrop variable set in both. The file is reported by its path and error code only.
@@ -35,18 +54,9 @@ export function readVariables(
   envFile: string | undefined,
   readFile: (path: string) => string,
 ): { variables: Variables; notes: Finding[] } | { error: string } {
-  let file: Record<string, string> = {};
-  if (envFile !== undefined) {
-    try {
-      file = parseEnvFile(readFile(envFile));
-    } catch (error) {
-      // Only the code: a message could quote the file.
-      const code = (error as { code?: unknown } | null)?.code;
-      return {
-        error: `Cannot read ${envFile} (${typeof code === "string" ? code : "unknown error"}). Check the path.`,
-      };
-    }
-  }
+  const read = envFile === undefined ? { values: {} } : readEnvFile(envFile, readFile);
+  if ("error" in read) return read;
+  const file: Record<string, string> = read.values;
   const variables: Variables = (name) => env[name] || file[name] || undefined;
   const notes = [...NAMES.R2, ...NAMES.S3, SECRET]
     .filter((name) => env[name] && file[name])

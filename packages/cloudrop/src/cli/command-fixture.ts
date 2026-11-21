@@ -6,6 +6,7 @@ import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
 import { createS3Driver } from "../storage/s3-driver.ts";
 import { createFakeR2 } from "../testing/fake-r2.ts";
+import { parseEnvFile } from "./env-file.ts";
 import { runCommand } from "./run.ts";
 
 export const ENV = {
@@ -93,7 +94,8 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
       },
     },
   });
-  const values = [...Object.values(ENV), ...Object.values(env)].filter(
+  const fromFiles = Object.values(files).flatMap((text) => Object.values(parseEnvFile(text).values));
+  const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
     (value): value is string => typeof value === "string" && value.length >= 8,
   );
   const leaked = values.filter((value) => stdout.includes(value) || stderr.includes(value));
