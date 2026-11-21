@@ -17,6 +17,11 @@ fixes stops a rare loss of a finished file.
 - A `trustedOrigins` entry that is not an exact origin (a pattern such as `https://*.example.org`, a wrong port) now
   stops the server at start with a message naming it. It never matched a request before; write each origin out.
 - `api.deleteFile` answers `{ id, deleted, cleaned }` and no longer answers an error once the row is deleted.
+- An `onDelete` written in JavaScript that returns anything but `undefined` or a `CloudropError` now fails the deletion
+  (the value was ignored before). Return nothing to let it go on.
+- `graceMs` or `completionLeaseMs` over 30 days now stops the server at start with a message naming the option.
+- Smaller refusals: `api.put` refuses options that are not an object, and an `OPTIONS` request that is not a preflight
+  for `POST` answers 405 instead of 403.
 - A store you wrote by hand: add `listAll` if you call `api.allFiles`; a `stale` cursor must be `<milliseconds>:<id>`.
 - One optional index for `api.allFiles`: [Upgrading from 0.5](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#upgrading-from-05).
 - Tests that count requests: a retry now sends an `/abort` for the ticket it replaces, and a cancel during `/upload`
@@ -63,8 +68,8 @@ fixes stops a rare loss of a finished file.
   `INVALID_CONFIG` without it. A `stale` cursor of another shape than `<milliseconds>:<id>` now fails `api.sweep` with
   a non-retryable `SERVER_ERROR` instead of stopping the sweep silently (`M11-L4`, `M11-R68`, `M11-R242`).
 - **`api.deleteFile` no longer answers a storage error once the row is deleted:** it answers success with
-  `cleaned: false`, logs the failure, and the sweep removes the object. A JavaScript `onDelete` that returns a value
-  other than a `CloudropError` now fails the deletion (it was ignored). `deleteFile` answers `NOT_FOUND` for a file
+  `cleaned: false`, logs the failure, and the sweep removes the object. **Breaking:** a JavaScript `onDelete` that
+  returns a value other than a `CloudropError` now fails the deletion (it was ignored). `deleteFile` answers `NOT_FOUND` for a file
   whose `/complete` is recorded during the call (`M11-D2`, `M11-D3`, `M11-R150`).
 - **`retry()` follows one table** and never repeats a request that cannot succeed: after a refusal that ended the
   upload (`FILE_TYPE_NOT_ALLOWED`, a hook's refusal, `UPLOAD_EXPIRED`, `NO_SUCH_UPLOAD`, `ALREADY_EXISTS` and others) it
@@ -73,8 +78,10 @@ fixes stops a rare loss of a finished file.
   that starts over does the same. Guide: [Retry](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/client.md#retry) (`M11-R80` to `M11-R94`, `M11-R201`).
 - **A cancel during `/upload` lets that request answer** (at most 30 seconds, behind the scenes) and gives back each
   ticket it brings, so its reservation does not stay; the job still ends `ABORTED` at once. `close()` waits for that
-  cleanup, so it can take up to 40 seconds when the server does not answer (`M11-R261`).
-- **Limits on configuration and requests:** `completionLeaseMs` and `graceMs` at most 30 days; metadata nested more
+  cleanup, also when the files were cancelled one by one, so it can take up to 40 seconds when the server does not
+  answer (`M11-R261`, `M11-R264`).
+- **Limits on configuration and requests:** **breaking:** `completionLeaseMs` and `graceMs` at most 30 days, checked
+  at start; metadata nested more
   than 32 levels is `INVALID_METADATA`; a file name with NUL, or with a control character the route's own `key`
   cannot hold, is `INVALID_INPUT` for that file alone (the second failed the whole request before); an owner or file
   id with a broken Unicode character (a lone surrogate) is refused; an `OPTIONS` that is not a preflight for `POST`
