@@ -123,8 +123,8 @@ export function canonicalQuery(params: URLSearchParams): string {
  * (https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html, "Create a canonical
  * request"). A value read back from the storage, which a copy in parts sends again, is a byte string, one character
  * per byte, and fetch sends those bytes. R2 reads them as UTF-8 before it trims and collapses, with JavaScript's
- * white space: the byte A0 of "\u00e0" (C3 A0) is no space and a no-break space (C2 A0) is one; a signature over
- * the bytes' own characters answers SignatureDoesNotMatch (measured: M11-R25, M11-R252).
+ * white space: the byte A0 of "à" (C3 A0) is no space and a no-break space (C2 A0) is one; a signature over the
+ * bytes' own characters answers SignatureDoesNotMatch (measured: M11-R25, M11-R252).
  */
 function canonicalValue(value: string): string {
   const text = /[\x80-\xff]/.test(value) ? decoder.decode(Uint8Array.from(value, (char) => char.charCodeAt(0))) : value;

@@ -119,8 +119,9 @@ function itemEnd(text: string, item: RegExpExecArray, html: boolean): number {
 /**
  * The name of the document's root element in lower case, "" when what follows the prolog is not a start tag, and null
  * when the text ends before the root of a document: one that has shown a doctype, and ends in it, in the blanks, the
- * comment or the processing instruction after it, or in the first characters of the root's tag (M11-R220, M11-R258). Text that opens with a processing instruction
- * and shows no doctype is not known to be a document: PHP source opens with "<?php" and need never close it.
+ * comment or the processing instruction after it, or in the first characters of the root's tag (M11-R220, M11-R258).
+ * Text that opens with a processing instruction and shows no doctype is not known to be a document: PHP source opens
+ * with "<?php" and need never close it.
  */
 function rootElement(text: string, html: boolean): string | null {
   let at = 0;
