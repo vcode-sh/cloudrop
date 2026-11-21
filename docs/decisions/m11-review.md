@@ -1552,3 +1552,40 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   on one definition for every adapter.
 - **Status:** in force.
 - **Visible in:** `docs/decisions/m11-listing.md` (`M11-L5`).
+
+### M11-R90: a resumed upload that starts over gives its old ticket up first
+
+- **Decision:** a resumed upload that starts over (`startOver` in `src/client/job-run.ts`, `M3-U74`) gives the old
+  ticket up as a `retry()` that replaces one does (`M11-R89`): one `/abort`, the record deleted, the lock let go once
+  the server answered. The new `/upload` waits for that answer, at most the `/abort`'s 10 seconds, whatever it is. A
+  ticket a `/complete` may have finished gets no `/abort`. Every place where the client asks `/upload` again was then
+  checked on a server with a store and a quota:
+
+  | The client asks `/upload` again | What frees the reservation of the ticket before |
+  | --- | --- |
+  | `retry()` replaces a ticket the file holds | The client: `/abort` first (`M11-R89`) |
+  | A resumed upload starts over | The client: `/abort` first (this entry) |
+  | `retry()` after `pagehide` gave the ticket up for a resume (`M4-F1`) | The client: the kept upload is discarded under its lock first (`M11-R91`) |
+  | An automatic retry of one ask, after a lost answer or a failure of the whole request | The server: every attempt of an ask sends one idempotency key, and `reserve` first ends the owner's pending rows of that key and route (`M5-T100`, `M5-T101`). Rows without an owner hold no quota (`M5-T105`) |
+  | `retry()` after an ask whose every attempt ended without a ticket | The server, since the client sends that ask's key once more (`M11-R92`) |
+  | A file asks again alone after `/upload` refused it with a retryable error (`M3-U92`) | The server: it gave the file no ticket and released what it had reserved for it within that request (`releaseUnstarted` in `src/server/store-upload.ts`); a file over its quota reserved nothing |
+  | A ticket arrives for a file cancelled meanwhile | The client: its `/abort` at once (`M4-F2`); no new `/upload` follows |
+  | `discard()` | No `/upload` follows. Its `/abort` ends the pending row and frees the reservation, with `keep` or not (`M3-U94`) |
+  | `forget()` | No `/upload` follows and no `/abort` is sent: the rows stay pending until their tokens expire and the sweep ends them, or the app's sign-out calls `api.revokeUploads({ owner })`. The resume guide says so |
+  | `upload()` of a file whose earlier `upload()` failed and kept its record (`M4-F1`) | Nothing: a new job knows nothing of the earlier one. `resumable()` lists it, and `resume()` or `discard()` settles it |
+- **Why:** reproduced on a server with a store and a quota of the file's size plus 1,000 bytes, two ways. A resumed
+  four-part upload in its ticket's last 15 minutes, parts 3 and 4 missing: the probe is answered `PARTS_MISSING`, the
+  ticket can sign nothing (`M9-H3`), and the new `/upload` was answered `QUOTA_EXCEEDED`. And a resumed upload whose
+  multipart upload the bucket had aborted: `/complete` answers `NO_SUCH_UPLOAD` and leaves the row pending
+  (`completeParts` answers a failure, not a refusal), and the new `/upload` was answered `QUOTA_EXCEEDED` too. Both
+  left the row `pending`, and every later `resume()` or `retry()` got the same answer until the sweep. `M11-R89` named
+  the first case and left it to the sweep; the second it took for an upload with nothing left to free. The `/abort` is
+  also what removes the parts of a ticket that only stopped signing, which no other request of this page would.
+- **If wrong:** a start over takes one more round trip, and for a token the server no longer knows (`INVALID_TOKEN`)
+  that `/abort` is refused and frees nothing, as nothing was held. After a probe whose first `/complete` got no answer
+  and whose second was answered `UPLOAD_EXPIRED`, the doubt stays and no `/abort` is sent: with a store that row stays
+  pending until the sweep, and the new `/upload` of an owner without room for the file twice is `QUOTA_EXCEEDED` until
+  then. A plugin's `onAbort` hears of the old upload.
+- **Status:** in force. Supersedes `M3-U55` for the start over, and the last sentence of `M11-R89`'s "If wrong".
+- **Visible in:** `src/client/job-run.ts` (`startOver`), `src/client/replaced-ticket.test.ts`,
+  `src/client/resume.test.ts`, `src/client/resume-job.test.ts`, `docs/guide/resume.md` ("The server is asked first").

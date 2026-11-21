@@ -5,7 +5,7 @@
 import { fail } from "../errors.ts";
 import type { Arguments } from "./arguments.ts";
 import { type Entry, outcomeOf, pauseFile, resumeFile } from "./entry.ts";
-import { abortFile, runFile } from "./file-run.ts";
+import { abortFile, drop, runFile } from "./file-run.ts";
 import { launch } from "./launch.ts";
 import { watchConnectivity } from "./lifecycle.ts";
 import { letGo } from "./persist.ts";
@@ -115,12 +115,15 @@ export function forgetTicket(context: UploadContext, entry: Entry): void {
  * Resolves once the file has settled.
  */
 async function startOver(job: Job, entry: Entry): Promise<void> {
-  // No /abort for the old ticket, whose upload the probe found gone (M3-U55, M3-U74): the bucket's lifecycle rule frees
-  // what is left of it. A retry's replaced ticket gets one (M11-R89).
+  const { upload } = entry;
+  // The old ticket is given up first, as a retry gives up the one it replaces (M11-R89, M11-R90): with a store its row
+  // is still pending, whether the bucket lost the upload or the ticket only stopped signing, and holds the owner's
+  // quota against the new /upload, which waits for the /abort's answer. Never after a /complete that may have finished.
+  const given = upload && !upload.mayBeComplete ? drop(job.context, upload) : undefined;
   forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
-  await launch(job, [entry], { first: 1 });
+  await launch(job, [entry], { first: 1, after: given });
   await entry.run;
 }
 

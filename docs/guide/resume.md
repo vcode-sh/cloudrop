@@ -91,10 +91,12 @@ of R2's two billed operation classes.
 - **Parts missing:** exactly those are sent, then `/complete` again. The parts already stored in the bucket count in `bytes` from that
   answer; before it, `bytes` is 0.
 - **The upload is gone** (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`, or parts missing in the ticket's
-  last 15 minutes, when the server signs no more URLs for it): the file is `queued` again, asks
-  `/upload` once for a new ticket with the record's route and metadata, and sends the whole file under a new key, its
-  `bytes` from 0, with no failure in between. The old parts wait for the bucket's lifecycle rule. When that `/upload` is
-  refused, the file ends `failed` with its error.
+  last 15 minutes, when the server signs no more URLs for it): the file is `queued` again and gives the old ticket up
+  with `/abort`, as a [retry that replaces a ticket](client.md#retry) does. It waits for the answer (at most 10
+  seconds), so with a [database store](store.md) the bytes the old ticket reserved no longer count against the owner's
+  quota. Then it asks `/upload` once for a new ticket with the record's route and metadata, and sends the whole file
+  under a new key, its `bytes` from 0, with no failure in between. A ticket whose `/complete` may have succeeded gets no
+  `/abort`. When that `/upload` is refused, the file ends `failed` with its error.
 - **Any other failure** ends the file `failed` and keeps its record. `retry()` then does what
   [any retry does](client.md#retry): it asks `/complete` again when the failure left the ticket good, such as a network
   or server failure, and asks `/upload` for a new ticket when the server ended the upload, such as a file refused for
@@ -217,7 +219,9 @@ With `aborted: false`, the bucket's abort-incomplete-multipart rule removes the 
 A tab closed while its `/abort` is on the way keeps the record, so the upload is listed again; discarding it again is
 harmless.
 `forget()` deletes every record of the namespace at once but sends no `/abort`: use it at sign-out, and `discard()` when
-the user drops an upload.
+the user drops an upload. With a database store, the uploads it forgets keep the bytes they reserved until their
+tokens expire and the sweep ends their rows: call `cloudrop.api.revokeUploads({ owner })` in your sign-out handler to
+free them at once.
 
 ## When persistence is off or unavailable
 

@@ -226,13 +226,9 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     }).toEqual({
       error: null,
       sent: [
-        "POST /complete",
-        "POST /upload",
-        "PUT part 1",
-        "PUT part 2",
-        "PUT part 3",
-        "PUT part 4",
-        "POST /complete",
+        // The old ticket is given up before the new one is asked for (M11-R90).
+        ...["POST /complete", "POST /abort", "POST /upload"],
+        ...["PUT part 1", "PUT part 2", "PUT part 3", "PUT part 4", "POST /complete"],
       ],
       asked: { route: "files", files: [{ name: "b.bin", size: FOUR_PARTS, type: FILE_TYPE }], metadata: METADATA },
       whileSent: { stored: [renewed?.id], locks: [lockOf(renewed?.id)] },
@@ -262,7 +258,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     }).toEqual({
       outcome: ["failed"],
       error: { code: "UNAUTHORIZED", message: "Sign in to upload files." },
-      sent: ["POST /complete", "POST /upload"],
+      sent: ["POST /complete", "POST /abort", "POST /upload"],
       stored: {},
       locks: [],
     });
@@ -324,7 +320,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     expect({ waiting, ended, sent: setup.sent() }).toEqual({
       waiting: "queued",
       ended: "aborted",
-      sent: ["POST /complete", "POST /upload"],
+      sent: ["POST /complete", "POST /abort", "POST /upload"],
     });
   });
 
@@ -350,10 +346,11 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
 
       expect({ paused, whilePaused, error, sent: setup.sent() }).toEqual({
         paused: "paused",
-        whilePaused: ["POST /complete", "POST /upload"],
+        whilePaused: ["POST /complete", "POST /abort", "POST /upload"],
         error: null,
         sent: [
           "POST /complete",
+          "POST /abort",
           "POST /upload",
           "POST /upload",
           "PUT part 1",
@@ -392,7 +389,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     }).toEqual({
       waiting: "queued",
       status: "aborted",
-      sent: ["POST /complete", "POST /upload"],
+      sent: ["POST /complete", "POST /abort", "POST /upload"],
       stored: {},
       locks: [],
     });

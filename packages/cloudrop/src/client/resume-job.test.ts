@@ -148,7 +148,7 @@ describe("a resumed file whose probe got no answer (M9)", () => {
       stored: setup.db.stored(),
     }).toEqual({
       sent: [
-        ...["POST /complete", "POST /upload"],
+        ...["POST /complete", "POST /abort", "POST /upload"],
         ...["PUT part 1", "PUT part 2", "PUT part 3", "PUT part 4", "POST /complete"],
       ],
       key: setup.issued[1]?.key,
@@ -172,7 +172,7 @@ describe("a resumed file in its ticket's last 15 minutes (M9-H3)", () => {
       key: outcome?.status === "done" ? outcome.result.file.key : outcome?.error.code,
     }).toEqual({
       sent: [
-        ...["POST /complete", "POST /upload"],
+        ...["POST /complete", "POST /abort", "POST /upload"],
         ...["PUT part 1", "PUT part 2", "PUT part 3", "PUT part 4", "POST /complete"],
       ],
       key: setup.issued[1]?.key,
