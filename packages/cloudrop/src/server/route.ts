@@ -3,6 +3,8 @@ import { isPlainObject } from "../input.ts";
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
+import type { DeleteContext } from "./store.ts";
+import type { RouteFunction } from "./store-route.ts";
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -10,7 +12,7 @@ export type Awaitable<T> = T | Promise<T>;
 // as a signed-in user.
 const DENIED: unique symbol = Symbol.for("cloudrop.unauthorized");
 // Symbol.for for the same reason: an adapter may come from another copy of cloudrop than the server.
-const STORE: unique symbol = Symbol.for("cloudrop.store");
+export const STORE: unique symbol = Symbol.for("cloudrop.store");
 
 /**
  * Returned by `authorize` to refuse an upload: `unauthorized()` answers UNAUTHORIZED (401), `forbidden()` FORBIDDEN
@@ -80,7 +82,7 @@ export type CompleteContext<TAuth, TMetadata> = Omit<Jsonified<TAuth>, ReservedN
 };
 
 /** What `/complete` sends as `data`: the JSON form of the result, and null where `onComplete` gave undefined or nothing. */
-type CompleteData<TResult> = Jsonified<TResult> | (undefined extends TResult ? null : never);
+export type CompleteData<TResult> = Jsonified<TResult> | (undefined extends TResult ? null : never);
 
 /** `afterComplete` sees what `onComplete` sees, plus the `data` the client was sent. */
 export type AfterCompleteContext<TAuth, TMetadata, TResult> = CompleteContext<TAuth, TMetadata> & {
@@ -159,6 +161,12 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
    * when `onComplete` comes first.
    */
   afterComplete?: (context: AfterCompleteContext<TAuth, TMetadata, TResult>) => Awaitable<void>;
+  /**
+   * With a store: runs when `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes one of the
+   * route's completed files; a throw keeps the file and fails that call. With a transaction, exactly once inside it,
+   * so writes through `tx` commit with the deletion; otherwise at least once, before the deletion (store guide).
+   */
+  onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void>;
 }
 
 /**
@@ -178,6 +186,7 @@ export interface RouteDefinition {
   owner?(context: OwnerContext<object, unknown>): Awaitable<string | null>;
   onComplete?(context: { request: Request; file: UploadedFile; metadata: unknown }): unknown;
   afterComplete?(context: { request: Request; file: UploadedFile; metadata: unknown; data: unknown }): unknown;
+  onDelete?(context: DeleteContext): unknown;
   /** The store whose `route()` made this route, whose `tx` its `onComplete` expects. */
   readonly [STORE]?: object;
 }
@@ -188,7 +197,7 @@ export interface Route<TMetadataInput = unknown, TResult = unknown> {
   readonly "~types"?: { readonly metadata: TMetadataInput; readonly result: TResult };
 }
 
-const CALLBACKS = ["prefix", "key", "owner", "onComplete", "afterComplete"] as const;
+const CALLBACKS = ["prefix", "key", "owner", "onComplete", "afterComplete", "onDelete"] as const;
 const POLICY = ["accept", "maxSize", "maxFiles", "metadata", "visibility", "replace", "authorize"] as const;
 
 /** JavaScript callers get no type error for an option in the wrong argument, and there it would do nothing. */
@@ -196,13 +205,13 @@ function checkPlacement(policy: object, callbacks: object): void {
   const callback = CALLBACKS.find((name) => Object.hasOwn(policy, name));
   if (callback) {
     throw configError(
-      `route(): ${callback} belongs in the second argument, which holds prefix, key, owner, onComplete and afterComplete: route({ accept, maxSize, authorize }, { ${callback} }).`,
+      `route(): ${callback} belongs in the second argument, which holds prefix, key, owner, onComplete, afterComplete and onDelete: route({ accept, maxSize, authorize }, { ${callback} }).`,
     );
   }
   const option = POLICY.find((name) => Object.hasOwn(callbacks, name));
   if (option) {
     throw configError(
-      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility, replace and authorize. The second takes only prefix, key, owner, onComplete and afterComplete.`,
+      `route(): ${option} belongs in the first argument, which holds accept, maxSize, maxFiles, metadata, visibility, replace and authorize. The second takes only prefix, key, owner, onComplete, afterComplete and onDelete.`,
     );
   }
 }
@@ -225,25 +234,12 @@ export function route<TAuth extends object, TSchema extends StandardSchema | und
   return { definition: { ...given, ...callbacks } as RouteDefinition };
 }
 
-/** route(), typed with a store's extra `onComplete` context. */
-export type RouteFunction<TExtra extends object> = <
-  TAuth extends object,
-  TSchema extends StandardSchema | undefined = undefined,
-  TResult = null,
->(
-  policy: RoutePolicy<TAuth, TSchema>,
-  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra>,
-) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>>;
-
 /**
- * For store adapters: a route() whose routes belong to `store`, so their `onComplete` is typed with `TExtra` (the
- * store's `tx`). createCloudrop refuses such a route unless `store` is its store and has a transaction.
+ * For store adapters: a route() whose routes belong to `store`, so their `onComplete` and `onDelete` are typed with
+ * `TExtra` (the store's `tx`). createCloudrop refuses such a route unless `store` is its store and has a transaction.
  */
 export function routeFor<TExtra extends object>(store: object): RouteFunction<TExtra> {
   return (policy, callbacks) => ({
     definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: store },
   });
 }
-
-/** The store whose route() made the route, if any. */
-export const storeOfRoute = (definition: RouteDefinition): object | undefined => definition[STORE];

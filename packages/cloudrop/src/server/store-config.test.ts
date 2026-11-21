@@ -96,6 +96,21 @@ describe("createCloudrop with a store: configuration errors", () => {
         'Route "notify": afterComplete needs a database store. Pass store to createCloudrop, or remove afterComplete.',
     },
     {
+      name: "a route with onDelete and no store",
+      make: create({
+        routes: { docs: route({ accept: "*/*", maxSize: 1, authorize: allowAnyone }, { onDelete: () => {} }) },
+      }),
+      message: 'Route "docs": onDelete needs a database store. Pass store to createCloudrop, or remove onDelete.',
+    },
+    {
+      name: "an onDelete that is not a function",
+      make: create({
+        store,
+        routes: { docs: { definition: { accept: "*/*", maxSize: 1, authorize: allowAnyone, onDelete: "audit" } } },
+      }),
+      message: 'Route "docs": onDelete must be a function.',
+    },
+    {
       name: "an owner that is not a function",
       make: create({
         store,
@@ -109,7 +124,7 @@ describe("createCloudrop with a store: configuration errors", () => {
 
   it("refuses owner and afterComplete in route()'s first argument, naming the second", () => {
     expect(() => route({ accept: "*/*", maxSize: 1, authorize: allowAnyone, owner: () => "u1" } as never)).toThrow(
-      "route(): owner belongs in the second argument, which holds prefix, key, owner, onComplete and afterComplete: route({ accept, maxSize, authorize }, { owner }).",
+      "route(): owner belongs in the second argument, which holds prefix, key, owner, onComplete, afterComplete and onDelete: route({ accept, maxSize, authorize }, { owner }).",
     );
   });
 });

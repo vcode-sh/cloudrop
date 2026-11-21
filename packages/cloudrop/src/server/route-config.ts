@@ -48,7 +48,7 @@ function checkCallbacks(where: string, definition: RouteDefinition): void {
   if (definition.metadata !== undefined && !isFunction(definition.metadata?.["~standard"]?.validate)) {
     throw configError(`${where}: metadata must be a Standard Schema, such as a zod, valibot or arktype schema.`);
   }
-  for (const option of ["prefix", "key", "owner", "onComplete", "afterComplete"] as const) {
+  for (const option of ["prefix", "key", "owner", "onComplete", "afterComplete", "onDelete"] as const) {
     if (definition[option] !== undefined && !isFunction(definition[option])) {
       throw configError(`${where}: ${option} must be a function.`);
     }

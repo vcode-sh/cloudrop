@@ -100,6 +100,9 @@ with a stable `file.id`. What it cannot do without a record of its own:
 - **Retries are answered from the row.** A `/complete` of a completed file answers the stored result with no storage
   call and no hook, also after the token expired. So does a file deleted with `api.deleteFile`: its answer still names
   the deleted object, so a resumed client does not upload it again.
+- **`onDelete` with the deletion.** A route's [`onDelete`](#ondelete) runs for each completed file `deleteFile`,
+  `replace` or `eraseOwner` deletes: with `transaction: true` inside the deletion's transaction, exactly once for
+  writes through `tx`; otherwise before the deletion, at least once. A throw keeps the file.
 - **A hard quota.** Concurrent uploads of one owner cannot pass their limit.
 - **`/abort` never deletes a completed file**, and an ended row refuses `/sign` and `/complete`.
 - **The sweep deletes only what it may.** It removes an object only when the object's `cloudrop-id` names a row that
@@ -534,6 +537,59 @@ record skips it, and a throw is logged while the client still gets its answer. T
 short. For work that must happen, write an outbox row through `tx` in `onComplete` and process the outbox elsewhere.
 `afterComplete` needs a store, like `owner`.
 
+## `onDelete`
+
+A route's `onDelete` runs when one of its completed files is deleted: by `api.deleteFile` (`reason: "deleted"`), by the
+next completion on a [`replace: true`](#one-file-per-owner-replace) route (`"replaced"`), or by
+[`api.eraseOwner`](#erase-an-owner) (`"erased"`). It keeps what your app holds about the file right: an audit trail, a
+pointer such as the user's current avatar, a counter. An audit trail on Postgres, with Drizzle:
+
+```ts
+const files = store.route(policy, {
+  owner: ({ userId }) => userId,
+  onDelete: async ({ tx, file, owner, reason }) => {
+    // Commits with the deletion, or not at all.
+    await tx.insert(auditEvents).values({ action: "file-deleted", userId: owner, fileId: file.id, reason });
+    await tx.delete(avatars).where(eq(avatars.fileId, file.id));
+  },
+});
+```
+
+`file` is the file's row as it was before the deletion (`status: "completed"`, with its `key`, `name`, `size`, `type`
+and `result`); `owner` is its owner, or null. Only completed files run it: an upload that never completed was never
+yours, so `/abort`, `revokeUploads`, a refusal and the sweep run nothing, and neither does `api.delete(key)`, which
+removes an object and leaves its row. `onDelete` needs a store (`INVALID_CONFIG` otherwise), and a file whose route is
+no longer among your `routes` is deleted without one.
+
+| | With `transaction: true` (Postgres) | Without (SQLite, D1, or a lease on Postgres) |
+| --- | --- | --- |
+| When | Inside the deletion's transaction: before cloudrop locks the file and the owner's counters for `deleteFile` and `eraseOwner`, after the completion is recorded for `replace`. | Before the deletion is recorded. |
+| How often | Exactly once for writes through `tx`. Two deletions of one file at once may both run it, but the one that finds the file already deleted rolls its writes back. | At least once, like `onComplete` under a lease: again after a deletion that failed after it is retried, and twice when two calls delete the file at once. Make it idempotent by `file.id`. |
+| A throw | Rolls back the deletion and everything written through `tx`. | Keeps the file: the deletion is not recorded. |
+
+A throw is logged, the file stays, and the call answers:
+
+- **`api.deleteFile`:** a retryable `SERVER_ERROR`, "onDelete failed for route "files", so the file was kept. Its error
+  is in the server log; fix it and try again."
+- **`api.eraseOwner`:** the file counts in `failed`, and `waiting` as it is still completed; the run goes on with the
+  next file and reports `done: false`, and the next run tries it again.
+- **A replacing `/complete`:** the retryable `SERVER_ERROR` a throw in `onComplete` gives. The new file is not
+  recorded (with a transaction, `onComplete`'s writes roll back too), the previous one stays, and the client's retry
+  runs both hooks again.
+
+Without a transaction, a replacing completion runs `onDelete` for the files it is about to replace, then records the
+completion. A file of the same owner that completed in between is replaced too: its `onDelete` runs right after, where
+a throw is only logged, as the deletion is already recorded.
+
+- **Lock order.** In transaction mode `onDelete` of `deleteFile` and `eraseOwner` runs before cloudrop locks anything,
+  as `onComplete` runs before cloudrop locks the owner's counters, so rows of yours that both write (a counter, the
+  user's row) are taken in the same order and the two take turns. On a `replace: true` route `onDelete` runs after the
+  completion locked the replaced file: have its `onComplete` lock first whatever `onDelete` writes, such as the user's
+  row, or a replacement and a `deleteFile` of the previous file at once can deadlock (Postgres then fails one of them
+  with a retryable error).
+- **Keep network calls out**, as in `onComplete`: in transaction mode they hold a connection and row locks, and a
+  rollback cannot undo them. Write an outbox row through `tx` instead.
+
 ## One file per owner: `replace`
 
 ```ts
@@ -559,8 +615,9 @@ the row deleted but not cleaned up.
 - **Two uploads completing at once leave exactly one file:** the one recorded last. On Postgres the two completions
   take turns on a transaction-scoped advisory lock for the owner and route; SQLite and D1 have one writer at a time.
 - **What the hooks see.** `onComplete` runs before the completion is recorded, so the previous file is still
-  completed there (`api.files` lists it). `afterComplete` runs after: the previous file's row is deleted and the removal
-  of its object was tried. Neither gets a new field.
+  completed there (`api.files` lists it). The route's [`onDelete`](#ondelete) runs for the previous file with
+  `reason: "replaced"`. `afterComplete` runs after: the previous file's row is deleted and the removal of its object was
+  tried. Neither gets a new field.
 - **Read the kept file; do not keep a pointer of your own.** `api.files({ owner, route, limit: 1 })` answers the file
   that survived. A pointer such as `users.avatar_key` written in `onComplete` can name the file that was deleted: without
   `transaction: true`, `onComplete` runs before the completion is recorded and outside any lock, so two uploads at once
@@ -702,7 +759,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
 | `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
-| `deleteFile(id)` | Deletes a completed file: its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
+| `deleteFile(id)` | Deletes a completed file: the route's [`onDelete`](#ondelete) runs, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Within 1 hour 15 minutes of the file's completion (its URLs' 15 minutes, then an hour), the row is left for the sweep to check once more, in case a `PUT` with one of its URLs lands later. Idempotent; `NOT_FOUND` for a file that never completed. |
 | `eraseOwner(owner, { graceMs?, signal? })` | Removes everything an owner uploaded, and reports when that is proven ([above](#erase-an-owner)). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |

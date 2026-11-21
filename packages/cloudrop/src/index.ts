@@ -34,7 +34,6 @@ export {
   type Route,
   type RouteCallbacks,
   type RouteDefinition,
-  type RouteFunction,
   type RoutePolicy,
   route,
   unauthorized,
@@ -45,6 +44,8 @@ export type {
   ClaimOutcome,
   CloudropStore,
   Completion,
+  DeleteContext,
+  DeleteReason,
   EndedStatus,
   FileRecord,
   FileStatus,
@@ -55,6 +56,7 @@ export type {
 } from "./server/store.ts";
 export type { StoreFileApi } from "./server/store-api.ts";
 export type { Quota, StoreOptions } from "./server/store-config.ts";
+export type { RouteFunction } from "./server/store-route.ts";
 export type { SweepOptions, SweepReport } from "./server/sweep.ts";
 export type {
   BucketCorsRule,

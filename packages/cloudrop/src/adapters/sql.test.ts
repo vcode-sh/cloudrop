@@ -3,8 +3,8 @@
 
 import postgres from "postgres";
 import { describe, expect, expectTypeOf, test } from "vitest";
-import { storeOfRoute } from "../server/route.ts";
 import type { CloudropStore } from "../server/store.ts";
+import { storeOfRoute } from "../server/store-route.ts";
 import { type PgQueryable, pgExecutor, postgresJsExecutor, type SqlExecutor, sqliteExecutor, sqlStore } from "./sql.ts";
 
 const executor = (dialect: string): SqlExecutor =>

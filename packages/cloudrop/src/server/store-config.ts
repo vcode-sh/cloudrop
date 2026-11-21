@@ -3,9 +3,10 @@
 
 import { configError } from "../errors.ts";
 import type { RouteConfig } from "./config.ts";
-import { type Awaitable, storeOfRoute } from "./route.ts";
+import type { Awaitable } from "./route.ts";
 import { isFunction } from "./route-config.ts";
 import type { CloudropStore } from "./store.ts";
+import { storeOfRoute } from "./store-route.ts";
 
 /** An owner's limit in bytes, or null for no limit. */
 export type Quota = (owner: string) => Awaitable<number | null>;
@@ -86,7 +87,7 @@ function checkReplace(name: string, definition: RouteConfig["definition"], store
 function checkRoutes(routes: readonly RouteConfig[], store: CloudropStore<unknown> | undefined): void {
   for (const { name, definition, replace } of routes) {
     if (replace) checkReplace(name, definition, store);
-    const needsStore = (["owner", "afterComplete"] as const).find((callback) => definition[callback]);
+    const needsStore = (["owner", "afterComplete", "onDelete"] as const).find((callback) => definition[callback]);
     if (needsStore && !store) {
       throw configError(
         `Route "${name}": ${needsStore} needs a database store. Pass store to createCloudrop, or remove ${needsStore}.`,

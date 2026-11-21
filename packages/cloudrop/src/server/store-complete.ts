@@ -10,9 +10,10 @@ import type { EndpointInput, RouteConfig, ServerConfig } from "./config.ts";
 import { busy } from "./http.ts";
 import { removeDeleted } from "./leftovers.ts";
 import { nowSeconds } from "./presign.ts";
-import { storeOfRoute } from "./route.ts";
 import type { ClaimOutcome, CloudropStore, FileRecord } from "./store.ts";
 import { cancelled, type FileCalls, fileCalls, storeUnavailable } from "./store-calls.ts";
+import { afterReplacing, beforeReplacing } from "./store-delete.ts";
+import { storeOfRoute } from "./store-route.ts";
 import { type UploadTokenPayload, uploadExpired } from "./token.ts";
 
 type Answer = Result<CompleteResponse>;
@@ -29,6 +30,8 @@ interface Completion {
   route: RouteConfig;
   file: UploadedFile;
   calls: FileCalls;
+  /** The row's owner, whose previous files a replacing route deletes. */
+  owner: string | null;
 }
 
 /** The stored answer: the completion is over, and a deleted file keeps the answer it was given. */
@@ -89,22 +92,30 @@ async function resultToStore(
   return ok({ data: JSON.parse(json), json });
 }
 
-/** Without a transaction: claim under a lease, and hand the row back at once when onComplete fails in-process. */
-async function withLease(completion: Completion): Promise<Attempt> {
-  const { calls, file, config } = completion;
+/**
+ * Without a transaction: claim under a lease, and hand the row back at once when onComplete, or onDelete for a file it
+ * is about to replace, fails in-process.
+ */
+async function withLease(completion: Completion, store: CloudropStore<unknown>): Promise<Attempt> {
+  const { calls, file, config, route } = completion;
   const claim = crypto.randomUUID();
   const claimed = await calls.claim(claim, config.completionLeaseMs);
   if (claimed.error) return { answer: claimed, recorded: false };
   if (claimed.data.kind !== "claimed") return { answer: claimAnswer(claimed.data, file), recorded: false };
-  const ran = await resultToStore(completion, {});
-  if (ran.error) {
+  const handBack = async (answer: Answer): Promise<Attempt> => {
     // A failed release is logged by the call; the lease then frees the row.
     await calls.release(claim);
-    return { answer: ran, recorded: false };
-  }
-  const done = await calls.complete(claim, ran.data.json, completion.route.replace);
+    return { answer, recorded: false };
+  };
+  const ran = await resultToStore(completion, {});
+  if (ran.error) return handBack(ran);
+  const hooked = await beforeReplacing(config, store, route, completion.owner);
+  if (hooked.error) return handBack(hooked);
+  const done = await calls.complete(claim, ran.data.json, route.replace);
   if (done.error) return { answer: done, recorded: false };
   if (!done.data.changed) return { answer: lostClaim(done.data.record, file), recorded: false };
+  // A file that completed while onDelete ran is replaced too: its onDelete runs now, and a throw is only logged.
+  await afterReplacing(config, route, done.data.replaced, { ran: hooked.data });
   return { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.data.replaced };
 }
 
@@ -136,6 +147,8 @@ async function inTransaction(
       const replace = completion.route.replace;
       const done = await store.complete(token.id, claim, ran.data.json, new Date(), { replace });
       if (!done.changed) return rollBack(lostClaim(done.record, file));
+      const deleted = await afterReplacing(config, completion.route, done.replaced, { transaction: { tx } });
+      if (!deleted) return rollBack(fail(unfinished()));
       attempt = { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.replaced };
     });
   } catch (error) {
@@ -178,9 +191,10 @@ export async function completeStored(
   route: RouteConfig,
 ): Promise<Answer> {
   const calls = fileCalls(store, config.logger, token);
-  const completion: Completion = { request, config, token, route, file: uploadedFile(config, token, route), calls };
   const row = await calls.get();
   if (row.error) return row;
+  const file = uploadedFile(config, token, route);
+  const completion: Completion = { request, config, token, route, file, calls, owner: row.data?.owner ?? null };
   const early = answerFromRow(row.data, completion);
   if (early) return early;
   // Storage and plugins run outside any transaction: no network call while a row lock is held.
@@ -190,7 +204,7 @@ export async function completeStored(
   if (checked.kind === "refused") return refuse(completion, checked);
   const attempt = store.transaction
     ? await inTransaction(completion, store.transaction.bind(store))
-    : await withLease(completion);
+    : await withLease(completion, store);
   if (attempt.recorded) {
     await removeReplaced(completion, store, attempt.replaced);
     await runAfterComplete(completion, attempt.answer.data?.data);

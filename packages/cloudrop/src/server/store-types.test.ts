@@ -5,7 +5,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import type { RouteResult } from "../protocol/types.ts";
 import type { Cloudrop } from "./cloudrop.ts";
 import { route, routeFor } from "./route.ts";
-import type { CloudropStore } from "./store.ts";
+import type { CloudropStore, FileRecord } from "./store.ts";
 
 interface DrizzleTx {
   insert(table: string): Promise<void>;
@@ -53,7 +53,36 @@ const albums = txRoute(
   },
 );
 
+/** onDelete sees the file's row, its owner and why, never the authorize result; a store's route adds its tx. */
+const deleted = route(
+  { accept: "*/*", maxSize: 1, authorize: () => ({ userId: "u1" }) },
+  {
+    onDelete: (context) => {
+      expectTypeOf(context.file).toEqualTypeOf<FileRecord>();
+      expectTypeOf(context.owner).toEqualTypeOf<string | null>();
+      expectTypeOf(context.reason).toEqualTypeOf<"deleted" | "replaced" | "erased">();
+      // @ts-expect-error: onDelete runs outside any request, with no authorize result.
+      void context.userId;
+      // @ts-expect-error: a plain route() has no tx.
+      void context.tx;
+    },
+  },
+);
+const audited = txRoute(
+  { accept: "*/*", maxSize: 1, authorize: () => ({ userId: "u1" }) },
+  {
+    onDelete: async ({ tx, file }) => {
+      expectTypeOf(tx).toEqualTypeOf<DrizzleTx>();
+      await tx.insert(file.id);
+    },
+  },
+);
+
 describe("store route types", () => {
+  it("onDelete is typed like onComplete: the store's tx only on its own routes", () => {
+    void [deleted, audited];
+  });
+
   it("owner sees the authorize context and no file, and returns a string or null", () => {
     void avatar;
     // @ts-expect-error: owner returns a string or null.

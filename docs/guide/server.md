@@ -377,7 +377,14 @@ Why it works this way: the M2 decisions in [docs/decisions](../decisions/README.
 `onComplete` is a route option. It runs inside `/complete`, after the file is verified, at least once per file. Its JSON
 result reaches the client as `data.data`; without `onComplete`, `data.data` is `null`. With a [database store](store.md)
 it runs once per file, and on a store built with `transaction: true` its writes through `tx` commit with the upload;
-`owner` and `afterComplete` are store callbacks, described there.
+`owner`, `afterComplete` and `onDelete` are store callbacks, described there.
+
+### onDelete
+
+With a store, `onDelete({ file, owner, reason })` runs when one of the route's completed files is deleted by
+`api.deleteFile`, a `replace: true` completion or `api.eraseOwner`, so an audit trail or a pointer of yours follows the
+file. A throw keeps the file. With `transaction: true` it runs inside the deletion's transaction with `tx`; otherwise
+before the deletion, at least once. See [`onDelete`](store.md#ondelete).
 
 ### Plugin hooks
 
@@ -418,7 +425,8 @@ cloudrop's own plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive
 ### Make hooks idempotent
 
 Hooks can run more than once. A retried or replayed request repeats `afterVerify` and `onComplete` (on `/complete`) and
-`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Make their side effects
+`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Without a transaction,
+`onDelete` can run twice for one file too. Make their side effects
 idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate. A
 database store answers a finished upload's retries from its row instead (see
 [what it guarantees](store.md#what-it-guarantees)).

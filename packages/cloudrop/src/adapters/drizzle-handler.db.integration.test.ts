@@ -4,8 +4,9 @@
 // of one file run onComplete once, held apart by Postgres's row lock.
 
 import { randomBytes } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import { drizzle as nodePostgres } from "drizzle-orm/node-postgres";
-import { pgTable, text } from "drizzle-orm/pg-core";
+import { integer, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import pg from "pg";
 import postgres from "postgres";
@@ -18,6 +19,7 @@ import { gate, hello, TEXT } from "../testing/store-fixture.ts";
 import { drizzleStore } from "./drizzle.ts";
 
 const appUploads = pgTable("app_uploads", { fileId: text("file_id").primaryKey(), owner: text("owner").notNull() });
+const appOwners = pgTable("app_owners", { owner: text("owner").primaryKey(), files: integer("files").notNull() });
 
 const RETRY = "The file was uploaded, but the server could not finish processing it. Try again in a moment.";
 const BUSY = "Another request is completing this upload. Try again in a moment.";
@@ -60,6 +62,7 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     await db.reset();
     await db.createTables();
     await db.query("CREATE TABLE app_uploads (file_id text PRIMARY KEY, owner text NOT NULL)");
+    await db.query("CREATE TABLE app_owners (owner text PRIMARY KEY, files integer NOT NULL)");
   });
 
   /** An uploaded file whose route writes an app row through tx, then answers `after(run)`. */
@@ -180,5 +183,81 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
     expect((await first).body.data).toEqual({ run: 1 });
     expect([runs(), await appRows()]).toEqual([1, [{ file_id: ticket.id, owner: "u1" }]]);
+  });
+
+  // onDelete runs before cloudrop locks the file's row and the owner's usage, as onComplete runs before the usage is
+  // locked, so both take the app's owner row first. Run after the deletion instead, the two would deadlock here.
+  test("onDelete and onComplete writing the same row of the owner take turns, and both commit", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    const held = gate();
+    let completions = 0;
+    const count = (delta: number) => sql`${appOwners.files} + ${delta}`;
+    const files = store.route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onComplete: async ({ tx, userId }) => {
+          await tx
+            .update(appOwners)
+            .set({ files: count(1) })
+            .where(eq(appOwners.owner, userId));
+          completions += 1;
+          if (completions === 2) await held.pass();
+        },
+        onDelete: async ({ tx, owner }) => {
+          await tx
+            .update(appOwners)
+            .set({ files: count(-1) })
+            .where(eq(appOwners.owner, owner ?? ""));
+        },
+      },
+    );
+    await db.query("INSERT INTO app_owners VALUES ('u1', 0)");
+    const fixture = serverFixture({ files }, { store });
+    const upload = async () => {
+      const ticket = await fixture.single("files", TEXT);
+      await fixture.send(ticket.put, hello);
+      return ticket;
+    };
+    const old = await upload();
+    expect((await complete(fixture, old.token)).status).toBe(200);
+    const next = await upload();
+    // The second completion holds the owner's row inside onComplete while the deletion's onDelete waits for it.
+    const completing = complete(fixture, next.token);
+    await held.arrived;
+    const deleting = fixture.cloudrop.api.deleteFile(old.id);
+    await lockWaiter();
+    held.open();
+    expect([(await completing).status, (await deleting).error]).toEqual([200, null]);
+    expect(await db.query("SELECT files FROM app_owners")).toEqual([{ files: 1 }]);
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+  });
+
+  test("onDelete's writes through tx commit with the deletion, and a throw rolls them back and keeps the file", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    let failing = true;
+    const files = store.route(
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onDelete: async ({ tx, file, owner }) => {
+          await tx.insert(appUploads).values({ fileId: file.id, owner: `${owner} deleted` });
+          if (failing) throw new Error("the audit service refused");
+        },
+      },
+    );
+    const fixture = serverFixture({ files }, { store });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.send(ticket.put, hello);
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    const appRows = () => db.query("SELECT file_id, owner FROM app_uploads");
+    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error?.code).toBe("SERVER_ERROR");
+    expect([(await rawTables(db).files())[0]?.status, await appRows()]).toEqual(["completed", []]);
+    failing = false;
+    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error).toBeNull();
+    expect([(await rawTables(db).files())[0]?.status, await appRows()]).toEqual([
+      "deleted",
+      [{ file_id: ticket.id, owner: "u1 deleted" }],
+    ]);
   });
 });

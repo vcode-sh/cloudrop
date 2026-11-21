@@ -9,6 +9,7 @@ import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
 import { badOwner, isOwnerOrId } from "./owner-files.ts";
 import type { CloudropStore, FileRecord, FileStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
+import { deleteCompleted } from "./store-delete.ts";
 
 export interface EraseOptions {
   /**
@@ -70,11 +71,9 @@ function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSig
   return graceMs.error ? graceMs : ok({ graceMs: graceMs.data, signal });
 }
 
-/** A completed file: ended as deleted now, so the `deleted` pass removes its object. */
-async function deleteCompleted({ config, store, report }: Eraser, record: FileRecord): Promise<void> {
-  const ended = await storeCall(config.logger, `delete file ${record.id}`, () =>
-    store.end(record.id, "completed", "deleted", new Date()),
-  );
+/** A completed file: ended as deleted now, after its route's onDelete, so the `deleted` pass removes its object. */
+async function deleteOne({ config, store, report }: Eraser, record: FileRecord): Promise<void> {
+  const ended = await deleteCompleted(config, store, record.id, "erased");
   if (ended.error) report.failed += 1;
   else if (ended.data.changed) report.deleted += 1;
 }
@@ -195,7 +194,7 @@ export async function eraseOwner(
   // new /upload adds files), so the ended passes see every ended file. Reading the live statuses one at a time would
   // miss a file that moves between two of them, such as a completion that fails and hands its file back.
   const ran = await runPasses(eraser, [
-    [["completed"], deleteCompleted],
+    [["completed"], deleteOne],
     [LIVE, wait],
     ...ENDED.map((status) => [[status], checkEnded] as const),
   ]);

@@ -52,3 +52,113 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   on Postgres); the store's statements do not stop it from being used.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md#known-costs`.
+
+### M10-D4: `onDelete` runs for a completed file that becomes `deleted`, with the row as it was
+
+- **Decision:** A route callback `onDelete({ file, owner, reason })`, `reason` one of `"deleted"` (`api.deleteFile`),
+  `"replaced"` (a `replace: true` completion) and `"erased"` (`api.eraseOwner`). It runs only when a `completed` row
+  becomes `deleted`; `/abort`, `revokeUploads`, refusals and the sweep end rows that never completed and run nothing,
+  and `api.delete(key)` touches no row. `file` is the `FileRecord` as it was before the deletion (`status:
+  "completed"`, `endedAt: null`); `owner` is `file.owner`. The hook is the one of the route the row names; a row whose
+  route is no longer configured is deleted without one. It needs a store (`INVALID_CONFIG` otherwise, like `owner` and
+  `afterComplete`) and must be a function. Its context is typed like `onComplete`'s: `WithExtra<DeleteContext,
+  TExtra>`, so a store's `route()` adds `tx` and a plain `route()` does not. `DeleteContext` and `DeleteReason` are
+  exported from `cloudrop`.
+- **Why:** the pilot wrote its own deletion path (`vstack/packages/storage/src/deletion.ts`) to keep an audit row and
+  its avatar pointer in step with `deleteFile` and `replace`. The row before the deletion is the same shape for every
+  reason: a replaced file's record comes back from the store already `deleted`, while `deleteFile`'s hook runs before
+  the row changes (`M10-D5`), so the context reports the one state every caller saw. The design names `owner` beside
+  `file` so a hook can destructure it.
+- **If wrong:** a hook that needs the deletion time reads `new Date()`; the row's `endedAt` is written after it.
+- **Status:** in force.
+- **Visible in:** `src/server/route.ts`, `src/server/store.ts`, `src/server/store-delete.ts`,
+  `src/server/store-config.ts`, `src/server/route-config.ts`, `docs/guide/store.md#ondelete`, `docs/guide/server.md`.
+
+### M10-D5: with a transaction, `onDelete` runs before cloudrop's locks and commits exactly once
+
+- **Decision:** On a store with `transaction`, `deleteFile` and `eraseOwner` delete each file in its own transaction:
+  read the row, run `onDelete` with `tx`, then `end(completed → deleted)`. When `end` finds the row no longer completed
+  (another deletion committed first), the transaction rolls back, so only one deletion's writes ever commit. A replacing
+  completion runs `onDelete` for each replaced file inside its own transaction, after `store.complete` answered them;
+  a throw rolls the whole completion back, `onComplete`'s writes included.
+- **Why:** `end` locks the file row and then the owner's usage row; a completion locks its own row, runs `onComplete`
+  (the app's locks), then the usage row. Run after `end`, an `onDelete` that writes a row `onComplete` also writes (a
+  per-user counter, the user row) waits for that row while holding the usage row the completion waits for: measured on
+  Postgres 18 through Drizzle on both drivers, a fault probe that moved the hook after `end` failed the new case in
+  `drizzle-handler.db.integration.test.ts` with `40P01 deadlock detected` after Postgres's 1 s `deadlock_timeout`. Run first, the
+  app's locks come before cloudrop's in both paths and the two take turns (the case passes). A replaced file is known
+  only once `store.complete` answers, after its row and the usage row are locked, so on a replacing route the guide
+  asks `onComplete` to lock first whatever `onDelete` writes, as the pilot locks the user row.
+- **If wrong:** an app whose `onDelete` on a replacing route writes a row its `onComplete` does not lock can deadlock
+  against a concurrent `deleteFile` of the previous file; Postgres fails one with a retryable `SERVER_ERROR`.
+- **Status:** in force.
+- **Visible in:** `src/server/store-delete.ts`, `src/server/store-complete.ts`,
+  `src/adapters/drizzle-handler.db.integration.test.ts`, `src/server/store-delete.test.ts`, `docs/guide/store.md`.
+
+### M10-D6: without a transaction, `onDelete` runs before the deletion, at least once
+
+- **Decision:** Under a lease (SQLite, D1, Postgres without `transaction: true`) `deleteFile` and `eraseOwner` read the
+  row, run `onDelete`, then `end` it; a throw keeps the file. A replacing completion, after `onComplete`, lists the
+  owner's completed files on the route, runs `onDelete` for each, then records the completion; a throw hands the claim
+  back and records nothing. A file that completed in between is replaced too, and its `onDelete` runs right after the
+  record, where a throw is only logged.
+- **Why:** this is `onComplete`'s rule under a lease (`M5`): before the record, so a throw keeps things as they were,
+  and at least once. A completed row has no claim to hold, so two deletions of one file at once can both run the hook,
+  and a deletion that fails after it (a database error, a replacing completion whose record fails or loses its lease)
+  runs it again on the retry, or leaves the file with a hook run for it. Running it after the record instead would
+  skip it on a crash and could not keep the file on a throw.
+- **If wrong:** an app that needs exactly once uses `transaction: true` on Postgres, or makes the hook idempotent by
+  `file.id`, as the guide says.
+- **Status:** in force.
+- **Visible in:** `src/server/store-delete.ts` (`deleteCompleted`, `beforeReplacing`, `afterReplacing`),
+  `src/server/store-complete.ts` (`withLease`), `docs/guide/store.md#ondelete`.
+
+### M10-D7: what each caller answers when `onDelete` throws
+
+- **Decision:** The throw is logged as `cloudrop: onDelete failed for route "<route>" while deleting file <id>.` with
+  the error, and the file stays completed with its bytes and object. `api.deleteFile` answers a retryable
+  `SERVER_ERROR`: "onDelete failed for route "<route>", so the file was kept. Its error is in the server log; fix it and
+  try again." `api.eraseOwner` counts the file in `failed` (and in `waiting`, as it is still completed), goes on with
+  the next file and reports `done: false`. A replacing `/complete` answers the retryable `SERVER_ERROR` a throw in
+  `onComplete` gives ("The file was uploaded, but the server could not finish processing it. Try again in a moment."),
+  and the client's retry runs the hooks again.
+- **Why:** each caller already has a way to report a file it could not handle: `deleteFile` an error, `eraseOwner`
+  its counters, `/complete` the unfinished answer. Retryable, as the hook's own failure is often a database or network
+  blip; the message names the route and points at the log, never the thrown error, which may hold anything.
+- **If wrong:** a caller that must tell a hook's failure from the store's reads the message or the log.
+- **Status:** in force.
+- **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete.test.ts`, `docs/guide/store.md#ondelete`.
+
+### M10-D8: a server without `onDelete` deletes as 0.3 did
+
+- **Decision:** When no route has `onDelete`, `deleteFile` and `eraseOwner` make exactly the store calls of 0.3 (one
+  `end` per file, no read and no transaction), and a replacing completion lists nothing.
+- **Why:** the hook costs a read and, in transaction mode, a transaction per file; apps that do not use it should not
+  pay that, and their behaviour, M9-H52's measured waits included, stays as recorded.
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/server/store-delete.ts`.
+
+### M10-D9: the Hono example keeps its avatar route as it is
+
+- **Decision:** `examples/hono` does not use `onDelete`.
+- **Why:** the brief allowed it only if it removed code. Its avatar pointer is cleared by one statement in the delete
+  RPC; an `onDelete` would be three lines more in the route for one fewer in the router.
+- **If wrong:** none; the example may adopt it once it has a reason to, such as an audit trail.
+- **Status:** in force.
+- **Visible in:** `examples/hono/src/uploads.ts`, `examples/hono/src/rpc/router.ts`.
+
+### M10-D10: the bundled server budget goes from 30 to 32 kB (for owner confirmation)
+
+- **Decision:** `scripts/size-limit.config.ts` raises the "cloudrop (bundled)" ceiling from 30 kB to 32 kB. Measured
+  gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.71 kB (+3.9%), `cloudrop` summed 39.76 → 41.48 kB (+4.3%),
+  `adapters/sql` 11.86 → 12.17 kB, `adapters/drizzle` 13.58 → 13.89 kB, `adapters/prisma` 11.33 → 11.65 kB,
+  `cloudrop/testing` 13.18 → 13.35 kB; `cloudrop/client`, `cloudrop/react`, `cloudrop/next` and `cloudrop/node`
+  unchanged. Every other ceiling stays.
+- **Why:** `M4-F24` set the ceilings with a wide margin for the store and plugins, and 0.3.0 left 0.45 kB of it on the
+  bundled server. `onDelete` (its transaction and lease paths, and the replacing completion's) and the filters with
+  their checks and messages add 1.16 kB; none of it is dead weight an app could drop, as every export ships in this
+  budget. No entry grew by 5% or more.
+- **If wrong:** the owner sets another ceiling; nothing depends on this number.
+- **Status:** in force until the owner confirms or changes it.
+- **Visible in:** `scripts/size-limit.config.ts`.

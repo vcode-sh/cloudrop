@@ -9,6 +9,7 @@ import { removeDeleted } from "./leftovers.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listFiles } from "./owner-files.ts";
 import type { CloudropStore, FileRecord, OwnerUsage } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
+import { deleteCompleted } from "./store-delete.ts";
 import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 
 export interface StoreFileApi {
@@ -20,7 +21,10 @@ export interface StoreFileApi {
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
   revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
-  /** Deletes a completed file: its row becomes `deleted`, its bytes are released and its object removed. Idempotent. */
+  /**
+   * Deletes a completed file: its route's `onDelete` runs, its row becomes `deleted`, its bytes are released and its
+   * object removed. Idempotent.
+   */
   deleteFile(id: string): Promise<Result<{ id: string }>>;
   /**
    * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
@@ -48,9 +52,7 @@ async function deleteFile(
   store: CloudropStore<unknown>,
   id: string,
 ): Promise<Result<{ id: string }>> {
-  const ended = await storeCall(config.logger, `delete file ${id}`, () =>
-    store.end(id, "completed", "deleted", new Date()),
-  );
+  const ended = await deleteCompleted(config, store, id, "deleted");
   if (ended.error) return ended;
   const { changed, record } = ended.data;
   if (record?.status !== "deleted") return fail(notCompleted());
