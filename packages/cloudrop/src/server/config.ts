@@ -5,6 +5,7 @@
 import { CloudropError, configError, type Result } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { environmentReader } from "./environment.ts";
+import { readOrigins } from "./origins.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { isFunction, readRoute } from "./route-config.ts";
@@ -25,8 +26,10 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> extends 
   /** Where the handler is mounted. Default "/api/cloudrop". */
   basePath?: string;
   /**
-   * Exact origins, such as "https://app.example.com", allowed to call the handler cross-origin with credentials. Behind
-   * a proxy that terminates TLS or rewrites Host, list the app's own public origin too: no forwarded header is trusted.
+   * Exact origins, such as "https://app.example.com", allowed to call the handler cross-origin with credentials: the
+   * text a browser sends as `Origin`, so never a pattern, and for a webview or an extension page its own scheme, such
+   * as "capacitor://localhost". Behind a proxy that terminates TLS or rewrites Host, list the app's own public origin
+   * too: no forwarded header is trusted.
    */
   trustedOrigins?: readonly string[];
   /** Files larger than this use multipart. Default 64 MiB. */
@@ -67,22 +70,10 @@ export const ROUTE_NAME: RegExp = /^[A-Za-z0-9_-]{1,64}$/;
 const BASE_PATH = /^(\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+$/;
 const PLUGIN_HOOKS = ["beforeUpload", "afterVerify", "onAbort", "extendRoute"] as const;
 
-/**
- * Only a scheme and host survive URL's own serialization unchanged: a path, credentials, "*", "null" and the line
- * breaks the parser strips all fail.
- */
-export const isExactOrigin = (origin: unknown): origin is string =>
-  typeof origin === "string" && URL.canParse(origin) && new URL(origin).origin === origin;
-
-function readOrigins(origins: unknown): Set<string> {
-  const list = origins ?? [];
-  const valid = Array.isArray(list) && list.every(isExactOrigin);
-  if (!valid) {
-    throw configError(
-      'trustedOrigins must list exact origins such as "https://app.example.com": scheme and host, no path or trailing slash, and never "*".',
-    );
-  }
-  return new Set(list);
+function readTrustedOrigins(given: unknown): Set<string> {
+  const read = readOrigins(given ?? []);
+  if ("problem" in read) throw configError(`trustedOrigins: ${read.problem}`);
+  return new Set(read.origins);
 }
 
 function readStorage(storage: StorageDriver | undefined): StorageDriver {
@@ -195,7 +186,7 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   const plugins = readPlugins(options.plugins);
   const logger = readLogger(options.logger);
   const ready = environmentReader(options.secret, storage);
-  const trustedOrigins = readOrigins(options.trustedOrigins);
+  const trustedOrigins = readTrustedOrigins(options.trustedOrigins);
   const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
   const store = readStoreConfig(options, [...routes.values()]);
   const config = { storage, routes, ready, basePath, trustedOrigins, multipartThreshold, plugins, logger, ...store };

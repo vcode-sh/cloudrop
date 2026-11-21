@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { outcome, request, setup, TRUSTED } from "../testing/handler-fixture.ts";
-import { APP_ORIGIN } from "../testing/server-fixture.ts";
+import { avatar, outcome, request, setup, TRUSTED } from "../testing/handler-fixture.ts";
+import { APP_ORIGIN, serverFixture } from "../testing/server-fixture.ts";
 
 describe("cloudrop.handler origins and CORS", () => {
   it("accepts a same-origin request without CORS headers", async () => {
@@ -92,6 +92,19 @@ describe("cloudrop.handler origins and CORS", () => {
       cache: "no-store",
     });
   });
+
+  // A webview or an extension page sends its app scheme as the Origin (M11-R41): a scheme with "-", and a port.
+  it.for(["capacitor://localhost", "chrome-extension://abcdefghijklmnopabcdefghijklmnop", "app://localhost:8100"])(
+    "answers the trusted app origin %s with that exact origin",
+    async (origin) => {
+      const { cloudrop } = serverFixture({ avatar }, { trustedOrigins: [origin] });
+      const response = await cloudrop.handler(request("/api/cloudrop/upload", { headers: { origin } }));
+      expect({ status: response.status, origin: response.headers.get("access-control-allow-origin") }).toEqual({
+        status: 200,
+        origin,
+      });
+    },
+  );
 
   // A header name is an RFC 9110 token: "_" and "." are as valid as "-", and a list answered short blocks the request.
   it("allows every valid header name a trusted preflight asks for", async () => {

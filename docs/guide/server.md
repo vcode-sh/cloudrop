@@ -43,7 +43,7 @@ checked when `createCloudrop` runs too, so a dev server fails as soon as the ser
 | `routes` | The upload routes, by name. At least one. A name uses letters, digits, `-` and `_`, at most 64. | |
 | `secret` | The secret that signs upload tokens: text of at least 32 characters, or a list of them (see [Rotate the secret](#rotate-the-secret)). | env `CLOUDROP_SECRET` |
 | `basePath` | Where the handler is mounted. A leading slash, no trailing slash, no query. | `"/api/cloudrop"` |
-| `trustedOrigins` | Exact origins, such as `"https://app.example.com"`, that may call the handler from another origin (see [Origins](#origins)). Never `"*"`. | `[]` |
+| `trustedOrigins` | Exact origins, such as `"https://app.example.com"`, that may call the handler from another origin (see [Origins](#origins)). Never `"*"` or a pattern such as `"https://*.example.com"`. | `[]` |
 | `multipartThreshold` | Files larger than this go in parts. Bytes or a size such as `"64MB"`. | 64 MiB |
 | `plugins` | Plugins with server hooks (see [Hooks](#hooks)). | `[]` |
 | `logger` | Where failures inside the handler and configuration warnings go: any object with `error(message, error)` and `warn(message)`, such as `console` or a pino logger. | `console` |
@@ -566,7 +566,42 @@ The handler accepts:
   shows a browser that dropped it. `Origin: null` is refused.
 
 Everything else gets `ORIGIN_NOT_ALLOWED`. The handler also requires `Content-Type: application/json`, so a page on
-another origin must pass a CORS preflight first.
+another origin must pass a CORS preflight first. The handler answers that preflight itself and allows the headers it
+asks for; an `OPTIONS` from an allowed origin that is not a preflight for `POST` gets `METHOD_NOT_ALLOWED`.
+
+### What an origin is
+
+An entry of `trustedOrigins` is compared, character for character, with the `Origin` header the browser sends, so it
+must be exactly that text. `createCloudrop` throws `INVALID_CONFIG` for anything a browser cannot send, and
+`api.checkBucket({ origins })` refuses the same values:
+
+| You write | A browser sends | So |
+| --- | --- | --- |
+| `"https://app.example.com/"`, `"https://app.example.com:443"`, `"https://App.Example.com"` | `https://app.example.com` | Refused; the message names the origin to use: scheme, host and a non-default port, lowercase, no path. |
+| `"https://*.example.com"`, `"*"` | never a pattern | Refused. List each origin; there are no wildcards. |
+| `"https://bücher.example"` | `https://xn--bcher-kva.example` | Refused; the message names the punycode form, which is what to list. |
+| `"null"`, `"file://"`, `"data:..."` | `null`, which every sandboxed frame and local file shares | Refused: trusting `null` would trust them all. |
+| `"capacitor://localhost"`, `"tauri://localhost"`, `"chrome-extension://<id>"` | the same text | Accepted (below). |
+
+**Webviews and extensions.** A page inside an app shell or a browser extension has an origin with the app's own
+scheme, and the webview sends it as it is:
+
+| Where the page runs | Its `Origin` |
+| --- | --- |
+| Capacitor on iOS | `capacitor://localhost` |
+| Capacitor on Android | `https://localhost` or `http://localhost`, by `androidScheme` |
+| Tauri on macOS and Linux | `tauri://localhost` |
+| Tauri on Windows and Android | `http://tauri.localhost` (or `https://tauri.localhost`, by `useHttpsScheme`) |
+| A Chrome extension page | `chrome-extension://<extension id>` |
+| A Firefox extension page | `moz-extension://<the installation's UUID>`, different on every install |
+
+For a scheme other than `http` and `https`, `trustedOrigins` accepts `scheme://host` or `scheme://host:port`, all in
+lowercase: the scheme starts with a letter and may hold letters, digits, `+`, `-` and `.`; the host holds letters,
+digits, `.` and `-`; the port is 1 to 5 digits. That is the form the Fetch standard gives the `Origin` header
+([`Origin`](https://fetch.spec.whatwg.org/#origin-header)). `file:` is never accepted. Check what your shell really
+sends in its network inspector before you list it: by the URL standard alone a page on such a scheme has an
+[opaque origin](https://url.spec.whatwg.org/#origin) and would send `null`, and it is the webview that makes the
+scheme behave like `https`. The bucket's CORS rule needs the same origin, because the bytes leave from that page too.
 
 The handler sees its own origin in the request URL and trusts no `X-Forwarded-*` header. **Behind a proxy that
 terminates TLS or rewrites `Host`, your own pages look cross-origin:** list the app's public origin in

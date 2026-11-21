@@ -337,6 +337,53 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** provisional.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
+### M11-R40: `trustedOrigins` and `checkBucket` refuse a pattern, in the command's words
+
+- **Decision:** A value with `*` in `trustedOrigins` (`createCloudrop`, `INVALID_CONFIG`) or in
+  `api.checkBucket({ origins })` (`INVALID_INPUT`) is refused with the command's sentence (`M9-H100`): `"https://*.example.org"
+  is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.` Every other
+  refusal uses the command's two sentences too, prefixed with `trustedOrigins: ` or `checkBucket: `: the one that names
+  the origin to use (`Use https://app.example.com: …`) and the one for text with no origin. One module,
+  `src/server/origins.ts`, serves the option, the api call and the handler's origin hint.
+- **Why:** `new URL("https://*.example.org").origin` equals its input, so the old check accepted the pattern and the
+  server then matched it against no request: every upload from the subdomains answered `403 ORIGIN_NOT_ALLOWED`, found
+  only in production. The command already refused it. A bucket's CORS rule may hold a pattern, but a page's origin never
+  is one, so a `checkBucket` for a pattern would report on an origin no page has.
+- **If wrong:** an app that relied on the pattern being accepted now fails at start-up instead of at the first upload;
+  the pattern never matched, so no working setup changes. The command keeps its own copy of the sentences
+  (`src/cli/args.ts`); a later change can make it import `readOrigins`.
+- **Status:** in force.
+- **Visible in:** `src/server/origins.ts`, `src/server/config.test.ts`, `src/server/bucket-check.test.ts`,
+  `docs/guide/server.md#what-an-origin-is`.
+
+### M11-R41: an app's own scheme is an origin: `scheme://host[:port]`, lowercase
+
+- **Decision:** For a URL whose origin the URL parser gives as `null`, `trustedOrigins` and `checkBucket` accept the
+  text itself when it matches `^(?!file:)[a-z][a-z0-9+.-]*:\/\/[a-z0-9.-]+(:\d{1,5})?$`: `capacitor://localhost`,
+  `tauri://localhost`, `chrome-extension://<id>`, `moz-extension://<uuid>`, `app://localhost:8100`. The handler compares
+  it with the request's `Origin` header as an exact string, as for every origin, and answers with it in
+  `Access-Control-Allow-Origin`. `null`, `file://…`, `data:…` and anything with a path, an uppercase letter or
+  credentials stay refused, with a message that now says "in lowercase". `http`, `https` and the other special schemes
+  keep the parser's rule, so `https://bücher.example` is refused with `Use https://xn--bcher-kva.example`, the form a
+  browser sends.
+- **Why:** the old check answered `INVALID_CONFIG` with a message `capacitor://localhost` already satisfied, so a
+  Capacitor, Tauri or extension app could not be configured at all. The form is the one the Fetch standard gives the
+  header (`serialized-origin = serialized-scheme "://" serialized-host [ ":" serialized-port ]`, lowercase scheme, port
+  of 1 to 5 digits, <https://fetch.spec.whatwg.org/#origin-header>). The URL standard alone makes such a URL's origin
+  opaque (<https://url.spec.whatwg.org/#origin>, "Otherwise: return a new opaque origin"), which serializes as `null`;
+  WebKit and Chromium treat a scheme the app registered as a tuple origin and send it. What each shell sends is taken
+  from its documentation, not measured here: Capacitor iOS `capacitor://localhost`
+  (<https://ionicframework.com/docs/troubleshooting/cors>), Tauri `tauri://localhost` on macOS and Linux and
+  `http://tauri.localhost` on Windows and Android (<https://v2.tauri.app/reference/config/>, `useHttpsScheme`).
+  `file:` is excluded because a file page sends `null`, and trusting `null` would trust every sandboxed frame.
+- **If wrong:** a shell that sends `null` for its scheme (the standard's reading) is refused as before, with its entry
+  accepted but never matched; the guide tells the reader to check the header in the shell's network inspector. The
+  `chrome-extension://` and `moz-extension://` values are from memory of those browsers' behaviour, with no page found
+  that states the header. A host outside `[a-z0-9.-]` (an IPv6 literal, an underscore) is refused.
+- **Status:** in force.
+- **Visible in:** `src/server/origins.ts`, `src/server/handler-cors.test.ts`, `src/server/config.test.ts`,
+  `docs/guide/server.md#what-an-origin-is`, `docs/guide/deployment.md#a-webview-or-a-browser-extension`.
+
 ### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
 
 - **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC

@@ -88,6 +88,32 @@ cookies. What remains is the cookie itself:
 With `authorize` that finds no session, every upload ends `UNAUTHORIZED`: check in the browser's DevTools whether the
 `/upload` request carried the cookie.
 
+`trustedOrigins` takes each origin as the browser sends it: no path, no trailing slash, no default port, lowercase, an
+internationalized host in its punycode form, and never a pattern such as `"https://*.example.com"`. `createCloudrop`
+refuses anything else and says what to write. The rule and the table of cases: [What an origin is](server.md#what-an-origin-is).
+
+### A webview or a browser extension
+
+A page in a Capacitor or Tauri shell, or in an extension, is cross-origin to your API and sends the app's own scheme
+as its origin. List that text, and add it to the bucket's CORS rule too:
+
+```ts
+createCloudrop({
+  // ...
+  trustedOrigins: [
+    "capacitor://localhost", // Capacitor on iOS
+    "https://localhost", // Capacitor on Android (http://localhost with androidScheme: "http")
+    "tauri://localhost", // Tauri on macOS and Linux
+    "http://tauri.localhost", // Tauri on Windows and Android
+  ],
+});
+```
+
+A webview's cookies are often blocked or partitioned, so most such apps send a token with the client's `headers` option
+instead: [Send a bearer token](client.md#send-a-bearer-token). A `localhost` origin is shared by every app and local
+server that uses that scheme and port on the device, so trusting it trusts them all with the user's cookies: one more
+reason for a token. Which shell sends what: [What an origin is](server.md#what-an-origin-is).
+
 A whole app in this shape, a Vite SPA on one origin and a Hono API with better-auth on another of the same site, step by
 step and with its CORS middleware kept off cloudrop's path: [Hono with better-auth and Drizzle](hono.md).
 

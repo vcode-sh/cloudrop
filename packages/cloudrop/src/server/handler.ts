@@ -7,7 +7,7 @@ import type { Endpoint } from "../protocol/types.ts";
 import { handleAbort } from "./abort.ts";
 import { checkBucket } from "./bucket-check.ts";
 import { handleComplete } from "./complete.ts";
-import { type EndpointInput, isExactOrigin, type ServerConfig } from "./config.ts";
+import type { EndpointInput, ServerConfig } from "./config.ts";
 import {
   checkOrigin,
   errorResponse,
@@ -19,6 +19,7 @@ import {
   readJson,
   serverError,
 } from "./http.ts";
+import { isExactOrigin } from "./origins.ts";
 import type { Logger } from "./plugins.ts";
 import { handleSign } from "./sign.ts";
 import { handleUpload } from "./upload.ts";

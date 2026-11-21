@@ -144,23 +144,41 @@ describe("api.checkBucket", () => {
   });
 
   // Origins are echoed in the report, so only exact origins may reach it: no path, header or credential text.
-  it.for<{ name: string; options: unknown }>([
-    { name: "options that are not an object", options: "https://app.example.com" },
-    { name: "origins that are not a list", options: { origins: "https://app.example.com" } },
-    { name: "an origin that is not text", options: { origins: [42] } },
-    { name: "an origin with a path", options: { origins: ["https://app.example.com/upload"] } },
-    { name: "an origin with a line break", options: { origins: ["https://app.example.com\r\nx-forged: 1"] } },
-    { name: "an origin with credentials", options: { origins: ["https://user:secret@app.example.com"] } },
-    { name: "a wildcard", options: { origins: ["*"] } },
-  ])("refuses $name", async ({ options }) => {
+  const NOT_A_LIST = 'checkBucket: pass a list of origins as text, such as ["https://app.example.com"].';
+  it.for<{ name: string; options: unknown; message: string }>([
+    { name: "options that are not an object", options: "https://app.example.com", message: NOT_A_LIST },
+    { name: "origins that are not a list", options: { origins: "https://app.example.com" }, message: NOT_A_LIST },
+    { name: "an origin that is not text", options: { origins: [42] }, message: NOT_A_LIST },
+    {
+      name: "an origin with a path",
+      options: { origins: ["https://app.example.com/upload"] },
+      message:
+        'checkBucket: "https://app.example.com/upload" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+    },
+    {
+      name: "an origin with a line break",
+      options: { origins: ["https://app.example.com\r\nx-forged: 1"] },
+      message:
+        'checkBucket: "https://app.example.com\\r\\nx-forged: 1" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
+    },
+    {
+      name: "an origin with credentials",
+      options: { origins: ["https://user:secret@app.example.com"] },
+      message:
+        'checkBucket: "https://user:secret@app.example.com" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+    },
+    // A bucket rule may hold a pattern, but a page's origin never is one, so a check for it would match no page.
+    {
+      name: "a pattern",
+      options: { origins: ["https://*.example.org"] },
+      message:
+        'checkBucket: "https://*.example.org" is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.',
+    },
+  ])("refuses $name", async ({ options, message }) => {
     const { cloudrop } = serverFixture({ files }, { bucketConfig: {} });
     expect(await cloudrop.api.checkBucket(options as never)).toMatchObject({
       data: null,
-      error: {
-        code: "INVALID_INPUT",
-        message:
-          'checkBucket takes { origins } with exact origins such as "https://app.example.com": scheme and host, no path or trailing slash.',
-      },
+      error: { code: "INVALID_INPUT", message },
     });
   });
 });

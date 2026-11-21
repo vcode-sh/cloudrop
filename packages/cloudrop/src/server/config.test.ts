@@ -163,13 +163,39 @@ describe("readConfig errors", () => {
       name: 'a trusted origin of "*"',
       make: create({ trustedOrigins: ["*"] }),
       message:
-        'trustedOrigins must list exact origins such as "https://app.example.com": scheme and host, no path or trailing slash, and never "*".',
+        'trustedOrigins: "*" is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.',
+    },
+    // The URL parser accepts "*" in a host, and no browser ever sends one: the pattern would match no request (M11-R40).
+    {
+      name: "a trusted origin with a wildcard host",
+      make: create({ trustedOrigins: ["https://*.example.org"] }),
+      message:
+        'trustedOrigins: "https://*.example.org" is a pattern, not an origin. Name each origin your pages upload from, such as https://app.example.com.',
     },
     {
       name: "a trusted origin with a trailing slash",
       make: create({ trustedOrigins: ["https://app.example.com/"] }),
       message:
-        'trustedOrigins must list exact origins such as "https://app.example.com": scheme and host, no path or trailing slash, and never "*".',
+        'trustedOrigins: "https://app.example.com/" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+    },
+    // A browser sends an internationalized host in its punycode form, so the Unicode form would match no request.
+    {
+      name: "a trusted origin with an internationalized host",
+      make: create({ trustedOrigins: ["https://b\u00fccher.example"] }),
+      message:
+        'trustedOrigins: "https://b\u00fccher.example" is not an origin. Use https://xn--bcher-kva.example: an origin is the scheme, host and port, with no path.',
+    },
+    ...["null", "file://", "file://server", "data:text/html,x", "capacitor://localhost/", "Capacitor://localhost"].map(
+      (origin) => ({
+        name: `a trusted origin of ${origin}`,
+        make: create({ trustedOrigins: [origin] }),
+        message: `trustedOrigins: "${origin}" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.`,
+      }),
+    ),
+    {
+      name: "trusted origins that are not text",
+      make: create({ trustedOrigins: [42] }),
+      message: 'trustedOrigins: pass a list of origins as text, such as ["https://app.example.com"].',
     },
     {
       name: "a multipartThreshold in words",

@@ -6,8 +6,9 @@ import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
 import { keyProblem } from "../storage/validate.ts";
 import { type BucketReport, checkBucket } from "./bucket-check.ts";
-import { isExactOrigin, type ServerConfig } from "./config.ts";
+import type { ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";
+import { readOrigins } from "./origins.ts";
 import { nowSeconds } from "./presign.ts";
 import { type StoreFileApi, storeApi } from "./store-api.ts";
 
@@ -32,7 +33,10 @@ export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "delete
    * listing came back empty. For erasure requests.
    */
   deletePrefix(prefix: string): Promise<Result<{ deleted: number; verifiedAt: Date }>>;
-  /** CORS for `origins` (default: trustedOrigins), the abort-incomplete lifecycle rule, and public-domain conflicts. */
+  /**
+   * CORS for `origins` (default: trustedOrigins), the abort-incomplete lifecycle rule, and public-domain conflicts. An
+   * origin is the text a browser sends, as in trustedOrigins: never a pattern, even where the bucket's rule holds one.
+   */
   checkBucket(options?: { origins?: readonly string[] }): Promise<Result<BucketReport>>;
 }
 
@@ -164,16 +168,10 @@ export function createFileApi(config: ServerConfig): FileApi {
     deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, prefix)),
     checkBucket: async (given) => {
       const options = given ?? {};
-      const origins = isPlainObject(options) ? (options.origins ?? [...config.trustedOrigins]) : null;
       // The origins are echoed in the report, so only exact origins may reach it.
-      if (!Array.isArray(origins) || !origins.every(isExactOrigin)) {
-        return fail(
-          invalidInput(
-            'checkBucket takes { origins } with exact origins such as "https://app.example.com": scheme and host, no path or trailing slash.',
-          ),
-        );
-      }
-      return whenReady(() => checkBucket(config, origins));
+      const read = readOrigins(isPlainObject(options) ? (options.origins ?? [...config.trustedOrigins]) : null);
+      if ("problem" in read) return fail(invalidInput(`checkBucket: ${read.problem}`));
+      return whenReady(() => checkBucket(config, read.origins));
     },
   };
 }
