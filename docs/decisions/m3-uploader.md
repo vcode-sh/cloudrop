@@ -1608,7 +1608,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Why:** a record can outlive a `/complete` that finished: the page reloaded while the file was completing, or a
   failed `upload()` kept its record for a resume to settle the doubt (`M3-U82`). `discard()` of such a record sent
   `/abort` with a live token, and without a store the server deleted the finished object and ran `onAbort`, although
-  `onComplete` had recorded it (re-review N1). Every other client path refuses that delete (`M3-H16`). The server
+  `onComplete` had recorded it (re-review N1). Every path of the page that sent the `/complete` refuses that delete
+  (`M3-H16`); a `resume()` after a reload did not, until `M11-R260`. The server
   already had the branch that keeps a landed object (an expired token's); asking for it is exact, needs no extra
   IndexedDB write per completion, and covers records older versions wrote. With a store the row already knows: in
   transaction mode the claim, `onComplete`'s writes through `tx` and the completion commit or roll back together, and
@@ -1621,7 +1622,7 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
 - **Status:** in force (task B fix round 2, M4b); amended in fix round 3 (controller ruling): with a store's row `keep`
   changes nothing. A server older than this ignores `keep` and keeps today's behaviour; `docs/guide/resume.md` says to
   update the server with the client. Amended by `M11-R201`: a ticket whose doubt the server ended is given up with
-  `keep` too.
+  `keep` too. Amended by `M11-R260`: so is a resumed upload's, until the server proves the upload unfinished.
 - **Source:** task B re-review N1, controller ruling 2026-11-17.
 - **Visible in:** `server/abort.ts`, `server/abort.test.ts` and `server/store-abort.test.ts` (the `keep` rows: a pending
   row's landed object deleted, a completed file kept),

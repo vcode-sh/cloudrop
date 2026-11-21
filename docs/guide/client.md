@@ -299,7 +299,8 @@ so the cancel does not cut that request off. The file stays `completing` until t
 A file after a `/complete` that may have succeeded (no answer, or a `SERVER_ERROR`) is kept, never deleted: no `/abort`
 is sent for it. Once a later `/complete` has answered that the ticket is over (`UPLOAD_EXPIRED`, for example), a
 cancel does send `/abort`, with `keep: true`: it frees what the ticket still holds and never deletes a file that
-landed.
+landed. The `/abort` of a [resumed](resume.md#the-server-is-asked-first) upload carries `keep: true` too, until the
+server has answered which parts the bucket lacks: the page before the reload may have completed the file.
 
 ### Retry
 

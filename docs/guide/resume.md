@@ -98,14 +98,32 @@ of R2's two billed operation classes.
   with `/abort`, as a [retry that replaces a ticket](client.md#retry) does. It waits for the answer (at most 10
   seconds), so with a [database store](store.md) the bytes the old ticket reserved no longer count against the owner's
   quota. Then it asks `/upload` once for a new ticket with the record's route and metadata, and sends the whole file
-  under a new key, its `bytes` from 0, with no failure in between. After a `/complete` that may have succeeded (no
-  answer, or a `SERVER_ERROR`), that `/abort` carries `keep: true`, so a file that did land is never deleted by it.
-  When that `/upload` is refused, the file ends `failed` with its error.
+  under a new key, its `bytes` from 0, with no failure in between. That `/abort` carries `keep: true` (see below)
+  unless the answer proved the upload unfinished, as `NO_SUCH_UPLOAD` and missing parts do, so a file that did land
+  is never deleted by it. When that `/upload` is refused, the file ends `failed` with its error.
 - **Any other failure** ends the file `failed` and keeps its record. `retry()` then does what
   [any retry does](client.md#retry): it asks `/complete` again when the failure left the ticket good, such as a network
   or server failure, and asks `/upload` for a new ticket when the server ended the upload, such as a file refused for
   its content. A `resume()` after a reload that left the record asks `/complete` again (see
   [When a record is deleted](#when-a-record-is-deleted)).
+
+Until that first answer the page cannot know whether the page before the reload sent a `/complete` that finished the
+upload. So every `/abort` a resumed upload sends carries `keep: true`, as [`discard()`](#discard-one-upload) does: for
+`abort()`, the `signal`, `close({ abort: true })`, a failed file given up at `pagehide`, a retry that replaces the
+ticket and a start over, also when the file was paused or failed before the server answered. The multipart upload is
+aborted and its parts leave the bucket at once, and a file that landed is never deleted. An answer that proves the
+upload unfinished (`PARTS_MISSING` or `NO_SUCH_UPLOAD`) ends that, and a cancel afterwards is
+[any cancel](client.md#cancel).
+
+What `keep` costs when the upload really was unfinished:
+
+- **Without a [database store](store.md):** nothing for an upload whose parts never became an object. What stays is
+  an object the bucket had put together while your server never finished that `/complete`, because a hook threw or
+  the process stopped: a plain `/abort` would have deleted it, `keep` leaves it in the bucket, and `onAbort` does not
+  run for it. No lifecycle rule removes a finished object, so delete such objects yourself if they matter, or use a
+  store.
+- **With a store:** nothing. The upload's row decides, `keep` or not: a completed row keeps its file, and a landed
+  object under a pending row is deleted with it.
 
 ## What is stored
 

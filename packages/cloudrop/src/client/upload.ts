@@ -82,9 +82,11 @@ export interface Upload {
    */
   mayBeComplete: boolean;
   /**
-   * A /complete that may have finished the file was followed by the server's word that the ticket is over. The page
-   * then gives the ticket up as any other, and its /abort carries `keep`: without a row the server cannot tell an
-   * object that landed from one a /complete recorded, so it keeps it; with a row, the row decides (M11-R201).
+   * The ticket's /abort carries `keep`: without a row the server cannot tell an object that landed from one a
+   * /complete recorded, so it keeps it; with a row, the row decides. Set when a /complete that may have finished the
+   * file was followed by the server's word that the ticket is over (M11-R201), and from the start for an upload
+   * resume() rebuilt, whose earlier page may have sent a /complete this one never heard of (M11-R260). Cleared by an
+   * answer that proves the upload unfinished.
    */
   keepStored: boolean;
   /** The PARTS_MISSING repair rounds started so far. */
@@ -110,7 +112,7 @@ export function newUpload(ticket: Ticket, entry: Entry, unlock: () => void, prob
   // A single PUT is part 1 of 1, so one routine sends both kinds.
   const signed = ticket.kind === "single" ? [{ partNumber: 1, ...ticket.put }] : ticket.parts;
   const urls = new Map(signed.map((part) => [part.partNumber, part]));
-  return { ticket, entry, mayBeComplete: false, keepStored: false, repairs: 0, dropped: false, unlock, probe, urls };
+  return { ticket, entry, mayBeComplete: false, keepStored: probe, repairs: 0, dropped: false, unlock, probe, urls };
 }
 
 /** The file moves to `status` and the job hears of it at once. Sending starts the speed from 0. */
@@ -206,8 +208,12 @@ export async function sendAndComplete(
     // PARTS_MISSING clears the doubt wherever it arrives: the server sends it only while the multipart upload is still
     // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9). NO_SUCH_UPLOAD
     // too: the server sends it once it found the upload gone and no object of it stored (server/complete.ts, M3-U83).
-    // And NOT_UPLOADED: the bucket holds no object under the key, so /abort has nothing to delete (M11-R80).
-    if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD" || code === "NOT_UPLOADED") upload.mayBeComplete = false;
+    // And NOT_UPLOADED: the bucket holds no object under the key, so /abort has nothing to delete (M11-R80). The same
+    // proof ends a resumed upload's `keepStored` (M11-R260).
+    if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD" || code === "NOT_UPLOADED") {
+      upload.mayBeComplete = false;
+      upload.keepStored = false;
+    }
     // The server's word that the ticket is over ends the doubt too: no /complete can settle it any more, and the
     // ticket's row or parts still hold the owner's room. What stays of the doubt is `keepStored` (M11-R201).
     else if (error && retryStep(error) === "new") {

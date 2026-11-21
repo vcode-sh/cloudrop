@@ -2139,7 +2139,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   its object); without one the `/abort` may abort the multipart upload under it, and the file is stored once, by the
   new ticket. `upload()` no longer keeps the record of such a ticket for a resume: only a new ticket can store it.
 - **Status:** in force. Amends `M11-R89` and `M11-R90` ("a ticket a `/complete` may have finished gets no `/abort`"),
-  `M11-R81` (a cancel after the server's word) and `M3-U94` ("only `discard()` sends `keep`").
+  `M11-R81` (a cancel after the server's word) and `M3-U94` ("only `discard()` sends `keep`"). Amended by `M11-R260`:
+  a resumed upload's `/abort` carries `keep` from the start, until the server proves the upload unfinished.
 - **Visible in:** `src/client/upload.ts` (`complete`, `keepStored`), `src/client/file-run.ts` (`drop`),
   `src/client/job-run.ts`, `src/client/endpoints.ts`, `src/client/replaced-ticket.test.ts`,
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Cancel", "Retry"), `docs/guide/resume.md` ("The
@@ -2927,3 +2928,67 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/input.ts`, `src/server/api.ts`, `src/server/all-files.ts`, `src/server/store-api.ts`,
   `src/server/erase.ts`, `src/server/sweep-options.ts`, `src/server/api-options.test.ts`.
+
+### M11-R260: a resumed upload's `/abort` carries `keep` until the server proves the upload unfinished
+
+- **Decision:** an upload that `resume()` rebuilt from a record starts with `keepStored` set (`newUpload` in
+  `src/client/upload.ts`), so every `/abort` sent for its ticket carries `keep: true`. The mark ends with the one
+  thing that proves no `/complete` finished the upload: a `/complete` answered `PARTS_MISSING`, `NO_SUCH_UPLOAD` or
+  `NOT_UPLOADED`, which the server says only after it looked in the bucket and found the upload open, or gone with
+  nothing of it stored. From then on the page's own count of the `/complete` calls it sends (`mayBeComplete`,
+  `M3-S14`) decides, as for any upload. Every way a resumed upload ends:
+
+  | A resumed upload ends by | Sent before | Sent now |
+  | --- | --- | --- |
+  | `abort()` of the file or the job, the caller's signal, or `close({ abort: true })`, before the probe is sent (the file paused, or the page offline) | `/abort` | `/abort` with `keep` |
+  | The same once the probe failed without proof: a proxy's `429` page, `RATE_LIMITED`, `STORAGE_ERROR`, a refusal of the handler, `UNKNOWN_ROUTE`, any refusal for good, a `headers` function that failed | `/abort` | `/abort` with `keep` |
+  | The same while the probe is in flight | the answer is waited for (`M11-R86`), then as its row here | the same |
+  | A probe answered `UPLOAD_EXPIRED` or `INVALID_TOKEN`: the start over (`M11-R90`) | `/abort` | `/abort` with `keep` |
+  | `retry()` that replaces the ticket after a refusal for good (`M11-R89`) | `/abort` | `/abort` with `keep` |
+  | `pagehide` on the failed file, after a failure a resume cannot fix | `/abort` | `/abort` with `keep` |
+  | A probe answered `PARTS_MISSING`, also in the ticket's last 15 minutes (`M9-H3`), or `NO_SUCH_UPLOAD`, then any of the above | `/abort` | `/abort`: the upload is proven unfinished |
+  | A probe that got no answer or a `SERVER_ERROR`, then a cancel | nothing (`M3-S14`) | nothing |
+  | `close()` without `abort`, `pagehide` after a failure a resume can fix, a cancel while the checks run | nothing | nothing |
+  | `discard()` of the listed upload | `/abort` with `keep` (`M3-U94`) | the same |
+  | `forget()` | nothing | nothing |
+
+- **Why:** reproduced on a server without a store, two ways. A tab closed while `/complete` was in flight; the server
+  completed the file and ran `onComplete`. After the reload: (A) `resume(upload, file)`, `pause()`, then `abort()`
+  before the probe was sent; (B) the probe answered by a proxy's `429` page six times, the file failing
+  `RATE_LIMITED`, then `abort()`, which is the "Dismiss" of the React guide. Both sent a plain `/abort` with a live
+  token, and the server deleted the finished object: `{"status":"aborted","aborts":[["token"]],"stored":null,
+  "onComplete":1}`. The upload built for the probe knew nothing of the earlier page's `/complete`: its doubt is not in
+  the record, and only the probe's answer settles it. 0.5.0 has the same code. With a store the row is `completed`
+  and the object stays, `keep` or not. The other paths were read for the same shape, an `/abort` sent while the page
+  does not know whether a `/complete` finished: a `/complete` the page sends itself is counted on its upload, across
+  pauses and same-ticket retries, until one of the three proving answers or the server's word that the ticket is over
+  (`M11-R201`, which then sends `keep`); a ticket that arrives for a cancelled file (`M4-F2`, `M11-R261`) never had a
+  `/complete`; a ticket `pagehide` kept is discarded with `keep` (`M11-R91`). None was found.
+  A fuzz then ran 24,000 sequences (seeds 20261121, 801, 5150 and 77001, 6,000 each; 12,114 on a server without a
+  store, 11,886 with the memory store; 65 s on four workers, about 11 ms a sequence): a first page that closed during
+  `/complete`, lost its answer in place (`start()` and `upload()`), or closed before its part was sent, then up to 12
+  steps of resume, pause, resume, abort, dismiss, the signal, retry, both closes, discard, forget, offline, online,
+  `pagehide`, reload, and a change of what `/complete` is answered (the server, a lost success, no connection, a
+  `headers` function that throws, a `429` page, a `502` page, `RATE_LIMITED`, `UPLOAD_EXPIRED`, `INVALID_TOKEN`,
+  `UNKNOWN_ROUTE`, `ORIGIN_NOT_ALLOWED`). The server finished 20,403 files; 5,902 `/abort`s named one of them, in
+  5,889 sequences, each with `keep`; none was deleted, and with the store every one's row stayed `completed`. No
+  exception for `discard()` or `forget()` was needed. Against the client before this entry the same property failed
+  at its 12th sequence (`resume()` with the probe answered `RATE_LIMITED`, then `close({ abort: true })`).
+- **What `keep` costs when the upload really was unfinished:** without a store, nothing for an upload whose parts
+  never became an object: the server aborts the multipart upload either way (`abortAndDelete` in
+  `src/server/abort.ts`), so its parts leave the bucket at once and `onAbort` runs. What stays is an object the bucket
+  had put together while the server never finished that `/complete` (a hook threw, or the process stopped between the
+  bucket's answer and `onComplete`): a plain `/abort` deleted it, and `keep` leaves it in the bucket, without
+  `onAbort`. No lifecycle rule removes a finished object. The page that sent such a `/complete` kept that object
+  already (`M3-S14`); a page that resumes the upload now keeps it too. With a store, nothing: the row decides, and a
+  landed object under a `pending` row is deleted with it.
+- **If wrong:** a server without a store collects the objects of completions that failed after the bucket finished
+  and whose user then cancelled the resume; an app that cannot have that uses a store. A first page's `/complete`
+  still running on the server when the resumed page's `/abort` arrives races it as in `M11-R201`'s "If wrong". A
+  server older than `M3-U94` ignores `keep`.
+- **Status:** in force. Amends `M11-R201` ("only a ticket whose doubt the server ended carries `keep`") and corrects
+  `M3-U94`'s "Every other client path refuses that delete".
+- **Visible in:** `src/client/upload.ts` (`newUpload`, `complete`), `src/client/resume-keep.test.ts` (the two
+  reproductions), `src/client/finished-kept-fuzz.test.ts` (40 seeded sequences in the unit lane, about 0.5 s),
+  `src/client/resume-job.test.ts` (the proven-unfinished row), `docs/guide/resume.md` ("The server is asked first"),
+  `docs/guide/react.md` ("Resume after a reload"), `docs/guide/client.md` ("Cancel").
