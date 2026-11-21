@@ -1471,7 +1471,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   (`isStoreCursor`), the sweep handles none of that page's rows, logs "cloudrop: The store's stale answered a cursor
   that is not <milliseconds>:<id> of its page's last row, or null after the last page." and answers that message as
   a `SERVER_ERROR` that is not retryable, with `all` and without. To pay for it under the bundled entry's 32 kB
-  ceiling, three things in the same files became one each: `sweepAll` counts every page into one report instead of
+  ceiling, four things in the same files became one each: `sweepAll` counts every page into one report instead of
   summing each page's, `api.files`, `api.allFiles` and `api.sweep` read `limit` through one `readLimit`, `owner()`'s
   answer is checked by `isOwnerOrId` itself, and `graceMs` has one message. `sweep.ts` was at its 250 lines, so the
   reading of its options moved to `sweep-options.ts`.
@@ -1486,3 +1486,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `src/server/owner-files.ts`,
   `src/server/store-upload.ts`, `src/server/leftovers.ts`, `src/server/sweep-all.test.ts`.
+
+### M11-R69: the name filter folds ASCII letters without `lower()` on SQLite
+
+- **Decision:** on SQLite and D1 the SQL store's name filter is `instr(<name>, ?) > 0`, where `<name>` is `name`
+  wrapped in one `replace(…, 'R', 'r')` for each distinct ASCII letter of the search, and plain `name` when the
+  search has none. Postgres keeps `translate`. Only `a` to `z` reach the statement's text.
+- **Why:** the filter was `instr(lower(name), ?)`, and SQLite's ICU extension replaces `lower` with one that folds
+  every letter. Reproduced with the real extension (SQLite's `ext/icu/icu.c`, built against ICU 78 and loaded into
+  node:sqlite 3.53.4 with `loadExtension`): `lower('ÄB')` is `'äb'` instead of `'Äb'`, and a search for `ä` answered
+  `Ärger.TXT` beside `ärger.txt`. Postgres and the memory store answer only the second, and `api.files` checks each
+  page against its filter with ASCII folding (`M10-D11`), so on such a database it refused a page the store meant,
+  with `SERVER_ERROR`. `M10-D1` had recorded this as a known difference; it is none now. A letter the search does
+  not have cannot match one in the name, so folding only the search's letters gives the same answer as folding all
+  26. Measured on node:sqlite, 200,000 names of one owner and a search that matches none, the same with and without
+  the extension: `lower` 19 ms (34 ms under ICU); now 14 ms for a search without letters, 20 ms for one letter, 60 ms
+  for `report x` (six); folding all 26 letters always took 209 ms, which is why it folds only those it needs. The
+  plans are unchanged: the name was never searched through an index (`list-all.db.integration.test.ts`).
+- **If wrong:** a search of many distinct letters over an owner with very many files costs up to about 1 µs a file
+  on SQLite where `lower` cost 0.1. The committed test replaces `lower` with a function that folds every letter, as
+  the extension does, since CI has no ICU extension to load.
+- **Status:** in force.
+- **Visible in:** `src/store/sql/reads.ts`, `src/adapters/sql.db.integration.test.ts`.

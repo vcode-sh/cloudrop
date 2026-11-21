@@ -59,10 +59,18 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
   // SQLite's default collation already compares bytes.
   const byteOrder = (expression: string) => (dialect === "postgres" ? `${expression} COLLATE "C"` : expression);
   const run = (statement: SqlStatement) => runStatement(executor, statement);
-  // A substring search, not LIKE, so `%` and `_` in the name mean themselves. Both sides fold ASCII letters alone:
-  // SQLite's `lower` does only that, while Postgres's would fold other letters too, by the database's locale.
-  const nameContains = (b: Binder, name: string) =>
-    `${dialect === "postgres" ? `strpos(${FOLD_NAME}, ` : "instr(lower(name), "}${b.text(foldAscii(name))}) > 0`;
+  // A substring search, not LIKE, so `%` and `_` in the name mean themselves. Both sides fold ASCII letters alone,
+  // which neither dialect's `lower` promises: Postgres's folds other letters by the database's locale, and SQLite's
+  // does once the ICU extension replaces it (M11-R69).
+  const nameContains = (b: Binder, name: string) => {
+    const folded = foldAscii(name);
+    if (dialect === "postgres") return `strpos(${FOLD_NAME}, ${b.text(folded)}) > 0`;
+    // SQLite has no `translate`. Only a letter the search has can match one in the name, so only those are folded
+    // there, one `replace` each: `a` to `z` and nothing else reaches the statement's text.
+    const letters = new Set(folded.match(/[a-z]/g));
+    const foldedName = [...letters].reduce((sql, l) => `replace(${sql}, '${l.toUpperCase()}', '${l}')`, "name");
+    return `instr(${foldedName}, ${b.text(folded)}) > 0`;
+  };
   // `"image/"` is every type of that top-level type; types are ASCII, so lengths in characters are lengths in bytes.
   const typeMatches = (b: Binder, type: string) =>
     type.endsWith("/") ? `substr(type, 1, ${b.integer(type.length)}) = ${b.text(type)}` : `type = ${b.text(type)}`;

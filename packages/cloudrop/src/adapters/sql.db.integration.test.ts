@@ -68,6 +68,28 @@ describe("SQLite", () => {
     beforeEach(() => db.createTables());
     driverRows(() => sqlStore(sqliteExecutor(db.database)));
 
+    test("the name filter folds ASCII letters only, even where lower() folds every letter, as under SQLite's ICU extension", async () => {
+      // The ICU extension replaces lower() with one that folds every letter (measured with SQLite's ext/icu/icu.c
+      // loaded into node:sqlite: lower('Ä') is 'ä'). A function registered under that name replaces the built-in the
+      // same way. A filter through lower() then matched "Ärger" for "ä", which Postgres and the memory store do not,
+      // and which api.files refuses as a page outside its filter (M11-R69).
+      db.database.function("lower", { deterministic: true }, (text) => String(text).toLowerCase());
+      const store = sqlStore(sqliteExecutor(db.database));
+      const files = [
+        { ...file("f-upper", 1), name: "Ärger.TXT" },
+        { ...file("f-lower", 1), name: "ärger.txt" },
+      ];
+      await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files }, NOW);
+      const found = async (name: string) => {
+        const page = { route: null, type: null, order: "newest", limit: 10, cursor: null } as const;
+        const { records } = await store.list({ ...page, owner: "u-1", statuses: ["pending"], name });
+        return records.map((record) => record.id);
+      };
+      expect(await found("ä")).toEqual(["f-lower"]);
+      // ASCII letters still match in either case, on both sides.
+      expect(await found("RGER.t")).toEqual(["f-upper", "f-lower"]);
+    });
+
     test("complete that fails at its files write rolls back the usage write that ran before it", async () => {
       const store = sqlStore(sqliteExecutor(db.database));
       await store.reserve(
