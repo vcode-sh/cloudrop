@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Result } from "../../errors.ts";
 import { MiB, R2_RULES } from "../../rules.ts";
 import { copyStub, credentials, driverWith, endpoint, stubbed, timesOut } from "../../testing/driver-fixture.ts";
@@ -6,6 +6,10 @@ import type { FetchLike, StorageDriver } from "../driver.ts";
 import { createS3Driver } from "../s3-driver.ts";
 
 describe("createS3Driver", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("never passes on a platform error that quotes the Authorization header", async () => {
     const changing = { ...credentials };
     const driver = createS3Driver({ endpoint, region: "auto", bucket: "test", credentials: changing, rules: R2_RULES });
@@ -171,5 +175,13 @@ describe("createS3Driver", () => {
     });
     const partial = stubbed(async () => new Response(pieces, { status: 206 }));
     expect((await driverWith(partial).getRange("a.txt", 0, 3)).data).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+
+  // jsdom 26, Vitest's jsdom environment until jsdom 27, has a Blob without arrayBuffer() (M11-R2, M11-R250).
+  it("reads an answer where the environment's Blob has no arrayBuffer()", async () => {
+    const answer = stubbed(async () => new Response(new Uint8Array([1, 2, 3, 4]), { status: 206 }));
+    vi.stubGlobal("Blob", class Blob {});
+
+    expect((await driverWith(answer).getRange("a.txt", 0, 3)).data).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 });

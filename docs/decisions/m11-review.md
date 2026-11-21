@@ -233,7 +233,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   1 KiB of other fields, come to 7.2 MB; a CORS or lifecycle configuration is far smaller.
 - **If wrong:** a listing over 8 MiB fails where it was read; it cannot be S3's answer to `max-keys=1000`. A ranged
   answer that sends more than the range is refused rather than cut, since which bytes it sent is then unknown.
-- **Status:** in force.
+- **Status:** in force; `M11-R250` replaces the `Blob` the chunks were joined with.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/xml.ts`, `src/storage/s3/bucket-settings.ts`,
   `src/storage/s3/transport.test.ts`, `src/storage/xml.test.ts`.
 
@@ -3068,3 +3068,30 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   workspace, so its two constructors were declared by hand and only `uploads.api.sweep` was checked there.
 - **Status:** in force.
 - **Visible in:** `docs/guide/client.md`, `docs/guide/resume.md`, `docs/guide/react.md`, `docs/guide/hono.md`.
+
+### M11-R250: the driver joins an answer's chunks by hand, and no library source asks a `Blob` for its bytes on the server
+
+- **Decision:** `readBody` (`src/storage/s3/transport.ts`) copies the chunks it read into one `Uint8Array` of the
+  bytes it keeps, not through `new Blob(chunks).slice(0, limit).arrayBuffer()`. The bound, the cancel and what is
+  returned are unchanged. Every other use in `packages/cloudrop/src` of `Blob`, `File`, a body's `arrayBuffer()` and
+  the newer built-ins was read against Vitest's jsdom 26.1.0 and happy-dom 21 environments and the floors of
+  `M8-Q5` and `M8-Q8`, and probed where it runs there:
+  - `body instanceof Blob` in `send`, `bodyProblem` and `put` (the driver's own argument check): a `Blob` and a
+    `File` of either environment pass it and are stored with their bytes through `testBucket()` (measured).
+  - `request.arrayBuffer()` in the fake R2 and `answer.arrayBuffer()` in `cloudrop/node` are a `Request`'s and a
+    `Response`'s, which both environments have.
+  - `toSorted`, `isWellFormed`, `ArrayBuffer.prototype.detached`, `replaceAll`, `at`, `AbortSignal.timeout` and
+    `crypto.randomUUID` are in server files only, all in Node 24, and none is replaced by a test environment.
+  - `fingerprintOf` (`src/client/fingerprint.ts`) calls `arrayBuffer()` on the `File`: in jsdom 26 it rejects, so an
+    upload there is not saved for `resume()`. It is reached only where the page has IndexedDB, which jsdom has not;
+    left as it is and reported, since Chrome 76, Safari 14 and Firefox 69 have the method and the floor is above them.
+- **Why:** `M11-R22` and `M11-R2` contradicted each other: jsdom 26's `Blob` has no `arrayBuffer()`, the reason
+  `M11-R2` took `Blob` out of the handler's body reader, and `M11-R22` put one into the driver's. Measured in a copy
+  of the package with jsdom 26.1.0: `put`, `head`, `getRange`, `list`, `copy`, `delete` and `createMultipart` of
+  `testBucket().storage` each answered `STORAGE_UNREACHABLE` (cause: `slice(...).arrayBuffer is not a function`), and
+  `src/testing.jsdom.test.ts` failed at `/complete`; with the join by hand each succeeds and the file passes.
+- **If wrong:** none known; the join is the copy `Blob` made. A stream whose chunks are not `Uint8Array`s was
+  never supported.
+- **Status:** in force; amends `M11-R22`.
+- **Visible in:** `src/storage/s3/transport.ts`, `src/storage/s3/transport.test.ts` (a `Blob` without
+  `arrayBuffer()`, as `handler.test.ts` has for `M11-R2`).

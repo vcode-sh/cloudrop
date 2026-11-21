@@ -27,7 +27,10 @@ export const MAX_XML_BYTES: number = 8 * MiB;
 // An S3 error is a few hundred bytes and names its code first; a proxy's error page can be any size.
 const MAX_ERROR_BYTES = 4096;
 
-/** The body's first `limit` bytes, and whether it has more: the rest is cancelled, never read. */
+/**
+ * The body's first `limit` bytes, and whether it has more: the rest is cancelled, never read. The chunks are joined by
+ * hand: jsdom 26's `Blob` has no `arrayBuffer()`, and an app's tests run the driver there (M11-R2, M11-R250).
+ */
 async function readBody(response: Response, limit: number): Promise<{ bytes: Bytes; more: boolean }> {
   const reader = response.body?.getReader();
   const chunks: Bytes[] = [];
@@ -40,7 +43,14 @@ async function readBody(response: Response, limit: number): Promise<{ bytes: Byt
   }
   const more = size > limit;
   if (more) reader?.cancel().catch(() => undefined);
-  return { bytes: new Uint8Array(await new Blob(chunks).slice(0, limit).arrayBuffer()), more };
+  const bytes = new Uint8Array(more ? limit : size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    // Only the last chunk can pass the limit, so the room left is never negative.
+    bytes.set(chunk.subarray(0, bytes.length - offset), offset);
+    offset += chunk.length;
+  }
+  return { bytes, more };
 }
 
 // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID. The
