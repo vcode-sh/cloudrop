@@ -88,3 +88,12 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing rendered changes: a refused job never had a file in `files`.
 - **Status:** in force.
 - **Visible in:** `packages/cloudrop/src/react/use-upload.ts`, `packages/cloudrop/src/react/use-upload.test.ts`.
+
+### M11-R7: `createUploadHooks(null)` is `createUploadHooks()`
+
+- **Decision:** null options count as none, as `createCloudropClient` and `testBucket` read theirs.
+- **Why:** from plain JavaScript, `createUploadHooks(null)` threw a `TypeError` from the first `upload()`, read or
+  `close()`, where the hooks promise an `INVALID_CONFIG` result for a wrong option and nothing thrown.
+- **If wrong:** nothing to migrate; the types never allowed null.
+- **Status:** in force.
+- **Visible in:** `packages/cloudrop/src/react.ts`, `packages/cloudrop/src/react.test.ts`.

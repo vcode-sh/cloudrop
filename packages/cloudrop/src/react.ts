@@ -34,10 +34,12 @@ export type {
 export function createUploadHooks<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: UploadHooksOptions<TCloudrop> = {},
 ): UploadHooks<TCloudrop> {
+  // null counts as no options, as createCloudropClient reads its own (M11-R7).
+  const given = options ?? {};
   let created: Result<CloudropClient> | undefined;
   function createClient(): Result<CloudropClient> {
     try {
-      const client = "client" in options ? options.client : createCloudropClient<TCloudrop>(options);
+      const client = "client" in given ? given.client : createCloudropClient<TCloudrop>(given);
       return { data: client as CloudropClient, error: null };
     } catch (error) {
       // createCloudropClient throws only its configuration error (readOptions in client.ts).

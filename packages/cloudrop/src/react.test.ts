@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 // Contract: the factory's close() (M7-P3, M8-L7) is the client's close() without a route list: it stops the uploads of
 // every route the hooks started, and every upload afterwards resolves CLIENT_CLOSED before any request. It creates the
-// client when no hook has yet, so a client closed before its first upload starts nothing either.
+// client when no hook has yet, so a client closed before its first upload starts nothing either. null options are no
+// options (M11-R7).
 // Oracle: the statuses the client reports, the requests the fixture saw, literal error codes.
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createUploadHooks } from "./react.ts";
 import { allowAnyone, route } from "./server/route.ts";
 import { firstOf } from "./testing/persist-fixture.ts";
 import { holdPut, hooksFixture, note, statuses } from "./testing/react-fixture.ts";
@@ -57,5 +59,17 @@ describe("createUploadHooks().close()", () => {
     const answer = await act(() => result.current.upload(note("hello", "a.txt")));
 
     expect({ code: answer?.error?.code, requests: fixture.requests }).toEqual({ code: "CLIENT_CLOSED", requests: [] });
+  });
+});
+
+describe("createUploadHooks(options)", () => {
+  // From plain JavaScript: createCloudropClient(null) is a client with the default options.
+  it("counts null options as none, as createCloudropClient does", async () => {
+    const { useUpload, close } = createUploadHooks(null as never);
+    await close();
+    const { result } = renderHook(() => useUpload("notes"));
+    const answer = await act(() => result.current.upload(note("hello", "a.txt")));
+
+    expect(answer?.error?.code).toBe("CLIENT_CLOSED");
   });
 });
