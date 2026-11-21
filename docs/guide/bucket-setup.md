@@ -22,7 +22,7 @@ the page. With the page and the API on different origins, see [Deployment](deplo
 | The four headers cloudrop signs, in the rule's allowed headers | `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`. A preflight fails if one is missing. |
 | `Retry-After` in the exposed headers (recommended) | The one header of the bucket's answer the client reads. It lets the client wait as long as the bucket asks after a `429` or `503`. Uploads work without it. |
 | `ETag` in the exposed headers (optional) | Nothing in cloudrop reads it from a page: the client never reads `ETag`, and the server gets part ETags from the bucket when it completes an upload. The rules below expose it all the same, see [Why the rule exposes ETag](#why-the-rule-exposes-etag). |
-| That rule before any other rule that allows `PUT` from your origin | The service answers with the first rule that matches, never a later one: see [When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules). |
+| That rule before any other rule that allows `PUT` from your origin without exposing `Retry-After` | The service answers with the first rule that matches, never a later one: see [When the bucket has other CORS rules](#when-the-bucket-has-other-cors-rules). |
 | A lifecycle rule that aborts incomplete multipart uploads | Parts of an upload that never finished are removed instead of staying stored. |
 
 Add your production origin and, for development, your local origin such as `http://localhost:5173`. `GET` and `HEAD`
@@ -76,16 +76,22 @@ What a page sends when it uploads with cloudrop:
 So a rule that stands before cloudrop's and allows `PUT` from your origin, such as an old rule for every origin
 (`*`), answers the `PUT` in its place. Uploads still work, but the page gets that rule's exposed headers: without
 `Retry-After` there, retries after a `429` come too fast, whatever cloudrop's rule says, and `checkBucket` names that
-rule as advice. **Put cloudrop's rule before any rule that also allows `PUT` from your origins.**
-`cloudrop setup --apply` does that; in a file you write by hand, the order of the rules is the order they are tried in.
+rule as advice. **Put cloudrop's rule before any rule that allows `PUT` from your origins without exposing
+`Retry-After`.** A rule for another origin, or one that answers uploads in full, can stay in front.
+
+`cloudrop setup --apply` does that: a new `cloudrop-uploads` goes last, and an existing one stays where it stands,
+unless an earlier rule allows `PUT` from one of your origins without exposing `Retry-After`: then cloudrop's rule goes
+just before the first such rule, and the output names that rule and says why
+([the command's guide](command.md#setup)). In a file you write by hand, the order of the rules is the order they are
+tried in.
 
 cloudrop's server signs no checksum header into an upload, so none is matched here.
 
 ## Set the CORS rule on R2
 
 Setting CORS replaces the bucket's whole policy. Read the current rules first and keep any you still need, with
-cloudrop's rule [before any that also allows `PUT` from your origins](#when-the-bucket-has-other-cors-rules) (or let
-`cloudrop setup --apply` merge them):
+cloudrop's rule [before any that allows `PUT` from your origins without exposing
+`Retry-After`](#when-the-bucket-has-other-cors-rules) (or let `cloudrop setup --apply` merge them):
 
 ```bash
 npx wrangler r2 bucket cors list <bucket>
@@ -191,10 +197,10 @@ aws s3api get-bucket-lifecycle-configuration --bucket <bucket> --endpoint-url "$
 ```
 
 Both commands replace the bucket's whole CORS or lifecycle configuration, so merge in any rules it already has, with
-cloudrop's CORS rule [before any that also allows `PUT` from your origins](#when-the-bucket-has-other-cors-rules). The
-credentials need permission to change bucket settings, which upload credentials often lack. Use an admin key for this
-step, not the key you give cloudrop. These commands were checked against RustFS, with `checkBucket` reporting both rules
-`ok` afterwards.
+cloudrop's CORS rule [before any that allows `PUT` from your origins without exposing
+`Retry-After`](#when-the-bucket-has-other-cors-rules). The credentials need permission to change bucket settings, which
+upload credentials often lack. Use an admin key for this step, not the key you give cloudrop. These commands were
+checked against RustFS, with `checkBucket` reporting both rules `ok` afterwards.
 
 ## Add the lifecycle rule
 

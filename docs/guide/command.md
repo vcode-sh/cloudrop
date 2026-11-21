@@ -184,8 +184,8 @@ of [Bucket setup](bucket-setup.md): `PUT`, `GET` and `HEAD` from your origins wi
 `ETag` and `Retry-After` exposed, and an abort of incomplete multipart uploads after 1 day across the bucket.
 
 Setting CORS with Wrangler or the AWS CLI replaces every rule the bucket has. List the current rules first and add the
-ones you keep to the file, with cloudrop's rule before any that also allows `PUT` from your origins (the output says
-so), or use `--apply`: the output ends with that command, ready to run.
+ones you keep to the file, with cloudrop's rule before any that allows `PUT` from your origins without exposing
+`Retry-After` (the output says so), or use `--apply`: the output ends with that command, ready to run.
 
 With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and `PutBucketLifecycleConfiguration`):
 
@@ -198,8 +198,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   they allowed, and the output says how many it merged.
 - **It puts its CORS rule where the service answers with it.** The service answers a request with the first rule that
   matches it. A new `cloudrop-uploads` goes last, and an existing one stays where it stands, unless an earlier rule
-  allows `PUT` from one of your origins without exposing `Retry-After`: then cloudrop's rule goes just
-  before the first such rule, and the output names that rule and says why. The other rules keep their order. From
+  allows `PUT` from one of your origins without exposing `Retry-After`: then cloudrop's rule goes just before the
+  first such rule, and the output names that rule and says why. The other rules keep their order. From
   those origins cloudrop's rule then answers `GET` and `HEAD` too, in place of the rule it went before. A rule for
   another origin, or one that answers uploads in full, stays in front.
 - When the bucket's other rules already answer everything `cloudrop-uploads` would for your origins (every `PUT`

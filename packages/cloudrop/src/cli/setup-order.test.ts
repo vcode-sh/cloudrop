@@ -162,7 +162,7 @@ describe("cloudrop setup without --apply and the order of CORS rules", () => {
   it("says where its rule goes among the rules the reader keeps", async () => {
     const result = await run(["setup", "--origin", ORIGIN, "--origin", LOCAL]);
     expect(result.lines).toContain(
-      `Where the CORS rule goes: the storage service answers a request with the first rule that matches it, never a later one. Put cloudrop's rule before any rule you keep that also allows PUT from ${ORIGIN}, ${LOCAL}, such as a rule for every origin ("*").`,
+      `Where the CORS rule goes: the storage service answers a request with the first rule that matches it, never a later one. Put cloudrop's rule before any rule you keep that allows PUT from ${ORIGIN}, ${LOCAL} without exposing Retry-After, such as an old rule for every origin ("*").`,
     );
   });
 });

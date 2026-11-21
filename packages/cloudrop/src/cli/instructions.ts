@@ -1,6 +1,7 @@
 // `cloudrop setup` without --apply: the rules in the formats Wrangler and the AWS CLI read, and the commands that set
 // them, as docs/guide/bucket-setup.md describes.
 
+import { RETRY_AFTER } from "../server/bucket-cors.ts";
 import { aws, type Runner, type Target, wrangler } from "./commands.ts";
 import type { Service } from "./names.ts";
 import type { Output } from "./report.ts";
@@ -98,7 +99,7 @@ export function printInstructions(out: Output, instructions: Instructions): void
   if (target.placeholders) sections.push(placeholderNote(service));
   sections.push(
     // Measured on R2 and documented by S3 (r2-spike-findings.md, "Which CORS rule answers when several match").
-    `Where the CORS rule goes: the storage service answers a request with the first rule that matches it, never a later one. Put cloudrop's rule before any rule you keep that also allows PUT from ${origins.join(", ")}, such as a rule for every origin ("*").`,
+    `Where the CORS rule goes: the storage service answers a request with the first rule that matches it, never a later one. Put cloudrop's rule before any rule you keep that allows PUT from ${origins.join(", ")} without exposing ${RETRY_AFTER}, such as an old rule for every origin ("*").`,
     `Setting CORS, and setting lifecycle rules with the AWS CLI, replaces every rule the bucket has: list them first and add the ones you keep to the file. Or let cloudrop add its rules, each where it takes effect, and keep the others:\n${indent([apply])}`,
   );
   out.write(`${sections.join("\n\n")}\n`);

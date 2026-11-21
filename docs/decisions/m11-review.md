@@ -1767,7 +1767,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   rule IDs gets a second copy if the first is later shadowed, since `setup` cannot tell which rule to move. An origin
   left out of a later run is not looked at: only the origins passed decide the place.
 - **Status:** in force. Amends `M9-C6` (cloudrop's rule may move; no other rule does). Amended by `M11-R205`:
-  the rule cloudrop's goes before is one that does not expose `Retry-After`; `ETag` no longer counts.
+  the rule cloudrop's goes before is one that does not expose `Retry-After`; `ETag` no longer counts. The by-hand
+  instruction says the same since `M11-R232`.
 - **Visible in:** `src/cli/rules.ts` (`place`, `serving`, `mergeCors`), `src/cli/setup.ts`, `src/cli/instructions.ts`,
   `src/cli/setup-order.test.ts`, `docs/guide/command.md#setup`, `docs/guide/bucket-setup.md`.
 
@@ -2602,3 +2603,24 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   (`src/adapters/drizzle/postgres.ts`).
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md` ("Drizzle: `cloudrop/adapters/drizzle`").
+
+### M11-R232: where cloudrop's CORS rule goes is said once, in the same words, in both guides and in the command's output
+
+- **Decision:** `docs/guide/bucket-setup.md`, `docs/guide/command.md` and the instructions `cloudrop setup` prints all
+  give the rule the code follows (`place` in `src/cli/rules.ts`): cloudrop's rule goes before any rule that allows
+  `PUT` from your origins without exposing `Retry-After`; a rule for another origin, or one that answers uploads in
+  full, can stay in front. `bucket-setup.md` describes `setup --apply` with `command.md`'s sentence (a new
+  `cloudrop-uploads` goes last, an existing one stays, unless an earlier rule allows `PUT` from one of your origins
+  without exposing `Retry-After`) and links to it. The printed instruction reads "Put cloudrop's rule before any rule
+  you keep that allows PUT from <origins> without exposing Retry-After, such as an old rule for every origin ("*")."
+- **Why:** `bucket-setup.md` said "Put cloudrop's rule before any rule that also allows `PUT` from your origins.
+  `cloudrop setup --apply` does that", which it does not since `M11-R171`: a new rule goes last, behind a rule that
+  answers uploads in full, and `M11-R205` made `Retry-After` the one header that decides. A reader who compared the
+  guide with a `--dry-run` saw the command leave its rule behind another and could not tell which was wrong. The
+  by-hand advice asked for more than the command does, and following it moves `GET` and `HEAD` from those origins to
+  cloudrop's rule for no gain.
+- **If wrong:** a person who writes the file by hand now has to read a rule's exposed headers to place cloudrop's;
+  putting it first is still always right, and the guide's paragraph above the sentence says why.
+- **Status:** in force. Amends the wording of `M11-R171`'s by-hand instruction.
+- **Visible in:** `docs/guide/bucket-setup.md` ("What any bucket needs", "When the bucket has other CORS rules"),
+  `docs/guide/command.md#setup`, `src/cli/instructions.ts`, `src/cli/setup-order.test.ts`.
