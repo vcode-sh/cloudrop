@@ -1024,6 +1024,12 @@ as required.
 ## Postgres notes
 
 - **Isolation:** READ COMMITTED, the default. See [`onComplete` with `tx`](#oncomplete-with-tx).
+- **Deadlocks:** the store's own statements lock a file's row before its owner's usage row, and several file rows in
+  byte order of id, so they never deadlock each other. A transaction of your own over these tables can: lock in that
+  order too. A store call that Postgres ends to break a deadlock or a serialization conflict (`40P01`, `40001`) is run
+  once more; if that fails too, the call answers a retryable `SERVER_ERROR` with nothing written, so check `error`
+  after `revokeUploads` at sign-out. A completion in a transaction (`transaction: true`) is not run again: it rolls
+  back and the client's `/complete` retries.
 - **Tables outside `public`:** pass `tables: { schema: "app" }`, or set the search path; see
   [Tables in another schema](#tables-in-another-schema).
 - **Connection pools:** with `transaction: true`, a completion holds one connection and the file's row lock for the

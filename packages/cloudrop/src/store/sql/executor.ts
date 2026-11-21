@@ -84,3 +84,9 @@ export const isLockTimeout = (error: unknown): boolean => hasCode(error, "55P03"
 
 /** Postgres's `unique_violation`. */
 export const isUniqueViolation = (error: unknown): boolean => hasCode(error, "23505");
+
+/**
+ * Postgres's `deadlock_detected` and `serialization_failure`: it ended this statement so that another could go on, and
+ * rolled it back whole.
+ */
+export const isConflict = (error: unknown): boolean => hasCode(error, "40P01") || hasCode(error, "40001");

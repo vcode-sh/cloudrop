@@ -3,7 +3,7 @@
 
 import { configError } from "../../errors.ts";
 import type { CloudropStore } from "../../server/store.ts";
-import { isLockTimeout, type SqlExecutor } from "./executor.ts";
+import { isConflict, isLockTimeout, type SqlExecutor } from "./executor.ts";
 import { postgresWrites } from "./postgres.ts";
 import { type SqlContext, type StoreMethods, singleStatementMethods } from "./reads.ts";
 import { sqliteWrites } from "./sqlite.ts";
@@ -37,13 +37,20 @@ function methodsOver(context: SqlContext): StoreMethods {
   return { ...singleStatementMethods(context), ...writes };
 }
 
-/** The same methods, each waiting for `ready` first. */
+/**
+ * The same methods, each waiting for `ready` first. A call that Postgres ended to break a deadlock or a serialization
+ * conflict (40P01, 40001) runs once more: it is one atomic unit and rolled back whole. The store's own statements lock
+ * rows in one order and cannot deadlock each other; an app's own transaction over these tables can (M11-R61).
+ */
 function afterCheck(methods: StoreMethods, ready: () => Promise<void>): StoreMethods {
   const checked: Record<string, (...args: never[]) => Promise<unknown>> = {};
   for (const [name, method] of Object.entries(methods) as [string, (...args: never[]) => Promise<unknown>][]) {
     checked[name] = async (...args) => {
       await ready();
-      return method(...args);
+      return method(...args).catch((error: unknown) => {
+        if (!isConflict(error)) throw error;
+        return method(...args);
+      });
     };
   }
   // Every key of `methods` was copied with its own signature, only deferred.

@@ -1277,3 +1277,39 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none known; the limit of 16 origins keeps a flood of preflights out of the log as it does for posts.
 - **Status:** in force.
 - **Visible in:** `src/server/handler.ts`, `src/server/handler-origin-hint.test.ts`.
+
+### M11-R61: the Postgres store locks several rows in byte order of id, and a call ended as a deadlock runs once more
+
+- **Decision:** on Postgres, `reserve`'s superseding update and `revoke` take their rows through
+  `id IN (SELECT id … ORDER BY id COLLATE "C" FOR UPDATE)`, so each locks its pending rows in byte order of id before
+  it changes any. A store method that Postgres ends with `40P01` (deadlock) or `40001` (serialization failure) is run
+  once more by `sqlStore` (`isConflict`); a second failure is thrown, and the server answers it as every store
+  failure, a retryable `SERVER_ERROR`. Calls inside the store's `transaction` are not run again. The audit of every
+  statement that writes:
+  - `reserve` with a key: the superseded rows in id order, then the usage row (`FOR UPDATE`), then the new rows.
+    Without a key: the usage row, then new rows, which nobody else can hold.
+  - `revoke`: the owner's pending rows in id order, then the usage row.
+  - `complete` with `replace`: the advisory lock of the owner and route, the new row, the owner's other completed rows
+    on the route, the usage row. The replaced rows are completed, so `reserve` and `revoke` never want them; the only
+    other statement that locks several of them is another replacing completion of that owner and route, which waits
+    for the advisory lock before it locks a row. `end` and `deleteFile` lock one of them and then the usage row.
+  - `claim`, `attach`, `release`, `cleaned`: one file row. `complete` without `replace` and `end` (the sweep's and
+    `eraseOwner`'s only writes, one row at a time): one file row, then the usage row.
+  - `reconcile`: the usage row only; it reads the file rows without locking them.
+  - SQLite and D1 run one writer at a time and take no row locks.
+- **Why:** the two statements locked the same rows in different orders: `revoke` along
+  `(owner, status, created_at)`, the superseding update out of a hash join over the pending rows
+  (`Hash Right Semi Join` in its plan). Measured on Postgres 18.6 with 80 rows: 150 of 300 races ended one side with
+  `40P01` after the 1 s `deadlock_timeout`; when `revokeUploads` was the one ended, a sign-out that ignored the error
+  left the uploads live. After the change, 0 of 300 races of two superseding reserves and a revoke, in 2 s. Every
+  method is one atomic unit, so a call Postgres ended has written nothing and running it again is the whole call
+  again, as `M5-T74` does for `23505`. Without the rerun, an app whose own transaction locks these tables in another
+  order turns a deadlock into a failed sign-out; measured with such a transaction on node-postgres, postgres.js,
+  Drizzle and Prisma (whose error keeps the code): each `revoke` failed with `40P01` before, and answers after.
+- **If wrong:** the rerun costs one more statement after a failure that took a second to detect. `40001` cannot come
+  from Postgres at READ COMMITTED, which the store requires (`M5-T78`); it is rerun for databases that speak
+  Postgres's protocol and report conflicts that way. Should the replaced rows ever be locked in bulk by another
+  statement, `replace` needs the same ordered subquery.
+- **Status:** in force.
+- **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/store.ts`, `src/store/sql/executor.ts`,
+  `src/store/sql/lock-order.db.integration.test.ts`, `src/store/sql/store.test.ts`, `docs/guide/store.md`.

@@ -30,6 +30,15 @@ const inputJson = (files: readonly NewFile[]): string =>
   );
 
 /**
+ * The condition of an update that ends several pending rows: the rows that match `where`, each locked in byte order of
+ * id before any is changed. Two statements that lock the same rows in different orders, one along an index and one out
+ * of a hash join, deadlock (40P01); in one order the second waits at the first row they share (M11-R61).
+ */
+const pendingInOrder = (files: string, where: string): string =>
+  `status = 'pending' AND id IN (
+    SELECT id FROM ${files} WHERE ${where} AND status = 'pending' ORDER BY id COLLATE "C" FOR UPDATE)`;
+
+/**
  * A retry of a request whose answer was lost ends that attempt's pending rows in the reserve's statement: the CTE that
  * does it, and the bytes it frees. Every CTE reads one snapshot, so the counters read beside it still hold those bytes
  * and the freed sum is taken off them. `key` and `who` are bound placeholders (`who` may be `NULL`). No key: no CTE,
@@ -39,8 +48,10 @@ function superseding(files: string, key: string | null, who: string, at: string)
   if (key === null) return { cte: "", freed: "0" };
   const cte = `, superseded AS (
     UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
-    WHERE request_key = ${key} AND owner IS NOT DISTINCT FROM ${who}
-      AND route IN (SELECT route FROM input) AND status = 'pending'
+    WHERE ${pendingInOrder(
+      files,
+      `request_key = ${key} AND owner IS NOT DISTINCT FROM ${who} AND route IN (SELECT route FROM input)`,
+    )}
     RETURNING size
   )`;
   return { cte, freed: "(SELECT coalesce(sum(size), 0) FROM superseded)" };
@@ -186,7 +197,7 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
       const [who, at] = [b.text(owner), b.time(now)];
       const sql = `WITH revoked AS (
           UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
-          WHERE owner = ${who} AND status = 'pending' RETURNING size
+          WHERE ${pendingInOrder(files, `owner = ${who}`)} RETURNING size
         ),
         counted AS (
           UPDATE ${usage} SET reserved_bytes = reserved_bytes - (SELECT sum(size) FROM revoked), updated_at = ${at}
