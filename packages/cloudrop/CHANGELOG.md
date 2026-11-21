@@ -25,6 +25,30 @@ Every notable change to the `cloudrop` package. The format follows
 
 - Reading bucket settings refuses a configuration with CDATA, comments or namespace prefixes, with a non-retryable
   `STORAGE_ERROR`, and reads an empty self-closing configuration as no rules.
+- **Upload URLs end at least 15 minutes before their token**, so a `PUT` started near the deadline can still be
+  completed: `/sign` answers `UPLOAD_EXPIRED` in a token's last 15 minutes, and the client gets a new ticket or starts
+  over there (`M9-H3`). Measured on R2: a URL's expiry is checked when the request starts, not when its body ends.
+- The `cloudrop` command names the setting to fix when the bucket does not answer, suggests the exact origin for one
+  that is not, refuses a pattern such as `https://*.example.com`, notes a misspelt `CLOUDROP_*` name, and offers
+  `--replace` only after a refused read (`M9-H100` to `M9-H104`).
+
+### Fixed
+
+Found by testing against a real R2 bucket and as a new user before this release (`M9-H`):
+
+- A file whose type has parameters (`text/csv;charset=utf-8`, and every `text/plain` `File` under `bun test`) was
+  refused as "not a valid MIME type"; it is stored with its essence type (`M9-H1`).
+- A storage `HEAD` refused because the server's clock is more than 15 minutes off says so, instead of pointing at the
+  credentials (`M9-H2`); a `401` (R2's answer to an unknown access key) points at the access key ID and secret instead
+  of the object key (`M9-H5`).
+- A part sent to a multipart upload aborted elsewhere fails as `NO_SUCH_UPLOAD`, not `UPLOAD_REJECTED` (`M9-H4`).
+- `api.deletePrefix` refused a folder whose name has accents when R2 listed a key in the other Unicode form, so the
+  folder could never be deleted (`M9-H6`).
+- With `transaction: true`, a node-postgres connection that dies while `onComplete` runs no longer stops the process;
+  the completion answers a retryable error (`M9-H50`). The store guide now asks for `pool.on("error")` and gives a
+  workaround for drizzle-orm 0.45.
+- Owners, file ids and cursors containing NUL, and cursor times after the year 9999, are refused with `INVALID_INPUT`
+  instead of a retryable `SERVER_ERROR` on Postgres; an `owner()` that returns NUL is the route's bug (`M9-H51`).
 
 ## 0.2.0 - 2026-11-20
 
