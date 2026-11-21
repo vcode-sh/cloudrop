@@ -123,6 +123,39 @@ describe("createS3Driver", () => {
     expect(result.error?.code).toBe("STORAGE_DENIED");
   });
 
+  it.each([
+    { name: "ahead", minutes: 20 },
+    { name: "behind", minutes: -20 },
+  ])(
+    "reports a HEAD refused for a signing clock 20 minutes $name as the clock, not the credentials",
+    async ({ minutes }) => {
+      // R2 answers a HEAD without a body, so only its Date header shows the skew (M9-H2).
+      const { fake } = setup();
+      const skewed = createS3Driver({
+        endpoint,
+        region: "auto",
+        bucket: "test",
+        credentials,
+        rules: R2_RULES,
+        fetch: fake.fetch,
+        now: () => new Date(signedAt.getTime() + minutes * 60_000),
+      });
+      expect((await skewed.head("a.txt")).error).toMatchObject({
+        code: "STORAGE_DENIED",
+        message:
+          "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+      });
+    },
+  );
+
+  it("keeps reporting a bare refused HEAD within the clock tolerance as a refusal of the credentials", async () => {
+    const answeredAt = new Date(signedAt.getTime() + 14 * 60_000).toUTCString();
+    const refused = stubbed(async () => new Response(null, { status: 403, headers: { date: answeredAt } }));
+    expect((await driverWith(refused).head("a.txt")).error?.message).toBe(
+      "The storage service refused the request. Check the access key, its permissions and the bucket name.",
+    );
+  });
+
   it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, Response, string | null]>([
     [
       "aborts an upload the storage no longer knows",

@@ -76,6 +76,15 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
   };
 
   async function handle(request: Request): Promise<Response> {
+    const answer = await route(request);
+    // R2 dates every answer, and an answer to HEAD has no body, so a refused HEAD carries no S3 error code (measured
+    // 2026-11-21: r2-spike-findings.md, "Upload protocol edge cases").
+    const headers = new Headers(answer.headers);
+    headers.set("date", bucket.now().toUTCString());
+    return new Response(request.method === "HEAD" ? null : answer.body, { status: answer.status, headers });
+  }
+
+  async function route(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const [, bucketSegment = "", ...keySegments] = url.pathname.split("/");
     if (decodeURIComponent(bucketSegment) !== bucket.name) {
@@ -93,8 +102,8 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
       headers: request.headers,
       body,
     };
-    const route = ROUTES.find((candidate) => candidate.matches(verified));
-    if (route) return route.run(bucket, verified);
+    const matched = ROUTES.find((candidate) => candidate.matches(verified));
+    if (matched) return matched.run(bucket, verified);
     return errorResponse(501, "NotImplemented", `${request.method} is not implemented by the fake.`);
   }
 

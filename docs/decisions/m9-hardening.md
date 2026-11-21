@@ -24,6 +24,23 @@ The measurements behind the first range are in
 - **Status:** in force.
 - **Visible in:** `src/server/accept.ts`.
 
+### M9-H2: a bare `403` whose `Date` is more than 15 minutes off reports the clock
+
+- **Decision:** The S3 transport reads the `Date` header of every refused answer and passes its distance from the
+  request's signing time to `storageError`. A `403` without an S3 error code whose `Date` is more than 15 minutes from
+  the signing time, either way, gets the clock message of `RequestTimeTooSkewed` ("This server's clock is more than 15
+  minutes off …") instead of "Check the access key, its permissions and the bucket name". The code stays
+  `STORAGE_DENIED`, and `storageCode` stays unset: the storage did not send one.
+- **Why:** R2 refuses a request signed more than 15 minutes from its clock (measured 2026-11-21: 900 s ahead accepted,
+  960 s refused; 600 s behind accepted, 900 s refused), and says so with `RequestTimeTooSkewed` in the body. An answer
+  to `HEAD` has no body, so the same refusal reached `head()` as a bare `403`, indistinguishable from bad credentials
+  except by its `Date` header. `head()` is the first storage call of a single-PUT `/complete`, of `/abort` and of
+  `api.head`, so a server with a wrong clock was told to check its keys.
+- **If wrong:** a storage service whose `Date` header is itself wrong by more than 15 minutes would get the clock
+  message for a credentials problem; the code is the same either way.
+- **Status:** in force. The fake R2 now sends `Date` on every answer and no body on `HEAD`, as R2 does.
+- **Visible in:** `src/storage/storage-error.ts`, `src/storage/s3/transport.ts`, `src/testing/fake-r2.ts`.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as

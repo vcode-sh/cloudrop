@@ -58,13 +58,14 @@ export async function send(
   // Send exactly the query that is signed: URLSearchParams writes a space as "+", which a server may read literally.
   url.search = canonicalQuery(url.searchParams);
   const { headers = {}, body, timeoutMs = REQUEST_TIMEOUT_MS } = options;
+  const signedAt = now();
   const signed = await signRequest({
     method,
     url,
     headers,
     credentials,
     region,
-    date: now(),
+    date: signedAt,
     // A Blob is streamed unread, so its hash is unknown; UNSIGNED-PAYLOAD is SigV4's documented value for that.
     payloadHash: body instanceof Blob ? UNSIGNED_PAYLOAD : body ? await sha256Hex(body) : EMPTY_SHA256,
   });
@@ -74,7 +75,11 @@ export async function send(
   const sent = method === "HEAD" ? { ...signed, "accept-encoding": "identity" } : signed;
   try {
     const response = await http(url, { method, headers: sent, body, signal: AbortSignal.timeout(timeoutMs) });
-    if (!response.ok) return fail(storageError(response.status, await response.text()));
+    if (!response.ok) {
+      // NaN without a readable Date header, which storageError reads as no offset.
+      const clockOffsetMs = Date.parse(response.headers.get("date") ?? "") - signedAt.getTime();
+      return fail(storageError(response.status, await response.text(), clockOffsetMs));
+    }
     // A server that ignores Range answers 200 with the whole object; never read gigabytes for a 4 KiB sniff.
     if (headers.range !== undefined && response.status !== 206) {
       await response.body?.cancel();

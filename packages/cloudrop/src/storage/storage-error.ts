@@ -10,6 +10,19 @@ interface Rule {
   retryable?: true;
 }
 
+/**
+ * R2 refuses a request signed more than 15 minutes away from its own clock, either way (measured 2026-11-21). A Date
+ * header has whole seconds, so an offset read from it may fall short of the real one by up to a second.
+ */
+const MAX_CLOCK_SKEW_MS = 15 * 60 * 1000 - 1000;
+
+const CLOCK_SKEWED: Rule = {
+  matches: (_status, storageCode) => storageCode === "RequestTimeTooSkewed",
+  code: "STORAGE_DENIED",
+  message:
+    "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+};
+
 /** Checked in order; the first rule that matches decides. */
 const RULES: readonly Rule[] = [
   {
@@ -38,12 +51,7 @@ const RULES: readonly Rule[] = [
     code: "CHECKSUM_MISMATCH",
     message: "The uploaded bytes do not match their checksum. Upload them again.",
   },
-  {
-    matches: (_status, storageCode) => storageCode === "RequestTimeTooSkewed",
-    code: "STORAGE_DENIED",
-    message:
-      "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
-  },
+  CLOCK_SKEWED,
   {
     matches: (_status, storageCode) => storageCode === "ExpiredRequest",
     code: "STORAGE_DENIED",
@@ -77,12 +85,15 @@ const RULES: readonly Rule[] = [
 /**
  * Turns a failed S3 response into a CloudropError. 429 and 503 are matched by status, never by S3 code: real R2
  * answered a same-key write burst with HTTP 429 and S3 code "ServiceUnavailable" (docs/research/r2-spike-findings.md, Q9).
+ * `clockOffsetMs` is the answer's Date header minus the request's signing time: an answer to HEAD has no body, so a
+ * bare 403 that far off is the clock, not the credentials (M9-H2).
  */
-export function storageError(status: number, body: string): CloudropError {
+export function storageError(status: number, body: string, clockOffsetMs = 0): CloudropError {
   const rawCode = xmlValue(body, "Code");
   // The code comes from the response body and goes to logs, so accept only what an S3 code looks like.
   const storageCode = rawCode && /^[A-Za-z0-9]{1,64}$/.test(rawCode) ? rawCode : undefined;
-  const rule = RULES.find((candidate) => candidate.matches(status, storageCode));
+  const skewed = status === 403 && storageCode === undefined && Math.abs(clockOffsetMs) > MAX_CLOCK_SKEW_MS;
+  const rule = skewed ? CLOCK_SKEWED : RULES.find((candidate) => candidate.matches(status, storageCode));
   if (rule) return new CloudropError(rule.code, rule.message, { status, storageCode, retryable: rule.retryable });
   return new CloudropError(
     "STORAGE_ERROR",
