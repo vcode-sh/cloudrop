@@ -93,20 +93,75 @@ describe("cloudrop.handler origins and CORS", () => {
     });
   });
 
-  it.for([
-    { name: "an untrusted origin", origin: "https://evil.example", method: "POST" },
-    { name: "a preflight for PUT", origin: TRUSTED, method: "PUT" },
-  ])("refuses a preflight from $name without CORS headers", async ({ origin, method }) => {
+  // A header name is an RFC 9110 token: "_" and "." are as valid as "-", and a list answered short blocks the request.
+  it("allows every valid header name a trusted preflight asks for", async () => {
+    const asked = "content-type,x_api_key ,\tx.trace-id, x-a!#$%&'*+^`|~";
     const response = await setup().cloudrop.handler(
       request("/api/cloudrop/upload", {
         method: "OPTIONS",
         body: null,
-        headers: { origin, "access-control-request-method": method },
+        headers: {
+          origin: TRUSTED,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": asked,
+        },
       }),
     );
-    expect({ status: response.status, cors: response.headers.get("access-control-allow-origin") }).toEqual({
+    expect([response.status, response.headers.get("access-control-allow-headers")]).toEqual([204, asked]);
+  });
+
+  it("answers content-type alone when the asked header list is not a list of header names", async () => {
+    const response = await setup().cloudrop.handler(
+      request("/api/cloudrop/upload", {
+        method: "OPTIONS",
+        body: null,
+        headers: {
+          origin: TRUSTED,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "x-a, x b",
+        },
+      }),
+    );
+    expect(response.headers.get("access-control-allow-headers")).toBe("content-type");
+  });
+
+  it("refuses a preflight from an untrusted origin without CORS headers", async () => {
+    const response = await setup().cloudrop.handler(
+      request("/api/cloudrop/upload", {
+        method: "OPTIONS",
+        body: null,
+        headers: { origin: "https://evil.example", "access-control-request-method": "POST" },
+      }),
+    );
+    expect({ ...(await outcome(response)), cors: response.headers.get("access-control-allow-origin") }).toEqual({
       status: 403,
+      code: "ORIGIN_NOT_ALLOWED",
       cors: null,
+    });
+  });
+
+  // The origin is allowed, so the answer must not blame it (M11-R46).
+  it.for<{ name: string; headers: Record<string, string> }>([
+    { name: "an OPTIONS that is no preflight", headers: {} },
+    { name: "a preflight for PUT", headers: { "access-control-request-method": "PUT" } },
+  ])("tells $name from a trusted origin to ask for POST", async ({ headers }) => {
+    const response = await setup().cloudrop.handler(
+      request("/api/cloudrop/upload", { method: "OPTIONS", body: null, headers: { origin: TRUSTED, ...headers } }),
+    );
+    expect({
+      status: response.status,
+      allow: response.headers.get("allow"),
+      cors: response.headers.get("access-control-allow-origin"),
+      error: ((await response.json()) as { error: unknown }).error,
+    }).toEqual({
+      status: 405,
+      allow: "POST, OPTIONS",
+      cors: null,
+      error: {
+        code: "METHOD_NOT_ALLOWED",
+        message: "This OPTIONS request is not a CORS preflight for POST. Send the request as POST.",
+        retryable: false,
+      },
     });
   });
 });

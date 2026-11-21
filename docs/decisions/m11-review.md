@@ -336,3 +336,19 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** the owner sets another ceiling, or asks for the store paths behind their own entry (`M5-T69`).
 - **Status:** provisional.
 - **Visible in:** `scripts/size-limit.config.ts`.
+
+### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
+
+- **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC
+  9110 token (section 5.6.2: letters, digits and `` !#$%&'*+-.^_`|~ ``), separated by commas with optional spaces and
+  tabs; any other text is answered with `content-type` alone, as before. An `OPTIONS` from an allowed origin without
+  `Access-Control-Request-Method: POST` answers `405 METHOD_NOT_ALLOWED` with `Allow: POST, OPTIONS` and "This OPTIONS
+  request is not a CORS preflight for POST. Send the request as POST." It was `403 ORIGIN_NOT_ALLOWED`.
+- **Why:** the old pattern knew only letters, digits and `-`, so a preflight asking for `x_api_key` or `x.trace-id` got
+  `content-type` back and the browser blocked the real request, with nothing in the server log. And "This site may not
+  upload here. Add its origin to trustedOrigins" sent an operator whose origin was already trusted to the wrong
+  setting.
+- **If wrong:** a client that matched on `403` for a preflight for another method now sees `405`; a browser treats
+  both as a failed preflight.
+- **Status:** in force.
+- **Visible in:** `src/server/http.ts`, `src/server/handler-cors.test.ts`, `docs/guide/errors.md`.

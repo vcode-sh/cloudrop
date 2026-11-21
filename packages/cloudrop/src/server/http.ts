@@ -153,13 +153,21 @@ export const originNotAllowed = (): CloudropError =>
     "This site may not upload here. Add its origin to trustedOrigins in createCloudrop.",
   );
 
-const HEADER_LIST = /^[A-Za-z0-9-]+(\s*,\s*[A-Za-z0-9-]+)*$/;
+/** Header names, each an RFC 9110 token (section 5.6.2), separated by commas with optional spaces and tabs. */
+const HEADER_LIST = /^[\w!#$%&'*+.^`|~-]+([ \t]*,[ \t]*[\w!#$%&'*+.^`|~-]+)*$/;
 
 /** Answers a CORS preflight. A trusted origin may send the headers it asks for (an app's own auth header, say). */
 export function preflight(request: Request, trustedOrigins: ReadonlySet<string>): Response {
   const verdict = checkOrigin(request, trustedOrigins);
-  if (!verdict.allowed || request.headers.get("access-control-request-method") !== "POST") {
-    return errorResponse(originNotAllowed());
+  if (!verdict.allowed) return errorResponse(originNotAllowed());
+  if (request.headers.get("access-control-request-method") !== "POST") {
+    return errorResponse(
+      new CloudropError(
+        "METHOD_NOT_ALLOWED",
+        "This OPTIONS request is not a CORS preflight for POST. Send the request as POST.",
+      ),
+      { allow: "POST, OPTIONS" },
+    );
   }
   const requested = request.headers.get("access-control-request-headers") ?? "";
   return new Response(null, {

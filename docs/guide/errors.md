@@ -60,7 +60,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `UNAUTHORIZED` | 401 | No | `authorize` returned `unauthorized()`, or a plugin refused with this code. The message is the one `authorize` or the plugin gave. | Show the message; the user usually needs to sign in. |
 | `FORBIDDEN` | 403 | No | `authorize` returned `forbidden()`, or a plugin refused with this code: the user is signed in but may not upload this, such as over a quota or on the wrong plan. | Show the message, which says what to do. Signing in again does not help. |
 | `ORIGIN_NOT_ALLOWED` | 403 | No | The request came from an origin the handler does not accept. | Add the page's origin to `trustedOrigins`. Behind a proxy, add the app's public origin (see [Troubleshooting](troubleshooting.md#every-request-gets-origin_not_allowed)). |
-| `METHOD_NOT_ALLOWED` | 405 | No | The request was not `POST` (or an `OPTIONS` preflight). | Send `POST`. Check that nothing else is mounted at the same path. |
+| `METHOD_NOT_ALLOWED` | 405 | No | The request was not `POST`, or was an `OPTIONS` that is not a CORS preflight for `POST`. | Send `POST`. Check that nothing else is mounted at the same path. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | No | The body was not sent as `Content-Type: application/json`. | Send JSON. The cloudrop client always does; check a proxy or custom client. |
 | `BODY_TOO_LARGE` | 413 | No | The request body is over 64 KiB. | Send fewer files in one call. |
 | `UNKNOWN_ROUTE` | 404 | No | No route has that name, or the token's route was removed or renamed by a deploy. | Check the route name. For an old token, start a new upload. |
