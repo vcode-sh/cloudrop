@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { CloudropError, ok } from "../errors.ts";
 import type { AfterVerifyContext } from "../server/plugins.ts";
@@ -46,6 +47,13 @@ const PREFIXES = [
   bytes([0xfe, 0xff], "\0<"),
   bytes("<?xml"),
   bytes("<?xml ?><!DOCTYPE x ["),
+  // A doctype's parts that may hold "]>" and ">", each left open (M11-R220).
+  bytes('<!DOCTYPE x [<!ENTITY a "'),
+  bytes("<?xml ?><!DOCTYPE x [<!ENTITY a '"),
+  bytes("<!DOCTYPE x [<!--"),
+  bytes("<!DOCTYPE x [<?p "),
+  bytes('<!DOCTYPE x SYSTEM "'),
+  bytes("<!DOCTYPE x []"),
   bytes("<!--"),
   bytes("<!DOCTYPE html"),
   bytes("<!DOCTYPE "),
@@ -141,5 +149,42 @@ describe("the sniffer and the content check on bytes no writer made (M11-R130)",
       if (answer !== "passed" && answer !== "refused") wrong.push(`${hex(input)}: ${answer}`);
     }
     expect(wrong).toEqual([]);
+  });
+});
+
+// XML 1.0 §2.8: doctypedecl is "<!DOCTYPE" S Name (S ExternalID)? S? ("[" intSubset "]" S?)? ">", and intSubset any
+// run of markup declarations, comments (§2.5), processing instructions (§2.6), parameter-entity references and blanks.
+// A system literal (§2.3) is any text without its own quote; a comment any text without "-" (wider is allowed, and not
+// needed here); a processing instruction any text without "?>".
+describe("the sniffer on doctypes built from the XML grammar (M11-R220)", () => {
+  const text = (...without: string[]) =>
+    fc
+      .string({ unit: fc.constantFrom(...`]>[<!-?"'%; ax\n`), maxLength: 12 })
+      .filter((made) => without.every((part) => !made.includes(part)));
+  const literal = fc.oneof(
+    text('"').map((value) => `"${value}"`),
+    text("'").map((value) => `'${value}'`),
+  );
+  const part = fc.oneof(
+    literal.map((value) => `<!ENTITY a SYSTEM ${value}>`),
+    literal.map((value) => `<!NOTATION n SYSTEM ${value} >`),
+    text("-").map((value) => `<!--${value}-->`),
+    text("?>").map((value) => `<?p ${value}?>`),
+    fc.constantFrom("<!ELEMENT x (a|b)*>", "%p;", " ", "\n"),
+  );
+  const doctype = fc
+    .tuple(fc.option(literal), fc.option(fc.array(part, { maxLength: 8 })))
+    .map(
+      ([external, subset]) =>
+        `<!DOCTYPE x${external ? ` SYSTEM ${external}` : ""}${subset ? ` [${subset.join("")}] ` : ""}>`,
+    );
+
+  it("finds the SVG root after every one of them, with and without an XML declaration", () => {
+    fc.assert(
+      fc.property(doctype, fc.constantFrom("", '<?xml version="1.0"?>\n'), (made, declaration) => {
+        expect(sniff(bytes(`${declaration}${made}\n<svg onload=alert(1)>`))?.type).toBe("image/svg+xml");
+      }),
+      { numRuns: 2000 },
+    );
   });
 });

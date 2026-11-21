@@ -45,12 +45,16 @@ const HTML_ROOTS: ReadonlySet<string> = new Set(
   "html head script iframe h1 div font table a style title b body br p hta:application".split(" "),
 );
 /**
- * What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype.
- * No two neighbouring parts of the doctype can match the same character, so a doctype that never ends is read once:
- * blanks before its ">" belong to the name part, and only an internal subset is followed by blanks of its own
- * (M11-R211).
+ * What may come before an XML document's root element (XML 1.0 §2.8): whitespace, processing instructions, comments,
+ * and a doctype, of which this matches the opening; `doctypeEnd` reads the rest.
  */
-const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\]\s*)?>/iy;
+const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|(<!doctype)/iy;
+/**
+ * One part of a doctype: a quoted literal (XML 1.0 §2.3), a comment (§2.5) or a processing instruction (§2.6), whose
+ * text may hold any character, or one character outside them. One that opens and never closes matches nothing, so the
+ * doctype is read once, in time that grows with its length (M11-R211, M11-R220).
+ */
+const DOCTYPE_PART = /"[^"]*"|'[^']*'|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|[^"'<]|<(?!!--|\?)/y;
 /**
  * An element's start tag: its name, with its namespace prefix when it has one, is captured. The name ends where XML
  * 1.0 §3.1 and an HTML parser end it, at whitespace, "/" or ">": the standard's two tag-terminating bytes and the
@@ -77,16 +81,38 @@ function decode(bytes: Uint8Array): string {
   return String.fromCharCode(...bytes.subarray(startsWith(bytes, [0xef, 0xbb, 0xbf]) ? 3 : 0));
 }
 
-/** The name of the document's root element in lower case, or null when the prolog runs past what was read. */
-function rootElement(text: string): string | null {
+/**
+ * Where the doctype whose "<!DOCTYPE" ends at `at` ends, as an XML parser reads it (XML 1.0 §2.8, doctypedecl and
+ * intSubset): at the first ">" that is neither inside its internal subset, the part in brackets, nor inside a quoted
+ * literal, a comment or a processing instruction. 0 when it is still open where the text ends.
+ */
+function doctypeEnd(text: string, at: number): number {
+  let subset = false;
+  DOCTYPE_PART.lastIndex = at;
+  for (let part = DOCTYPE_PART.exec(text); part; part = DOCTYPE_PART.exec(text)) {
+    if (part[0] === ">" && !subset) return DOCTYPE_PART.lastIndex;
+    subset = part[0] === "[" || (subset && part[0] !== "]");
+  }
+  return 0;
+}
+
+/**
+ * The name of the document's root element in lower case, "" when what follows the prolog is not a start tag, and null
+ * when a doctype is still open where the text ends. `html` reads a doctype as an HTML parser does, to its first ">"
+ * (HTML Standard §13.2.5, the DOCTYPE states: each of them ends the doctype there, inside quotes too).
+ */
+function rootElement(text: string, html: boolean): string | null {
   let at = 0;
   for (;;) {
     PROLOG_ITEM.lastIndex = at;
-    if (!PROLOG_ITEM.exec(text)) break;
+    const item = PROLOG_ITEM.exec(text);
+    if (!item) break;
     at = PROLOG_ITEM.lastIndex;
+    if (item[1]) at = html ? text.indexOf(">", at) + 1 : doctypeEnd(text, at);
+    if (!at) return null;
   }
   START_TAG.lastIndex = at;
-  return START_TAG.exec(text)?.[1]?.toLowerCase() ?? null;
+  return START_TAG.exec(text)?.[1]?.toLowerCase() ?? "";
 }
 
 /** Whether `bytes` start with a byte order mark: such a file is text, whatever bytes follow. */
@@ -105,11 +131,16 @@ export function sniffText(bytes: Uint8Array): Sniffed | null {
   const text = decode(bytes).replace(LEADING, "");
   if (SCRIPT_START.test(text)) return SCRIPT;
   if (!text.startsWith("<")) return null;
-  // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
-  const root = rootElement(text) ?? "";
-  if (root.split(":").at(-1) === "svg") return SVG;
   // WHATWG MIME Sniffing §7.1: "<?xml" is XML.
   const xml = text.startsWith("<?xml");
-  if (root === "html" || (!xml && HTML_ROOTS.has(root)) || HTML_START.test(text)) return HTML;
-  return xml ? XML : null;
+  const root = rootElement(text, false);
+  // A document without an XML declaration is a web page to a browser that gets it as one, and its HTML parser ends a
+  // doctype sooner than an XML parser: the root either of them finds decides (M11-R220).
+  const roots = xml ? [root] : [root, rootElement(text, true)];
+  // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
+  if (roots.some((name) => name?.split(":").at(-1) === "svg")) return SVG;
+  const page = roots.some((name) => name === "html" || (!xml && HTML_ROOTS.has(name ?? "")));
+  if (page || HTML_START.test(text)) return HTML;
+  // A doctype still open where the read ends hides the root of a document only an XML parser reads on.
+  return xml || root === null ? XML : null;
 }

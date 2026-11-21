@@ -60,8 +60,10 @@ export default [
   // only an app's tests load it (M9-T2). Measured 2026-11-21: 12.71 kB.
   { name: "cloudrop/testing", path: join(dist, "testing.js"), gzip: true, limit: "16 kB", ...summed },
   // Its own file only, as cloudrop/testing: it imports CloudropError from index.js, which the cloudrop budget counts,
-  // and only a server that installs a plugin loads it (M10-K5). Measured 2026-11-21 with contentChecks(): 5.05 kB.
-  { name: "cloudrop/plugins", path: join(dist, "plugins.js"), gzip: true, limit: "6 kB", ...summed },
+  // and only a server that installs a plugin loads it (M10-K5). Measured 2026-11-21 with contentChecks(): 5.05 kB;
+  // 5.96 kB after the review fixes up to M11-R212, and 6.15 kB with a doctype read as an XML parser reads it, when the
+  // ceiling went from 6 to 7 kB: provisional until the owner confirms it (M11-R220).
+  { name: "cloudrop/plugins", path: join(dist, "plugins.js"), gzip: true, limit: "7 kB", ...summed },
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
   // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.37 kB after /abort's

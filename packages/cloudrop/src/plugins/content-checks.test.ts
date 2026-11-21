@@ -207,6 +207,9 @@ describe("contentChecks: ZIP-based files", () => {
   });
 });
 
+/** An SVG whose doctype, with a comment in its internal subset, ends past the 4 KiB the plugin reads. */
+const LONG_DOCTYPE = bytes(`<!DOCTYPE svg [<!--${" ".repeat(5000)}-->]><svg xmlns="http://www.w3.org/2000/svg"/>`);
+
 describe("contentChecks: XML and SVG by content", () => {
   it.for([
     {
@@ -239,6 +242,34 @@ describe("contentChecks: XML and SVG by content", () => {
         file: { name: "a.rss", type: "application/rss+xml" },
         body: bytes("<?xml version='1.0'?><rss/>"),
       },
+      expected: passed,
+    },
+    {
+      // M11-R220: the "]>" in the entity's value ended the doctype, so the root was not seen and the file passed.
+      name: "an SVG behind a doctype whose entity value holds ]>, sent as plain text",
+      input: {
+        accept: "text/plain",
+        file: { name: "a.txt", type: "text/plain" },
+        body: bytes('<!DOCTYPE x [<!ENTITY a "]>">]><svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'),
+      },
+      expected: refused("This file is an SVG image, which this upload does not accept. Pick another file.", {
+        declared: "text/plain",
+        detected: "image/svg+xml",
+        reason: "refused",
+      }),
+    },
+    {
+      name: "an SVG behind a doctype longer than the 4 KiB read, sent as plain text",
+      input: { accept: "text/plain", file: { name: "a.txt", type: "text/plain" }, body: LONG_DOCTYPE },
+      expected: refused("This file is an XML document, which this upload does not accept. Pick another file.", {
+        declared: "text/plain",
+        detected: "application/xml",
+        reason: "refused",
+      }),
+    },
+    {
+      name: "the same file on a route that names image/svg+xml",
+      input: { accept: "image/svg+xml", file: { name: "a.svg", type: "image/svg+xml" }, body: LONG_DOCTYPE },
       expected: passed,
     },
   ])("$name", async ({ input, expected }) => {

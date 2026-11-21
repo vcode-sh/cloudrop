@@ -120,10 +120,73 @@ describe("sniff: text built to make a pattern slow (M11-R211)", () => {
     { name: "a doctype whose subset is never followed by its end", input: `<!doctype[${"] ".repeat(32_000)}` },
     { name: "a comment that never ends", input: `<?xml ?><!--${"-".repeat(64_000)}` },
     { name: "a tag name that never ends", input: `<${"a:".repeat(32_000)}` },
+    // M11-R220: the doctype is read part by part, and a part that opens and never closes ends the read.
+    { name: "a doctype of comment openings", input: `<!doctype[${"<!--".repeat(16_000)}` },
+    { name: "a doctype of quoted values with no end", input: `<!doctype[${'"]>"'.repeat(16_000)}` },
   ])("reads $name in time that grows with its length, not its square", ({ input }) => {
     const text = bytes(input);
     const started = performance.now();
     sniffText(text);
     expect(performance.now() - started).toBeLessThan(250);
+  });
+});
+
+// XML 1.0 §2.8, doctypedecl and intSubset: a ">" or "]>" inside a quoted literal (§2.3), a comment (§2.5) or a
+// processing instruction (§2.6) is that part's text, and the doctype goes on after it.
+describe("sniff: the root element behind a doctype an XML parser reads to its end (M11-R220)", () => {
+  it.for([
+    { name: "an entity value in double quotes", doctype: '<!DOCTYPE x [<!ENTITY a "]>">]>' },
+    { name: "an entity value in single quotes", doctype: "<!DOCTYPE x [<!ENTITY a ']>'>]>" },
+    { name: "a double-quoted value that holds a single quote", doctype: `<!DOCTYPE x [<!ENTITY a "']>">]>` },
+    { name: "a comment in the subset", doctype: "<!DOCTYPE x [<!-- ]> -->]>" },
+    { name: "a comment that holds a quote", doctype: `<!DOCTYPE x [<!-- " --><!ENTITY a "b">]>` },
+    { name: "a processing instruction in the subset", doctype: "<!DOCTYPE x [<?p ]> ?>]>" },
+    { name: "a processing instruction that holds a quote", doctype: "<!DOCTYPE x [<?p ' ?>]>" },
+    { name: "a system identifier", doctype: '<!DOCTYPE x SYSTEM "a>b">' },
+    { name: "a public identifier in single quotes", doctype: "<!DOCTYPE x PUBLIC '[' 'a>b' >" },
+    { name: "an attribute default", doctype: '<!DOCTYPE x [<!ATTLIST x a CDATA "]>">%p; ] >' },
+    { name: "a notation's identifier", doctype: "<!DOCTYPE x [<!NOTATION n SYSTEM ']>'><!ELEMENT x (a|b)*>]>" },
+  ])("finds an SVG root after a ]> or > inside $name", ({ doctype }) => {
+    const svg = "<svg onload=alert(1)>";
+    expect([typeOf(doctype + svg), typeOf(`<?xml version="1.0"?>${doctype}${svg}`)]).toEqual([
+      "image/svg+xml",
+      "image/svg+xml",
+    ]);
+  });
+
+  it("finds a web page's root after such a doctype", () => {
+    expect(typeOf(`<!DOCTYPE x [<!ENTITY a "]>">]><script>alert(1)</script>`)).toBe("text/html");
+  });
+
+  // HTML Standard §13.2.5, the DOCTYPE states: an HTML parser ends a doctype at its first ">", inside quotes and
+  // brackets too, so a browser that gets these as a web page runs what follows it.
+  it.for([
+    { name: "a script", input: '<!DOCTYPE x "><script>alert(1)</script>"><y>', type: "text/html" },
+    {
+      name: "a script, in a doctype that never ends",
+      input: '<!DOCTYPE x "><script>alert(1)</script>',
+      type: "text/html",
+    },
+    { name: "an SVG root", input: "<!DOCTYPE x [><svg onload=alert(1)>]><y>", type: "image/svg+xml" },
+  ])("finds $name behind the first > of a doctype with no XML declaration", ({ input, type }) => {
+    expect(typeOf(input)).toBe(type);
+  });
+
+  it("reads a declared XML document's doctype as an XML parser only", () => {
+    expect(typeOf('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "><p>b</p>">]><x>&a;</x>')).toBe("application/xml");
+  });
+
+  // The plugin reads 4 KiB: a document whose doctype is still open there shows no root, and is XML whatever follows.
+  it.for([
+    { name: "a subset that fills the read", input: `<!DOCTYPE x [${" ".repeat(4096)}]><svg>` },
+    { name: "a quoted value that fills the read", input: `<!DOCTYPE x [<!ENTITY a "${"]>".repeat(2048)}">]><svg>` },
+    { name: "a comment in the subset that fills the read", input: `<!DOCTYPE x [<!--${"]>".repeat(2048)}-->]><svg>` },
+    { name: "a subset closed inside the read, and no > after it", input: `<!DOCTYPE x []${" ".repeat(4096)}><svg>` },
+  ])("reads a doctype with $name as XML", ({ input }) => {
+    expect(typeOf(input.slice(0, 4096))).toBe("application/xml");
+  });
+
+  it("still reads an HTML doctype that does not end as a web page", () => {
+    expect(typeOf('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN')).toBe("text/html");
   });
 });

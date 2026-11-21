@@ -198,13 +198,17 @@ The plugin applies to every route. A type that one route takes and another must 
 | Linux program | `application/x-executable` | `7F 45 4C 46` | System V ABI, ELF header |
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
 | Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/`, at the start or behind a byte order mark or blank lines | `execve(2)`; POSIX.1-2024 Shell Command Language §2.9.1.4 |
-| SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg` | SVG 2 |
+| SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg`; the doctype ends where an XML parser ends it, so a `>` or `]>` inside a quoted value, a comment or a processing instruction does not end it | SVG 2; XML 1.0 §2.8 |
 | Web page | `text/html` | one of the standard's tags (`<!DOCTYPE html`, `<html`, `<head`, `<script`, `<iframe`, `<h1`, `<div`, `<font`, `<table`, `<a`, `<style`, `<title`, `<b`, `<body`, `<br`, `<p`) or `<hta:application` at the start, in any case, before a space or `>`; also before a tab, a line break or `/`; also as the root after a comment or a doctype in a document without `<?xml`; an `html` root; or `<!--` at the start, whatever follows | WHATWG §7.1 |
-| XML | `application/xml` | `<?xml` | WHATWG §7.1 |
+| XML | `application/xml` | `<?xml`, or a doctype other than `html` that is still open where the first 4 KiB end | WHATWG §7.1; XML 1.0 §2.8 |
 
 Text is read after a byte order mark (UTF-8 or UTF-16) and after the standard's whitespace bytes (tab, line feed, form
 feed, carriage return, space). A tag is its whole name: `<a,b>`, `<a@b.com>` and `<br2>` are not tags. The standard
 asks for a space or `>` after `<!--` too; Chromium and Firefox take it before any byte, and so does the check.
+
+A browser's HTML parser ends a doctype at its first `>`, quoted or not, where an XML parser reads on. A document
+without `<?xml` may reach either, so the check reads its doctype both ways and the root either reading finds decides:
+`<!DOCTYPE x [<!ENTITY a "]>">]><svg onload=…>` is an SVG, and `<!DOCTYPE x "><script>…` is a web page.
 
 ### Limits
 
@@ -242,6 +246,10 @@ asks for a space or `>` after `<!--` too; Chromium and Firefox take it before an
 - **Text that starts like a web page is refused.** A Markdown file that opens with `<p align="center">`, `<div>` or a
   `<!--` comment reads as HTML, as a browser would read it. So does an SVG whose comments before the `<svg` root fill
   the first 4 KiB, even on a route that names `image/svg+xml`.
+- **A doctype longer than the first 4 KiB hides the root element.** Such a file reads as an XML document, whatever
+  its root is: it is refused unless it was sent as an XML type the route names, and an SVG sent as `image/svg+xml` to
+  a route that names it passes as before. `deny: ["image/svg+xml"]` does not see it on a route that names another XML
+  type.
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An
   empty file is not read: R2 answers any range of an empty object with `416` (measured 2026-11-21).
 

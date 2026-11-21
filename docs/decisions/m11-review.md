@@ -2329,7 +2329,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   random strings of `[ ] > < ! "`, blanks and a letter after `<!doctype`.
 - **If wrong:** the test bounds one read of 64,000 characters at 250 ms, between the 1 ms of a linear read and the
   1.4 s of a quadratic one; a machine 200 times slower than this one would fail it for a linear pattern.
-- **Status:** in force.
+- **Status:** in force for the bound and its test. Amended by `M11-R220`: the doctype is no longer one pattern but
+  is read part by part.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`.
 
 ### M11-R212: the ZIP walk reads data descriptors with 8-byte sizes
@@ -2414,3 +2415,47 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   change.
 - **Status:** in force.
 - **Visible in:** `src/server/erase.ts` (`lastReads`), `src/server/erase-clocks.test.ts`.
+
+### M11-R220: a doctype ends where an XML parser ends it, and one still open after 4 KiB is XML
+
+- **Decision:** `rootElement` (`src/plugins/sniff-text.ts`) reads a doctype by the grammar of XML 1.0 §2.8
+  (`doctypedecl`, `intSubset`): part by part, where a part is a quoted literal in either quote (§2.3), a comment
+  (§2.5), a processing instruction (§2.6) or one character, and the doctype ends at the first `>` that is in none of
+  them and not inside the brackets of its internal subset. Three rulings go with it.
+  1. **Both parsers are asked when there is no `<?xml`.** An HTML parser ends a doctype at its first `>`, inside
+     quotes and brackets too (HTML Standard §13.2.5, the DOCTYPE states). Such a document is read both ways and the
+     root either reading finds decides: `svg` is an SVG, one of the fifteen elements or `html` a web page. A
+     document that opens with `<?xml` is read as XML only, as `M11-R131` already has it for the fifteen elements.
+  2. **A doctype still open where the text ends is `application/xml`,** with or without `<?xml`, unless the HTML
+     reading found a root or the text opens with `<!DOCTYPE html`. A comment that fills the read is a web page
+     (`M10-K12`, `M11-R131`) because browsers sniff `<!--` as HTML; they sniff no other doctype as anything, and the
+     only parser that reads on to a root is an XML one, so the file is what it can still be: an XML document. It is
+     refused unless sent as an XML type the route names, where an SVG sent as `image/svg+xml` passes as before.
+  3. **The ceiling of `cloudrop/plugins` goes from 6 to 7 kB, provisional until the owner confirms it.** The entry
+     measured 5.96 kB before and 6.16 kB with this change.
+- **Why:** the doctype was one pattern, `<!doctype[^[>]*(?:\[[\s\S]*?\]\s*)?>`, which ended an internal subset at
+  the first `]` before `>` and a doctype without one at the first `>`, wherever they stood. Reproduced:
+  `<!DOCTYPE x [<!ENTITY a "]>">]><svg onload=…>` showed no type, and `application/xml` behind `<?xml ?>`; the same
+  with single quotes, with `]>` in a comment or a processing instruction of the subset, and with `>` in a system
+  identifier (`<!DOCTYPE x SYSTEM "a>b"><svg>`). Sent as `text/plain` such a file was kept. A doctype whose subset
+  ran past the 4 KiB read showed no type either. A pattern cannot be told "a part that opens and never closes ends
+  the read" without backtracking into another reading of the parts before it, so the parts are matched one at a
+  time, each once: the worst 4,096 characters measured (blanks, `] ` pairs, `<!-` runs) take 0.08 ms in
+  `doctypeEnd` and 0.4 ms through `sniffText`, 64,000 take 2.3 ms, and Adobe Illustrator's doctype with two
+  entities 1.2 µs (Node 24, 2026-11-21). Reading only as XML would have lost
+  what the old pattern found by accident: `<!DOCTYPE x "><script>alert(1)</script>"><y>` is a web page to an HTML
+  parser and has root `y` to an XML one. The entry's 40 bytes of room cannot hold a second reading of a grammar;
+  nothing else in the entry was shortened to make room.
+- **If wrong:** a document without `<?xml` whose entity value holds `>` followed by one of the fifteen tags or
+  `<svg` (`<!ENTITY a "<i><b>x</b></i>">`) is refused as the web page or SVG an HTML parser makes of it. A file
+  that is nothing but the start of a doctype (`<!DOCTYPE x`) now reads as XML where it showed no type. A declared
+  XML document that is not well-formed and hides a tag behind a quoted `>` (`<?xml ?><!DOCTYPE x "><svg>"><y>`) reads
+  as XML, not SVG: an XML parser refuses it, and a route that names an XML type takes documents with scripts
+  anyway. `deny: ["image/svg+xml"]` does not see an SVG whose doctype outlasts the read on a route that names another
+  XML type; the guide's Limits say so.
+- **Status:** in force; the 7 kB ceiling is provisional until the owner confirms it. Amends `M11-R211` (the doctype
+  pattern). `src/plugins/sniff-text.test.ts` has each bypass with each quote, a comment and a processing instruction,
+  each kind of doctype that outlasts the read, and both parsers' readings; `src/plugins/sniff-fuzz.test.ts` builds
+  2,000 doctypes from the grammar's productions and finds the root after each.
+- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `src/plugins/sniff-fuzz.test.ts`,
+  `src/plugins/content-checks.test.ts`, `scripts/size-limit.config.ts`, `docs/guide/plugins.md`.
