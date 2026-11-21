@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Result } from "../../errors.ts";
 import { MiB, R2_RULES } from "../../rules.ts";
@@ -183,5 +184,49 @@ describe("createS3Driver", () => {
     vi.stubGlobal("Blob", class Blob {});
 
     expect((await driverWith(answer).getRange("a.txt", 0, 3)).data).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+
+  /** An answer as node-fetch and cross-fetch give it: the body is a Node stream, which has no reader (M11-R251). */
+  function nodeStreamAnswer(status: number, text: string) {
+    const bytes = new TextEncoder().encode(text);
+    const body = Readable.from([bytes]);
+    const answer = {
+      ok: status < 300,
+      status,
+      redirected: false,
+      headers: new Headers(),
+      body,
+      arrayBuffer: async () => bytes.buffer,
+    };
+    return { fetch: stubbed(async () => answer as unknown as Response), body };
+  }
+
+  it("reads an answer whose body is a Node stream", async () => {
+    const result = await driverWith(nodeStreamAnswer(206, "abcd").fetch).getRange("a.txt", 0, 3);
+    expect(result.data).toEqual(new Uint8Array([97, 98, 99, 100]));
+  });
+
+  it("reads the code of an error whose body is a Node stream", async () => {
+    const denied = nodeStreamAnswer(403, "<Error><Code>AccessDenied</Code></Error>").fetch;
+    expect((await driverWith(denied).list("")).error).toMatchObject({
+      code: "STORAGE_DENIED",
+      storageCode: "AccessDenied",
+    });
+  });
+
+  it("refuses a Node stream that held more bytes than the range, once it is read", async () => {
+    expect((await driverWith(nodeStreamAnswer(206, "abcde").fetch).getRange("a.txt", 0, 3)).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      message: tooLarge,
+    });
+  });
+
+  it("destroys an unread Node stream and says the byte range was ignored", async () => {
+    const { fetch, body } = nodeStreamAnswer(200, "whole object");
+    expect((await driverWith(fetch).getRange("a.txt", 0, 3)).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      message: "The storage service ignored the byte range. Check that the endpoint supports ranged GET.",
+    });
+    expect(body.destroyed).toBe(true);
   });
 });

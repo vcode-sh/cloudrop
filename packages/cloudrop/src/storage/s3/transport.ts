@@ -32,7 +32,14 @@ const MAX_ERROR_BYTES = 4096;
  * hand: jsdom 26's `Blob` has no `arrayBuffer()`, and an app's tests run the driver there (M11-R2, M11-R250).
  */
 async function readBody(response: Response, limit: number): Promise<{ bytes: Bytes; more: boolean }> {
-  const reader = response.body?.getReader();
+  const { body } = response;
+  // The `fetch` option may be node-fetch or cross-fetch, whose body is a Node stream without a reader: it is read
+  // whole, as 0.5.0 read every answer, and judged against the bound afterwards (M11-R251).
+  if (body && typeof body.getReader !== "function") {
+    const all = new Uint8Array(await response.arrayBuffer());
+    return { bytes: all.subarray(0, limit), more: all.length > limit };
+  }
+  const reader = body?.getReader();
   const chunks: Bytes[] = [];
   let size = 0;
   while (reader && size <= limit) {
@@ -51,6 +58,12 @@ async function readBody(response: Response, limit: number): Promise<{ bytes: Byt
     offset += chunk.length;
   }
   return { bytes, more };
+}
+
+/** Drops a body nobody will read: a web stream is cancelled, a Node stream (node-fetch) destroyed. */
+async function discard(response: Response): Promise<void> {
+  const body: { cancel?(): Promise<void>; destroy?(): void } | null = response.body;
+  await (body?.cancel ? body.cancel() : body?.destroy?.());
 }
 
 // A header the platform refused is quoted in its error, and the Authorization header carries the access key ID. The
@@ -125,7 +138,7 @@ export async function send(
     }
     // A server that ignores Range answers 200 with the whole object; never read gigabytes for a 4 KiB sniff.
     if (headers.range !== undefined && response.status !== 206) {
-      await response.body?.cancel();
+      await discard(response);
       return fail(
         new CloudropError(
           "STORAGE_ERROR",

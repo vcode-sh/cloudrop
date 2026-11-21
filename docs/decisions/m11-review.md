@@ -233,7 +233,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   1 KiB of other fields, come to 7.2 MB; a CORS or lifecycle configuration is far smaller.
 - **If wrong:** a listing over 8 MiB fails where it was read; it cannot be S3's answer to `max-keys=1000`. A ranged
   answer that sends more than the range is refused rather than cut, since which bytes it sent is then unknown.
-- **Status:** in force; `M11-R250` replaces the `Blob` the chunks were joined with.
+- **Status:** in force; `M11-R250` replaces the `Blob` the chunks were joined with, and `M11-R251` reads a body
+  that is not a web stream whole.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/xml.ts`, `src/storage/s3/bucket-settings.ts`,
   `src/storage/s3/transport.test.ts`, `src/storage/xml.test.ts`.
 
@@ -3095,3 +3096,23 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; amends `M11-R22`.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/s3/transport.test.ts` (a `Blob` without
   `arrayBuffer()`, as `handler.test.ts` has for `M11-R2`).
+
+### M11-R251: an answer whose body is not a web stream is read whole, then judged against the bound
+
+- **Decision:** `readBody` reads through the body's reader only where the body has one. A body without `getReader`
+  (node-fetch and cross-fetch answer with a Node stream) is read with `arrayBuffer()`, cut to the bound, and
+  refused afterwards exactly as a web stream past the bound is: a successful answer over it fails with the error of
+  `M11-R20`, and an error body is cut to its first 4 KiB. A body nobody reads (the answer to an ignored `Range`) is
+  cancelled when it is a web stream and destroyed when it is a Node stream.
+- **Why:** the `fetch` option takes any function with fetch's shape, and 0.5.0 read every answer through `text()`
+  and `arrayBuffer()`, which node-fetch has. `M11-R22` called `response.body?.getReader()`, which throws on a Node
+  stream, so every call answered `STORAGE_UNREACHABLE`. Measured with node-fetch 2.7.0 against a local server:
+  `head`, `put`, `getRange`, `list` and `delete` failed with "getReader is not a function", and the same script on
+  the 0.5.0 sources succeeded; after the fix they succeed again. The answer to an ignored `Range` failed in 0.5.0
+  too (`response.body?.cancel is not a function`) and now says what happened.
+- **If wrong:** with such a `fetch` the bound is checked after the read, so a server that sends gigabytes is read
+  whole, as in 0.5.0; only a web stream can be stopped early. A body with neither a reader nor `arrayBuffer()` still
+  answers `STORAGE_UNREACHABLE`.
+- **Status:** in force; amends `M11-R22`.
+- **Visible in:** `src/storage/s3/transport.ts`, `src/storage/s3/transport.test.ts` (four rows with a Node stream as
+  the body).
