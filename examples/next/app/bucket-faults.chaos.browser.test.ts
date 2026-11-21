@@ -216,28 +216,32 @@ test("a readable SignatureDoesNotMatch fails the file at once; Retry starts it a
   await page.getByRole("button", { name: `Retry ${file.name}`, exact: true }).click();
 
   await expect(page.getByRole("status")).toContainText("completed after Retry");
-  // One attempt at part 1, no renewal; UPLOAD_REJECTED needs a new ticket, so every part goes again (M3-U31).
+  // One attempt at part 1, no renewal; UPLOAD_REJECTED needs a new ticket, so every part goes again (M3-U31), after
+  // the old ticket is given up (M11-R89).
   expect(await requestRows(page)).toEqual([
     ["/upload", "200", ""],
     ["PUT part 1", "403", ""],
     ["PUT part 2", "200", ""],
     ["PUT part 3", "200", ""],
+    ["/abort", "200", ""],
     ["/upload", "200", "new ticket"],
     ["PUT part 1", "200", ""],
     ["PUT part 2", "200", ""],
     ["PUT part 3", "200", ""],
     ["/complete", "200", ""],
   ]);
-  // The first ticket's upload is left to the bucket's lifecycle rule, never aborted (M3-U55).
+  // The first ticket's upload is aborted before the new ticket is asked for (M11-R89, which supersedes M3-U55 here).
   expect(multipartCalls(await chaos.log())).toEqual([
     "CreateMultipartUpload",
+    "AbortMultipartUpload",
     "CreateMultipartUpload",
     "CompleteMultipartUpload",
   ]);
   expect(await fileRows(page)).toEqual([[file.name, "done"]]);
   await expectStoredAsResult(page, file.path);
   expect(firstTicket).not.toContain(await resultKey(page));
-  expect(await chaos.uploadsLeft()).toEqual(firstTicket);
+  // Nothing of the first ticket is left for the lifecycle rule: its multipart upload was aborted.
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 // An expired URL as R2 and as RustFS answer it, both readable: one renewal through /sign, then the part again at once,

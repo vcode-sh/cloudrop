@@ -370,10 +370,12 @@ test("a file the bucket refused is retried with a new ticket", async ({ page }) 
   await page.getByRole("button", { name: "Retry random-1-KiB.bin", exact: true }).click();
 
   await expect(page.getByRole("status")).toContainText("completed after Retry");
-  // UPLOAD_REJECTED needs a new ticket (M3-U31): a new /upload, and the file's PUT under its new key.
+  // UPLOAD_REJECTED needs a new ticket (M3-U31): the old one is given up (M11-R89), then a new /upload, and the
+  // file's PUT under its new key.
   expect(await requestRows(page)).toEqual([
     ["/upload", "200", ""],
     ["PUT single", "400", "injected 400"],
+    ["/abort", "200", ""],
     ["/upload", "200", "new ticket"],
     ["PUT single", "200", ""],
     ["/complete", "200", ""],
