@@ -26,7 +26,7 @@ describe("the variables the command reads", () => {
     ]);
     expect([localFirst.code, localFirst.lines[3]]).toEqual([
       1,
-      "PROBLEM      Bucket: The bucket does not exist. Check the bucket name in your configuration.",
+      "PROBLEM      Bucket: The bucket does not exist. Check CLOUDROP_R2_BUCKET, the bucket's name. A bucket in a jurisdiction also needs --jurisdiction.",
     ]);
   });
 

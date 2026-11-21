@@ -2707,3 +2707,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; behaviour is unchanged.
 - **Status:** in force.
 - **Visible in:** `src/server/bucket-check.ts`, `src/cli/rules.ts`, `src/cli/setup.test.ts`.
+
+### M11-R237: a bucket that does not exist is reported by its variable, and on R2 with the jurisdiction
+
+- **Decision:** when the listing answers `404 NoSuchBucket`, `doctor` and `setup --apply` print the command's own
+  sentence in place of the storage's "Check the bucket name in your configuration":
+  - R2: "The bucket does not exist. Check CLOUDROP_R2_BUCKET, the bucket's name. A bucket in a jurisdiction also
+    needs --jurisdiction."
+  - R2 with `--jurisdiction eu`: "The bucket does not exist in the eu jurisdiction. Check CLOUDROP_R2_BUCKET, the
+    bucket's name, and that the bucket is in that jurisdiction."
+  - S3: "The bucket does not exist. Check CLOUDROP_S3_BUCKET, the bucket's name, and that CLOUDROP_S3_ENDPOINT is the
+    service the bucket is on."
+  Each name is the app's own under `--var`. The library's message for the same answer is unchanged.
+- **Why:** confirmed from the tests that pinned it: the line named no variable, where every other line of the bucket
+  check does (`M9-H101`), and under `--var` "your configuration" pointed nowhere. It also said nothing of the
+  jurisdiction, while the refusal beside it does ("A bucket in a jurisdiction also needs --jurisdiction") and
+  `src/cli/bucket-access.ts` says R2 answers a bucket of another jurisdiction "as missing or refused": the person
+  whose bucket is in the EU jurisdiction and who left the option out was told to check a name that was right.
+- **If wrong:** what R2 answers for a bucket of another jurisdiction was not measured here, on the owner's
+  instruction not to ask a real bucket; the sentences advise a check and assert nothing about that answer. If R2
+  answers such a bucket otherwise (a refusal), that path already carries the same hint.
+- **Status:** in force. Extends `M9-H101` and `M11-R116`.
+- **Visible in:** `src/cli/bucket-access.ts`, `src/cli/doctor.test.ts`, `src/cli/variables.test.ts`.

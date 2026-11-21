@@ -92,9 +92,30 @@ describe("cloudrop doctor", () => {
     });
     expect(result.code).toBe(1);
     expect(result.lines[3]).toBe(
-      "PROBLEM      Bucket: The bucket does not exist. Check the bucket name in your configuration.",
+      "PROBLEM      Bucket: The bucket does not exist. Check CLOUDROP_R2_BUCKET, the bucket's name. A bucket in a jurisdiction also needs --jurisdiction.",
     );
     expect(result.lines[4]).toBe("NOT CHECKED  CORS and lifecycle rules: the bucket did not answer.");
+  });
+
+  // The storage's own sentence says "in your configuration"; the command's reader set a variable, and on R2 a
+  // jurisdiction decides where the bucket is looked for (M11-R237).
+  it.each([
+    {
+      name: "R2 in a jurisdiction, by the app's own variable",
+      argv: ["--jurisdiction", "eu", "--var", "CLOUDROP_R2_BUCKET=R2_BUCKET"],
+      env: { ...without("CLOUDROP_R2_BUCKET"), R2_BUCKET: ENV.CLOUDROP_R2_BUCKET },
+      line: "PROBLEM      Bucket: The bucket does not exist in the eu jurisdiction. Check R2_BUCKET, the bucket's name, and that the bucket is in that jurisdiction.",
+    },
+    {
+      name: "S3",
+      argv: [],
+      env: S3_ENV,
+      line: "PROBLEM      Bucket: The bucket does not exist. Check CLOUDROP_S3_BUCKET, the bucket's name, and that CLOUDROP_S3_ENDPOINT is the service the bucket is on.",
+    },
+  ])("names the variable of a bucket that does not exist on $name", async ({ argv, env, line }) => {
+    const fetch = () => Promise.resolve(new Response("<Error><Code>NoSuchBucket</Code></Error>", { status: 404 }));
+    const result = await run(["doctor", "--origin", ORIGIN, ...argv], { env, fetch });
+    expect([result.code, result.lines[3]]).toEqual([1, line]);
   });
 
   const unreachable = () => Promise.reject(new TypeError("fetch failed"));

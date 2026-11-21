@@ -54,10 +54,22 @@ function strayAnswer(error: CloudropError, { service, jurisdiction, name }: Buck
     : undefined;
 }
 
+/** The service's answer that the bucket does not exist: which variable names it, and where R2 looked (M11-R237). */
+function missingBucket({ service, jurisdiction, name }: BucketSettings): string {
+  if (service === "S3") {
+    return `The bucket does not exist. Check ${name("CLOUDROP_S3_BUCKET")}, the bucket's name, and that ${name("CLOUDROP_S3_ENDPOINT")} is the service the bucket is on.`;
+  }
+  const bucket = `Check ${name("CLOUDROP_R2_BUCKET")}, the bucket's name`;
+  return jurisdiction
+    ? `The bucket does not exist in the ${jurisdiction} jurisdiction. ${bucket}, and that the bucket is in that jurisdiction.`
+    : `The bucket does not exist. ${bucket}. A bucket in a jurisdiction also needs --jurisdiction.`;
+}
+
 /** What went wrong reaching the bucket, with the settings to check, in words true for the service (M11-R116). */
 function bucketProblem(error: CloudropError, bucket: BucketSettings): string {
   const { service, jurisdiction, name } = bucket;
   if (error.code === "STORAGE_UNREACHABLE") return `${error.message} ${endpointHint(service, jurisdiction, name)}`;
+  if (error.storageCode === "NoSuchBucket") return missingBucket(bucket);
   if (service === "S3" && OTHER_REGION.has(error.storageCode ?? "")) {
     return `The bucket is in another region (${error.storageCode}). Check ${name("CLOUDROP_S3_REGION")}, and that ${name("CLOUDROP_S3_ENDPOINT")} serves that region.`;
   }
