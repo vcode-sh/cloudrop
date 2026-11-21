@@ -62,25 +62,32 @@ describe("sniff: binary signatures", () => {
 
 const PE = "application/vnd.microsoft.portable-executable";
 const zeros = (count: number) => new Array(count).fill(0);
-/** A little-endian 16-bit field. */
+/** Little-endian 16- and 32-bit fields. */
 const u16 = (value: number) => [value & 0xff, value >> 8];
+const u32le = (value: number) => [...u16(value & 0xffff), ...u16(value >>> 16)];
 /**
  * The 28 bytes of an MS-DOS .EXE header (The MS-DOS Encyclopedia, Article 4) with these three fields; the defaults are
  * a DOS program's: 80 bytes on the last of 2 pages, no relocations, a 512-byte header (0x20 paragraphs).
  */
 const dos = ({ lastPage = 0x50, pages = 2, paragraphs = 0x20 } = {}) =>
   bytes("MZ", u16(lastPage), u16(pages), [0, 0], u16(paragraphs), [0x11, 0, 0xff, 0xff, 0, 0, 0xb8, 0], zeros(10));
-/** "MZ", every DOS field zero, and e_lfanew = `at`, as a packed program leaves them: Windows' loader reads only those. */
-const packed = (at: number) => bytes("MZ", zeros(58), [at & 0xff, (at >> 8) & 0xff, 0, 0], zeros(Math.max(0, at - 64)));
+/**
+ * "MZ", every DOS field zero, and e_lfanew = `at`, as a packed program leaves them (Windows' loader reads only those),
+ * padded up to `at` or the 4 KiB the check reads.
+ */
+const packed = (at: number) => bytes("MZ", zeros(58), u32le(at), zeros(Math.min(at, 0x1000) - 64));
 
 describe("sniff: MS-DOS headers and ID3 tags, which text could start like", () => {
   it.for([
     { name: "a Windows program", input: PROGRAM, size: PROGRAM.length, type: PE },
     { name: "a packed Windows program", input: bytes(packed(0x40), "PE\0\0", [0x4c, 0x01]), size: 70, type: PE },
     { name: "a 16-bit Windows program", input: bytes(packed(0x40), "NE", [5, 10]), size: 68, type: PE },
+    { name: "an OS/2 program", input: bytes(packed(0x40), "LX", [0, 0]), size: 68, type: PE },
     // Only the first 4 KiB is read: a header further in is taken on the file's size.
     { name: "a program whose header lies past the bytes read", input: packed(0x1000), size: 0x2000, type: PE },
+    { name: "a program whose header ends the file", input: packed(0x1000), size: 0x1004, type: PE },
     { name: "an MS-DOS program", input: dos(), size: 28, type: PE },
+    { name: "an MS-DOS program whose header fills its one page", input: dos({ pages: 1 }), size: 28, type: PE },
     // ID3v2.4 §3.1: version 4, revision 0, no flags, a syncsafe size of 1,071 bytes.
     { name: "an ID3v2.4 tag", input: bytes("ID3", [4, 0, 0, 0, 0, 0x08, 0x2f]), size: 10, type: "audio/mpeg" },
     // ID3v2.3 §3.1: flag "a", unsynchronisation, is the top bit.
@@ -104,15 +111,28 @@ describe("sniff: MS-DOS headers and ID3 tags, which text could start like", () =
     { name: "a DOS header longer than its one page", input: dos({ pages: 1, paragraphs: 0x21 }) },
     { name: "a DOS header cut at 27 bytes", input: dos().subarray(0, 27) },
     { name: "an e_lfanew pointing at no header", input: bytes(packed(0x40), "NOPE") },
-    { name: "an e_lfanew past the end of the file", input: packed(0x1000) },
+    { name: "an e_lfanew past the end of the file", input: packed(0x1000), size: 0x1003 },
+    // The header starts inside the bytes read, so those bytes decide.
+    {
+      name: "an e_lfanew at the last 3 bytes read, pointing at no header",
+      input: bytes(packed(0xffd), "xyz"),
+      size: 0x2000,
+    },
+    // 3 GB of log lines whose bytes at 0x3C read as an offset of 175 MB, inside the file.
+    {
+      name: "a large log that starts with MZ",
+      input: bytes("MZ 2026-11-21T06:00:00Z worker-1 started\n".repeat(3)),
+      size: 3_000_000_000,
+    },
+    { name: "an e_lfanew as large as text can spell", input: packed(0x09090909), size: 0x10000000 },
     { name: "an ID3 tag of version 1", input: bytes("ID3", [1, 0, 0, 0, 0, 0, 0]) },
     { name: "an ID3 tag of version 5", input: bytes("ID3", [5, 0, 0, 0, 0, 0, 0]) },
     { name: "an ID3 tag with revision 0xFF", input: bytes("ID3", [4, 0xff, 0, 0, 0, 0, 0]) },
     { name: "an ID3 tag with an undefined flag set", input: bytes("ID3", [4, 0, 0x01, 0, 0, 0, 0]) },
     { name: "an ID3 tag whose size is not syncsafe", input: bytes("ID3", [4, 0, 0, 0, 0, 0x80, 0]) },
     { name: "an ID3 header cut at 9 bytes", input: bytes("ID3", [4, 0, 0, 0, 0, 0]) },
-  ])("detects nothing in $name", ({ input }) => {
-    expect(sniff(input)).toBeNull();
+  ])("detects nothing in $name", ({ input, size }: { input: Uint8Array; size?: number }) => {
+    expect(sniff(input, size)).toBeNull();
   });
 });
 

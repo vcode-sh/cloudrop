@@ -64,17 +64,22 @@ function sniffId3(bytes: Uint8Array): Sniffed | null {
  */
 const NEW_HEADERS = [ascii("PE\0\0"), ascii("NE"), ascii("LE"), ascii("LX")];
 
+/**
+ * Four bytes of text read as an offset of at least this, 151 MB: past the bytes read, only a smaller e_lfanew is taken.
+ */
+const TEXT_OFFSET = 0x09090909;
+
 /** Whether e_lfanew, `at`, leads to a header: one of NEW_HEADERS, or past the bytes read, room for one in the file. */
 function leadsToHeader(bytes: Uint8Array, at: number, size: number): boolean {
-  if (at + 4 > bytes.length) return at + 4 <= size;
+  if (at >= bytes.length) return at < TEXT_OFFSET && at + 4 <= size;
   return NEW_HEADERS.some((header) => startsWith(bytes, header, at));
 }
 
 /**
  * A program that starts with an MS-DOS header. A Windows program is found as Windows' loader finds it (Microsoft PE
  * Format, "MS-DOS Stub" and "Signature"), by "MZ" and e_lfanew, at 3C, the offset of its own header. Past the bytes
- * read, the offset is taken when that header still fits in the file: text there reads as at least 09 09 09 09, so only
- * a text file over 151 MB could. A DOS program by its header's own fields (The MS-DOS Encyclopedia, Article 4, the
+ * read, the offset is taken when the header still fits in the file and the offset is under what text can spell. A DOS
+ * program by its header's own fields (The MS-DOS Encyclopedia, Article 4, the
  * .EXE file header): fewer than 512 bytes on the last 512-byte page, and a header of at least two paragraphs (its 28
  * bytes) that fits in the file's pages. Text cannot form one: the last-page count needs a byte 00 or 01.
  */
