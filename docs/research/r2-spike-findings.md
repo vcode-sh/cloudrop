@@ -842,6 +842,13 @@ live-test/cloudrop-a43618d161f43970185b9c0bf08d7e1c/  in-flight 412     deleted 
 
 No bucket setting was read or written, and nothing outside these prefixes was touched.
 
+### An unknown access key
+
+Measured the same day on the same bucket by the coordinator, with the `r2` driver signing for an access key ID of 32
+zeros: `HEAD` answered a bare `401` (no body), and a `ListObjectsV2` `401` with `<Code>Unauthorized</Code>`. cloudrop
+read both as a generic `STORAGE_ERROR` that pointed at the object key; it now reports `STORAGE_DENIED` with the
+credentials to check (`M9-H5`).
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in

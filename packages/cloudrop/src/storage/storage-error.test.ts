@@ -16,6 +16,9 @@ describe("storageError", () => {
     [403, xml("SignatureDoesNotMatch"), "STORAGE_DENIED", false, "SignatureDoesNotMatch"],
     [403, xml("RequestTimeTooSkewed"), "STORAGE_DENIED", false, "RequestTimeTooSkewed"],
     [403, xml("ExpiredRequest"), "STORAGE_DENIED", false, "ExpiredRequest"],
+    // R2 answers an unknown access key with 401: a bare one to HEAD, "Unauthorized" in the body otherwise (M9-H5).
+    [401, xml("Unauthorized"), "STORAGE_DENIED", false, "Unauthorized"],
+    [401, "", "STORAGE_DENIED", false, undefined],
     [429, xml("ServiceUnavailable"), "RATE_LIMITED", true, "ServiceUnavailable"],
     [503, xml("SlowDown"), "RATE_LIMITED", true, "SlowDown"],
     [503, "", "RATE_LIMITED", true, undefined],
@@ -42,6 +45,12 @@ describe("storageError", () => {
     const { message } = storageError(400, xml("InvalidArgument"));
     expect(message).not.toContain("raw text");
     expect(message).not.toContain("InvalidArgument");
+  });
+
+  it("points a 401 at the access key ID and secret, not at the request", () => {
+    expect(storageError(401, "").message).toBe(
+      "The storage service did not accept these credentials. Check the access key ID and the secret access key.",
+    );
   });
 
   it("tells the person to fix the clock when the request time is skewed", () => {

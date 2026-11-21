@@ -84,6 +84,18 @@ The measurements behind the first range are in
 - **Status:** in force.
 - **Visible in:** `src/client/bucket.ts`, `src/client/failures.ts`, `docs/guide/errors.md`.
 
+### M9-H5: a `401` from the storage service is a credentials refusal
+
+- **Decision:** `storageError` maps HTTP `401` to `STORAGE_DENIED` with "The storage service did not accept these
+  credentials. Check the access key ID and the secret access key.", whatever its body.
+- **Why:** R2 answers a request signed with an unknown access key with `401`: a bare one to `HEAD`, and
+  `<Code>Unauthorized` to a `GET` (measured on the development bucket, 2026-11-21). It fell through to the generic
+  "Check the key, size and headers you passed", which sent people to the object key (found while testing the command as
+  a new user, `M9-H101`).
+- **If wrong:** a `401` for another reason reads as a credentials problem; S3 documents `401` only for authentication.
+- **Status:** in force.
+- **Visible in:** `src/storage/storage-error.ts`.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as
@@ -204,5 +216,6 @@ The measurements behind the first range are in
   clocks passed in all three runners, `vi.useFakeTimers()` and `jest.useFakeTimers()` included.
 - **If wrong:** the server's refusal of a type with parameters is the server's; it is reported to its owner. Once the
   server accepts `text/plain;charset=utf-8`, the guide's Bun note and the Troubleshooting entry go.
-- **Status:** in force.
-- **Visible in:** `docs/guide/testing-your-app.md`, `docs/guide/troubleshooting.md`, `src/testing.guide.test.ts`.
+- **Status:** amended by `M9-H1`: the server now reads a type by its essence, so the guide's Bun note says the file is
+  accepted as `text/plain`, and the Troubleshooting entry is gone. The quota example keeps `application/pdf`.
+- **Visible in:** `docs/guide/testing-your-app.md`, `src/testing.guide.test.ts`.

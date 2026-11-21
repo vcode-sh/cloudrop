@@ -58,6 +58,12 @@ const RULES: readonly Rule[] = [
     message: "The signed request expired. Sign it again and retry.",
   },
   {
+    // R2 answers an unknown access key with 401, bare to HEAD and "Unauthorized" otherwise (measured 2026-11-21, M9-H5).
+    matches: (status) => status === 401,
+    code: "STORAGE_DENIED",
+    message: "The storage service did not accept these credentials. Check the access key ID and the secret access key.",
+  },
+  {
     matches: (status) => status === 403,
     code: "STORAGE_DENIED",
     message: "The storage service refused the request. Check the access key, its permissions and the bucket name.",
