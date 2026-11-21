@@ -59,6 +59,20 @@ describe("api.checkBucket", () => {
     });
   });
 
+  // The rule is known by what it does. The ready bucket above passes with a rule named "abort"; the name the command
+  // gives its own rule earns nothing.
+  it.each([
+    { name: "disabled", rule: abortRule.replace("Enabled", "Disabled") },
+    { name: "limited to a prefix", rule: abortRule.replace("<Prefix></Prefix>", "<Prefix>tmp/</Prefix>") },
+  ])("does not count a rule named cloudrop-abort-incomplete that is $name", async ({ rule }) => {
+    const named = rule.replace("<ID>abort</ID>", "<ID>cloudrop-abort-incomplete</ID>");
+    const fixture = serverFixture(
+      { files },
+      { bucketConfig: { lifecycle: `<LifecycleConfiguration>${named}</LifecycleConfiguration>` } },
+    );
+    expect((await fixture.cloudrop.api.checkBucket()).data?.lifecycle.status).toBe("problem");
+  });
+
   it("finds a rule that does not expose ETag, a missing abort rule and a private route on a public bucket", async () => {
     const privateFiles = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone, visibility: "private" });
     const fixture = serverFixture(

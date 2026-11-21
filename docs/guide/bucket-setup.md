@@ -154,7 +154,7 @@ calls (checked on RustFS). For a service other than AWS, point it at the service
 {
   "Rules": [
     {
-      "ID": "abort-incomplete-uploads",
+      "ID": "cloudrop-abort-incomplete",
       "Status": "Enabled",
       "Filter": { "Prefix": "" },
       "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
@@ -201,13 +201,14 @@ npx wrangler r2 bucket lifecycle list <bucket>
 Add one if it is missing, for the whole bucket:
 
 ```bash
-npx wrangler r2 bucket lifecycle add <bucket> abort-incomplete-uploads --abort-multipart-days 1
+npx wrangler r2 bucket lifecycle add <bucket> cloudrop-abort-incomplete --abort-multipart-days 1
 ```
 
 On S3 and other services, set it with [the AWS CLI](#set-both-rules-with-the-aws-cli).
 
-`checkBucket` accepts any enabled rule that applies to the whole bucket (no prefix) and aborts incomplete multipart
-uploads, whatever its number of days. The example's RustFS setup uses one day.
+`cloudrop-abort-incomplete` is the name `cloudrop setup --apply` gives the rule. The name is yours to choose:
+`checkBucket` and `cloudrop doctor` accept any enabled rule that applies to the whole bucket (no prefix) and aborts
+incomplete multipart uploads, whatever its name and its number of days. The example's RustFS setup uses one day.
 
 ## Credentials and permissions
 

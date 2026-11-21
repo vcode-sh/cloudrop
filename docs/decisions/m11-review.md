@@ -1801,3 +1801,17 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   (exit 2) and prints the usage after it, as every usage error does.
 - **Status:** in force.
 - **Visible in:** `src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
+
+### M11-R175: the lifecycle rule has one name in the guide and the command, and is known by what it does
+
+- **Decision:** the by-hand lifecycle rule of `docs/guide/bucket-setup.md` is named `cloudrop-abort-incomplete`, the
+  name `cloudrop setup` prints and writes. `checkBucket`, `doctor` and `setup` go on recognising the rule by what it
+  does (enabled, whole bucket, aborts incomplete multipart uploads), whatever its name.
+- **Why:** the guide named it `abort-incomplete-uploads`, so a reader who followed the guide and then compared with
+  the command's output saw two rules where there is one. A test now holds the other half: a rule that carries
+  cloudrop's name but is disabled, or limited to a prefix, is reported as a problem.
+- **If wrong:** a bucket set up from the old guide keeps a rule named `abort-incomplete-uploads`; it passes every
+  check, and `setup --apply` leaves it alone and adds none (`M9-C7`).
+- **Status:** in force. `examples/next/scripts/setup-rustfs.ts` and `examples/hono/scripts/setup-rustfs.ts` still
+  write the old name into their local RustFS bucket.
+- **Visible in:** `docs/guide/bucket-setup.md`, `src/server/bucket-check.test.ts`.
