@@ -593,3 +593,18 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. `src/server/erase.test.ts` ("waits for the sweep to end a completion its server never
   finished…") holds the times at the millisecond: not ended at 25 hours, ended one millisecond later.
 - **Visible in:** `docs/guide/store.md#erase-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.
+
+### M11-R154: a replacement whose `onDelete` threw for a lost race asks its client to retry
+
+- **Decision:** The guide scopes the lost-race sentence: when `onDelete` throws because another deletion took the file
+  first, `api.deleteFile` answers as for a file already deleted and `api.eraseOwner` counts the file nowhere
+  (`M10-D7`), but a replacing `/complete` answers the retryable `SERVER_ERROR` of any throw, its new file stays
+  `pending`, and the client's retry, which finds nothing left to replace, completes. The behaviour is as it was.
+- **Why:** the sentence read as if every caller answered "already deleted". A replacement cannot: it has run
+  `onComplete` and holds a claim or a transaction, and whether the file it meant to replace is gone decides nothing
+  about its own completion, which the retry settles by listing again (`M10-D5`). Reading the row again there would
+  add a store call to gain an answer the retry gives anyway.
+- **If wrong:** a client sees one more retry of `/complete` in that race than a second read would cost.
+- **Status:** in force. `src/server/store-delete-race.test.ts` ("an onDelete that throws after a deletion won fails
+  /complete, which a retry finishes"), in both modes.
+- **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.

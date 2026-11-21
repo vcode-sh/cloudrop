@@ -690,7 +690,10 @@ takes the previous file):
   database answer lost after the commit, between the record and that run skips it.
 
 When `onDelete` throws because another deletion got there first (an audit row keyed by the file already exists), the
-file is deleted all the same, and the call answers as it does for a file already deleted.
+file is deleted all the same. `api.deleteFile` then answers as it does for a file already deleted (`deleted: false`),
+and `api.eraseOwner` counts the file nowhere. A replacing `/complete` does not look at the file again: it answers the
+retryable `SERVER_ERROR` of any throw and its new file stays unfinished. The client's retry finds nothing left to
+replace, runs no `onDelete` and completes.
 
 - **Lock order.** `onDelete` runs before cloudrop locks the file or the owner's counters, as `onComplete` runs before
   cloudrop records the completion, so rows of yours that both write (a counter, the user's row) are locked before
