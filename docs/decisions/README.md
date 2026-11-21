@@ -25,6 +25,8 @@ uses one of these prefixes instead.
 | `M8-L<n>` | 0.2.0, the client lifecycle: the client-wide stop and the request options for the upload server only (`M7-P3`, `M7-P4`), and the React bindings that follow. | [m8-client.md](m8-client.md) |
 | `M8-A<n>` | 0.2.0, the owner file API: listing an owner's files, erasing an owner, one file per owner on a route, and a sweep of every page in one call. | [m8-owner-files.md](m8-owner-files.md) |
 | `M8-Q<n>` | 0.2.0, the code-quality pass: simplifications and newer platform APIs that change no behaviour. | [m8-quality.md](m8-quality.md) |
+| `M9-T<n>` | `cloudrop/testing`: the public test bucket, test client and memory store. | [m9-testing.md](m9-testing.md) |
+| `M9-C<n>` | The `cloudrop` command: `doctor` and `setup`, and the driver's bucket-settings writes they need. | [m9-cli.md](m9-cli.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 
