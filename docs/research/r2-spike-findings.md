@@ -925,6 +925,23 @@ Write token, after backing up the bucket's CORS and lifecycle rules with Wrangle
 | `test:browser:live` (the Next example, two passes) against this bucket | 27 + 3 passed through the rule `setup` wrote; 30 objects deleted | the written rule is enough for real browser uploads |
 | Restore | the temporary rule and `cloudrop-uploads` removed through the same writes; Wrangler's listing identical to the backup | |
 
+## The first 4 KiB of small objects, 2026-11-21
+
+Measured for `contentChecks()` (`M10-K6`) on the test bucket with the S3 driver: one object per size written as
+`text/plain`, then `getRange(key, 0, 4095)` and `getRange(key, 0, size - 1)`. The prefix was deleted and listed empty.
+
+| Object size | `Range: bytes=0-4095` | `Range: bytes=0-<size - 1>` |
+|---|---|---|
+| 0 bytes | `416 InvalidRange` | `bytes=0-0`: `416 InvalidRange` |
+| 1 byte | `206`, `content-range: bytes 0-0/1`, 1 byte | the same |
+| 100 bytes | `206`, `bytes 0-99/100`, 100 bytes | the same |
+| 4,096 bytes | `206`, `bytes 0-4095/4096` | the same |
+| 5,000 bytes | `206`, `bytes 0-4095/5000`, 4,096 bytes | `bytes=0-4999`: `206`, 5,000 bytes |
+
+No answer was compressed. The fake R2 answers the same way (`416` for a range that starts at or past the end, a range
+past the end clamped), so the unit lane covers it; `contentChecks()` reads nothing of an empty file and asks for
+`min(size, 4096)` bytes otherwise.
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in

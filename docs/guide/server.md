@@ -394,7 +394,7 @@ of these functions:
 | Hook | When it runs |
 | --- | --- |
 | `beforeUpload` | In `/upload`, after authorization and the size and type checks, before anything is signed. Return a `CloudropError` to refuse every file. |
-| `afterVerify` | In `/complete`, after verification, before `onComplete`. Return a `CloudropError` to refuse the file: the object is deleted and the error reaches the client. |
+| `afterVerify` | In `/complete`, after verification, before `onComplete`. Its context carries the `file`, the route's `accept` and the `storage` driver. Return a `CloudropError` to refuse the file: the object is deleted and the error reaches the client. |
 | `onAbort` | When a file `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete`, or is ended through `/abort`. Release a reservation here. |
 | `extendRoute` | Once per route, in `createCloudrop`. Throw a `CloudropError` with `INVALID_CONFIG` to refuse the route. |
 
@@ -420,7 +420,8 @@ in but may not upload this; the message says what to do (see [Errors](errors.md#
 
 Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. A database store's
 `quota` reserves and releases bytes for you, with no plugin (see [Database store](store.md#owners-and-quota)).
-cloudrop's own plugins (`contentChecks`, `limits`, `images`, `checksums`) arrive in M6.
+cloudrop's own plugins are in `cloudrop/plugins`: [`contentChecks()`](plugins.md#contentchecks) refuses a file whose
+content is not the type it was sent as.
 
 ### Make hooks idempotent
 

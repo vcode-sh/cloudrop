@@ -23,6 +23,8 @@ For developers adding uploads to an app, in reading order:
 8. [Hono with better-auth and Drizzle](guide/hono.md): a complete app, step by step, with a Vite SPA on another origin.
 9. [Testing your app](guide/testing-your-app.md): `cloudrop/testing`, your routes, store and a whole upload in your
    own tests, with no bucket, browser or network.
+10. [Plugins](guide/plugins.md): `cloudrop/plugins` and `contentChecks()`, which refuses a file whose content is not the
+    type it was sent as.
 
 When something goes wrong:
 

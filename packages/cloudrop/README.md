@@ -102,6 +102,21 @@ expect(bucket.object(data!.file.key)?.size).toBe(png.byteLength);
 `memoryStore()` stands in for a database store. Examples for `authorize`, metadata, quotas, `onComplete` and multipart
 files: [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/testing-your-app.md).
 
+## Checking what was uploaded
+
+The browser declares each file's type, and `accept` checks that declaration. `contentChecks()` from `cloudrop/plugins`
+also checks the bytes: at `/complete` it reads the first 4 KiB of the stored file and refuses, and deletes, a file whose
+content contradicts its type, or that is a web page, a program or a script whatever it was sent as.
+
+```ts
+import { contentChecks } from "cloudrop/plugins";
+
+export const cloudrop = createCloudrop({ storage, routes, plugins: [contentChecks()] });
+```
+
+What it recognises, what it refuses and its limits:
+[Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md).
+
 ## Bucket setup
 
 The browser uploads to the bucket directly, so the bucket needs a CORS rule that allows `PUT` from your page's origin
@@ -122,6 +137,7 @@ Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudr
 [Deployment](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/deployment.md) ·
 [Resume after reload](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/resume.md) ·
 [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/testing-your-app.md) ·
+[Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md) ·
 [Hono guide](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/hono.md) ·
 [Errors](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/errors.md) ·
 [Troubleshooting](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/troubleshooting.md) ·
