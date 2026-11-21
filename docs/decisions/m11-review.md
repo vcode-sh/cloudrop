@@ -1313,3 +1313,37 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/store.ts`, `src/store/sql/executor.ts`,
   `src/store/sql/lock-order.db.integration.test.ts`, `src/store/sql/store.test.ts`, `docs/guide/store.md`.
+
+### M11-R66: a page of sweep work is one index range per status
+
+- **Decision:** the SQL store's `stale` reads each status on its own, `status = '…' AND <time> < before`, ordered by
+  the time and the id with `LIMIT limit + 1`, and takes the page from those ranges with `UNION ALL` and the same
+  order and limit: `pending` and `completing` (with its lease check) for `"expire"`, the five ended statuses with
+  `cleaned_at IS NULL` for `"cleanup"`. The cleanup ranges order by `cleaned_at, ended_at, id`: `cleaned_at` is null
+  in every row of the range, so the rows and their order are the same, and it is how Postgres sees that the
+  `(status, cleaned_at, ended_at)` index already has them in order. One statement text serves Postgres, SQLite and D1.
+  The rows a page answers, their order and the cursor are unchanged.
+- **Why:** asked as one condition over the statuses (`status = 'pending' OR (status = 'completing' AND …)`,
+  `status IN (…)`), no single index holds the rows in the page's order, so every page read every waiting row and
+  sorted them. Measured with `EXPLAIN (ANALYZE, BUFFERS)` on Postgres 18.6, 360,000 rows of which 120,000 pending
+  (30,000 past their deadline), 30,000 completing (28,750 past deadline and lease) and 24,000 ended and not cleaned,
+  a page of 101 rows:
+
+  | Page | Before | After |
+  | --- | --- | --- |
+  | expire, first | 6,996 buffers, 12.1 ms: `BitmapOr` over two indexes, 58,750 rows, top-N sort | 244 buffers, 0.12 ms: two `Index Scan`s of `status_expires_at_idx` under `Incremental Sort` (presorted `expires_at`), 105 and 101 rows read |
+  | expire, after a cursor | 6,977 buffers, 12.4 ms | 140 buffers, 0.11 ms |
+  | cleanup, first | 6,885 buffers, 8.7 ms: bitmap scan of 24,000 rows, top-N sort | 435 buffers, 0.46 ms: five `Index Scan`s of `status_cleaned_at_ended_at_idx` under `Incremental Sort` |
+  | cleanup, after a cursor | 6,860 buffers, 8.4 ms | 439 buffers, 0.47 ms |
+
+  The same ids in the same order before and after, on all four pages. Without `cleaned_at` in the cleanup ranges'
+  order Postgres chose a bitmap scan and a sort per status (24,063 buffers, worse than before). SQLite (node:sqlite,
+  the same rows, with and without `ANALYZE`): expire 10.9 ms (`MULTI-INDEX OR`, `USE TEMP B-TREE FOR ORDER BY`) to
+  0.20 ms, cleanup 3.9 ms to 0.41 ms, each range a `SEARCH` of its index with `USE TEMP B-TREE FOR LAST TERM OF ORDER
+  BY`. A sweep of a backlog cost a full read per page, so its cost grew with the square of the backlog.
+- **If wrong:** a status with few stale rows among many past their deadline (completing rows whose claims are live) is
+  walked along `expires_at` until a page is found or the range ends, as before the change at worst. A page costs up
+  to five small ranges where one statement ran; on D1 that is one query all the same, with at most 21 parameters.
+- **Status:** in force.
+- **Visible in:** `src/store/sql/reads.ts`, `src/store/sql/stale.db.integration.test.ts`,
+  `src/testing/store-contract/stale.ts`.

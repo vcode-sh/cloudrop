@@ -31,7 +31,7 @@ type Listing = Omit<Parameters<StoreMethods["list"]>[0], "owner" | "statuses"> &
 /** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
 export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
 
-const CLEANUP_STATUSES = "'aborted', 'rejected', 'failed', 'expired', 'deleted'";
+const CLEANUP_STATUSES = ["aborted", "rejected", "failed", "expired", "deleted"];
 /** Postgres: the name with its ASCII letters in lower case and nothing else changed. */
 const FOLD_NAME = "translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
 
@@ -141,15 +141,21 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     async stale({ kind, before, claimedBefore, limit, cursor }) {
       const b = binder(dialect);
       const time = kind === "expire" ? "expires_at" : "ended_at";
-      const work =
-        kind === "expire"
-          ? `expires_at < ${b.time(before)}
-            AND (status = 'pending' OR (status = 'completing' AND claimed_at < ${b.time(claimedBefore)}))`
-          : `status IN (${CLEANUP_STATUSES}) AND cleaned_at IS NULL AND ended_at < ${b.time(before)}`;
       const start = cursor === null ? null : decodeCursor(cursor);
-      const after = start ? `AND (${time}, ${byteOrder("id")}) > (${b.time(start.time)}, ${b.text(start.id)})` : "";
-      const sql = `SELECT ${RECORD_COLUMNS} FROM ${files} WHERE ${work} ${after}
-        ORDER BY ${time}, ${byteOrder("id")} LIMIT ${b.integer(limit + 1)}`;
+      // One status at a time: its rows are a range of one index, already in the page's order, so each range stops
+      // after a page of rows and the page is the first rows of them all. Asked as one condition over the statuses, the
+      // database reads every matching row and sorts them, for every page (M11-R66). `lead` names an index column
+      // before the time that is the same in every row of the range, which is how Postgres sees the index's order.
+      const ordered = (lead = "") => `ORDER BY ${lead}${time}, ${byteOrder("id")} LIMIT ${b.integer(limit + 1)}`;
+      const range = (work: string, lead?: string) =>
+        `SELECT * FROM (SELECT ${RECORD_COLUMNS} FROM ${files} WHERE ${work} AND ${time} < ${b.time(before)} ${
+          start ? `AND (${time}, ${byteOrder("id")}) > (${b.time(start.time)}, ${b.text(start.id)})` : ""
+        } ${ordered(lead)}) AS part`;
+      const ranges =
+        kind === "expire"
+          ? [range("status = 'pending'"), range(`status = 'completing' AND claimed_at < ${b.time(claimedBefore)}`)]
+          : CLEANUP_STATUSES.map((status) => range(`status = '${status}' AND cleaned_at IS NULL`, "cleaned_at, "));
+      const sql = `SELECT ${RECORD_COLUMNS} FROM (${ranges.join(" UNION ALL ")}) AS work ${ordered()}`;
       const records = (await run(b.statement(sql))).map(toRecord);
       const timeOf = (record: FileRecord) => (kind === "expire" ? record.expiresAt : (record.endedAt ?? new Date(0)));
       const { kept, cursor: next } = page(records, limit, (last) => encodeCursor(timeOf(last), last.id));

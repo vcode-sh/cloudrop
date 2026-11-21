@@ -79,6 +79,23 @@ export function staleCases(suite: StoreSuite): void {
     expect(await ask(null, 3)).toMatchObject({ cursor: null });
   });
 
+  it("expire pages through a deadline that pending and completing rows share, in id order across both", async () => {
+    const { store } = suite;
+    // One deadline for all four, and the ids alternate between the statuses: a page read status by status must still
+    // answer them in id order, and a cursor inside the tie must skip none of either status.
+    await seed("u-1", [newFile("f-a", 1), newFile("f-b", 1), newFile("f-c", 1), newFile("f-d", 1)], at(MINUTE));
+    await advance("f-a", "completing", at(0));
+    await advance("f-c", "completing", at(0));
+    const pages: string[][] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await store.stale({ kind: "expire", before, claimedBefore, limit: 1, cursor });
+      pages.push(ids(page));
+      cursor = page.cursor;
+    } while (cursor !== null);
+    expect(pages).toEqual([["f-a"], ["f-b"], ["f-c"], ["f-d"]]);
+  });
+
   it("cleanup pages by end time then id, and ends with null", async () => {
     const { store } = suite;
     await seed("u-1", [newFile("f-1", 1), newFile("f-2", 1), newFile("f-3", 1)]);
