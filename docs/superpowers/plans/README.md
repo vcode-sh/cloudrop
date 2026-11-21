@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-20 for 0.2.0 (the first pilot's report and what it built itself). This file
+Updated 2026-11-21 for 0.3.0 (cloudrop/testing, the command, hardening on a real bucket). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -115,7 +115,8 @@ The pilot moved to 0.2.0 and replaced its own avatar replacement, deletion clean
 abort plumbing with `replace`, `deleteFile`, `sweep({ all })`, `eraseOwner` and `close()`. Candidates it surfaced,
 none decided:
 
-- **Done on `main` (unreleased):** `cloudrop/testing` (`M9-T`) and the `cloudrop doctor`/`setup` command (`M9-C`),
+- **Released in 0.3.0 (2026-11-21):** `cloudrop/testing` (`M9-T`), the `cloudrop doctor`/`setup` command
+  (`M9-C`) and the hardening from tests on a real bucket (`M9-H`),
   designed in `docs/superpowers/specs/2026-11-21-testing-and-cli-design.md`. R2 accepts `setup --apply`'s two
   writes (measured on the development bucket with an admin token, 2026-11-21), and a real browser uploaded through the
   rule it wrote.

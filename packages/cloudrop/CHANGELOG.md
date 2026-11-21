@@ -6,20 +6,28 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-21
+
+In short: you can now test your upload routes without a bucket (`cloudrop/testing`), and one command checks and sets
+up your bucket (`cloudrop doctor`, `cloudrop setup`). Everything was then tested against a real R2 bucket and a real
+database, and the problems found there are fixed below. The guides now ship inside the package (`docs/`).
+
 ### Added
 
 - **`cloudrop/testing`:** `testBucket()`, `testClient()` and `memoryStore()` let an app test its routes, `authorize`,
   metadata, quotas, `onComplete` and whole uploads in Vitest, Bun or `node:test`, with no bucket, browser or network.
   The test client is the real client, wired to `cloudrop.handler` in-process; the test bucket is the in-process fake
-  of R2 that cloudrop's own tests use. Guide: [Testing your app](../../docs/guide/testing-your-app.md) (`M9-T1` to
+  of R2 that cloudrop's own tests use. Guide: [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/testing-your-app.md) (`M9-T1` to
   `M9-T9`).
 - **The `cloudrop` command** (Node 24+ and Bun): `cloudrop doctor --origin <origin>` checks the storage settings,
   `CLOUDROP_SECRET`, the bucket and its CORS and lifecycle rules in plain words (exit 0, 1 or 2).
   `cloudrop setup --origin <origin>` prints the rules and the Wrangler and AWS CLI commands; with `--apply` it adds
   cloudrop's rules through the S3 API and keeps every other rule (`--dry-run`, `--replace`). It never prints a
-  setting's value. Guide: [The cloudrop command](../../docs/guide/command.md) (`M9-C1` to `M9-C9`).
+  setting's value. Guide: [The cloudrop command](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/command.md) (`M9-C1` to `M9-C9`).
 - `StorageDriver` gains optional `putBucketCors` and `putBucketLifecycle`. `BucketCorsRule` gains `id` and
   `maxAgeSeconds`, and `BucketLifecycleRule` gains `sourceXml`.
+- **The guides ship in the package:** `node_modules/cloudrop/docs/` holds the user guides of this exact version, with
+  an index in `docs/README.md`; links to the project's history point at GitHub.
 
 ### Changed
 
@@ -29,8 +37,9 @@ Every notable change to the `cloudrop` package. The format follows
   completed: `/sign` answers `UPLOAD_EXPIRED` in a token's last 15 minutes, and the client gets a new ticket or starts
   over there (`M9-H3`). Measured on R2: a URL's expiry is checked when the request starts, not when its body ends.
 - The `cloudrop` command names the setting to fix when the bucket does not answer, suggests the exact origin for one
-  that is not, refuses a pattern such as `https://*.example.com`, notes a misspelt `CLOUDROP_*` name, and offers
-  `--replace` only after a refused read (`M9-H100` to `M9-H104`).
+  that is not, refuses a pattern such as `https://*.example.com`, notes a misspelt `CLOUDROP_*` name, offers
+  `--replace` only after a refused read, and ends a dry run by pointing at `--apply` (`M9-H100` to `M9-H104`,
+  `M9-H107`). `setup --apply` was measured on R2: both writes accepted, other rules kept, rule IDs kept.
 
 ### Fixed
 

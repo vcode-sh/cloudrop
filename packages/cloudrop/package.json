@@ -1,6 +1,6 @@
 {
   "name": "cloudrop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fast, resumable, direct-to-bucket file uploads for Cloudflare R2 and S3-compatible storage.",
   "license": "MIT",
   "repository": {
@@ -19,6 +19,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "CHANGELOG.md"
   ],
   "engines": {
@@ -66,7 +67,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && bun ../../scripts/package-docs.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --project unit",
     "package:check": "../../scripts/check-package.sh"
