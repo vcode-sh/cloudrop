@@ -8,6 +8,8 @@ import type { Service } from "./settings.ts";
 
 // Refusals about the clock or the signature's age, not the credentials: the storage's own advice is the right one.
 const NOT_CREDENTIALS = new Set(["RequestTimeTooSkewed", "ExpiredRequest"]);
+// AWS's answers to a request signed for, or sent to, another region than the bucket's (its error-code list; unmeasured).
+const OTHER_REGION = new Set(["AuthorizationHeaderMalformed", "PermanentRedirect"]);
 
 function credentialsHint(service: Service, jurisdiction: string | undefined): string {
   if (service === "S3") {
@@ -31,6 +33,9 @@ function endpointHint(service: Service, jurisdiction: string | undefined): strin
 /** What went wrong reaching the bucket, with the settings to check. */
 function bucketProblem(error: CloudropError, service: Service, jurisdiction: string | undefined): string {
   if (error.code === "STORAGE_UNREACHABLE") return `${error.message} ${endpointHint(service, jurisdiction)}`;
+  if (service === "S3" && OTHER_REGION.has(error.storageCode ?? "")) {
+    return `The bucket is in another region (${error.storageCode}). Check CLOUDROP_S3_REGION, and that CLOUDROP_S3_ENDPOINT serves that region.`;
+  }
   const refused = (error.status === 401 || error.status === 403) && !NOT_CREDENTIALS.has(error.storageCode ?? "");
   if (!refused) return error.message;
   return `The storage service refused these credentials (HTTP ${error.status}). ${credentialsHint(service, jurisdiction)}`;

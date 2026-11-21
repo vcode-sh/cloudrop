@@ -35,7 +35,9 @@ S3-compatible service, and `CLOUDROP_SECRET`. When any `CLOUDROP_R2_*` variable 
   does.
 
 A name that is not a setting but looks like one, such as `CLOUDROP_R2_BUCKT` or `cloudrop_secret`, gets a `note` naming
-the setting it was probably meant to be. When settings for R2 and S3 are both set, a `note` says that R2 is checked.
+the setting it was probably meant to be, among the settings of the service its name names. `CLOUDROP_R2_ENDPOINT` and
+`CLOUDROP_R2_REGION` get a note that R2 needs neither. When settings for R2 and S3 are both set, a `note` says that R2
+is checked.
 
 The command never prints a setting's value, only its name. The commands it prints name the bucket as
 `"$CLOUDROP_R2_BUCKET"` (or `"$CLOUDROP_S3_BUCKET"`), so they work in a shell that has the variable set.
@@ -48,7 +50,8 @@ The command never prints a setting's value, only its name. The commands it print
 2. that `CLOUDROP_SECRET` is set and has at least 32 characters;
 3. that the bucket answers and the credentials may list it (a listing, which tells a missing bucket from a missing
    object). When it does not, the finding names the settings to check: the account ID (R2) or the endpoint (S3) when
-   the service cannot be reached, the keys, the bucket and `--jurisdiction` when it refuses them;
+   the service cannot be reached, the keys, the bucket and `--jurisdiction` when it refuses them, the region (S3) when
+   it answers that the bucket is in another one;
 4. the bucket's CORS rule for each `--origin` and its lifecycle rule, as `cloudrop.api.checkBucket` does.
 
 Each line is one finding: `ok`, `PROBLEM` with what to do, `NOT CHECKED` with how to check by hand, or a `note`. The
@@ -100,13 +103,14 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
 - It writes nothing for a setting that would not change.
 - It needs credentials that may read and change bucket settings, such as an R2 Admin Read & Write token. Use it for
   this step only; the app needs no more than Object Read & Write.
-- When it cannot read the current rules, it writes nothing and exits 1. It also lists the bucket, as `doctor` does: when
-  that fails too, the keys, the bucket name or the network is the problem, and it says which settings to check; when
-  it succeeds, the credentials may not read bucket settings, as an R2 object token cannot. `--replace` (with `--apply` or `--dry-run`)
-  writes cloudrop's rules alone instead, replacing what the bucket has, but only when the read was refused (`403`, or a
-  service that does not support it). A read that failed for any other reason, such as a timeout, never leads to a
-  write. Neither does a configuration written in XML the command does not read (CDATA, comments or namespace
-  prefixes): check that bucket's rules by hand.
+- When it cannot read the current rules, it writes nothing and exits 1. It also lists the bucket, as `doctor` does.
+  When the listing fails too, the keys, the bucket name or the network is the problem, and it names the settings to
+  check. When the listing works and the read was refused, the credentials may not read bucket settings, as an R2 object
+  token cannot; it names an R2 Admin Read & Write token, or S3's two permissions for the setting. `--replace` (with
+  `--apply` or `--dry-run`) writes cloudrop's rules alone instead, replacing what the bucket has, but only when the
+  read was refused (`403`, or a service that does not support it). A read that failed for any other reason, such as a
+  timeout, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
+  comments or namespace prefixes): check that bucket's rules by hand.
 
 `--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add or update
 and which rules it would keep. R2 can take up to 30 seconds to apply a change; run `doctor` afterwards to check.

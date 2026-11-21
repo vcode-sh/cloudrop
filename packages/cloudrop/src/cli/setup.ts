@@ -9,7 +9,7 @@ import type { CommandOptions } from "./args.ts";
 import { reachBucket } from "./bucket-access.ts";
 import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
-import { readStorage, type Variables } from "./settings.ts";
+import { readStorage, type Service, type Variables } from "./settings.ts";
 
 /** What setup does to one setting, once its current rules are read and cloudrop's merged in. */
 interface Step {
@@ -37,20 +37,26 @@ interface Setting<Rule> {
   write(rules: Rule[]): Promise<Result<void>>;
 }
 
-const REPLACE = "or pass --replace to replace every rule with cloudrop's alone.";
+/** S3's two permissions for reading and changing each setting. */
+const S3_PERMISSIONS: Record<Step["label"], string> = {
+  CORS: "s3:GetBucketCORS and s3:PutBucketCORS",
+  Lifecycle: "s3:GetLifecycleConfiguration and s3:PutLifecycleConfiguration",
+};
 
 /**
- * Why nothing is written when the current rules cannot be read. --replace is offered only where it would act; the
- * credentials themselves were proven by a listing before this is printed (M9-H102).
+ * Why nothing is written when the current rules cannot be read. A refused read is offered --replace, since the
+ * listing beside it proved the credentials (M9-H102); after any other failure --replace would not act, so it is not.
  */
-function unreadable(label: Step["label"], error: CloudropError, refusedRead: boolean, replace: boolean): string {
-  if (error.code === "STORAGE_DENIED" && !replace) {
-    const rules = label === "CORS" ? "CORS rules" : "lifecycle rules";
-    return `${label}: these credentials may not read the bucket's ${rules} (R2 object tokens cannot), and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step, such as an R2 Admin Read & Write token, ${REPLACE}`;
+function unreadable(label: Step["label"], error: CloudropError, replace: boolean, service: Service): string {
+  if (error.code === "STORAGE_DENIED") {
+    const [rules, admin] =
+      service === "R2"
+        ? ["rules (R2 object tokens cannot)", ", such as an R2 Admin Read & Write token,"]
+        : ["rules", ` (${S3_PERMISSIONS[label]}),`];
+    return `${label}: these credentials may not read the bucket's ${label === "CORS" ? "CORS" : "lifecycle"} ${rules}, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step${admin} or pass --replace to replace every rule with cloudrop's alone.`;
   }
   const failed = `${label}: could not read the current rules: ${error.message} A write replaces every rule, so none was written.`;
-  if (replace) return `${failed} --replace applies only when the credentials or the service refuse the read.`;
-  return refusedRead ? `${failed} Use a service that supports it, ${REPLACE}` : failed;
+  return replace ? `${failed} --replace applies only when the credentials or the service refuse the read.` : failed;
 }
 
 /**
@@ -58,11 +64,15 @@ function unreadable(label: Step["label"], error: CloudropError, refusedRead: boo
  * --replace covers only a read the credentials or the service refuse (403, 501); any other failure says nothing about
  * the rules, so it never replaces them.
  */
-function plan<Rule extends { id?: string }>(setting: Setting<Rule>, replace: boolean): Step | Finding {
+function plan<Rule extends { id?: string }>(
+  setting: Setting<Rule>,
+  replace: boolean,
+  service: Service,
+): Step | Finding {
   const { label, ours, describe, read } = setting;
   const refusedRead = read.error?.code === "STORAGE_DENIED" || read.error?.status === 501;
   if (read.error && !(replace && refusedRead)) {
-    return { status: "problem", text: unreadable(label, read.error, refusedRead, replace) };
+    return { status: "problem", text: unreadable(label, read.error, replace, service) };
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
   const { change, kept, reason, added } = merged;
@@ -105,7 +115,7 @@ async function carryOut(step: Step, dryRun: boolean): Promise<Finding> {
   return { status: "ok", text: describeChange(step, false) };
 }
 
-async function planBoth(driver: S3Driver, options: CommandOptions): Promise<(Step | Finding)[]> {
+async function planBoth(driver: S3Driver, options: CommandOptions, service: Service): Promise<(Step | Finding)[]> {
   const [cors, lifecycle] = await Promise.all([driver.getBucketCors(), driver.getBucketLifecycle()]);
   const origins = options.origins.join(", ");
   const days = plural(ABORT_DAYS, "day");
@@ -120,6 +130,7 @@ async function planBoth(driver: S3Driver, options: CommandOptions): Promise<(Ste
         write: driver.putBucketCors,
       },
       options.replace,
+      service,
     ),
     plan<BucketLifecycleRule>(
       {
@@ -131,6 +142,7 @@ async function planBoth(driver: S3Driver, options: CommandOptions): Promise<(Ste
         write: driver.putBucketLifecycle,
       },
       options.replace,
+      service,
     ),
   ];
 }
@@ -155,7 +167,7 @@ export async function applySetup(
   // The listing runs beside the reads and counts only when a read failed: wrong credentials or no network fail the
   // reads too, and then the bucket is the problem, not its rules (M9-H102).
   const [steps, access] = await Promise.all([
-    planBoth(storage.driver, options),
+    planBoth(storage.driver, options, storage.service),
     reachBucket(storage.driver, storage.service, options.jurisdiction),
   ]);
   const refused = steps.filter(isFinding);

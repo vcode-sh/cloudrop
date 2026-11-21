@@ -92,17 +92,31 @@ function distance(a: string, b: string): number {
   return previous[b.length] ?? 0;
 }
 
+// Settings people bring from S3 to R2, which R2 builds or does not need.
+const NOT_FOR_R2 = new Map([
+  ["CLOUDROP_R2_ENDPOINT", "R2's endpoint is built from CLOUDROP_R2_ACCOUNT_ID."],
+  ["CLOUDROP_R2_REGION", "R2 needs no region."],
+]);
+
+/** The setting that is not set and is the same name in another case, or two edits from it, in the name's service. */
+function meant(upper: string, variables: Variables): string | undefined {
+  // CLOUDROP_R2_ENDPOINT is no misspelt CLOUDROP_S3_ENDPOINT: following that advice would change nothing.
+  const service = /^CLOUDROP_(R2|S3)_/.exec(upper)?.[1] as Service | undefined;
+  const scored = (service ? NAMES[service] : KNOWN).map((known) => ({ known, score: distance(upper, known) }));
+  const best = scored.sort((a, b) => a.score - b.score)[0];
+  return best && best.score <= 2 && !variables(best.known) ? `Did you mean ${best.known}?` : undefined;
+}
+
 /**
- * A note for each CLOUDROP_* name that is no setting but is one in another case or two typos away from one that is
- * not set, such as CLOUDROP_R2_BUCKT: otherwise the only clue is "CLOUDROP_R2_BUCKET is not set" (M9-H103).
+ * A note for each CLOUDROP_* name that is no setting but looks meant as one, such as CLOUDROP_R2_BUCKT: otherwise the
+ * only clue is "CLOUDROP_R2_BUCKET is not set" (M9-H103).
  */
 function misspelt(names: readonly string[], variables: Variables): Finding[] {
   return [...new Set(names)].flatMap((name): Finding[] => {
     if (!/^cloudrop_/i.test(name) || KNOWN.includes(name)) return [];
-    const scored = KNOWN.map((known) => ({ known, score: distance(name.toUpperCase(), known) }));
-    const best = scored.sort((a, b) => a.score - b.score)[0];
-    if (!best || best.score > 2 || variables(best.known)) return [];
-    return [{ status: "note", text: `${name} is not a cloudrop setting. Did you mean ${best.known}?` }];
+    const upper = name.toUpperCase();
+    const hint = NOT_FOR_R2.get(upper) ?? meant(upper, variables);
+    return hint ? [{ status: "note", text: `${name} is not a cloudrop setting. ${hint}` }] : [];
   });
 }
 

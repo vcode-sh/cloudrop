@@ -197,6 +197,52 @@ describe("cloudrop setup --apply", () => {
     expect([result.code, result.lines.slice(1)]).toEqual([1, [line, "Nothing was written."]]);
   });
 
+  const isSettingsRead = (input: string | URL | Request, init?: RequestInit) =>
+    /\?(cors|lifecycle)=$/.test(String(input)) && (init?.method ?? "GET") === "GET";
+  const isListing = (input: string | URL | Request) => String(input).includes("list-type=2");
+  const answer = (status: number, code: string) =>
+    Promise.resolve(new Response(`<Error><Code>${code}</Code></Error>`, { status }));
+
+  it("names S3's permissions when S3 credentials may list the bucket but not read its settings", async () => {
+    const env = {
+      CLOUDROP_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
+      CLOUDROP_S3_REGION: "us-east-1",
+      CLOUDROP_S3_BUCKET: "acme-s3-uploads",
+      CLOUDROP_S3_ACCESS_KEY_ID: "AKIDs3fixture",
+      CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
+    };
+    const fetch: FetchLike = (input, init) =>
+      isSettingsRead(input, init)
+        ? answer(403, "AccessDenied")
+        : Promise.resolve(new Response("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>"));
+    const result = await run(apply("--dry-run"), { env, fetch });
+    expect(result.lines.slice(1)).toEqual([
+      "PROBLEM      CORS: these credentials may not read the bucket's CORS rules, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step (s3:GetBucketCORS and s3:PutBucketCORS), or pass --replace to replace every rule with cloudrop's alone.",
+      "PROBLEM      Lifecycle: these credentials may not read the bucket's lifecycle rules, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step (s3:GetLifecycleConfiguration and s3:PutLifecycleConfiguration), or pass --replace to replace every rule with cloudrop's alone.",
+      "Nothing was written.",
+    ]);
+  });
+
+  // Wrangler's local R2 answers 501 to the writes as well (M9-C4), so --replace could not act there either.
+  it("reports a service that cannot read bucket settings without offering --replace", async () => {
+    const storage = bucket(FOREIGN);
+    const fetch: FetchLike = (input, init) =>
+      isSettingsRead(input, init) ? answer(501, "NotImplemented") : storage.fetch(input, init);
+    const result = await run(apply(), { fetch });
+    expect([result.code, result.lines[1]]).toEqual([
+      1,
+      "PROBLEM      CORS: could not read the current rules: The storage service does not support this request. Use R2 or another backend that implements it. A write replaces every rule, so none was written.",
+    ]);
+  });
+
+  it("writes when the rules are readable, although the credentials may not list the bucket", async () => {
+    const storage = bucket(FOREIGN);
+    const fetch: FetchLike = (input, init) =>
+      isListing(input) ? answer(403, "AccessDenied") : storage.fetch(input, init);
+    const result = await run(apply(), { fetch });
+    expect([result.code, storage.writes]).toEqual([0, ["PUT ?cors=", "PUT ?lifecycle="]]);
+  });
+
   it("with --replace, writes cloudrop's rules alone when the current rules cannot be read", async () => {
     const storage = bucket(FOREIGN);
     // The bucket refuses reads of its settings but accepts writes.

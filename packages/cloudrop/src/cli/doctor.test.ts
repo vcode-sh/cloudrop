@@ -127,12 +127,6 @@ describe("cloudrop doctor", () => {
     expect([result.code, result.lines[3]]).toEqual([1, line]);
   });
 
-  it("names the settings to check when the secret key is wrong", async () => {
-    const env = { ...ENV, CLOUDROP_R2_SECRET_ACCESS_KEY: "another-secret-access-key" };
-    const result = await doctor({ env, fetch: bucket(READY).fetch });
-    expect(result.lines[3]).toMatch(/^PROBLEM {6}Bucket: The storage service refused these credentials \(HTTP 403\)\./);
-  });
-
   it("keeps the storage's own advice for a refusal that is not about the credentials", async () => {
     const skewed = () =>
       Promise.resolve(new Response("<Error><Code>RequestTimeTooSkewed</Code></Error>", { status: 403 }));
@@ -151,28 +145,41 @@ describe("cloudrop doctor", () => {
       CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
       CLOUDROP_SECRET: ENV.CLOUDROP_SECRET,
     };
-    const [refused, unreached] = await Promise.all([
+    const otherRegion = () =>
+      Promise.resolve(new Response("<Error><Code>AuthorizationHeaderMalformed</Code></Error>", { status: 400 }));
+    const results = await Promise.all([
       doctor({ env, fetch: answers(403) }),
       doctor({ env, fetch: unreachable }),
+      doctor({ env, fetch: otherRegion }),
     ]);
-    expect([refused.lines[3], unreached.lines[3]]).toEqual([
+    expect(results.map((result) => result.lines[3])).toEqual([
       "PROBLEM      Bucket: The storage service refused these credentials (HTTP 403). Check CLOUDROP_S3_ACCESS_KEY_ID and CLOUDROP_S3_SECRET_ACCESS_KEY, that they may read and write objects in the bucket named by CLOUDROP_S3_BUCKET, and CLOUDROP_S3_REGION.",
       "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The endpoint is CLOUDROP_S3_ENDPOINT.",
+      "PROBLEM      Bucket: The bucket is in another region (AuthorizationHeaderMalformed). Check CLOUDROP_S3_REGION, and that CLOUDROP_S3_ENDPOINT serves that region.",
     ]);
   });
 
-  it("suggests the setting a misspelt or lower-case name was meant to be", async () => {
+  it("suggests the setting a misspelt or lower-case name was meant to be, among its own service's", async () => {
     const { CLOUDROP_R2_BUCKET, CLOUDROP_SECRET, ...rest } = ENV;
-    const file = `CLOUDROP_R2_BUCKT=${CLOUDROP_R2_BUCKET}\ncloudrop_secret=${CLOUDROP_SECRET}\nCLOUDROP_UPLOADS_PATH=/api\n`;
+    const file = [
+      `CLOUDROP_R2_BUCKT=${CLOUDROP_R2_BUCKET}`,
+      `cloudrop_secret=${CLOUDROP_SECRET}`,
+      "CLOUDROP_R2_ACESS_KEY_ID=other", // a setting that is set: nothing to suggest
+      "CLOUDROP_R2_ENDPOINT=https://r2.example.com", // close to CLOUDROP_S3_ENDPOINT, which R2 does not read
+      "CLOUDROP_R2_REGION=auto",
+      "CLOUDROP_UPLOADS_PATH=/api", // the app's own: far from every setting
+    ].join("\n");
     const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env"], {
       env: rest,
       files: { ".env": file },
     });
-    expect(result.lines.slice(1, 3)).toEqual([
+    expect(result.lines.slice(1, 6)).toEqual([
       "note         CLOUDROP_R2_BUCKT is not a cloudrop setting. Did you mean CLOUDROP_R2_BUCKET?",
       "note         cloudrop_secret is not a cloudrop setting. Did you mean CLOUDROP_SECRET?",
+      "note         CLOUDROP_R2_ENDPOINT is not a cloudrop setting. R2's endpoint is built from CLOUDROP_R2_ACCOUNT_ID.",
+      "note         CLOUDROP_R2_REGION is not a cloudrop setting. R2 needs no region.",
+      "PROBLEM      CLOUDROP_R2_BUCKET is not set. Set it to the bucket's name.",
     ]);
-    expect(result.lines).toContain("PROBLEM      CLOUDROP_R2_BUCKET is not set. Set it to the bucket's name.");
   });
 
   it("says which service it checks when settings for both are set", async () => {
