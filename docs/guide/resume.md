@@ -50,7 +50,10 @@ cloudrop does not copy files (see [Not supported](#not-supported)). `resumable()
 for.
 
 `start()` and `upload()` never match a file against a record: the same file passed to them is uploaded again under a new
-key. Only `resume()` continues an upload.
+key. Only `resume()` continues an upload. The earlier upload stays as it is, with its parts in the bucket and, with a
+[database store](store.md), its bytes counted against the owner's quota, so the new one can be refused with
+`QUOTA_EXCEEDED`: before you send a file a second time, look for it in `resumable()` and call `resume()` or
+[`discard()`](#discard-one-upload) ([Sending a file again after it failed](client.md#sending-a-file-again-after-it-failed)).
 
 ### What counts as the same file
 

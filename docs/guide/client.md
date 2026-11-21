@@ -122,6 +122,31 @@ if (error) {
   otherwise `null`).
 - No `this`: `const { upload } = createCloudropClient()` works too.
 
+### Sending a file again after it failed
+
+`upload()` and `start()` never look for an earlier attempt: the same file passed again is a new upload under a new
+key. That matters for a file sent in parts whose `upload()` failed for a reason a later attempt can fix, such as the
+network: its parts and its resume record are [kept](#what-gets-cleaned-up), and with a [database store](store.md)
+its row still holds the file's bytes of the owner's quota. A second `upload()` of that file can then be refused with
+`QUOTA_EXCEEDED` until the sweep ends the first one's row. Settle the earlier attempt first:
+
+```ts
+const { data: unfinished } = await client.resumable("files");
+const earlier = unfinished?.find(
+  (kept) => kept.name === file.name && kept.size === file.size && kept.lastModified === file.lastModified,
+);
+
+if (earlier) {
+  // Continue it: only the parts the bucket lacks are sent.
+  const { data, error } = await client.resume(earlier, file).done;
+  // Or drop it, which frees its parts and its bytes of the quota, and upload the file as new:
+  // await client.discard(earlier);
+}
+```
+
+[Resume after reload](resume.md) describes both calls. With `start()`, call `retry()` on the failed file instead: it
+reuses the ticket, or gives it up before it asks for a new one ([Retry](#retry)).
+
 ## Upload several files
 
 Pass a list, such as an array or `input.files`, and `upload()` resolves to an `UploadResult` once every file has

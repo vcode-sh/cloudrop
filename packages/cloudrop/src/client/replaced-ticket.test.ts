@@ -257,3 +257,54 @@ describe("a retry after pagehide kept the failed file's ticket for a resume (M11
     });
   });
 });
+
+describe("upload() of a file whose earlier upload() failed and kept its upload for a resume (M11-R202)", () => {
+  /** Part 3 got no answer on any attempt: upload() failed, and its parts, record and pending row stay (M4-F1). */
+  async function failedOnce() {
+    let offline = true;
+    const page = ownedPage((call) => (offline && call.label === "PUT part 3" ? unreachable() : undefined));
+    const client = page.client();
+    const first = await client.upload("owned", fourParts());
+    await page.saved();
+    offline = false;
+    const [kept] = (await client.resumable("owned")).data ?? [];
+    if (!kept) throw new Error("The failed upload() left no record.");
+    return { ...page, client, first, kept, sent: page.from() };
+  }
+
+  it("is a new upload, refused while the kept one holds the owner's quota", async () => {
+    const page = await failedOnce();
+    const second = await page.client.upload("owned", fourParts());
+
+    expect({ first: page.first.error?.code, second: second.error?.code, rows: await page.rows() }).toEqual({
+      first: "NETWORK_ERROR",
+      second: "QUOTA_EXCEEDED",
+      rows: ["pending"],
+    });
+  });
+
+  it("passes once the app discarded the kept upload", async () => {
+    const page = await failedOnce();
+    const discarded = await page.client.discard(page.kept);
+    const second = await page.client.upload("owned", fourParts());
+
+    expect({ discarded: discarded.data, second: second.error?.code ?? "done", sent: page.sent() }).toEqual({
+      discarded: { aborted: true },
+      second: "done",
+      sent: ["POST /abort", "POST /upload", ...WHOLE_FILE],
+    });
+    expect(await page.rows()).toEqual(["aborted", "completed"]);
+  });
+
+  it("is not needed when the app resumes the kept upload: only the part the bucket lacks is sent", async () => {
+    const page = await failedOnce();
+    const { data } = await page.client.resume(page.kept, fourParts()).done;
+
+    expect({ outcome: codeOf(data?.files[0]), sent: page.sent(), rows: await page.rows() }).toEqual({
+      outcome: "done",
+      // Part 4 landed in the first attempt, after part 3 had failed.
+      sent: ["POST /complete", "POST /sign", "PUT part 3", "POST /complete"],
+      rows: ["completed"],
+    });
+  });
+});

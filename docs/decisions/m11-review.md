@@ -2124,3 +2124,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `src/client/job-run.ts`, `src/client/endpoints.ts`, `src/client/replaced-ticket.test.ts`,
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Cancel", "Retry"), `docs/guide/resume.md` ("The
   server is asked first").
+
+### M11-R202: a second `upload()` or `start()` of a file whose first attempt kept its upload is the app's to settle
+
+- **Decision:** `upload()` and `start()` go on knowing nothing of an earlier attempt: the same file passed again is a
+  new upload under a new key (resume spec §3.3, `M11-R90`'s table). An app that sends a file a second time settles
+  the first attempt itself: it finds it with `resumable(route)` by name, size and `lastModified`, and calls
+  `resume()`, which sends only the parts the bucket lacks, or `discard()`, which frees its parts and its bytes of the
+  quota. The client guide says so under "Upload one file" ("Sending a file again after it failed"), with the calls,
+  and the resume guide where it says that only `resume()` continues an upload. No code changed.
+- **Why:** reproduced with a store and a quota that fits the file once: a four-part `upload()` failed with
+  `NETWORK_ERROR` and kept its record (`M4-F1`); a second `upload()` of the same file was `QUOTA_EXCEEDED`, the first
+  row still `pending`; after `discard()` of the listed upload it passed, and `resume()` of it sent the one missing
+  part. The client cannot do this for the app without a cost the owner ruled out. The reservation has to be freed
+  before `/upload` is asked, and the file's fingerprint (SHA-256 of its edges, `fingerprint.ts`) is computed only
+  after a multipart ticket has arrived and its lock was taken (`persist.ts`); a plain `upload()` hashes nothing
+  before `/upload`, and does not know yet whether the file will go in parts. Matching on name, size and
+  `lastModified` alone would discard another file's upload that shares them, and a client that discarded on its own
+  would throw away parts the user may want resumed, while one that resumed on its own would send the file with the
+  record's route and metadata instead of the call's. Each of the two is a choice the page's user or its code makes.
+- **If wrong:** an app that sends a failed file again without looking in `resumable()` is refused `QUOTA_EXCEEDED`
+  for an owner without room for the file twice, until the sweep ends the first row (its token's 24 hours and the
+  grace, or sooner with `api.revokeUploads`). Without a quota the first attempt's parts stay until the bucket's
+  lifecycle rule removes them. `start()` has `retry()`, which needs none of this.
+- **Status:** in force.
+- **Visible in:** `docs/guide/client.md` ("Sending a file again after it failed"), `docs/guide/resume.md` ("The user
+  picks the file again"), `src/client/replaced-ticket.test.ts`.
