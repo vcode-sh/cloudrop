@@ -1,7 +1,7 @@
 // api.files (M8-A1, M10-D1, M10-D2): an owner's completed files, newest or oldest first, optionally filtered by route,
 // name and type, a page at a time, straight from the store's rows.
 
-import { fail, ok, type Result } from "../errors.ts";
+import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import { MAX_NAME_LENGTH } from "../protocol/types.ts";
 import type { ServerConfig } from "./config.ts";
@@ -161,6 +161,31 @@ function readOptions(config: ServerConfig, given: unknown): Result<{ query: File
   return cursor.error ? cursor : ok({ query: { owner, limit, ...filters.data, cursor: cursor.data }, mark });
 }
 
+const foldAscii = (text: string): string => text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+
+/**
+ * Whether the store answered what it was asked: the owner's completed files, inside the filters, in order. A store
+ * written for 0.3 ignores name, type and order and still compiles (M10-D1), so its unfiltered page is refused here
+ * instead of reaching an app as if it were the filtered one. Order is seen only within a page, so a page of one file
+ * cannot show it.
+ */
+function answersQuery(query: FilesQuery, records: readonly FileRecord[]): boolean {
+  const { owner, route, name, type, order } = query;
+  const folded = name === null ? null : foldAscii(name);
+  return records.every((record, index) => {
+    const previous = records[index - 1]?.createdAt.getTime();
+    const time = record.createdAt.getTime();
+    return (
+      record.owner === owner &&
+      record.status === "completed" &&
+      (route === null || record.route === route) &&
+      (folded === null || foldAscii(record.name).includes(folded)) &&
+      (type === null || (type.endsWith("/") ? record.type.startsWith(type) : record.type === type)) &&
+      (previous === undefined || (order === "newest" ? time <= previous : time >= previous))
+    );
+  });
+}
+
 export async function listFiles(
   config: ServerConfig,
   store: CloudropStore<unknown>,
@@ -173,6 +198,12 @@ export async function listFiles(
     store.list({ ...query, statuses: ["completed"] }),
   );
   if (page.error) return page;
+  if (!answersQuery(query, page.data.records)) {
+    config.logger.error(
+      `cloudrop: the store's list answered files outside the owner, route, name, type or order asked for (owner ${query.owner}). A store written by hand must apply every option list receives.`,
+    );
+    return fail(new CloudropError("SERVER_ERROR", "The store listed files that do not match this listing's options."));
+  }
   const cursor = page.data.cursor === null || mark === "" ? page.data.cursor : `${mark}.${page.data.cursor}`;
   return ok({ items: page.data.records, cursor });
 }

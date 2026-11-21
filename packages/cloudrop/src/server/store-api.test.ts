@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete, files } from "../testing/complete-fixture.ts";
+import { memoryStore } from "../testing/memory-store.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { FileApi } from "./api.ts";
@@ -255,6 +256,33 @@ describe("cloudrop.api.files", () => {
     const plain = (await api.files({ owner: "u1", limit: 1 })).data?.cursor ?? undefined;
     expect(plain).toMatch(/^\d+:/);
     expect((await api.files({ owner: "u1", type: "text/", cursor: plain })).error?.code).toBe("INVALID_INPUT");
+  });
+
+  it("refuses the unfiltered page of a store written for 0.3, which ignores name, type and order", async () => {
+    const store = memoryStore();
+    const fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...store,
+          list: ({ owner, statuses, route, limit, cursor }) =>
+            store.list({ owner, statuses, route, limit, cursor, name: null, type: null, order: "newest" }),
+        },
+      },
+    );
+    await uploadAt(fixture, "owned", 1);
+    await uploadAt(fixture, "owned", 2);
+    const { api } = fixture.cloudrop;
+    expect((await api.files({ owner: "u1" })).data?.items).toHaveLength(2);
+    expect((await api.files({ owner: "u1", name: "hello" })).data?.items).toHaveLength(2);
+    for (const options of [{ type: "image/" }, { name: "report" }, { order: "oldest" as const }]) {
+      const { data, error } = await api.files({ owner: "u1", ...options });
+      expect({ data, code: error?.code, retryable: error?.retryable }).toEqual({
+        data: null,
+        code: "SERVER_ERROR",
+        retryable: false,
+      });
+    }
   });
 
   it.for([

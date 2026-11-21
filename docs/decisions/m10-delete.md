@@ -19,8 +19,8 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   could answer different files per backend. A substring function needs no escape character, which `LIKE` on D1 and
   Postgres would each need spelled out. SQLite's `lower` folds ASCII only unless the ICU extension replaces it.
 - **If wrong:** an app that loads SQLite's ICU extension gets Unicode case folding there; the contract case "Ä" against
-  "ä" shows it. A custom `CloudropStore` written for 0.3 still compiles and ignores the new fields, answering
-  unfiltered pages, until it implements them.
+  "ä" shows it. A custom `CloudropStore` written for 0.3 still compiles and ignores the new fields; its unfiltered
+  pages are refused (`M10-D11`) until it implements them.
 - **Status:** in force.
 - **Visible in:** `src/server/owner-files.ts`, `src/server/store.ts`, `src/store/sql/reads.ts`,
   `src/testing/memory-store-reads.ts`, `src/testing/store-contract/list-filters.ts`, `docs/guide/store.md`.
@@ -157,7 +157,7 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
 - **Status:** in force.
 - **Visible in:** `examples/hono/src/uploads.ts`, `examples/hono/src/rpc/router.ts`.
 
-### M10-D10: the bundled server budget goes from 30 to 32 kB (for owner confirmation)
+### M10-D10: the bundled server budget goes from 30 to 32 kB
 
 - **Decision:** `scripts/size-limit.config.ts` raises the "cloudrop (bundled)" ceiling from 30 kB to 32 kB. Measured
   gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.76 kB (+4.1%), `cloudrop` summed 39.76 → 41.64 kB (+4.7%),
@@ -169,5 +169,19 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   their checks and messages add 1.21 kB; none of it is dead weight an app could drop, as every export ships in this
   budget. No entry grew by 5% or more.
 - **If wrong:** the owner sets another ceiling; nothing depends on this number.
-- **Status:** in force until the owner confirms or changes it.
+- **Status:** in force; the owner confirmed 32 kB on 2026-11-21, before 0.4.0.
 - **Visible in:** `scripts/size-limit.config.ts`.
+
+### M10-D11: `api.files` refuses a page the store did not filter
+
+- **Decision:** `api.files` checks the store's page against what it asked for: each file is the owner's, completed,
+  on the route, matches the name (ASCII folded) and type, and the page is in the order asked for. When one is not, it
+  answers a non-retryable `SERVER_ERROR` ("The store listed files that do not match this listing's options.") and logs
+  that a store written by hand must apply every option `list` receives.
+- **Why:** a `CloudropStore` written for 0.3 compiles against 0.4 (TypeScript accepts a parameter with fewer
+  properties) and ignores `name`, `type` and `order`, so `api.files({ type: "image/" })` would answer PDFs as if they
+  were images, silently. Found by the review before 0.4.0. The memory store's own predicate is the same rule.
+- **If wrong:** a store whose order differs from cloudrop's (another time source) would be refused; none shipped does.
+  Order is seen only within a page, so a page of one file cannot show it.
+- **Status:** in force.
+- **Visible in:** `src/server/owner-files.ts`, `src/server/store-api.test.ts`.
