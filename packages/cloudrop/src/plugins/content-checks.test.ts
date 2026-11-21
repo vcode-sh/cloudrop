@@ -133,6 +133,11 @@ describe("contentChecks: ZIP-based files", () => {
       expected: passed,
     },
     {
+      name: "a plain archive sent as a 3D model",
+      input: { accept: "*/*", file: { name: "a.3mf", type: "model/3mf" }, body: ARCHIVE },
+      expected: passed,
+    },
+    {
       name: "a plain archive sent as an image",
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: ARCHIVE },
       expected: refused(
@@ -230,6 +235,22 @@ describe("contentChecks: allow and deny", () => {
       ),
     );
   });
+});
+
+it("judges the declared type at /complete too, for a token signed before the plugin was installed", async () => {
+  const files = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone });
+  const before = serverFixture({ files });
+  const ticket = await before.single("files", { name: "a.html", type: "text/html", size: TEXT.length });
+  await before.send(ticket.put, TEXT);
+  // The same bucket and secret, now with contentChecks.
+  const after = serverFixture({ files }, { plugins: [contentChecks()] });
+  after.fake.fetch = before.fake.fetch;
+  expect((await complete(after, ticket.token)).body.error).toEqual({
+    code: "FILE_TYPE_NOT_ALLOWED",
+    message: "This file was sent as text/html, which this upload does not accept. Pick another file.",
+    retryable: false,
+  });
+  expect(before.fake.keys()).toEqual([]);
 });
 
 describe("contentChecks: reading the bucket", () => {

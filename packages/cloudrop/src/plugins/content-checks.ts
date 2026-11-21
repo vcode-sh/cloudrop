@@ -39,12 +39,16 @@ const REFUSED: ReadonlySet<string> = new Set([
   "application/x-sharedlib",
   "application/x-mach-binary",
   "application/x-mach-o-executable",
-  // Scripts: every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, and shell scripts.
+  // Windows installers and HTML applications, which a browser hands to the system to run.
+  "application/x-msi",
+  "application/x-ms-installer",
+  "application/hta",
+  // Scripts: every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, shell scripts and VBScript.
   ..."application/ecmascript application/javascript application/x-ecmascript application/x-javascript".split(" "),
   ..."text/ecmascript text/javascript text/jscript text/livescript text/x-ecmascript text/x-javascript".split(" "),
   ..."text/javascript1.0 text/javascript1.1 text/javascript1.2 text/javascript1.3 text/javascript1.4".split(" "),
   "text/javascript1.5",
-  ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh".split(" "),
+  ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh text/vbscript".split(" "),
 ]);
 
 /** XML types (RFC 7303 §3, every "+xml" type, and text/xsl): a browser renders them, SVG with its scripts. */
@@ -89,6 +93,8 @@ const notAccepted = (what: string) =>
 
 /** The refusal of a file sent as `declared` whose first bytes show `sniffed`, or undefined when it may be kept. */
 function checkContent(declared: string, sniffed: Sniffed | null, accept: readonly string[], lists: Lists) {
+  // /upload refused these already; a token signed before the plugin or its lists changed was not judged there.
+  if (isRefused(declared, declared, accept, lists)) return notAccepted(`This file was sent as ${declared}`);
   if (!sniffed) return undefined;
   if (isRefused(sniffed.type, declared, accept, lists)) return notAccepted(`This file is ${sniffed.name}`);
   // A browser that could not type the file sent it as application/octet-stream: nothing to contradict, so the content's

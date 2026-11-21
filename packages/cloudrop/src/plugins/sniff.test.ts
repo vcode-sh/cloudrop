@@ -139,11 +139,9 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "UTF-16LE with a BOM", input: "\xff\xfe<\0h\0t\0m\0l\0>\0", type: "text/html" },
     { name: "UTF-16BE with a BOM", input: "\xfe\xff\0<\0s\0c\0r\0i\0p\0t\0>", type: "text/html" },
     { name: "XHTML", input: '<?xml version="1.0"?>\n<html xmlns="http://www.w3.org/1999/xhtml">', type: "text/html" },
-    {
-      name: "a script root after an XML declaration",
-      input: "<?xml version='1.0'?><script>alert(1)</script>",
-      type: "text/html",
-    },
+    { name: "an XHTML root after an XML declaration", input: "<?xml version='1.0'?><html>", type: "text/html" },
+    // In a declared XML document, a root named like an HTML tag is the app's own element.
+    { name: "an XML table", input: "<?xml version='1.0'?><table><row/></table>", type: "application/xml" },
     { name: "a script after a comment with no space", input: "<!--x--><script>alert(1)</script>", type: "text/html" },
     {
       // Namespaces are not read: a character reference can spell one, so any XML a route names may carry scripts.
@@ -180,6 +178,7 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "a tag after other text", input: "Notes: <script>alert(1)</script>" },
     { name: "markup in a CSV", input: "id,body\n1,<b>hi</b>\n" },
     { name: "XML without a declaration", input: "<note>hi</note>" },
+    { name: "a prefixed root named like an HTML tag", input: '<x:p xmlns:x="urn:a"/>' },
   ])("detects nothing in $name", ({ input }) => {
     expect(sniff(bytes(input))).toBeNull();
   });

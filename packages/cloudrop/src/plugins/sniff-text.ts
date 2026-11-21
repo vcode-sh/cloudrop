@@ -14,14 +14,17 @@ const SCRIPT = kind("text/x-shellscript", "a script", "application/x-sh", "appli
  * end in a space or ">". A "/" and any other whitespace end them here too: a browser's parser reads those the same.
  */
 const HTML_START = /^<(?:!doctype html|html|head|script|iframe|h1|div|font|table|a|style|title|b|body|br|p|!--)[\s/>]/i;
-/** The same tags as a root element after a prolog, where a browser that renders the document as HTML finds them. */
+/**
+ * The same tags as the unprefixed root element of a document without an XML declaration, after comments or a doctype:
+ * a browser that renders it as HTML finds them there. In a declared XML document they are the app's own elements.
+ */
 const HTML_ROOTS: ReadonlySet<string> = new Set(
   "html head script iframe h1 div font table a style title b body br p".split(" "),
 );
 /** What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype. */
 const PROLOG_ITEM = /\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
-/** An element's start tag, with or without a namespace prefix: the local name is captured. */
-const START_TAG = /<(?:[\w.-]+:)?([A-Za-z_][\w.-]*)/y;
+/** An element's start tag: its name, with its namespace prefix when it has one, is captured. */
+const START_TAG = /<((?:[\w.-]+:)?[A-Za-z_][\w.-]*)/y;
 
 /** UTF-16 code units from `start`, as WHATWG Encoding's BOM sniff selects them; enough to compare ASCII. */
 function utf16(bytes: Uint8Array, start: number, littleEndian: boolean): string {
@@ -40,7 +43,7 @@ function decode(bytes: Uint8Array): string {
   return String.fromCharCode(...bytes.subarray(startsWith(bytes, [0xef, 0xbb, 0xbf]) ? 3 : 0));
 }
 
-/** The local name of the document's root element in lower case, or null when the prolog runs past what was read. */
+/** The name of the document's root element in lower case, or null when the prolog runs past what was read. */
 function rootElement(text: string): string | null {
   let at = 0;
   for (;;) {
@@ -62,9 +65,10 @@ export function sniffText(bytes: Uint8Array): Sniffed | null {
   const text = decode(bytes).trimStart();
   if (!text.startsWith("<")) return null;
   // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
-  const root = rootElement(text);
-  if (root === "svg") return SVG;
-  if ((root !== null && HTML_ROOTS.has(root)) || HTML_START.test(text)) return HTML;
+  const root = rootElement(text) ?? "";
+  if (root.split(":").at(-1) === "svg") return SVG;
   // WHATWG MIME Sniffing §7.1: "<?xml" is XML.
-  return text.startsWith("<?xml") ? XML : null;
+  const xml = text.startsWith("<?xml");
+  if (root === "html" || (!xml && HTML_ROOTS.has(root)) || HTML_START.test(text)) return HTML;
+  return xml ? XML : null;
 }
