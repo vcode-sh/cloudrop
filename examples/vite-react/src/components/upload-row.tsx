@@ -1,4 +1,4 @@
-import { IconFile, IconPhoto, IconRefresh, IconX } from "@tabler/icons-react";
+import { IconFile, IconPhoto, IconRefresh, IconReload, IconX } from "@tabler/icons-react";
 import type { FileStatus, JobSnapshot } from "cloudrop/client";
 import type { UploadItem } from "cloudrop/react";
 import {
@@ -80,7 +80,13 @@ export function UploadRow({ file }: { file: UploadItem<unknown> }) {
             <IconX />
           </AttachmentAction>
         )}
-        {file.status === "failed" && (
+        {/* Another account signed in in another tab: a retry would be refused again, a reload shows who is signed in. */}
+        {file.status === "failed" && file.error?.code === "ACCOUNT_CHANGED" && (
+          <AttachmentAction aria-label="Reload the page" onClick={() => location.reload()}>
+            <IconReload />
+          </AttachmentAction>
+        )}
+        {file.status === "failed" && file.error?.code !== "ACCOUNT_CHANGED" && (
           <AttachmentAction aria-label={`Retry ${file.name}`} onClick={() => void file.retry()}>
             <IconRefresh />
           </AttachmentAction>

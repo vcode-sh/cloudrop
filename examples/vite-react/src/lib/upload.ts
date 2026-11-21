@@ -8,8 +8,14 @@ import { API_ORIGIN } from "./api";
 /** One user's upload client, which sign-out forgets (src/components/auth-panel.tsx), and the hooks over it. */
 function createUploads(userId: string) {
   // The namespace keeps each user's unfinished uploads apart on a shared browser: the next user to sign in never lists
-  // or resumes them, even when the last one closed the tab without signing out (docs/guide/resume.md).
-  const client = createCloudropClient<Server>({ basePath: `${API_ORIGIN}/api/cloudrop`, namespace: userId });
+  // or resumes them, even when the last one closed the tab without signing out (docs/guide/resume.md). The account is
+  // what the API's routes return as owner, so the API refuses an /upload this page sends after another tab signed in
+  // as someone else, which would otherwise make the file theirs (docs/guide/client.md).
+  const client = createCloudropClient<Server>({
+    basePath: `${API_ORIGIN}/api/cloudrop`,
+    namespace: userId,
+    account: userId,
+  });
   return { client, ...createUploadHooks<Server>({ client }) };
 }
 

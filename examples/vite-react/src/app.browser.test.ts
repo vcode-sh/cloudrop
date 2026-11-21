@@ -308,3 +308,32 @@ test("Sign out during a multipart upload ends its row as aborted", async ({ page
   // Forgetting alone would leave the row pending, holding its bytes against the quota until a sweep.
   await expect.poll(() => storedStatuses(email)).toEqual({ "left.bin": "aborted" });
 });
+
+test("after a sign-in as someone else in another tab, this page's upload is refused with ACCOUNT_CHANGED and stored for nobody", async ({
+  page,
+}) => {
+  const puts = recordBucketPuts(page);
+  const first = await signUp(page);
+  // Another tab signs up: the browser's cookie now names the second user, and this page's session hook has not seen it.
+  const second = `user-${crypto.randomUUID()}@example.com`;
+  const signedUp = await page.request.post(`${API}/api/auth/sign-up/email`, {
+    headers: { origin: WEB_ORIGIN },
+    data: { email: second, password: "correct horse battery", name: "second" },
+  });
+  expect(signedUp.status()).toBe(200);
+
+  await page
+    .getByLabel("Choose attachments")
+    .setInputFiles({ name: "mine.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+
+  await expect(rowStatus(page, "mine.txt")).toHaveText(
+    "ACCOUNT_CHANGED: The account signed in on this site changed since this page was loaded, so the upload was not started. Reload the page, then upload the file again.",
+  );
+  expect({ puts, first: await storedStatuses(first), second: await storedStatuses(second) }).toEqual({
+    puts: [],
+    first: {},
+    second: {},
+  });
+  await page.getByRole("button", { name: "Reload the page" }).click();
+  await expect(page.getByText(`Signed in as ${second}`)).toBeVisible();
+});
