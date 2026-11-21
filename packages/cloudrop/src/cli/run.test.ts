@@ -58,16 +58,6 @@ describe("cloudrop usage", () => {
     expect([result.code, result.stderr]).toEqual([2, "Cannot read missing.env (ENOENT). Check the path.\n"]);
   });
 
-  it("reports an env file's open quote by line number, with exit code 2", async () => {
-    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", ".env"], {
-      files: { ".env": 'CLOUDROP_R2_BUCKET=a\nCLOUDROP_SECRET="unfinished-secret-value' },
-    });
-    expect([result.code, result.stderr]).toEqual([
-      2,
-      "Line 2 of .env opens a quote it does not close. Close it; a value spans one line.\n",
-    ]);
-  });
-
   it("accepts --name=value", async () => {
     const result = await run(["setup", `--origin=${ORIGIN}`, "--env-file=.env", "--jurisdiction=eu"], {
       files: { ".env": "" },

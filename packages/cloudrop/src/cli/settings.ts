@@ -26,7 +26,7 @@ const WHAT_TO_SET: Record<string, string> = {
   CLOUDROP_S3_SECRET_ACCESS_KEY: "the secret access key of the service's credentials",
 };
 
-/** The file's values, or what is wrong with it, by its path, an error code and a line number only. */
+/** The file's values, or why it cannot be read, by its path and an error code only. */
 function readEnvFile(
   path: string,
   readFile: (path: string) => string,
@@ -39,10 +39,7 @@ function readEnvFile(
     const code = (error as { code?: unknown } | null)?.code;
     return { error: `Cannot read ${path} (${typeof code === "string" ? code : "unknown error"}). Check the path.` };
   }
-  const { values, unclosed } = parseEnvFile(text);
-  const [line] = unclosed;
-  if (line === undefined) return { values };
-  return { error: `Line ${line} of ${path} opens a quote it does not close. Close it; a value spans one line.` };
+  return { values: parseEnvFile(text) };
 }
 
 /**

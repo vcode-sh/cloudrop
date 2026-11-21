@@ -94,7 +94,7 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
       },
     },
   });
-  const fromFiles = Object.values(files).flatMap((text) => Object.values(parseEnvFile(text).values));
+  const fromFiles = Object.values(files).flatMap((text) => Object.values(parseEnvFile(text)));
   const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
     (value): value is string => typeof value === "string" && value.length >= 8,
   );

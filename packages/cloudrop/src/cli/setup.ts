@@ -16,7 +16,7 @@ interface Step {
   ruleId: string;
   /** What cloudrop's rule does, for the output. */
   describe: string;
-  change: "add" | "update" | "none";
+  change: Merged<unknown>["change"];
   kept: { id?: string }[];
   /** True when the current rules could not be read and --replace allowed writing cloudrop's alone. */
   replacing: boolean;
@@ -55,7 +55,6 @@ function plan<Rule extends { id?: string }>(setting: Setting<Rule>, replace: boo
   }
   const merged: Merged<Rule> = read.error ? { rules: [ours], change: "add", kept: [] } : setting.merge(read.data, ours);
   const { change, kept, reason, added } = merged;
-  if (change === "blocked") return { status: "problem", text: `${label}: ${reason}` };
   return {
     label,
     ruleId: ours.id,
@@ -84,6 +83,8 @@ function describeChange(step: Step, dryRun: boolean): string {
 }
 
 async function carryOut(step: Step, dryRun: boolean): Promise<Finding> {
+  // An edited rule of cloudrop's stops only its own setting: the other is still written.
+  if (step.change === "blocked") return { status: "problem", text: `${step.label}: ${step.reason}` };
   if (step.change === "none") {
     return { status: "ok", text: `${step.label}: ${step.reason}; nothing to change.` };
   }

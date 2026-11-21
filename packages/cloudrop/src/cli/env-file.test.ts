@@ -21,24 +21,28 @@ describe("parseEnvFile", () => {
       "not a line",
     ].join("\r\n");
     expect(parseEnvFile(text)).toEqual({
-      values: {
-        PLAIN: "abc",
-        EXPORTED: "def",
-        SPACED: "ghi",
-        HASHED: "abc",
-        COMMENTED: "abc",
-        DOUBLE: "a b # not a comment",
-        SINGLE: "a\\nb",
-        BACKTICK: "x'y\"z",
-        NEWLINE: "one\ntwo",
-        EMPTY: "",
-        DUPLICATE: "second",
-      },
-      unclosed: [],
+      PLAIN: "abc",
+      EXPORTED: "def",
+      SPACED: "ghi",
+      HASHED: "abc",
+      COMMENTED: "abc",
+      DOUBLE: "a b # not a comment",
+      SINGLE: "a\\nb",
+      BACKTICK: "x'y\"z",
+      NEWLINE: "one\ntwo",
+      EMPTY: "",
+      DUPLICATE: "second",
     });
   });
 
-  it("reports a quote left open by its line number and keeps no value for it", () => {
-    expect(parseEnvFile('A=1\nKEY="never closed\nB=2')).toEqual({ values: { A: "1", B: "2" }, unclosed: [2] });
+  it("reads a quoted value over several lines, and keeps a quote never closed as written, as Node does", () => {
+    // Measured with node --env-file on Node 24.22: a PEM key in quotes spans lines; an open quote stays in the value.
+    const text = 'KEY="-----BEGIN KEY-----\nabc\n-----END KEY-----"\nAFTER=1\nOPEN="never\nLAST=2';
+    expect(parseEnvFile(text)).toEqual({
+      KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----",
+      AFTER: "1",
+      OPEN: '"never',
+      LAST: "2",
+    });
   });
 });

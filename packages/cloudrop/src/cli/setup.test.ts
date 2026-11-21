@@ -136,13 +136,14 @@ describe("cloudrop setup --apply", () => {
     ]);
   });
 
-  it("will not touch its own lifecycle rule once someone disabled it, and writes nothing", async () => {
+  it("will not touch its own lifecycle rule once someone disabled it, and still writes CORS", async () => {
     const disabled =
       "<LifecycleConfiguration><Rule><ID>cloudrop-abort-incomplete</ID><Filter><Prefix></Prefix></Filter><Status>Disabled</Status><AbortIncompleteMultipartUpload><DaysAfterInitiation>1</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>";
     const storage = bucket({ cors: FOREIGN.cors, lifecycle: disabled });
     const result = await run(apply(), { fetch: storage.fetch });
-    expect([result.code, storage.writes]).toEqual([1, []]);
-    expect(result.lines[1]).toBe(
+    expect([result.code, storage.writes]).toEqual([1, ["PUT ?cors="]]);
+    expect(result.lines.at(-1)).toBe("Some rules were not written; see above.");
+    expect(result.lines[2]).toBe(
       'PROBLEM      Lifecycle: rule "cloudrop-abort-incomplete" exists but does not abort incomplete multipart uploads across the whole bucket, so someone changed it (disabled it, or gave it a prefix). setup does not change an edited rule: fix or delete it by hand, then run setup again.',
     );
   });
