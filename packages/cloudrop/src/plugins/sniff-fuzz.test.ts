@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { CloudropError, ok } from "../errors.ts";
 import type { AfterVerifyContext } from "../server/plugins.ts";
-import { bytes, HTML, JPEG, PNG, PROGRAM, SVG, zipEntry } from "../testing/file-samples.ts";
+import { bytes, HTML, JPEG, PNG, PROGRAM, SVG, zip64Entry, zipEntry } from "../testing/file-samples.ts";
 import { contentChecks } from "./content-checks.ts";
 import { sniff } from "./sniff.ts";
 
@@ -34,6 +34,9 @@ const PREFIXES = [
   bytes("PK", [3, 4]),
   bytes("PK", [3, 4, 20, 0, 8, 0, 8, 0], new Array(18).fill(0), [5, 0, 0, 0], "word/"),
   bytes("PK", [3, 4, 20, 0, 0, 0, 0, 0], new Array(10).fill(0xff), [0xff, 0xff, 0xff, 0xff, 8, 0, 0xff, 0xff]),
+  // Sizes in a ZIP64 extra field, whose own length and the lengths of the fields before it are the file's to say.
+  zip64Entry("a", bytes()),
+  zip64Entry("a", bytes(), { before: [0x55, 0x54] }),
   zipEntry("mimetype", "application/vnd.oasis.opendocument."),
   bytes("PK", [5, 6]),
   bytes("PK", [7, 8]),

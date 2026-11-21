@@ -1,6 +1,6 @@
 import { deflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { bytes, streamedZipEntry, zipEntry } from "../testing/file-samples.ts";
+import { bytes, streamedZipEntry, zip64Entry, zipEntry } from "../testing/file-samples.ts";
 import { sniff } from "./sniff.ts";
 
 const WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -151,5 +151,59 @@ describe("sniff: Office files whose data descriptors hold 8-byte sizes (M11-R212
   ])("reads an 8-byte descriptor whose size $name as a ZIP archive", ({ first }) => {
     const input = bytes(first, streamedZipEntry("word/document.xml", BODY, { zip64: "poi" }));
     expect(typeOf(input)).toBe("application/zip");
+  });
+});
+
+// APPNOTE §4.5.3: a writer that can seek back and writes ZIP64 format for every entry leaves FF FF FF FF in the local
+// file header's sizes and puts them in the ZIP64 extra field, with no data descriptor to find the next entry by.
+describe("sniff: Office files whose sizes are in the ZIP64 extra field (M11-R221)", () => {
+  // An extended timestamp (header ID 5455, Info-ZIP's extrafld.txt), which writers put ahead of other fields.
+  const timestamp = [0x55, 0x54, 5, 0, 1, 0, 0, 0, 0];
+  it.for([
+    {
+      name: "as Python's zipfile writes it with force_zip64",
+      input: bytes(
+        zip64Entry("[Content_Types].xml", TYPES),
+        zip64Entry("_rels/.rels", RELS),
+        zip64Entry("word/document.xml", BODY),
+      ),
+      type: WORD,
+    },
+    {
+      name: "behind another extra field",
+      input: bytes(zip64Entry("docProps/app.xml", PROPS, { before: timestamp }), zip64Entry("xl/workbook.xml", BODY)),
+      type: EXCEL,
+    },
+    {
+      name: "after a streamed entry and one with its sizes in the header",
+      input: bytes(
+        streamedZipEntry("[Content_Types].xml", TYPES),
+        zipEntry("a.txt", "a"),
+        zip64Entry("_rels/.rels", RELS),
+        zip64Entry("ppt/presentation.xml", BODY),
+      ),
+      type: POWERPOINT,
+    },
+  ])("finds the Office folder $name", ({ input, type }) => {
+    expect(typeOf(input)).toBe(type);
+  });
+
+  it.for([
+    {
+      // The entry is 4 GiB and 12 bytes long: the next one is not where the size's lower half points.
+      name: "a size beyond 4 GiB",
+      first: zip64Entry("a.bin", RELS, { compressed: [RELS.length, 0, 0, 0, 1, 0, 0, 0] }),
+    },
+    {
+      name: "a size that is not the entry's",
+      first: zip64Entry("a.bin", RELS, { compressed: [7, 0, 0, 0, 0, 0, 0, 0] }),
+    },
+    {
+      // FF FF FF FF with no ZIP64 field says nothing about where the entry ends.
+      name: "no ZIP64 field",
+      first: bytes(zip64Entry("a.bin", RELS).subarray(0, 28), [0, 0], "a.bin", RELS),
+    },
+  ])("reads an entry with $name as the end of the walk: a ZIP archive", ({ first }) => {
+    expect(typeOf(bytes(first, zip64Entry("word/document.xml", BODY)))).toBe("application/zip");
   });
 });

@@ -2355,7 +2355,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `FF FF FF FF` in the header, no bit 3 and its real sizes in the ZIP64 extra field (Commons Compress with
   `Zip64Mode.Always` on a file), still ends the walk, and such a file reads as a plain ZIP: reading that field did not
   fit in the entry's 6 kB (5.96 kB with this change, 5.89 kB before).
-- **Status:** in force. Amends `M11-R132` ("ZIP64 descriptors (8-byte sizes) are not read").
+- **Status:** in force. Amends `M11-R132` ("ZIP64 descriptors (8-byte sizes) are not read"). Amended by `M11-R221`:
+  the ZIP64 extra field of an entry from a writer that can seek back is read.
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff-zip.test.ts`, `src/testing/file-samples.ts`,
   `docs/guide/plugins.md`.
 
@@ -2459,3 +2460,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   2,000 doctypes from the grammar's productions and finds the root after each.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `src/plugins/sniff-fuzz.test.ts`,
   `src/plugins/content-checks.test.ts`, `scripts/size-limit.config.ts`, `docs/guide/plugins.md`.
+
+### M11-R221: the ZIP walk reads an entry's size from its ZIP64 extra field
+
+- **Decision:** when a local file header gives `FF FF FF FF` as its compressed size, `zipEntries`
+  (`src/plugins/sniff-containers.ts`) walks the header's extra fields and takes the size from the ZIP64 extended
+  information extra field, header ID `0001`: 8 bytes, behind the 8 of the uncompressed size (PKWARE APPNOTE 6.3.10
+  §4.5.3, which says the field in a local header "MUST include BOTH original and compressed file size fields"). Both
+  halves count, so an entry of 4 GiB or more ends the walk as before; so does `FF FF FF FF` with no such field. An
+  entry with bit 3 is still followed by its data descriptor (`M11-R132`, `M11-R212`).
+- **Why:** `M11-R212` left this case open for want of room in the entry's 6 kB, and `M11-R220` raised that ceiling.
+  Reproduced with the bytes Python 3.14's `zipfile` writes for `ZipFile.open(name, "w", force_zip64=True)` on a file
+  (measured 2026-11-21: version 4.5, no bit 3, both sizes `FF FF FF FF`, an extra field `01 00 10 00` with the two
+  sizes) and that `M11-R212` reads from Apache Commons Compress's source for `Zip64Mode.Always` on a file: the walk
+  stopped at the first entry, so a Word file written that way read as a plain ZIP: sent as its Office type it passed
+  only by `M11-R133`'s rule for a ZIP that names no package, and `detected` never named it as the Word file it is.
+- **If wrong:** a field shorter than its 16 bytes, or lengths that lead the walk of the fields astray, give a size
+  the file did not mean; the next entry is then looked for in the wrong place, and the worst outcome is still a ZIP
+  read as an Office file or the other way round, as in `M11-R132`. `cloudrop/plugins` measures 6.27 kB with this
+  change, 6.16 kB before, under the ceiling `M11-R220` set provisionally.
+- **Status:** in force. Amends `M11-R212` ("A ZIP64 entry from a writer that can seek back ... still ends the walk").
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff-zip.test.ts`, `src/plugins/sniff-fuzz.test.ts`,
+  `src/testing/file-samples.ts`, `scripts/size-limit.config.ts`, `docs/guide/plugins.md`.

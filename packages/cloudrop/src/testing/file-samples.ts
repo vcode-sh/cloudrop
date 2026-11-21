@@ -70,3 +70,22 @@ export function streamedZipEntry(
   ];
   return bytes(header, [0, 0, 0, 0], sizes, [name.length, 0, extra.length, 0], name, extra, deflated, descriptor);
 }
+
+/**
+ * A deflated ZIP entry as a writer that can seek back writes it in ZIP64 format: no bit 3, both sizes FF FF FF FF in
+ * the local file header, and the real ones in 8 bytes each, the uncompressed first, in a ZIP64 extended information
+ * extra field, header ID 0001 (PKWARE APPNOTE §4.5.3). These are the bytes Python 3.14's zipfile writes for
+ * `ZipFile.open(name, "w", force_zip64=True)` (measured 2026-11-21). `before` are extra fields that come ahead of that
+ * one, and `compressed` the size it gives.
+ */
+export function zip64Entry(
+  name: string,
+  deflated: Uint8Array,
+  options: { before?: number[]; compressed?: number[] } = {},
+): Uint8Array<ArrayBuffer> {
+  const { before = [], compressed = [...u32le(deflated.length), 0, 0, 0, 0] } = options;
+  // An uncompressed size the walk has no use for, then the compressed one.
+  const extra = [...before, 1, 0, 16, 0, 0x18, 0, 0, 0, 0, 0, 0, 0, ...compressed];
+  const header = [0x50, 0x4b, 3, 4, 45, 0, 0, 0, 8, 0, 0, 0, 0x21, 0, 0xde, 0xad, 0xbe, 0xef];
+  return bytes(header, new Array(8).fill(0xff), [name.length, 0, extra.length, 0], name, extra, deflated);
+}

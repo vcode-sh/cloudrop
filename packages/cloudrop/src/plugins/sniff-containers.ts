@@ -139,13 +139,28 @@ function afterStreamed(bytes: Uint8Array, data: number): number {
   return bytes.length;
 }
 
+/**
+ * The compressed size of an entry whose local file header gives `size` and whose extra fields lie from `extra` to
+ * `data`. FF FF FF FF sends a reader to the ZIP64 extended information extra field, header ID 0001, which holds the
+ * uncompressed size and then the compressed one in 8 bytes each (APPNOTE §4.5.3): a writer that can seek back and
+ * writes ZIP64 format for every entry, as Python's zipfile does with force_zip64, has the sizes nowhere else
+ * (M11-R221). Without that field the size stays what it was, past any bytes read.
+ */
+function compressedSize(bytes: Uint8Array, size: number, extra: number, data: number): number {
+  if (size !== 0xffffffff) return size;
+  for (let field = extra; field + 4 <= data; field += 4 + uint16LE(bytes, field + 2)) {
+    if (uint16LE(bytes, field) === 1) return uint32LE(bytes, field + 12) + uint32LE(bytes, field + 16) * 2 ** 32;
+  }
+  return size;
+}
+
 /** The entries whose local file headers (APPNOTE §4.3.7) lie in `bytes`. */
 function* zipEntries(bytes: Uint8Array): Generator<{ name: string; stored: string }> {
   let at = 0;
   while (startsWith(bytes, LOCAL_FILE, at) && at + 30 <= bytes.length) {
-    const size = uint32LE(bytes, at + 18);
     const nameEnd = at + 30 + uint16LE(bytes, at + 26);
     const data = nameEnd + uint16LE(bytes, at + 28);
+    const size = compressedSize(bytes, uint32LE(bytes, at + 18), nameEnd, data);
     yield { name: latin1(bytes, at + 30, nameEnd), stored: latin1(bytes, data, data + size) };
     at = uint16LE(bytes, at + 6) & 0x08 ? afterStreamed(bytes, data) : data + size;
   }
