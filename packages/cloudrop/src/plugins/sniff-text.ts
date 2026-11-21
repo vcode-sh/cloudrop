@@ -11,7 +11,7 @@ const XML = kind("application/xml", "an XML document", "text/xml", "*+xml");
  * A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type, and with
  * the types freedesktop.org's shared-mime-info gives shell, Perl, Ruby and PHP scripts.
  */
-const SCRIPT = kind(
+export const SCRIPT: Sniffed = kind(
   "text/x-shellscript",
   "a script",
   ..."text/x-sh text/* application/x-sh application/x-shellscript".split(" "),

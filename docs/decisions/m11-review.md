@@ -1131,3 +1131,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   its own types is never refused on it.
 - **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/bytes.ts`, `src/plugins/sniff-containers.ts`,
   `src/plugins/sniff.ts`, `src/plugins/content-checks-containers.test.ts`, `docs/guide/plugins.md#containers`.
+
+### M11-R134: `allow` lets a kind through by any of its names, at both hooks
+
+- **Decision:** the refused kinds that go by several names are groups: web page (`text/html`,
+  `application/xhtml+xml`), Windows or DOS program (five names), Linux program (three), macOS program (two), `#!`
+  script (the four shell types and `application/x-perl`, `application/x-ruby`, `application/x-php`), JavaScript
+  (WHATWG's sixteen), Windows installer (two), the unknown types (two). The groups of detected kinds are the
+  sniffer's own `agrees` lists, so the two cannot drift apart. A type is let through when `allow` matches the type or
+  any name of its group. At `/complete`, content is let through when `allow` matches any type that content can be
+  here: its group, and the type it was sent as when the content agrees with that type. `deny` still wins, the route's
+  `accept` still applies, and content sent as a type it does not agree with is still a `mismatch`. What is refused by
+  default does not change: `application/x-perl`, `-ruby` and `-php` are names a script is allowed by, not types
+  refused at `/upload`.
+- **Why:** `allow` was matched against one type at a time, the declared one at `/upload` and the sniffer's at
+  `/complete`, so it had to name both (review finding G5, each reproduced). With `allow: ["text/x-shellscript"]`, a
+  script sent as `application/x-sh` or `text/x-sh` was refused at `/upload`, though the guide said it passes; with
+  `allow: ["application/x-msdownload"]` a program passed `/upload` and was refused at `/complete` as
+  `application/vnd.microsoft.portable-executable`; `allow: ["application/xhtml+xml"]` refused real XHTML as
+  `text/html`; `allow: ["application/rss+xml"]` refused a feed as `application/xml` on a route that did not name it.
+  An operator knows the type their users' browsers send, not the sniffer's name for it.
+- **If wrong:** allowing one name allows its whole group: `allow: ["application/xhtml+xml"]` also lets `text/html`
+  through a route that accepts it, and `allow: ["application/x-perl"]` every `#!` script. Each group is one risk
+  (a page that runs script, a program for one system), so there is nothing to tell apart; an app that must can leave
+  the other names out of the route's `accept`, or `deny` them.
+- **Status:** in force; `src/plugins/content-checks-allow.test.ts` allows each kind by each of its names and sends it
+  as every one, at `/upload` for the eight groups and at `/complete` for the six kinds the bytes show.
+- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`,
+  `docs/guide/plugins.md#options`.

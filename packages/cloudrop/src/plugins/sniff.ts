@@ -9,15 +9,19 @@ export type { Sniffed } from "./bytes.ts";
 
 const ANY4 = [null, null, null, null];
 const GIF = kind("image/gif", "a GIF image");
-const PROGRAM = [
-  "application/x-msdownload",
-  "application/x-msdos-program",
-  "application/x-dosexec",
+export const WINDOWS: Sniffed = kind(
+  "application/vnd.microsoft.portable-executable",
+  "a program",
+  ..."application/x-msdownload application/x-msdos-program application/x-dosexec".split(" "),
   "application/x-ms-dos-executable",
-];
-const WINDOWS = kind("application/vnd.microsoft.portable-executable", "a program", ...PROGRAM);
-const LINUX = kind("application/x-executable", "a program", "application/x-elf", "application/x-sharedlib");
-const MAC = kind("application/x-mach-binary", "a program", "application/x-mach-o-executable");
+);
+export const LINUX: Sniffed = kind(
+  "application/x-executable",
+  "a program",
+  "application/x-elf",
+  "application/x-sharedlib",
+);
+export const MAC: Sniffed = kind("application/x-mach-binary", "a program", "application/x-mach-o-executable");
 
 const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   // PNG: W3C PNG Specification (Third Edition) §5.2, PNG signature; WHATWG MIME Sniffing §6.1. An animated PNG has the

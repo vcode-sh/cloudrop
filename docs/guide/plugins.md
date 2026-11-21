@@ -34,7 +34,7 @@ At `/upload`, before anything is signed, a request with a file **sent as** one o
    `text/jscript` and the rest), the shell script types and `text/vbscript`, and Windows installers
    (`application/x-msi`) and HTML applications (`application/hta`). Also `unknown/unknown` and `application/unknown`, which a
    browser sniffs and may render as a page, and `multipart/x-mixed-replace`, whose parts a browser renders each by its
-   own type, an HTML part as a page. `allow` lets a type through.
+   own type, an HTML part as a page. `allow` lets a kind through, by any of its names.
 2. **An XML type the route does not name.** A browser renders XML, and runs the scripts an SVG or an XHTML element in
    it carries. `text/xml`, `application/xml`, `text/xsl` and every `+xml` type, `image/svg+xml` among them, pass only
    when the route's `accept` lists that exact type, such as `accept: ["image/png", "image/svg+xml"]`; `image/*` and
@@ -111,11 +111,31 @@ a store, the sweep removes it. A browser shows such an object as that type.
 
 | Option | What it does | Default |
 | --- | --- | --- |
-| `allow` | Types let through rules 1 to 3, such as `["text/html"]` on a route that takes web pages on purpose. The route's `accept` and rules 4 and 5 still apply. | `[]` |
+| `allow` | Types let through rules 1 to 3, such as `["text/html"]` on a route that takes web pages on purpose. One name allows the kind under all its names (below). The route's `accept` and rules 4 and 5 still apply. | `[]` |
 | `deny` | Types refused on every route: a file sent as one, at `/upload`, and a file whose first bytes show one, at `/complete`. Such as `["application/zip"]` or `["video/*"]`. Wins over `allow`. For audio and video containers and for ZIP, see [below](#containers). | `[]` |
 
 Both take exact types or a top-level wildcard such as `"image/*"`, in lower case. Anything else throws
 `INVALID_CONFIG` when `contentChecks()` is called.
+
+A browser picks the name a file is sent under, and the check has one of its own for what the bytes show, so `allow`
+goes by kind. Naming one type of a kind allows the kind under each of its names, at `/upload` and at `/complete`:
+
+| Kind | Names |
+| --- | --- |
+| Web page | `text/html`, `application/xhtml+xml` |
+| Windows or DOS program | `application/vnd.microsoft.portable-executable`, `application/x-msdownload`, `application/x-msdos-program`, `application/x-dosexec`, `application/x-ms-dos-executable` |
+| Linux program | `application/x-executable`, `application/x-elf`, `application/x-sharedlib` |
+| macOS program | `application/x-mach-binary`, `application/x-mach-o-executable` |
+| Script with a `#!` line | `text/x-shellscript`, `text/x-sh`, `application/x-sh`, `application/x-shellscript`, `application/x-perl`, `application/x-ruby`, `application/x-php` |
+| JavaScript | every JavaScript type |
+| Windows installer | `application/x-msi`, `application/x-ms-installer` |
+| Unknown type | `unknown/unknown`, `application/unknown` |
+
+So `allow: ["application/x-msdownload"]` takes a Windows program sent under any of the five names, and
+`allow: ["application/xhtml+xml"]` an XHTML document, which the bytes show as a web page. An allowed type also covers
+content that agrees with it: with `allow: ["application/rss+xml"]`, a feed sent as that type passes although its bytes
+show plain XML, and with `allow: ["text/x-python"]`, a Python script with a `#!` line sent as that type. Allowing a
+kind never allows a mismatch: an allowed program sent as `image/png` is still refused by rule 4.
 
 ```ts
 // A site builder that takes HTML pages, but never plain ZIP archives.

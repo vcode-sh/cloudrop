@@ -12,7 +12,8 @@ import {
   type StorageDriver,
 } from "../index.ts";
 import { acceptsType, isAcceptEntry } from "../server/accept-entry.ts";
-import { type Sniffed, sniff } from "./sniff.ts";
+import { LINUX, MAC, type Sniffed, sniff, WINDOWS } from "./sniff.ts";
+import { HTML, SCRIPT } from "./sniff-text.ts";
 
 export interface ContentCheckOptions {
   /**
@@ -28,38 +29,42 @@ export interface ContentCheckOptions {
 const SNIFF_BYTES = 4096;
 const OCTET_STREAM = "application/octet-stream";
 
-/** Refused by default, whatever the route accepts (M10-K3). */
-const REFUSED: ReadonlySet<string> = new Set([
-  // Web pages, and WHATWG MIME Sniffing §7's unknown types, which a browser sniffs and may render as one.
-  "text/html",
-  "application/xhtml+xml",
-  "unknown/unknown",
-  "application/unknown",
-  // A browser navigated to it renders each body part by the part's own type, text/html among them (HTML Standard
-  // §7.5.5, Loading multipart/x-mixed-replace documents, and §17.2).
-  "multipart/x-mixed-replace",
-  // Programs: the types the sniffer gives them (sniff.ts) and their common aliases.
-  "application/vnd.microsoft.portable-executable",
-  "application/x-msdownload",
-  "application/x-msdos-program",
-  "application/x-dosexec",
-  "application/x-ms-dos-executable",
-  "application/x-executable",
-  "application/x-elf",
-  "application/x-sharedlib",
-  "application/x-mach-binary",
-  "application/x-mach-o-executable",
-  // Windows installers and HTML applications, which a browser hands to the system to run.
-  "application/x-msi",
-  "application/x-ms-installer",
-  "application/hta",
-  // Scripts: every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, shell scripts and VBScript.
+/** WHATWG MIME Sniffing §7's unknown types, which a browser sniffs and may render as a web page. */
+const UNKNOWN = ["unknown/unknown", "application/unknown"];
+/** Windows installers, which a browser hands to the system to run. */
+const INSTALLER = ["application/x-msi", "application/x-ms-installer"];
+/** Every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6. */
+const JAVASCRIPT = [
   ..."application/ecmascript application/javascript application/x-ecmascript application/x-javascript".split(" "),
   ..."text/ecmascript text/javascript text/jscript text/livescript text/x-ecmascript text/x-javascript".split(" "),
   ..."text/javascript1.0 text/javascript1.1 text/javascript1.2 text/javascript1.3 text/javascript1.4".split(" "),
   "text/javascript1.5",
+];
+
+/** Refused by default, whatever the route accepts (M10-K3). */
+const REFUSED: ReadonlySet<string> = new Set([
+  // Web pages, and programs under the types the sniffer gives them and their common aliases.
+  ...HTML.agrees,
+  ...UNKNOWN,
+  // A browser navigated to it renders each body part by the part's own type, text/html among them (HTML Standard
+  // §7.5.5, Loading multipart/x-mixed-replace documents, and §17.2).
+  "multipart/x-mixed-replace",
+  ...WINDOWS.agrees,
+  ...LINUX.agrees,
+  ...MAC.agrees,
+  ...INSTALLER,
+  // HTML applications, which Windows runs outside the browser.
+  "application/hta",
+  // Scripts: JavaScript, shell scripts and VBScript.
+  ...JAVASCRIPT,
   ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh text/vbscript".split(" "),
 ]);
+
+/**
+ * The refused kinds that go by several names. `allow` lets a kind through by any of them (M11-R134): a browser picks
+ * the name, and the sniffer has one of its own.
+ */
+const KINDS = [HTML, WINDOWS, LINUX, MAC, SCRIPT].map(({ agrees }) => agrees).concat([UNKNOWN, INSTALLER, JAVASCRIPT]);
 
 /** XML types (RFC 7303 §3, every "+xml" type, and text/xsl): a browser renders them, SVG with its scripts. */
 const isXml = (type: string) =>
@@ -81,10 +86,19 @@ function readList(list: readonly string[] | undefined): readonly string[] {
   return list;
 }
 
-/** Whether `type`, sent as or found in a file sent as `declared`, is refused whatever else matches. */
-function isRefused(type: string, declared: string, accept: readonly string[], { allow, deny }: Lists): boolean {
+/**
+ * Whether `type`, sent as or found in a file sent as `declared`, is refused whatever else matches. `names` are the
+ * types `allow` lets it through by: its kind's, and for content, every type that content can be here.
+ */
+function isRefused(
+  type: string,
+  declared: string,
+  accept: readonly string[],
+  { allow, deny }: Lists,
+  names: readonly string[] = KINDS.find((kind) => kind.includes(type)) ?? [type],
+): boolean {
   if (acceptsType(deny, type)) return true;
-  if (acceptsType(allow, type)) return false;
+  if (names.some((name) => acceptsType(allow, name))) return false;
   if (REFUSED.has(type)) return true;
   // XML and SVG pass only on a route that names the type the file was sent as (M10-K3).
   return isXml(type) && !(isXml(declared) && accept.includes(declared));
@@ -122,7 +136,8 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
     (type) => !type.includes("*") && fits(sniffed.agrees, type),
   );
   // A container's bytes do not say which of them the file is, so it is refused only when all of them are (M11-R133).
-  const open = (sniffed.container ? can : [detected]).filter((type) => !isRefused(type, declared, accept, lists));
+  const judged = sniffed.container ? can : [detected];
+  const open = judged.filter((type) => !isRefused(type, declared, accept, lists, can));
   if (!open.length) return notAccepted(what, { declared, detected, reason: "refused" });
   if (!typed) {
     // The content's own type must be accepted.
