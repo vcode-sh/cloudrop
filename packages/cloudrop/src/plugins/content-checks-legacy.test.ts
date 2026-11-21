@@ -22,32 +22,40 @@ const ole = (type: string, options?: ContentCase["options"]): ContentCase => ({
   ...(options && { options }),
 });
 
-describe("contentChecks: OLE compound files, old Office documents and installers alike (M11-R136)", () => {
+const OLE_NAME = "an old Office document, an Outlook message or a Windows installer";
+
+describe("contentChecks: OLE compound files, documents, messages and installers alike (M11-R136, M11-R254)", () => {
   it.for([
     { name: "sent as an old Word document", input: ole("application/msword") },
     { name: "sent as an old Excel workbook", input: ole(EXCEL) },
     // Many formats are compound files (Hangul, Outlook messages, CAD): one sent as its own type is not contradicted.
     { name: "sent as a Hangul document", input: ole("application/x-hwp") },
-    { name: "untyped, on a server that allows installers", input: ole("", { allow: ["application/x-msi"] }) },
+    // An Outlook .msg, an old CAD drawing or a Thumbs.db the browser could not type: it is what it was sent as, as in
+    // 0.5.0, since the signature cannot tell it from an installer.
+    { name: "untyped", input: ole("") },
+    {
+      name: "untyped, on a route that names no type it could be",
+      input: { ...ole(""), accept: ["image/png", UNTYPED] },
+    },
   ])("passes a compound file $name", async ({ input }) => {
     expect(await contentOutcome(input)).toEqual(passed);
   });
 
   it.for([
     {
-      // An .msi the browser could not type: nothing says it is a document, and it may be an installer.
-      name: "untyped",
-      input: ole(""),
-      expected: refused(
-        "This file is an old Office document or a Windows installer, which this upload does not accept. Pick another file.",
-        { declared: UNTYPED, detected: OLE_TYPE, reason: "refused" },
-      ),
+      name: "untyped, on a server that denies compound files",
+      input: ole("", { deny: [OLE_TYPE] }),
+      expected: refused(`This file is ${OLE_NAME}, which this upload does not accept. Pick another file.`, {
+        declared: UNTYPED,
+        detected: OLE_TYPE,
+        reason: "refused",
+      }),
     },
     {
       name: "sent as an image",
       input: ole("image/png"),
       expected: refused(
-        "This file is an old Office document or a Windows installer, but it was sent as image/png. Give it the right extension, or pick another file.",
+        `This file is ${OLE_NAME}, but it was sent as image/png. Give it the right extension, or pick another file.`,
         { declared: "image/png", detected: OLE_TYPE, reason: "mismatch" },
       ),
     },

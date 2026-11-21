@@ -38,7 +38,7 @@ describe("sniff: binary signatures", () => {
       input: bytes([0xff, 0xf3, 0x80, 0xc4], zeros(204), [0xff, 0xf3, 0x80, 0xc4]),
       type: "audio/mpeg",
     },
-    // MS-CFB §2.2: the header signature of a compound file, which old Office documents and installers share.
+    // MS-CFB §2.2: the header signature of a compound file, which old Office documents, messages and installers share.
     {
       name: "an OLE compound file",
       input: bytes([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], zeros(16), [0x3e, 0, 3, 0, 0xfe, 0xff, 9, 0]),

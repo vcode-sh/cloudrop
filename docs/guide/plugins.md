@@ -55,7 +55,8 @@ At `/complete`, a file whose **first bytes show**:
    any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF); a ZIP sent as
    `application/pdf` passes for the same reason, while one sent as an image or a font does not.
 5. **For a file the browser could not type, a type the route does not accept.** Such a file is sent as
-   `application/octet-stream`, which is not a contradiction; the content's own type must then be in `accept`.
+   `application/octet-stream`, which is not a contradiction; the content's own type must then be in `accept`. An
+   OLE compound file has no type of its own to ask for (see [Containers](#containers)) and passes as sent.
 
 A file whose first bytes match none of the formats below passes as the type it was sent as, which the route accepted
 and rule 1 and 2 let through. Plain text, CSV, JSON and most text formats have no signature, so they pass this way.
@@ -170,9 +171,11 @@ type, it is that type, since ZIP is what such a file is: `deny: ["application/zi
 whose `word/` folder starts past the bytes read. Anyone can put a `word/` entry into a ZIP, so `deny` never kept a
 determined ZIP out of a route that takes Office files.
 
-An OLE compound file is the container of Word, Excel and PowerPoint files before 2007, of Outlook messages, and of
-Windows installers (`.msi`). Sent as an `application/` type other than an installer's, it passes as that type. Sent
-untyped it is refused, since it may be an installer; `allow: ["application/x-msi"]` takes it.
+An OLE compound file is the container of Word, Excel and PowerPoint files before 2007, of Outlook messages (`.msg`),
+of old CAD drawings and of Windows installers (`.msi`), and its first bytes do not say which. Sent as an
+`application/` type other than an installer's, it passes as that type; sent untyped, it passes as the untyped file it
+is, on any route that takes `application/octet-stream`. Sent as an image, a text or a media type it is refused by
+rule 4. `deny: ["application/x-ole-storage"]` refuses every compound file, typed or not.
 
 The plugin applies to every route. A type that one route takes and another must not belongs in each route's `accept`.
 
@@ -192,7 +195,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |
 | PDF | `application/pdf` | `%PDF-` | ISO 32000-2 §7.5.2; WHATWG §7.1 |
-| Old Office file or Windows installer | `application/x-ole-storage` | `D0 CF 11 E0 A1 B1 1A E1` | MS-CFB §2.2 |
+| Old Office file, Outlook message or Windows installer (OLE compound file) | `application/x-ole-storage` | `D0 CF 11 E0 A1 B1 1A E1` | MS-CFB §2.2 |
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
 | Word, Excel, PowerPoint | the Office Open XML types | a ZIP with an entry under `word/`, `xl/` or `ppt/` among the entries in the first 4 KiB, also after entries whose sizes follow their data (streamed archives, as Java and Node writers make them), in 4 bytes each or in ZIP64's 8, as Apache POI's streaming workbook writes them, and after entries whose sizes are in a ZIP64 extra field, as Python's `zipfile` writes them with `force_zip64` | ECMA-376 Part 1; PKWARE APPNOTE §4.3.9, §4.4.4, §4.5.3 |
 | OpenDocument, EPUB | the type in the archive | a ZIP whose first entry `mimetype` names it | ODF 1.3 Part 2 §3.3; EPUB OCF 3.3 §4.2.1 |
@@ -229,9 +232,11 @@ without `<?xml` may reach either, so the check reads its doctype both ways and t
   programs, which have no header at all, and an HTML application (`.hta`) that starts with none of the tags in the
   table. Keep `application/octet-stream` and broad text types out of `accept` where such files must not land, and
   do not serve stored files to be opened.
-- **An installer sent as an old Office type passes.** An `.msi` and a `.doc` from before 2007 start with the same
-  bytes, so an installer sent as `application/msword` is taken for a document. Only an untyped one, or one sent as
-  an installer type, is refused.
+- **An installer sent untyped or as an Office type is not caught.** An `.msi`, a `.doc` from before 2007 and an
+  Outlook `.msg` start with the same bytes, so an installer sent as `application/msword`, or as
+  `application/octet-stream` to a route that takes it, passes as what it was sent as. Only one sent as an installer
+  type is refused. Keep `application/octet-stream` out of `accept` where an installer must not land, or refuse every
+  compound file with `deny: ["application/x-ole-storage"]`.
 - **A spreadsheet export that is HTML or XML inside is refused.** Many applications' "Export to Excel" writes an HTML
   table into a file named `.xls`, and Excel 2003 saves XML. Sent as `application/vnd.ms-excel`, the first is refused
   as a web page and the second as XML; the same holds for `application/msword`. To take them, add

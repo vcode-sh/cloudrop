@@ -12,7 +12,7 @@ import {
   type StorageDriver,
 } from "../index.ts";
 import { acceptsType, isAcceptEntry } from "../server/accept-entry.ts";
-import { LINUX, MAC, type Sniffed, sniff, WINDOWS } from "./sniff.ts";
+import { LINUX, MAC, OLE, type Sniffed, sniff, WINDOWS } from "./sniff.ts";
 import { HTML, SCRIPT } from "./sniff-text.ts";
 
 export interface ContentCheckOptions {
@@ -150,8 +150,8 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
   if (typed ? !open.length : open.length < judged.length) {
     return notAccepted(what, { declared, detected, reason: "refused" });
   }
-  // The content's own type must be accepted.
-  if (!typed && !can.some((type) => acceptsType(accept, type))) {
+  // The content's own type must be accepted. A compound file has none: untyped, it is what it was sent as (M11-R254).
+  if (!typed && sniffed !== OLE && !can.some((type) => acceptsType(accept, type))) {
     return notAccepted(what, { declared, detected, reason: "not-accepted" });
   }
   if (!typed || agreed) return undefined;

@@ -1561,7 +1561,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   followed by junk shows no type and passes as sent; a browser does not sniff it either. Other compound-file formats
   sent under a non-`application/` type are a `mismatch`. `.lnk` has a signature (the 20 bytes shared-mime-info matches for
   `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected: it is left out to keep the entry inside its 6 kB, and belongs with the next format added.
-- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
+- **Status:** in force, except the third bullet's refusal of an untyped compound file, which `M11-R254` takes back
+  (the maintainer's decision); `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
   `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
 - **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`, `src/plugins/content-checks.ts`,
   `docs/guide/plugins.md#limits`, `docs/decisions/m10-content.md` (two sentences corrected).
@@ -3170,3 +3171,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/plugins/sniff-containers.ts` (`ARCHIVE`), `src/plugins/content-checks-containers.test.ts`,
   `docs/guide/plugins.md` (rule 4).
+
+### M11-R254: an untyped OLE compound file passes as what it was sent as
+
+- **Decision (the maintainer's):** an OLE compound file sent as `application/octet-stream` passes on every route
+  that takes that type, as in 0.5.0, whatever else the route accepts. It is no longer a container of the installer
+  types: its one type is `application/x-ole-storage`, it contradicts no `application/` type, and sent as another
+  top-level type (an image, text, audio, video) it is still a `mismatch`. A file sent as `application/x-msi` or
+  `application/x-ms-installer` is still refused by its declared type unless `allow` names an installer type.
+  `deny: ["application/x-ole-storage"]` refuses every compound file, typed or not. A message calls it "an old Office
+  document, an Outlook message or a Windows installer".
+- **Why:** `M11-R136` refused every untyped compound file because it may be an installer. The signature (MS-CFB
+  §2.2) is also that of an Outlook `.msg`, an old CAD drawing and a `Thumbs.db`, which browsers send untyped on a
+  system without the application, and 0.5.0 took them on a route with `accept: "*/*"`: 0.6.0 refused them as "an old
+  Office document or a Windows installer". The bytes cannot tell an installer from a mail message, and refusing all
+  of them breaks apps that take business documents. The "content's own type must be in `accept`" rule is skipped
+  for it too: `application/x-ole-storage` is the sniffer's name, not a type a route would list, and 0.5.0 asked for
+  none.
+- **If wrong:** an installer sent untyped, or as an Office type, is not caught; the guide's Limits say so and name
+  the two ways to keep it out (`application/octet-stream` out of `accept`, or `deny` of
+  `application/x-ole-storage`). `allow: ["application/x-msi"]` is no longer needed for an untyped compound file.
+- **Status:** in force; amends `M11-R136`.
+- **Visible in:** `src/plugins/sniff.ts` (`OLE`), `src/plugins/content-checks.ts`,
+  `src/plugins/content-checks-legacy.test.ts`, `docs/guide/plugins.md` (rule 5, Containers, Limits).

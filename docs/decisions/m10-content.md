@@ -64,7 +64,7 @@ Entries continue from 1.
   `application/x-msi`, `application/x-ms-installer`, `application/hta`), every JavaScript MIME type essence of WHATWG
   MIME Sniffing §4.6, the shell script types (`text/x-shellscript`, `application/x-sh`, `application/x-shellscript`,
   `text/x-sh`) and `text/vbscript`. A Windows installer's content (an OLE compound file) is detected only as that
-  container, which Word and Excel files before 2007 share: it is refused when sent untyped (`M11-R136`). Every XML type (`text/xml`, `application/xml`, `text/xsl` and any `+xml`, SVG
+  container, which Word and Excel files before 2007 share: sent untyped it passes as what it was sent as (`M11-R254`, which took back the refusal of `M11-R136`). Every XML type (`text/xml`, `application/xml`, `text/xsl` and any `+xml`, SVG
   among them) passes only when the file was sent as an XML type that the route's `accept` lists exactly. `allow` lifts
   these refusals per type; `deny` adds to them and wins over `allow`.
 - **Why:** the design names HTML, executables, scripts and SVG. The SVG rule is widened to every XML type because a

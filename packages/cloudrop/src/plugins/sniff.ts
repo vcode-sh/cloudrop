@@ -23,13 +23,13 @@ export const LINUX: Sniffed = kind(
 );
 export const MAC: Sniffed = kind("application/x-mach-binary", "a program", "application/x-mach-o-executable");
 
-const OLE: Sniffed = {
-  ...container(
-    "application/x-ole-storage",
-    "an old Office document or a Windows installer",
-    "application/x-msi",
-    "application/x-ms-installer",
-  ),
+/**
+ * An OLE compound file (MS-CFB §2.2): Word, Excel and PowerPoint files before 2007, Outlook messages, old CAD
+ * drawings, Thumbs.db and Windows installers (.msi), which its first bytes do not tell apart. It contradicts no
+ * application type, and one the browser could not type is what it was sent as (M11-R254).
+ */
+export const OLE: Sniffed = {
+  ...kind("application/x-ole-storage", "an old Office document, an Outlook message or a Windows installer"),
   loose: ["application/*"],
 };
 
@@ -51,8 +51,6 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   [[...ascii("OggS"), 0], container("audio/ogg", "an Ogg file", "audio/opus", "video/ogg", "application/ogg")],
   // FLAC: RFC 9639 §8, the stream marker "fLaC".
   [ascii("fLaC"), kind("audio/flac", "a FLAC recording", "audio/x-flac")],
-  // An OLE compound file (MS-CFB §2.2, header signature): Word, Excel and PowerPoint files before 2007, Outlook
-  // messages, and Windows installers (.msi), which the first bytes do not tell apart (M11-R136).
   [[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], OLE],
   // Linux programs: System V ABI, ELF header, e_ident[EI_MAG0..3].
   [[0x7f, ...ascii("ELF")], LINUX],
