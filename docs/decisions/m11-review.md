@@ -1961,3 +1961,20 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   buffers with `substr`), and the family row of `list-as-0-5.db.integration.test.ts` for the rows.
 - **Visible in:** `src/store/sql/reads.ts` (`typeMatches`).
 
+### M11-R193: the guide says how to check and repair an index a concurrent build left invalid
+
+- **Decision:** "Upgrading from 0.5" keeps its advice to build the index with `CREATE INDEX CONCURRENTLY IF NOT
+  EXISTS` on a large table, and adds what the advice left out: the statement runs alone, never inside a transaction
+  or beside other statements; the check `SELECT indisvalid FROM pg_index WHERE indexrelid = '"…_idx"'::regclass`; and
+  the repair, `DROP INDEX CONCURRENTLY` and the build again. "Upgrading from 0.1" points there.
+- **Why:** reproduced on Postgres 18.6 with 306,000 rows: under `SET statement_timeout = '5ms'` the build ends with
+  `canceling statement due to statement timeout` and leaves the index with `indisvalid = f`; the same statement
+  again, and the migration's `CREATE INDEX IF NOT EXISTS`, both answer `relation … already exists, skipping` and
+  leave it invalid; the planner then sorts the table for `api.allFiles` (a parallel sort of 306,000 rows) as if
+  there were no index. After the drop and a second build it is valid and read. Inside `BEGIN`, and as the second
+  statement of one query string, Postgres refuses `CONCURRENTLY` with `cannot run inside a transaction block`.
+- **If wrong:** none; the statements are Postgres's own, per its `CREATE INDEX` page ("Building Indexes
+  Concurrently").
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md#upgrading-from-05`, `docs/guide/store.md#upgrading-from-01`.
+

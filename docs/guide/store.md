@@ -393,7 +393,8 @@ CREATE INDEX "cloudrop_files_owner_status_created_at_idx" ON "cloudrop_files" (o
 DROP INDEX "cloudrop_files_owner_status_idx";
 ```
 
-On a large Postgres table, `CREATE INDEX CONCURRENTLY` (outside a transaction) avoids blocking uploads while it builds.
+On a large Postgres table, `CREATE INDEX CONCURRENTLY` (outside a transaction) avoids blocking uploads while it builds;
+check afterwards that the index is valid, as [Upgrading from 0.5](#upgrading-from-05) shows.
 With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in both statements.
 
 ### Upgrading from 0.5
@@ -426,12 +427,36 @@ breaks an app that has not migrated yet, and an app that never calls `api.allFil
   CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files"("created_at");
   ```
 
-On a large Postgres table a plain `CREATE INDEX` blocks uploads while it builds. Build it first, by hand and outside a
-transaction, with `CREATE INDEX CONCURRENTLY IF NOT EXISTS "cloudrop_files_created_at_idx" ON "cloudrop_files"
-(created_at);`, then add `IF NOT EXISTS` to the statement in the migration, which finds the index there and does
-nothing. With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in the
-statement. A store you wrote yourself also needs the new `listAll` method before `api.allFiles` works with it; every
-other call works without.
+On a large Postgres table a plain `CREATE INDEX` blocks uploads while it builds. Build it first, by hand:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
+```
+
+Send it as one statement of its own. `CONCURRENTLY` cannot run inside a transaction, so not from a migration file
+either when the tool wraps the file in one or sends several statements at once: Postgres answers `CREATE INDEX
+CONCURRENTLY cannot run inside a transaction block`. Then add `IF NOT EXISTS` to the statement in the migration,
+which finds the index there and does nothing.
+
+Check the index before you rely on it. A concurrent build that is cancelled or runs into a `statement_timeout` (or
+loses its connection) leaves the index behind, marked invalid. No query uses an invalid index, uploads may still
+write to it, and both statements above then answer `relation "cloudrop_files_created_at_idx" already exists,
+skipping` and build nothing, so running them again does not help. This must answer `t`:
+
+```sql
+SELECT indisvalid FROM pg_index WHERE indexrelid = '"cloudrop_files_created_at_idx"'::regclass;
+```
+
+If it answers `f`, drop the index and build it again, each statement on its own:
+
+```sql
+DROP INDEX CONCURRENTLY "cloudrop_files_created_at_idx";
+CREATE INDEX CONCURRENTLY "cloudrop_files_created_at_idx" ON "cloudrop_files" (created_at);
+```
+
+With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in the statements. A
+store you wrote yourself also needs the new `listAll` method before `api.allFiles` works with it; every other call
+works without.
 
 ### Tables in another schema
 
