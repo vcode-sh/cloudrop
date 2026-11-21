@@ -784,3 +784,15 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/cli.ts`, `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
 
+### M11-R120: the package check runs the built bin on Node and Bun
+
+- **Decision:** `scripts/check-package.sh` (part of `bun run verify`) checks `dist/cli.js` itself: its first line is
+  `#!/usr/bin/env node`, it is executable in the packed tarball, `--version` prints the version of `package.json`,
+  `--help` prints the usage and `doctor` without `--origin` exits 2, on Node and, when `bun` is on `PATH`, on Bun.
+- **Why:** every test of the command ran the source (`runCommand`, or `src/cli.ts` under each runtime). A build that
+  dropped the shebang, lost the version or broke the entry would have been published green. Each message was seen to
+  fire by breaking the built file by hand (a wrong version, a wrong exit code).
+- **If wrong:** none known; the check adds four starts of a runtime, about half a second, to the package check.
+- **Status:** in force.
+- **Visible in:** `scripts/check-package.sh`.
+

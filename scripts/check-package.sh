@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
-# README, LICENSE and CHANGELOG and the repository that trusted publishing checks, publint and attw read it, and
-# size-limit reads the built entries. The tarball goes to a scratch directory that the trap removes on success, failure
-# and interrupt.
+# README, LICENSE and CHANGELOG and the repository that trusted publishing checks, the built bin must run, publint and
+# attw read the tarball, and size-limit reads the built entries. The tarball goes to a scratch directory that the trap
+# removes on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/packages/cloudrop"
@@ -55,6 +55,40 @@ for entry in testing plugins; do
     exit 1
   fi
 done
+# The built bin is what a project runs, and the tests run the source: its shebang, --help, --version and a usage
+# error's exit code are checked here on Node and, when it is on PATH, on Bun (M11-R119). The runner's user agent is
+# taken out of the environment, so the usage line is the one a direct start prints.
+VERSION="$(node -p 'require("./package.json").version')"
+if [ "$(head -n 1 dist/cli.js)" != "#!/usr/bin/env node" ]; then
+  echo "dist/cli.js does not start with #!/usr/bin/env node. Check the first line of src/cli.ts." >&2
+  exit 1
+fi
+if ! tar -tvzf "${TARBALL[0]}" package/dist/cli.js | grep -q '^-rwx'; then
+  echo "dist/cli.js is not executable in the packed tarball. Check the cli build in tsdown.config.ts." >&2
+  exit 1
+fi
+check_bin() {
+  local runtime="$1" printed code
+  printed="$(env -u npm_config_user_agent "$runtime" dist/cli.js --version)"
+  if [ "$printed" != "$VERSION" ]; then
+    echo "$runtime dist/cli.js --version printed \"$printed\", and package.json says $VERSION. Run bun run build." >&2
+    exit 1
+  fi
+  if ! env -u npm_config_user_agent "$runtime" dist/cli.js --help | grep -q '^Usage: npx cloudrop <doctor|setup>'; then
+    echo "$runtime dist/cli.js --help did not print the usage. Run it to see what it prints." >&2
+    exit 1
+  fi
+  code=0
+  "$runtime" dist/cli.js doctor >/dev/null 2>&1 || code=$?
+  if [ "$code" != 2 ]; then
+    echo "$runtime dist/cli.js doctor (no --origin) exited $code; a usage error exits 2." >&2
+    exit 1
+  fi
+}
+check_bin node
+if command -v bun >/dev/null; then
+  check_bin bun
+fi
 ./node_modules/.bin/publint run "${TARBALL[0]}" --strict
 # The package is ESM-only by decision. The esm-only profile leaves out the two resolutions that cannot load ESM at
 # all, node10 and require() under node16; every rule stays on for node16 from ESM and for bundlers.
