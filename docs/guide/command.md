@@ -23,7 +23,8 @@ sends: name each origin.
 The command reads `--origin` with the rule the server reads `trustedOrigins` with
 ([What an origin is](server.md#what-an-origin-is)), so what one takes the other takes. An app's own scheme is an origin
 too: `capacitor://localhost`, `tauri://localhost`, `chrome-extension://<id>`. `ws://`, `wss://` and `ftp://` are
-refused: no page is loaded over them.
+refused: no page is loaded over them. So is a host no browser loads a page from, such as `https://a.example$(id)`: a
+host is an address, or a name of letters, digits, `-` and `_` in parts joined by single dots.
 
 ## Settings
 

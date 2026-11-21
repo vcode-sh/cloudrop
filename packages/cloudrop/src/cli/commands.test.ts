@@ -36,14 +36,15 @@ const emptyBucket: FetchLike = (input, init) => {
   return Promise.resolve(new Response(`<Error><Code>${code}</Code></Error>`, { status: 404 }));
 };
 
-// Arguments a shell would read as more than text: a command substitution, a quote, spaces, a tilde, a leading "=".
+// Arguments a shell would read as more than text: a pattern in brackets, a command substitution, a quote, spaces, a
+// tilde, a leading "=". An origin holds no "$" or "(": no browser loads a page from such a host (M11-R176).
 const AWKWARD = [
   "--origin",
-  "https://a.example$(id)",
+  "http://[::1]:5173",
   "--origin",
   "http://localhost:5173",
   "--env-file",
-  "my env's file.env",
+  "my env's $(id) file.env",
   "--env-file=~/=second.env",
   "--var",
   "CLOUDROP_R2_BUCKET=R2_BUCKET",
@@ -51,7 +52,7 @@ const AWKWARD = [
   "eu",
 ];
 const files = {
-  "my env's file.env": `R2_BUCKET=${ENV.CLOUDROP_R2_BUCKET}`,
+  "my env's $(id) file.env": `R2_BUCKET=${ENV.CLOUDROP_R2_BUCKET}`,
   "~/=second.env": "",
 };
 const env = { ...ENV, CLOUDROP_R2_BUCKET: undefined };

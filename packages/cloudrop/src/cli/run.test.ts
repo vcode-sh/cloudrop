@@ -47,6 +47,12 @@ describe("cloudrop usage", () => {
         "\"ws://app.example.com\" is not a page's origin: a page is loaded over http or https, or over an app's own scheme. Name the origin of the page that uploads, such as https://app.example.com.",
     },
     {
+      name: "a host no browser loads a page from",
+      argv: ["doctor", "--origin", "https://a.example$(id)"],
+      message:
+        '"https://a.example$(id)" is not an origin: no browser loads a page from this host. A host is an address, or a name of letters, digits, "-" and "_" in parts joined by single dots. Name the origin of the page that uploads, such as https://app.example.com.',
+    },
+    {
       name: "an unknown option",
       argv: ["doctor", "--origin", ORIGIN, "--force"],
       message: 'Unknown option "--force". The options are listed below.',

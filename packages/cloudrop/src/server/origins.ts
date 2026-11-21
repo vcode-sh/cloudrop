@@ -16,6 +16,15 @@ const APP_ORIGIN = /^(?!file:)[a-z][a-z0-9+.-]*:\/\/[a-z0-9.-]+(:\d{1,5})?$/;
  */
 const PAGE_SCHEME = /^https?:/;
 
+/**
+ * The hosts a browser loads a page from: an address, or a name of letters, digits, "-" and "_" in parts joined by
+ * single dots, with or without a last dot. The URL standard forbids fewer characters in a host
+ * (https://url.spec.whatwg.org/#forbidden-host-code-point), so its parser keeps "$", "(", ")", "&", "'", "+" and more;
+ * Chromium refuses to load such a host, and one with an empty part, with ERR_INVALID_URL, so no page has it as its
+ * origin (measured 2026-11-21, Chromium 159: M11-R176). Read from the parsed host, which is lowercase ASCII.
+ */
+const PAGE_HOST = /^([a-z0-9_-]+(\.[a-z0-9_-]+)*\.?|\[[0-9a-f:.]+\])$/;
+
 const NOT_TEXT = 'pass a list of origins as text, such as ["https://app.example.com"].';
 
 const EXAMPLE = "such as https://app.example.com.";
@@ -27,14 +36,22 @@ function originFault(value: string): [wrong: string, fix: string] | null {
     return ["is a pattern, not an origin.", `Name each origin your pages upload from, ${EXAMPLE}`];
   }
   // "null" is the origin of a URL without one (file:, data:, an app's own scheme) and of text that is no URL.
-  const origin = URL.canParse(value) ? new URL(value).origin : "null";
-  if (origin === "null") {
+  const url = URL.canParse(value) ? new URL(value) : undefined;
+  const origin = url?.origin ?? "null";
+  if (url === undefined || origin === "null") {
     if (APP_ORIGIN.test(value)) return null;
     return ["is not an origin.", `Write it in lowercase as scheme://host[:port] with no path, ${EXAMPLE}`];
   }
   if (!PAGE_SCHEME.test(origin)) {
     return [
       "is not a page's origin: a page is loaded over http or https, or over an app's own scheme.",
+      `Name the origin of the page that uploads, ${EXAMPLE}`,
+    ];
+  }
+  // Before any correction is offered, so that no such host is named as the origin to use.
+  if (!PAGE_HOST.test(url.hostname)) {
+    return [
+      'is not an origin: no browser loads a page from this host. A host is an address, or a name of letters, digits, "-" and "_" in parts joined by single dots.',
       `Name the origin of the page that uploads, ${EXAMPLE}`,
     ];
   }

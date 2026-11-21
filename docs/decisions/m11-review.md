@@ -1815,3 +1815,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. `examples/next/scripts/setup-rustfs.ts` and `examples/hono/scripts/setup-rustfs.ts` still
   write the old name into their local RustFS bucket.
 - **Visible in:** `docs/guide/bucket-setup.md`, `src/server/bucket-check.test.ts`.
+
+### M11-R176: an origin's host is one a browser loads a page from
+
+- **Decision:** `originProblem` (the server's `trustedOrigins` and `api.checkBucket`, and the command's `--origin`)
+  refuses an `http` or `https` origin whose host, as the URL parser writes it, is neither an address nor a name of
+  letters, digits, `-` and `_` in parts joined by single dots, with or without a last dot: "… is not an origin: no
+  browser loads a page from this host. A host is an address, or a name of letters, digits, "-" and "_" in parts joined
+  by single dots. Name the origin of the page that uploads, such as https://app.example.com." The host is checked
+  before a correction is offered, so no refused host is named as the origin to use.
+- **Why:** `https://a.example$(id)` passed as an origin. The URL standard forbids only a few characters in a host
+  (space, `#`, `/`, `:`, `<`, `>`, `?`, `@`, `[`, `\`, `]`, `^`, `|`, and `%` and controls in a domain:
+  <https://url.spec.whatwg.org/#forbidden-host-code-point>), so its parser keeps `$ ( ) & ' " { } ! ; = + , ~` and
+  the backtick, and gives such a URL an origin. Measured on 2026-11-21 with Chromium 159 (Playwright's headless shell,
+  a page served on `http://<host>.localhost:<port>` that fetches another origin, the `Origin` header read on the
+  server): every host with one of those characters, and one with an empty part (`a..b`), ends in
+  `net::ERR_INVALID_URL` before any request; `a_b`, `_a`, `-a`, `a.-b`, `xn--bcher-kva`, `localhost.` and `127.0.0.1`
+  load, and the page sends exactly that host in `Origin`. A CORS rule or a trusted origin written for a host no page
+  has allows nobody, and the text reached logs, a CORS rule and printed commands.
+- **If wrong:** Firefox and WebKit were not measured (their Playwright builds were not installed); a browser that
+  loads a page from such a host would have its origin refused at start-up (`INVALID_CONFIG`) and by the command
+  (exit 2). An origin with an app's own scheme was already held to letters, digits, `.` and `-` (`M11-R41`).
+- **Status:** in force. Extends `M11-R111`. The table in `docs/guide/server.md` ("What an origin is") has no row for
+  this yet.
+- **Visible in:** `src/server/origins.ts`, `src/server/origins.test.ts`, `src/cli/run.test.ts`,
+  `src/cli/commands.test.ts`, `docs/guide/command.md`.
