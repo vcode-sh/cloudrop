@@ -1,6 +1,6 @@
 {
   "name": "cloudrop",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Fast, resumable, direct-to-bucket file uploads for Cloudflare R2 and S3-compatible storage.",
   "license": "MIT",
   "repository": {

@@ -6,6 +6,8 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-21
+
 In short: four things the first production app could not do with 0.5.0 are now built in (a deletion says what it
 did, a hook can say no to a deletion, a refused file says what it really is, and the command reads your own variable
 names), and you can list every owner's files. Then every part of the library was read again, file by file, by
