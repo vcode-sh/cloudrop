@@ -164,8 +164,8 @@ export async function applySetup(
     out.write("Nothing was written. Fix the settings above, then run the command again.\n");
     return 1;
   }
-  // The listing runs beside the reads and counts only when a read failed: wrong credentials or no network fail the
-  // reads too, and then the bucket is the problem, not its rules (M9-H102).
+  // The listing runs beside the reads and counts whenever a read failed, with --replace too: wrong credentials or no
+  // network fail the reads as well, and then the bucket is the problem, not its rules (M9-H102, M11-R114).
   const [steps, access] = await Promise.all([
     planBoth(storage.driver, options, storage.service),
     reachBucket(storage.driver, {
@@ -175,7 +175,8 @@ export async function applySetup(
     }),
   ]);
   const refused = steps.filter(isFinding);
-  if (refused.length > 0) {
+  const unread = steps.some((step) => isFinding(step) || step.replacing);
+  if (refused.length > 0 || (unread && access.status === "problem")) {
     printFindings(out, [...notes, ...(access.status === "problem" ? [access] : refused)]);
     out.write("Nothing was written.\n");
     return 1;
@@ -191,7 +192,7 @@ export async function applySetup(
   out.write(
     options.dryRun
       ? "Dry run: nothing was written. To write, run it with --apply and without --dry-run.\n"
-      : `Done. Check the bucket with cloudrop doctor ${sameArguments(options)}; R2 can take up to 30 seconds to apply a change.\n`,
+      : `Done. Check the bucket with cloudrop doctor ${sameArguments(options)}${storage.service === "R2" ? "; R2 can take up to 30 seconds to apply a change" : ""}.\n`,
   );
   return 0;
 }

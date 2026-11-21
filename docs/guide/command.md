@@ -118,7 +118,8 @@ setting's own cloudrop name.
 3. that the bucket answers and the credentials may list it (a listing, which tells a missing bucket from a missing
    object). When it does not, the finding names the settings to check: the account ID (R2) or the endpoint (S3) when
    the service cannot be reached, the keys, the bucket and `--jurisdiction` when it refuses them, the region (S3) when
-   it answers that the bucket is in another one;
+   it answers that the bucket is in another one, and the endpoint when the answer is not a storage service's at all
+   (a redirect, or a `404` that names no missing bucket: a proxy, or an endpoint with a wrong path);
 4. the bucket's CORS rule for each `--origin` and its lifecycle rule, as `cloudrop.api.checkBucket` does.
 
 Each line is one finding: `ok`, `PROBLEM` with what to do, `NOT CHECKED` with how to check by hand, or a `note`. The
@@ -176,8 +177,9 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   check. When the listing works and the read was refused, the credentials may not read bucket settings, as an R2 object
   token cannot; it names an R2 Admin Read & Write token, or S3's two permissions for the setting. `--replace` (with
   `--apply` or `--dry-run`) writes cloudrop's rules alone instead, replacing what the bucket has, but only when the
-  read was refused (`403`). A read that failed for any other reason, such as a timeout or a service that does not
-  support it, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
+  read was refused (`403`) and the listing worked: keys the bucket refuses outright are reported as such, with or
+  without `--replace`. A read that failed for any other reason, such as a timeout or a service that does not support
+  it, never leads to a write. Neither does a configuration written in XML the command does not read (CDATA,
   comments or namespace prefixes): check that bucket's rules by hand.
 
 `--dry-run` does everything `--apply` does except the writes, and shows the result: which rule it would add or update

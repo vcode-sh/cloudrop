@@ -195,6 +195,15 @@ describe("cloudrop setup --apply", () => {
   ])("reports $name as a bucket problem, not as rules it could not read", async ({ env, fetch, line }) => {
     const result = await run(apply("--dry-run"), { env, fetch });
     expect([result.code, result.lines.slice(1)]).toEqual([1, [line, "Nothing was written."]]);
+    // --replace is for rules the credentials may not read; it never stands in for a bucket that refuses them (M11-R114).
+    const replacing = [
+      await run(apply("--dry-run", "--replace"), { env, fetch }),
+      await run(apply("--replace"), { env, fetch }),
+    ];
+    expect(replacing.map((each) => [each.code, each.lines.slice(1)])).toEqual([
+      [1, [line, "Nothing was written."]],
+      [1, [line, "Nothing was written."]],
+    ]);
   });
 
   const isSettingsRead = (input: string | URL | Request, init?: RequestInit) =>
@@ -220,6 +229,14 @@ describe("cloudrop setup --apply", () => {
       "PROBLEM      CORS: these credentials may not read the bucket's CORS rules, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step (s3:GetBucketCORS and s3:PutBucketCORS), or pass --replace to replace every rule with cloudrop's alone.",
       "PROBLEM      Lifecycle: these credentials may not read the bucket's lifecycle rules, and a write replaces every rule, so none was written. Use credentials that may read and change bucket settings for this step (s3:GetLifecycleConfiguration and s3:PutLifecycleConfiguration), or pass --replace to replace every rule with cloudrop's alone.",
       "Nothing was written.",
+    ]);
+    // The half minute a change takes is R2's (M11-R116): the closing line says nothing of it for another service.
+    const writesAccepted: FetchLike = (input, init) =>
+      init?.method === "PUT" ? Promise.resolve(new Response("")) : fetch(input, init);
+    const replaced = await run(apply("--replace"), { env, fetch: writesAccepted });
+    expect([replaced.code, replaced.lines.at(-1)]).toEqual([
+      0,
+      `Done. Check the bucket with cloudrop doctor --origin ${ORIGIN}.`,
     ]);
   });
 
@@ -333,6 +350,25 @@ describe("cloudrop setup --apply", () => {
     expect(result.code).toBe(1);
     expect(result.lines[1]).toBe("PROBLEM      CORS: the write failed. The storage service failed. Retry the request.");
     expect(result.lines.at(-1)).toBe("Some rules were not written; see above.");
+  });
+
+  it("keeps the CORS rule it wrote when the lifecycle write then fails, and exits 1", async () => {
+    const storage = bucket(FOREIGN);
+    const lifecycleWriteFails: FetchLike = (input, init) =>
+      init?.method === "PUT" && String(input).endsWith("?lifecycle=")
+        ? Promise.resolve(new Response("<Error><Code>InternalError</Code></Error>", { status: 500 }))
+        : storage.fetch(input, init);
+    const result = await run(apply(), { fetch: lifecycleWriteFails });
+    expect([result.code, result.lines.slice(1)]).toEqual([
+      1,
+      [
+        `ok           CORS: added rule "cloudrop-uploads" for ${ORIGIN} and kept 1 other rule ("public-reads").`,
+        "PROBLEM      Lifecycle: the write failed. The storage service failed. Retry the request.",
+        "Some rules were not written; see above.",
+      ],
+    ]);
+    expect(await storage.cors()).toEqual([publicReads, uploadsFor(ORIGIN)]);
+    expect(fields(await storage.lifecycle())).toEqual([{ id: "expire-logs", enabled: true, prefix: "logs/" }]);
   });
 
   it("checks the settings before reaching the bucket", async () => {

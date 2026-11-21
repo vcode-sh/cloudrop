@@ -666,6 +666,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/cli/variables.test.ts`,
   `docs/guide/command.md#settings`.
 
+### M11-R114: `--replace` never stands in for a bucket that refuses the credentials
+
+- **Decision:** `setup --apply` and `--dry-run` report the listing's failure whenever a read of the rules failed,
+  with `--replace` as without it, in the same sentence (`Bucket: The storage service refused these credentials…`),
+  and write nothing.
+- **Why:** with `--replace` a refused read became a planned replace before the listing was looked at. With a wrong
+  secret key every request is refused, so `--dry-run --replace` exited 0 with "would replace every rule" and
+  `--apply --replace` printed two "the write failed" lines that named no variable (run against a local server,
+  2026-11-21). `M9-H102` had ruled that the listing tells wrong credentials from an object token; the `--replace`
+  path skipped it.
+- **If wrong:** credentials that may write bucket settings but may neither read them nor list objects can no longer
+  replace the rules with this command; none is known, and the S3 API writes still work by hand.
+- **Status:** in force. Completes `M9-H102`.
+- **Visible in:** `src/cli/setup.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#setup`.
+
 ### M11-R115: the command and the origin rule repeat nothing that may be a secret
 
 - **Decision:** an argument the command does not know is repeated only when it is shaped like an option's name
@@ -686,6 +701,27 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`.
 - **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
   `src/cli/command-fixture.ts`, `src/server/bucket-check.test.ts`, `docs/guide/command.md#settings`.
+
+### M11-R116: a sentence about the bucket is true for the answer and for the service
+
+- **Decision:** the listing that proves the bucket (`M9-C5`) reads two answers as not a storage service's: a `404`
+  that names no missing bucket ("The endpoint answered the listing with HTTP 404, but not as a storage service does…")
+  and a redirect (for S3 the storage's own sentence with the endpoint and region variables; for R2 "The endpoint
+  redirected the request (HTTP 302), and a signed request is not sent on", since R2 has no region setting), each with
+  the endpoint's variable. `api.checkBucket` words its "may not read" and "add a lifecycle rule" messages for R2 only
+  when the storage's `rules` are the `r2()` preset's own object, and names no service otherwise. `setup --apply` says
+  "R2 can take up to 30 seconds" only on R2.
+- **Why:** a listing names no object, yet a bare `404` from a proxy printed "The object does not exist. Check the
+  key."; and an S3 run printed "R2 object tokens cannot", "admin read token or in the dashboard", "R2 creates a 7-day
+  rule by default" and R2's half minute. The review's third case, a redirect reported as "Could not reach the storage
+  service", did not reproduce on this commit: the driver already answers "The storage endpoint redirected the
+  request…" (run on Node 24 and Bun 1.4 against a local server), so only its wording for R2 changed.
+- **If wrong:** a driver built by hand with `rules: { ...R2_RULES }` gets the neutral words on R2. A storage service
+  that answers a listing of a missing bucket with a bare `404` is told "something else may be answering", and the
+  finding still names the endpoint to check.
+- **Status:** in force. Extends `M9-H101`.
+- **Visible in:** `src/cli/bucket-access.ts`, `src/server/bucket-check.ts`, `src/cli/setup.ts`,
+  `src/cli/doctor.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#doctor`.
 
 ### M11-R117: a variable is read as an own property
 

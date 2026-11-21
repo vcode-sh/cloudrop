@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FetchLike } from "../storage/driver.ts";
 import { bucket, ENV, ORIGIN, run } from "./command-fixture.ts";
 
 // A rule that lets ORIGIN upload, and R2's default 7-day multipart rule.
@@ -6,6 +7,15 @@ const READY = {
   cors: `<CORSConfiguration><CORSRule><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedHeader>content-type</AllowedHeader><AllowedHeader>content-disposition</AllowedHeader><AllowedHeader>if-none-match</AllowedHeader><AllowedHeader>x-amz-meta-cloudrop-id</AllowedHeader><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>`,
   lifecycle:
     "<LifecycleConfiguration><Rule><ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>",
+};
+
+const S3_ENV = {
+  CLOUDROP_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
+  CLOUDROP_S3_REGION: "us-east-1",
+  CLOUDROP_S3_BUCKET: "acme-s3-uploads",
+  CLOUDROP_S3_ACCESS_KEY_ID: "AKIDs3fixture",
+  CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
+  CLOUDROP_SECRET: ENV.CLOUDROP_SECRET,
 };
 
 const doctor = (options?: Parameters<typeof run>[1]) => run(["doctor", "--origin", ORIGIN], options);
@@ -43,14 +53,7 @@ describe("cloudrop doctor", () => {
   });
 
   it("checks S3 settings when only CLOUDROP_S3_* are set", async () => {
-    const env = {
-      CLOUDROP_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
-      CLOUDROP_S3_BUCKET: "acme-s3-uploads",
-      CLOUDROP_S3_ACCESS_KEY_ID: "AKIDs3fixture",
-      CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
-      CLOUDROP_SECRET: ENV.CLOUDROP_SECRET,
-    };
-    const result = await doctor({ env });
+    const result = await doctor({ env: { ...S3_ENV, CLOUDROP_S3_REGION: undefined } });
     expect(result.lines.slice(0, 2)).toEqual([
       `cloudrop doctor: checking S3 settings, the bucket and its rules for ${ORIGIN}.`,
       "PROBLEM      CLOUDROP_S3_REGION is not set. Set it to the bucket's region, such as us-east-1.",
@@ -137,14 +140,7 @@ describe("cloudrop doctor", () => {
   });
 
   it("names the S3 settings that build the request", async () => {
-    const env = {
-      CLOUDROP_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
-      CLOUDROP_S3_REGION: "us-east-1",
-      CLOUDROP_S3_BUCKET: "acme-s3-uploads",
-      CLOUDROP_S3_ACCESS_KEY_ID: "AKIDs3fixture",
-      CLOUDROP_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
-      CLOUDROP_SECRET: ENV.CLOUDROP_SECRET,
-    };
+    const env = S3_ENV;
     const otherRegion = () =>
       Promise.resolve(new Response("<Error><Code>AuthorizationHeaderMalformed</Code></Error>", { status: 400 }));
     const results = await Promise.all([
@@ -157,6 +153,67 @@ describe("cloudrop doctor", () => {
       "PROBLEM      Bucket: Could not reach the storage service. Check the endpoint and the network connection, then retry. The endpoint is CLOUDROP_S3_ENDPOINT.",
       "PROBLEM      Bucket: The bucket is in another region (AuthorizationHeaderMalformed). Check CLOUDROP_S3_REGION, and that CLOUDROP_S3_ENDPOINT serves that region.",
     ]);
+  });
+
+  // A listing names no object, and a signed request is never sent on to another host (M11-R116).
+  const NOT_A_BUCKETS_404 =
+    "PROBLEM      Bucket: The endpoint answered the listing with HTTP 404, but not as a storage service does for a bucket that does not exist: something else may be answering there, such as a proxy or an endpoint with a wrong path.";
+  it.each([
+    {
+      name: "a bare 404 from R2's endpoint",
+      env: ENV,
+      status: 404,
+      line: `${NOT_A_BUCKETS_404} The R2 endpoint is built from CLOUDROP_R2_ACCOUNT_ID: check that it is your account ID.`,
+    },
+    {
+      name: "a bare 404 from an S3 endpoint",
+      env: S3_ENV,
+      status: 404,
+      line: `${NOT_A_BUCKETS_404} The endpoint is CLOUDROP_S3_ENDPOINT.`,
+    },
+    {
+      name: "a redirect from R2's endpoint",
+      env: ENV,
+      status: 302,
+      line: "PROBLEM      Bucket: The endpoint redirected the request (HTTP 302), and a signed request is not sent on. The R2 endpoint is built from CLOUDROP_R2_ACCOUNT_ID: check that it is your account ID.",
+    },
+    {
+      name: "a redirect from an S3 endpoint",
+      env: S3_ENV,
+      status: 307,
+      line: "PROBLEM      Bucket: The storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings: CLOUDROP_S3_ENDPOINT and CLOUDROP_S3_REGION.",
+    },
+  ])("says what $name means, in that service's words", async ({ env, status, line }) => {
+    const result = await doctor({ env, fetch: answers(status) });
+    expect([result.code, result.lines[3]]).toEqual([1, line]);
+  });
+
+  it("reports an S3 bucket's rules in words that hold for S3", async () => {
+    const listing = "<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>";
+    // `answer` gives the error for a read of bucket settings; every other request is a listing that succeeds.
+    const settingsAnswer = (status: number, code: (setting: string) => string): FetchLike => {
+      return (input) => {
+        const setting = /\?(cors|lifecycle)=$/.exec(String(input))?.[1];
+        return Promise.resolve(
+          setting ? new Response(`<Error><Code>${code(setting)}</Code></Error>`, { status }) : new Response(listing),
+        );
+      };
+    };
+    const refused = settingsAnswer(403, () => "AccessDenied");
+    // S3's answers for a bucket with neither configuration.
+    const empty = settingsAnswer(404, (setting) =>
+      setting === "cors" ? "NoSuchCORSConfiguration" : "NoSuchLifecycleConfiguration",
+    );
+    const [denied, missing] = [
+      await doctor({ env: S3_ENV, fetch: refused }),
+      await doctor({ env: S3_ENV, fetch: empty }),
+    ];
+    expect(denied.lines[5]?.split(" By hand:")[0]).toBe(
+      "NOT CHECKED  Lifecycle: These storage credentials may not read the bucket's lifecycle rules. Check them with credentials that may read bucket settings, or in the service's console.",
+    );
+    expect(missing.lines[5]?.split(" Run:")[0]).toBe(
+      "PROBLEM      Lifecycle: No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored. Add one.",
+    );
   });
 
   it("suggests the setting a misspelt or lower-case name was meant to be, among its own service's", async () => {

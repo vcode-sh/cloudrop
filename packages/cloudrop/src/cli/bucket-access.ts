@@ -38,12 +38,31 @@ export interface BucketSettings {
   name: NameOf;
 }
 
-/** What went wrong reaching the bucket, with the settings to check. */
-function bucketProblem(error: CloudropError, { service, jurisdiction, name }: BucketSettings): string {
+const isRedirect = (status: number | undefined): boolean => status !== undefined && status >= 300 && status < 400;
+
+/** An answer that is not a storage service's to a listing: a redirect, or a 404 that names no missing bucket. */
+function strayAnswer(error: CloudropError, { service, jurisdiction, name }: BucketSettings): string | undefined {
+  if (isRedirect(error.status)) {
+    // The storage's sentence speaks of a region setting, which R2 has none of.
+    return service === "S3"
+      ? `${error.message.replace(/\.$/, "")}: ${name("CLOUDROP_S3_ENDPOINT")} and ${name("CLOUDROP_S3_REGION")}.`
+      : `The endpoint redirected the request (HTTP ${error.status}), and a signed request is not sent on. ${endpointHint(service, jurisdiction, name)}`;
+  }
+  // A listing names no object, so the storage's "The object does not exist" would be untrue here.
+  return error.code === "NOT_FOUND"
+    ? `The endpoint answered the listing with HTTP 404, but not as a storage service does for a bucket that does not exist: something else may be answering there, such as a proxy or an endpoint with a wrong path. ${endpointHint(service, jurisdiction, name)}`
+    : undefined;
+}
+
+/** What went wrong reaching the bucket, with the settings to check, in words true for the service (M11-R116). */
+function bucketProblem(error: CloudropError, bucket: BucketSettings): string {
+  const { service, jurisdiction, name } = bucket;
   if (error.code === "STORAGE_UNREACHABLE") return `${error.message} ${endpointHint(service, jurisdiction, name)}`;
   if (service === "S3" && OTHER_REGION.has(error.storageCode ?? "")) {
     return `The bucket is in another region (${error.storageCode}). Check ${name("CLOUDROP_S3_REGION")}, and that ${name("CLOUDROP_S3_ENDPOINT")} serves that region.`;
   }
+  const stray = strayAnswer(error, bucket);
+  if (stray) return stray;
   const refused = (error.status === 401 || error.status === 403) && !NOT_CREDENTIALS.has(error.storageCode ?? "");
   if (!refused) return error.message;
   return `The storage service refused these credentials (HTTP ${error.status}). ${credentialsHint(service, jurisdiction, name)}`;

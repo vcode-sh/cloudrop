@@ -2,6 +2,7 @@
 // never assumed from the docs.
 
 import { fail, ok, type Result } from "../errors.ts";
+import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../storage/driver.ts";
 import type { ServerConfig } from "./config.ts";
 
@@ -55,7 +56,7 @@ function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[])
   };
 }
 
-function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean): BucketCheck {
+function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean, isR2: boolean): BucketCheck {
   const rule = rules.find(
     (candidate) =>
       candidate.enabled && candidate.prefix === "" && candidate.abortIncompleteMultipartUploadDays !== undefined,
@@ -73,18 +74,26 @@ function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean
     : "";
   return {
     status: "problem",
-    message: `No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored.${required} Add one (R2 creates a 7-day rule by default).`,
+    message: `No enabled lifecycle rule aborts incomplete multipart uploads across the bucket, so abandoned uploads keep their parts stored.${required} Add one${isR2 ? " (R2 creates a 7-day rule by default)" : ""}.`,
   };
 }
 
 // A read the credentials may not make (403) or the storage does not implement (501, Wrangler's local R2, measured
 // 2026-11-16) says nothing about the setting itself, so it is reported as unknown. Any other failure fails the check.
-function settingCheck<T>(read: Result<T>, setting: string, check: (rules: T) => BucketCheck): Result<BucketCheck> {
+function settingCheck<T>(
+  read: Result<T>,
+  setting: string,
+  isR2: boolean,
+  check: (rules: T) => BucketCheck,
+): Result<BucketCheck> {
   if (read.error === null) return ok(check(read.data));
   if (read.error.code === "STORAGE_DENIED") {
+    const advice = isR2
+      ? " (R2 object tokens cannot). Check it with an admin read token or in the dashboard."
+      : ". Check them with credentials that may read bucket settings, or in the service's console.";
     return ok({
       status: "unknown",
-      message: `These storage credentials may not read the bucket's ${setting} (R2 object tokens cannot). Check it with an admin read token or in the dashboard.`,
+      message: `These storage credentials may not read the bucket's ${setting}${advice}`,
     });
   }
   if (read.error.status === 501) {
@@ -102,11 +111,13 @@ export async function checkBucket(
   origins: readonly string[],
 ): Promise<Result<BucketReport>> {
   const { storage } = config;
+  // The r2() preset's limits are this very object; any other storage gets words that name no service (M11-R116).
+  const isR2 = storage.rules === R2_RULES;
   const [corsRules, lifecycleRules] = await Promise.all([storage.getBucketCors(), storage.getBucketLifecycle()]);
-  const cors = settingCheck(corsRules, "CORS rules", (rules) => corsCheck(rules, origins));
+  const cors = settingCheck(corsRules, "CORS rules", isR2, (rules) => corsCheck(rules, origins));
   if (cors.error) return cors;
-  const lifecycle = settingCheck(lifecycleRules, "lifecycle rules", (rules) =>
-    lifecycleCheck(rules, config.store !== undefined),
+  const lifecycle = settingCheck(lifecycleRules, "lifecycle rules", isR2, (rules) =>
+    lifecycleCheck(rules, config.store !== undefined, isR2),
   );
   if (lifecycle.error) return lifecycle;
   const privateRoutes = [...config.routes.values()].filter((route) => route.visibility === "private");

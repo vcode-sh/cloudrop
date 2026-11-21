@@ -1,5 +1,6 @@
 // `cloudrop doctor`: the settings, then the bucket, then its rules. Exit 0 when nothing is wrong, 1 when something is.
-// A rule the credentials may not read is "not checked", never a failure: R2 object tokens cannot read them (M9-C2).
+// A rule the credentials may not read is "not checked", never a failure: an R2 object token, for one, cannot read
+// them (M9-C2).
 
 import type { BucketCheck } from "../server/bucket-check.ts";
 import { checkBucket } from "../server/bucket-check.ts";
