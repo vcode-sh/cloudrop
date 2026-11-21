@@ -14,14 +14,18 @@ describe("bucket names", () => {
     ["legacy upper case with underscore", "My_Legacy_Bucket"],
   ] as const;
 
+  const r2Message =
+    "The R2 bucket name must be 3 to 63 characters: lowercase letters, digits and hyphens, starting and ending with a letter or digit. Copy the exact name from your R2 bucket list.";
+  const s3Message =
+    "The S3 bucket name must be 3 to 63 characters: lowercase letters, digits, hyphens and dots, starting and ending with a letter or digit, with no two dots in a row, and not formatted like an IP address. Copy the exact name from your S3 bucket list.";
+
+  // The message is part of each case: INVALID_CONFIG alone would also pass for a refusal of another setting.
   it.each(rejected)("r2() rejects a bucket name that is %s", (_why, bucket) => {
-    const error = thrownBy(() => r2({ ...goodR2, bucket }));
-    expect(error.code).toBe("INVALID_CONFIG");
-    expect(error.message).toContain("bucket name");
+    expect(thrownBy(() => r2({ ...goodR2, bucket }))).toMatchObject({ code: "INVALID_CONFIG", message: r2Message });
   });
 
   it.each(rejected)("s3() rejects a bucket name that is %s", (_why, bucket) => {
-    expect(thrownBy(() => s3({ ...goodS3, bucket })).code).toBe("INVALID_CONFIG");
+    expect(thrownBy(() => s3({ ...goodS3, bucket }))).toMatchObject({ code: "INVALID_CONFIG", message: s3Message });
   });
 
   it("accepts the shortest and the longest valid name", () => {
@@ -30,27 +34,18 @@ describe("bucket names", () => {
   });
 
   it("r2() rejects a dot, s3() accepts one but not an IP address or a double dot", () => {
-    expect(thrownBy(() => r2({ ...goodR2, bucket: "my.media" })).code).toBe("INVALID_CONFIG");
+    expect(thrownBy(() => r2({ ...goodR2, bucket: "my.media" })).message).toBe(r2Message);
     expect(() => s3({ ...goodS3, bucket: "my.media" })).not.toThrow();
-    expect(thrownBy(() => s3({ ...goodS3, bucket: "192.168.5.4" })).code).toBe("INVALID_CONFIG");
-    expect(thrownBy(() => s3({ ...goodS3, bucket: "my..media" })).code).toBe("INVALID_CONFIG");
-  });
-
-  it("pins the R2 and S3 bucket messages", () => {
-    expect(thrownBy(() => r2({ ...goodR2, bucket: "Media" })).message).toBe(
-      "The R2 bucket name must be 3 to 63 characters: lowercase letters, digits and hyphens, starting and ending with a letter or digit. Copy the exact name from your R2 bucket list.",
-    );
-    expect(thrownBy(() => s3({ ...goodS3, bucket: "my..media" })).message).toBe(
-      "The S3 bucket name must be 3 to 63 characters: lowercase letters, digits, hyphens and dots, starting and ending with a letter or digit, with no two dots in a row, and not formatted like an IP address. Copy the exact name from your S3 bucket list.",
-    );
+    expect(thrownBy(() => s3({ ...goodS3, bucket: "192.168.5.4" })).message).toBe(s3Message);
+    expect(thrownBy(() => s3({ ...goodS3, bucket: "my..media" })).message).toBe(s3Message);
   });
 
   it.each([".media", "media.", "-media", "media-"])("s3() rejects the edge character in %s", (bucket) => {
-    expect(thrownBy(() => s3({ ...goodS3, bucket })).code).toBe("INVALID_CONFIG");
+    expect(thrownBy(() => s3({ ...goodS3, bucket })).message).toBe(s3Message);
   });
 
   it("rejects a bucket that is not a string, as plain-JavaScript callers can pass one", () => {
-    expect(thrownBy(() => r2({ ...goodR2, bucket: 42 as unknown as string })).message).toContain("bucket name");
+    expect(thrownBy(() => r2({ ...goodR2, bucket: 42 as unknown as string })).message).toBe(r2Message);
   });
 });
 
