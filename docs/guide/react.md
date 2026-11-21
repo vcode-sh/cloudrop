@@ -537,6 +537,11 @@ Every other code and what it means: [Errors](errors.md).
   touches `fetch`, IndexedDB or the page's lifecycle on the server, and the first browser render matches.
 - **StrictMode.** No upload starts in an effect or during render, only in `upload()`, the input's `onChange`, a drop
   and `resume()`. StrictMode's second render and second effect start nothing; `useResumable` only reads once more.
+- **Hooks from a context.** A component whose `useUpload` or `useResumable` comes from a context follows the context
+  without a remount: once it renders with another factory's hooks, it shows that factory's list and uploads through
+  its client. Uploads started through the previous factory stay on its client and its list; they are cancelled only
+  by that factory's `close()` or their own `abort()`. `useResumable(route)` shows `[]` after its `route` or factory
+  changes until the new list is read, never the previous one's records.
 - **Unmounting.** A component that unmounts stops listening and cancels nothing. The client owns its uploads: they
   finish, and a multipart upload's resume record stays. The route's list stays in the factory, so the next component
   on the route shows those uploads and can retry a failed file; until the page reloads, `useResumable` does not list

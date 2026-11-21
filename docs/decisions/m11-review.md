@@ -46,3 +46,45 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `packages/cloudrop/src/testing.ts`, `packages/cloudrop/src/testing.guide.test.ts`,
   `docs/guide/testing-your-app.md`.
+
+### M11-R4: `useUpload` follows the factory of its latest render
+
+- **Decision:** a mounted `useUpload` whose hooks come from another factory, as from a context whose value changed
+  without a remount, uploads through that factory's client and renders, pauses, aborts, retries and clears that
+  factory's list. The factory is read from the committed render, with the route and the options. Uploads started
+  through the previous factory stay on its client and in its list: the hook neither cancels nor shows them, and a
+  component that renders with the previous factory again shows them again.
+- **Why:** the hook's controller kept the first factory for the life of the component while the rendered list already
+  came from the new one, so a file picked after the change went through the previous client (the previous user's
+  `namespace` and `account` in the Signed-in recipe) and never appeared. `useResumable` already followed the change.
+  Cancelling the previous factory's uploads here would contradict `M4-B4`: the client owns its uploads, and the app
+  stops them with that factory's `close()`, as `useCloseOtherUsers` does.
+- **If wrong:** an app that relied on a mounted component staying on its first factory keys the component by the
+  factory, which remounts it.
+- **Status:** in force. Run under React Strict Mode and, once, on React 18.3.1.
+- **Visible in:** `packages/cloudrop/src/react/use-upload.ts`, `packages/cloudrop/src/react/rerender.test.ts`,
+  `docs/guide/react.md`.
+
+### M11-R5: `useResumable` shows only the list read for its route and factory
+
+- **Decision:** `uploads` is the list read for the render's `route` and factory. After either changes it is `[]`
+  until the new read answers. A `refresh()` kept from a render of another route or factory still answers its caller
+  and changes nothing the hook shows.
+- **Why:** the hook kept the previous route's records on screen until the new read answered, so a page could offer
+  "Resume" for a record of a route the component no longer shows. An empty list is what the hook shows before any
+  first read.
+- **If wrong:** a list flickers empty on a route change; an app that wants the old rows meanwhile keeps them itself.
+- **Status:** in force.
+- **Visible in:** `packages/cloudrop/src/react/use-resumable.ts`, `packages/cloudrop/src/react/rerender.test.ts`,
+  `packages/cloudrop/src/react/types.ts`.
+
+### M11-R6: a job refused before it starts is not kept by the hooks
+
+- **Decision:** `useUpload` adds a job to its route's list and to the factory's tracker only when the job has a file.
+  A job the client refuses before it starts (`CLIENT_CLOSED`, `INVALID_INPUT`) has none; `upload()` and
+  `resume(upload, file)` still resolve with its refusal.
+- **Why:** each refused call stayed in the list for good, so `retry()`, `pause()` and `abort()` walked jobs with
+  nothing to act on, and each one made every `useResumable` of the factory read IndexedDB again.
+- **If wrong:** nothing rendered changes: a refused job never had a file in `files`.
+- **Status:** in force.
+- **Visible in:** `packages/cloudrop/src/react/use-upload.ts`, `packages/cloudrop/src/react/use-upload.test.ts`.

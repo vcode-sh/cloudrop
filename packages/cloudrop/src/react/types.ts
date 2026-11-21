@@ -105,7 +105,10 @@ export interface UseUploadResult<R, TName extends string, TMetadata> {
 type ResumableOf<TName extends string> = TName extends string ? ResumableUpload<TName> : never;
 
 export interface UseResumableResult<TName extends string> {
-  /** The client's resumable() list, newest first; `[]` on the server, before the first read and when it failed. */
+  /**
+   * The client's resumable() list, newest first; `[]` on the server, before the first read, when it failed, and after
+   * `route` changes until that route's read answers.
+   */
   uploads: readonly ResumableOf<TName>[];
   /**
    * The ids of the listed uploads this hook's discard() is dropping, from the call until the list is read again: a

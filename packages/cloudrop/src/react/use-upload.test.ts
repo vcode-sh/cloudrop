@@ -10,11 +10,11 @@ import { File as NodeFile } from "node:buffer";
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react";
 import { createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { InferableCloudrop } from "../client.ts";
+import { createCloudropClient, type InferableCloudrop } from "../client.ts";
 import { createUploadHooks, type UploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import type { StandardSchema } from "../server/schema.ts";
-import type { Fault } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { firstOf, gate } from "../testing/persist-fixture.ts";
 import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 import type { UploadItem } from "./types.ts";
@@ -80,6 +80,24 @@ describe("useUpload", () => {
       code: "INVALID_INPUT",
       requests: [],
     });
+  });
+
+  // The client's job for a refused start() has no file (client/job.ts): nothing to list, retry or read the list for.
+  it("keeps nothing of an upload refused before it starts: no file, and no new read of the resumable list", async () => {
+    const fixture = clientFixture(routes);
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false });
+    const reads = vi.spyOn(client, "resumable");
+    const { useUpload, useResumable } = createUploadHooks({ client });
+    const { result } = renderHook(() => ({ hook: useUpload("notes"), resumable: useResumable() }));
+    await act(() => client.close());
+    const before = reads.mock.calls.length;
+    const refused = await act(() => result.current.hook.upload(note("alpha", "a.txt")));
+
+    expect({
+      code: refused?.error?.code,
+      files: result.current.hook.files,
+      reads: reads.mock.calls.length - before,
+    }).toEqual({ code: "CLIENT_CLOSED", files: [], reads: 0 });
   });
 
   it("throws a wrong client option in a task when a pick has no caller to resolve to", () => {

@@ -1,6 +1,7 @@
 // useUpload (spec §6.1, M4-B2, M4-B4): the jobs a factory's hooks started on one route, rendered through
 // useSyncExternalStore. No upload starts in an effect or during render, so StrictMode's second render and second effect
-// start nothing.
+// start nothing. The hook follows the factory of its latest render, as it follows the route: hooks taken from a context
+// that changed upload through the new factory's client and show its list (M11-R4).
 
 import { useCallback, useInsertionEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
@@ -22,6 +23,7 @@ export interface HookSource extends JobTracker {
 }
 
 interface Latest {
+  source: HookSource;
   route: string;
   options: UseUploadOptions<unknown>;
 }
@@ -29,17 +31,23 @@ interface Latest {
 type Hook = UseUploadResult<unknown, string, unknown>;
 
 /** Everything of a hook that keeps its identity across renders: React keeps one per component instance. */
-function createController(source: HookSource, initial: Latest, setDragOver: (isOver: boolean) => void) {
-  // Event handlers read the committed render's route and options, so the functions below never change.
+function createController(initial: Latest, setDragOver: (isOver: boolean) => void) {
+  // Event handlers read the committed render's factory, route and options, so the functions below never change.
   const controller = { latest: initial };
-  const jobs = () => source.storeOf(controller.latest.route).jobs();
+  const store = () => controller.latest.source.storeOf(controller.latest.route);
+  const jobs = () => store().jobs();
 
   function start(begin: (client: CloudropClient) => UploadJob<unknown>): Promise<UploadResult<unknown>> {
+    const { source } = controller.latest;
     const client = source.client();
     if (client.error) return Promise.resolve({ data: null, error: client.error });
     const job = begin(client.data);
-    source.storeOf(controller.latest.route).add(job);
-    source.track(job);
+    // A job refused before it started, by a closed client or for its arguments, has no file to list, retry or follow:
+    // its `done` carries the refusal (M11-R6).
+    if (job.files.length > 0) {
+      store().add(job);
+      source.track(job);
+    }
     return job.done;
   }
   const upload: Hook["upload"] = (files, call = {}) => {
@@ -58,7 +66,7 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
   }
   /** Files from a pick or a drop: no caller sees the result, so a wrong client option is thrown in a task (M3-U8). */
   const take = (files: File[]) => {
-    const { error } = source.client();
+    const { error } = controller.latest.source.client();
     if (!error) return void upload(files);
     setTimeout(() => {
       throw error;
@@ -87,7 +95,7 @@ function createController(source: HookSource, initial: Latest, setDragOver: (isO
     retry: async () => {
       await Promise.all(jobs().map((job) => job.retry()));
     },
-    clear: () => source.storeOf(controller.latest.route).clear(),
+    clear: () => store().clear(),
     getDropProps: () => dropProps,
   };
   return Object.assign(controller, { actions, onChange });
@@ -97,9 +105,9 @@ const serverView = () => EMPTY_VIEW;
 
 export function useUploadWith(source: HookSource, route: string, options: UseUploadOptions<unknown> = {}): Hook {
   const [isDragOver, setDragOver] = useState(false);
-  const [controller] = useState(() => createController(source, { route, options }, setDragOver));
+  const [controller] = useState(() => createController({ source, route, options }, setDragOver));
   useInsertionEffect(() => {
-    controller.latest = { route, options };
+    controller.latest = { source, route, options };
   });
   const store = source.storeOf(route);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
