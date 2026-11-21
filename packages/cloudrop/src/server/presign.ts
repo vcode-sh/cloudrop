@@ -13,16 +13,23 @@ import { type MultipartToken, type UploadTokenPayload, uploadExpired } from "./t
 export const TOKEN_LIFETIME_SECONDS = 86_400;
 /** How long one signed URL lives (spec §5.2); `/sign` renews it. */
 export const URL_LIFETIME_SECONDS = 900;
+/**
+ * Every URL ends this long before its token (M9-H3). R2 checks a URL's expiry when the request starts, so a PUT may
+ * finish long after its URL expired: this leaves a PUT started under the last URL time to land and be completed while
+ * the token still verifies. A 64 MiB single PUT at the 100 KiB/s the client's timeout allows takes 11 minutes.
+ */
+const LAST_URL_MARGIN_SECONDS = 900;
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 
 /**
- * How long a URL signed now may live, or null once the token's deadline has passed. The caller checked the deadline
- * before an await, so it may have passed since. Counting from the next whole second keeps the URL within the token
- * even when the driver reads the clock a moment later, in the next second.
+ * How long a URL signed now may live, or null once the token's signing time (its deadline less the margin) has
+ * passed. The caller checked the deadline before an await, so it may have passed since. Counting from the next whole
+ * second keeps the URL within the signing time even when the driver reads the clock a moment later.
  */
 function urlLifetime(token: UploadTokenPayload): number | null {
-  const seconds = Math.min(URL_LIFETIME_SECONDS, token.exp - Math.ceil(Date.now() / 1000));
+  const signUntil = token.exp - LAST_URL_MARGIN_SECONDS;
+  const seconds = Math.min(URL_LIFETIME_SECONDS, signUntil - Math.ceil(Date.now() / 1000));
   return seconds > 0 ? seconds : null;
 }
 
@@ -43,7 +50,7 @@ export function objectOptions(token: UploadTokenPayload): {
   };
 }
 
-/** UPLOAD_EXPIRED when the token's deadline has passed; any other error is the storage's. */
+/** UPLOAD_EXPIRED once the token's signing time (its deadline less the margin) is over; any other error is the storage's. */
 export async function presignSingle(storage: StorageDriver, token: UploadTokenPayload): Promise<Result<SignedRequest>> {
   const expiresIn = urlLifetime(token);
   if (expiresIn === null) return fail(uploadExpired());
@@ -58,7 +65,7 @@ export async function presignSingle(storage: StorageDriver, token: UploadTokenPa
 }
 
 /**
- * Signs the parts in parallel; UPLOAD_EXPIRED when the token's deadline has passed, as for presignSingle. Measured
+ * Signs the parts in parallel; UPLOAD_EXPIRED once the token's signing time is over, as for presignSingle. Measured
  * 2026-11-15 (Ryzen 9 9950X3D, 500 batches of 20 part URLs): 0.26 ms per batch with Promise.all against 0.38 ms one
  * after another on Bun 1.4.4, 0.39 against 0.57 ms on Node 26.13.
  */

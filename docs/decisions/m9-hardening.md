@@ -41,6 +41,26 @@ The measurements behind the first range are in
 - **Status:** in force. The fake R2 now sends `Date` on every answer and no body on `HEAD`, as R2 does.
 - **Visible in:** `src/storage/storage-error.ts`, `src/storage/s3/transport.ts`, `src/testing/fake-r2.ts`.
 
+### M9-H3: no URL is signed in a token's last 15 minutes
+
+- **Decision:** Every URL that `/upload` and `/sign` sign ends at least 15 minutes before the token's deadline: its
+  lifetime is the shorter of 15 minutes and the time left until `exp - 900`. Once that time is over, `/sign` answers
+  `410 UPLOAD_EXPIRED` before anything is signed. `/complete` and `/abort` keep the token's own deadline.
+- **Why:** measured on R2 2026-11-21: a URL's expiry is checked when the request starts, not when its body ends (a PUT
+  and an UploadPart whose URL expired 3 s into an 8 s body both answered 200 and stored the bytes). Before this ruling a
+  URL could be signed with seconds left on the token, so a PUT started in the token's last moments landed after the
+  token's deadline: a token signed with 2 s left got its URL, the PUT answered 200, and `/complete` 2.5 s later answered
+  `410 UPLOAD_EXPIRED`. The user waited for the whole upload and was told to start again, and on the stateless path the
+  object stayed in the bucket with nothing to delete it (an expired token's `/abort` keeps a stored object, `M3-U94`).
+  Fifteen minutes covers a default single PUT (64 MiB) at the 100 KiB/s the client's fetch timeout assumes, about 11
+  minutes, and every 16 MiB part.
+- **If wrong:** a PUT slower than that still lands after the deadline, as before; the resume window for sending bytes is
+  now 23 hours 45 minutes instead of 24 hours. Without a store, an upload paused across its token's last 15 minutes
+  fails 15 minutes earlier than before, with the same `UPLOAD_EXPIRED`.
+- **Status:** in force. The sweep's `MIN_GRACE_MS` (`src/server/leftovers.ts`) assumes no URL outlives its token; that
+  still holds, with 15 minutes to spare.
+- **Visible in:** `src/server/presign.ts`, spec §5.2.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as

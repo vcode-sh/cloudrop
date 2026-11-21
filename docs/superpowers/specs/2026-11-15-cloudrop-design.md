@@ -205,8 +205,9 @@ The server decides; the client cannot.
   token, and `onComplete` needs both. The token is signed, not encrypted, so it never carries a secret.
 - Every call after `/upload` must present it. The server ignores any key, size or upload ID that is not in the token,
   which rules out completion forgery and key rebinding without a database.
-- Lifetime 24 hours by default; this is the resume window. Signed URLs live 15 minutes, never past the token's
-  expiry, and are renewed through `/sign`, in batches (default 20 parts).
+- Lifetime 24 hours by default; this is the resume window. Signed URLs live 15 minutes, end at least 15 minutes
+  before the token expires (R2 checks a URL's expiry when the request starts, so a PUT started under the last URL still
+  has time to land and be completed: `M9-H3`), and are renewed through `/sign`, in batches (default 20 parts).
 - The token is the authority for its whole lifetime: `authorize` runs only in `/upload`, so a session revoked
   mid-upload can still finish that upload. `onComplete` receives the request, so an application that needs it
   re-checks the session there. Nothing revokes a live token (§5.5). (Amended 2026-11-17, M5-T3, M5-T10: a token

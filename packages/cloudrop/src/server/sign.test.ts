@@ -61,13 +61,34 @@ describe("POST /sign: multipart", () => {
     });
   });
 
-  it("never signs a URL that outlives its token", async () => {
+  it("ends every URL 15 minutes before its token, so a PUT that starts under it can still be completed", async () => {
     const fixture = serverFixture({ files }, { multipartThreshold: 0 });
     const ticket = await fixture.multipart("files", BIG);
-    // One minute before the token's 24 hours end, a 15-minute URL would outlive it by 14 minutes.
-    vi.setSystemTime(new Date("2026-11-16T11:59:00Z"));
+    // 20 minutes before the token's 24 hours end, a 15-minute URL would leave 5 for the PUT and /complete (M9-H3).
+    vi.setSystemTime(new Date("2026-11-16T11:40:00Z"));
     const { body } = await sign(fixture, { token: ticket.token, parts: [1] });
-    expect(body.parts?.[0]?.expiresAt).toBe("2026-11-16T12:00:00.000Z");
+    expect(body.parts?.[0]?.expiresAt).toBe("2026-11-16T11:45:00.000Z");
+  });
+
+  it.for([
+    { name: "a single PUT", kind: "single", file: SMALL, parts: undefined },
+    { name: "a multipart upload", kind: "multipart", file: BIG, parts: [1] },
+  ] as const)("signs nothing for $name in its token's last 15 minutes (M9-H3)", async ({ kind, file, parts }) => {
+    const fixture = serverFixture({ files }, { multipartThreshold: 16 * MiB });
+    const { token } = await fixture[kind]("files", file);
+    // R2 checks a URL's expiry when the request starts, not when its body ends (r2-spike-findings.md, "Upload protocol
+    // edge cases"): a URL signed now could still be uploading after /complete stops taking the token.
+    vi.setSystemTime(new Date("2026-11-16T11:45:00Z"));
+    expect(await sign(fixture, { token, parts })).toEqual({
+      status: 410,
+      body: {
+        error: {
+          code: "UPLOAD_EXPIRED",
+          message: "This upload expired. Start it again to upload the file.",
+          retryable: false,
+        },
+      },
+    });
   });
 
   const rule = "Ask for 1 to 20 different part numbers, each from 1 to 3.";
@@ -126,11 +147,11 @@ describe("POST /sign: single PUT", () => {
     };
     const fixture = serverFixture({ files }, { storage: late });
     const ticket = await fixture.single("files", SMALL);
-    // The token expires at 2026-11-16T12:00:00Z; the server reads 11:59:50.999 and the driver 11:59:51.000.
-    vi.setSystemTime(new Date("2026-11-16T11:59:50.999Z"));
+    // URLs end by 11:45:00, 15 minutes before the token; the server reads 11:44:50.999 and the driver 11:44:51.000.
+    vi.setSystemTime(new Date("2026-11-16T11:44:50.999Z"));
     const url = new URL((await sign(fixture, { token: ticket.token })).body.put?.url ?? "");
     expect({ signedAt: url.searchParams.get("X-Amz-Date"), expiresIn: url.searchParams.get("X-Amz-Expires") }).toEqual({
-      signedAt: "20261116T115951Z",
+      signedAt: "20261116T114451Z",
       expiresIn: "9",
     });
   });
@@ -161,19 +182,20 @@ describe("POST /sign: tokens", () => {
     });
   });
 
-  // Verifying the token awaits the HMAC; a renewal sent in the token's last second can cross its deadline there.
+  // Verifying the token awaits the HMAC; a renewal sent in the last second of the token's signing time can cross its
+  // end there.
   it.for([
     { name: "a single PUT", kind: "single", file: SMALL, parts: undefined },
     { name: "a multipart upload", kind: "multipart", file: BIG, parts: [1] },
   ] as const)(
-    "answers 410 UPLOAD_EXPIRED when $name's deadline passes while the token is verified",
+    "answers 410 UPLOAD_EXPIRED when $name's signing time ends while the token is verified",
     async ({ kind, file, parts }) => {
       const fixture = serverFixture({ files }, { multipartThreshold: 16 * MiB });
       const { token } = await fixture[kind]("files", file);
-      vi.setSystemTime(new Date("2026-11-16T11:59:59Z"));
+      vi.setSystemTime(new Date("2026-11-16T11:44:59Z"));
       const hmac = crypto.subtle.sign.bind(crypto.subtle);
       vi.spyOn(crypto.subtle, "sign").mockImplementation((...args) => {
-        vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+        vi.setSystemTime(new Date("2026-11-16T11:45:00Z"));
         return hmac(...args);
       });
       const response = await fixture.post("sign", { token, parts });
