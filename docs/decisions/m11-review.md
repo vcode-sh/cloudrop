@@ -3043,3 +3043,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing: tests only.
 - **Status:** in force.
 - **Visible in:** the three test files named above.
+
+### M11-R263: the client, resume, React and Hono guides say what the code does, and every block of theirs compiles
+
+- **Decision:** `docs/guide/client.md` ("Cancel", "Close the client") says what a cancel does with an `/upload` in
+  flight (`M11-R261`) and that a resumed upload's `/abort` carries `keep` (`M11-R260`); `docs/guide/resume.md` ("The
+  server is asked first") says when a resumed upload sends `keep`, what ends it, and what it costs with and without a
+  store; `docs/guide/react.md` ("Resume after a reload") no longer says that Dismiss deletes what the upload sent
+  "unless a `/complete` may have finished it", which a resumed upload did not honour before `M11-R260`.
+  `docs/guide/hono.md`: the step 7 block imports the `API_ORIGIN` it uses, and step 10 names the row's Dismiss and its
+  Reload after `ACCOUNT_CHANGED` (`M11-R12`) beside Cancel and Retry.
+- **Why:** each sentence was wrong or silent about what the final review proved. The 34 `ts` and `tsx` blocks of the
+  four guides were then type-checked against the workspace: each block written out as one module, with the context
+  it assumes declared above it (a `createCloudrop` server with the routes `avatar`, `files` and `documents` for the
+  client, resume and React guides; the Hono example's own server type, schema and components for the Hono guide;
+  `declare` for the names a guide calls the app's own, such as `showError` and `getToken`), and `tsc --noEmit` run on
+  them in `examples/vite-react` (28 modules) and `examples/hono` (5, the step 6 routes inside step 5's
+  `createCloudrop`) against the built package. One block failed, the missing `API_ORIGIN`; a wrong route name, a
+  wrong field of a result and a wrong option of `api.sweep`, each put into a block on purpose, were all reported. The
+  blocks that show an example's code were read against `examples/hono/src`, `examples/vite-react/src` and
+  `examples/next/components/upload`: none had drifted.
+- **If wrong:** the harness was a scratch script and is not in the repository: a later change to a guide block is
+  checked by nothing until someone repeats it. BullMQ, which step 8 of the Hono guide uses, is no dependency of the
+  workspace, so its two constructors were declared by hand and only `uploads.api.sweep` was checked there.
+- **Status:** in force.
+- **Visible in:** `docs/guide/client.md`, `docs/guide/resume.md`, `docs/guide/react.md`, `docs/guide/hono.md`.

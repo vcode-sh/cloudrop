@@ -166,6 +166,7 @@ import { createCloudropClient } from "cloudrop/client";
 import { createUploadHooks } from "cloudrop/react";
 import { createContext, useContext } from "react";
 import type { Uploads as Server } from "@app/uploads"; // types only
+import { API_ORIGIN } from "./api"; // the API's origin, such as "https://api.example.com"
 
 function createUploads(userId: string) {
   // account: what the routes' owner returns for this user ("" signed out); the server compares the two at /upload.
@@ -287,8 +288,9 @@ its `status`:
 | `uploading` | `uploading` | percent of the size, with a progress bar |
 | `completing` | `processing` | the server verifies the object and runs `onComplete` |
 | `done` | `done` | the size |
-| `failed` | `error` | `file.error.code` and `file.error.message`, with Retry |
+| `failed` | `error` | `file.error.code` and `file.error.message`, with Retry (Reload after `ACCOUNT_CHANGED`) and Dismiss |
 | `aborted` | `idle` | "Cancelled" |
 
-`examples/vite-react/src/components/upload-row.tsx` is that mapping, with Cancel while the file runs and Retry once it
-failed.
+`examples/vite-react/src/components/upload-row.tsx` is that mapping, with Cancel while the file runs. Once a file
+failed it has Retry, or Reload after `ACCOUNT_CHANGED`, which a retry would only meet again, and Dismiss: the file's
+`abort()`, which ends it `aborted`, after which Clear finished removes it.
