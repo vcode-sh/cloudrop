@@ -31,7 +31,8 @@ At `/upload`, before anything is signed, a request with a file **sent as** one o
 
 1. **A web page, a program or a script.** `text/html`, `application/xhtml+xml`, the program types (such as
    `application/x-msdownload`), every JavaScript type WHATWG lists (`text/javascript`, `text/x-javascript`,
-   `text/jscript` and the rest) and the shell script types. Also `unknown/unknown` and `application/unknown`, which a
+   `text/jscript` and the rest), the shell script types and `text/vbscript`, and Windows installers
+   (`application/x-msi`) and HTML applications (`application/hta`). Also `unknown/unknown` and `application/unknown`, which a
    browser sniffs and may render as a page. `allow` lets a type through.
 2. **An XML type the route does not name.** A browser renders XML, and runs the scripts an SVG or an XHTML element in
    it carries. `text/xml`, `application/xml`, `text/xsl` and every `+xml` type, `image/svg+xml` among them, pass only
@@ -42,11 +43,13 @@ A refusal at `/upload` refuses the whole request, as any `beforeUpload` refusal 
 
 At `/complete`, a file whose **first bytes show**:
 
-3. **A web page, a program, a script, or XML the route does not name**, whatever the file was sent as.
+3. **A web page, a program, a script, or XML the route does not name**, whatever the file was sent as. The declared
+   type is judged again here, for an upload signed before the plugin was installed or its lists changed.
 4. **A type that contradicts the declared type.** A JPEG sent as `image/png`, a PDF sent as `text/plain`, a ZIP sent as
    an image. A content type agrees with its common aliases: `audio/x-wav` with a WAV, `image/heif` with a HEIC, a
    Word template or a macro-enabled document with a Word file. A ZIP whose entries do not say what it is agrees with
-   any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF).
+   any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF); a ZIP sent as
+   `application/pdf` passes for the same reason, while one sent as an image or a font does not.
 5. **For a file the browser could not type, a type the route does not accept.** Such a file is sent as
    `application/octet-stream`, which is not a contradiction; the content's own type must then be in `accept`.
 
@@ -56,7 +59,9 @@ JavaScript has none either: a script is refused by its declared type, or by a `#
 
 ### What happens to a refused file
 
-The refusal is an `afterVerify` refusal, handled like any other (see [Plugin hooks](server.md#plugin-hooks)):
+A refusal at `/upload` signs and stores nothing; only the plugins listed before `contentChecks()` hear `onAbort`, for
+what their own `beforeUpload` reserved. A refusal at `/complete` is an `afterVerify` refusal, handled like any other
+(see [Plugin hooks](server.md#plugin-hooks)):
 
 - The client gets `FILE_TYPE_NOT_ALLOWED` (400, not retryable) with a message for the person, such as "This file is a
   JPEG image, but it was sent as image/png. Give it the right extension, or pick another file." or "This file is a
@@ -114,7 +119,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
 | Script | `text/x-shellscript` | `#!` | `execve(2)` |
 | SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg` | SVG 2 |
-| Web page | `text/html` | a tag such as `<html`, `<script`, `<div`, `<p`, `<!DOCTYPE html` or `<!--` at the start, or one of those tags as the root element | WHATWG §7.1 |
+| Web page | `text/html` | a tag such as `<html`, `<script`, `<div`, `<p`, `<!DOCTYPE html` or `<!--` at the start, an `html` root, or one of those tags as the root after a comment or doctype in a document without `<?xml` | WHATWG §7.1 |
 | XML | `application/xml` | `<?xml` | WHATWG §7.1 |
 
 Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitespace, as a browser reads it.

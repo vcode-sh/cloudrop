@@ -11,8 +11,8 @@ Entries continue from 1.
   Matroska), ZIP and the packages inside it (Office Open XML by an entry under `word/`, `xl/` or `ppt/`, OpenDocument
   and EPUB by their first `mimetype` entry), Windows, Linux and macOS programs (`MZ`, ELF, Mach-O and universal
   binaries), a `#!` line, and as text after a UTF-8 or UTF-16 byte order mark and leading whitespace: SVG (an `svg`
-  root element after the prolog), HTML (WHATWG's tags at the start, or one of them as the root element) and XML
-  (`<?xml`). Each row cites its specification in `src/plugins/sniff*.ts`; the table with sources is in
+  root element after the prolog), HTML (WHATWG's tags at the start, an `html` root, or one of the tags as the
+  unprefixed root of a document without an XML declaration) and XML (`<?xml`). Each row cites its specification in `src/plugins/sniff*.ts`; the table with sources is in
   [Plugins](../guide/plugins.md#what-it-recognises). A detection carries the declared types it agrees with: aliases;
   each Office application's own Open XML and Microsoft types (templates, slide shows, macro-enabled files); any
   `application/` or `model/` type for a ZIP whose entries name no package; `+xml` types for XML.
@@ -22,7 +22,8 @@ Entries continue from 1.
   brand is known (a camera's raw file compatible with `isom` is not a video); an MPEG audio header is not read after
   a byte order mark (UTF-16LE text starting with `h` forms a valid one); the root element is read before the HTML
   tags, so an SVG that opens with a generator's comment is an SVG; a ZIP is the container of many formats (APK, JAR,
-  Visio, 3MF), so an unnamed one contradicts only image, audio, video and text types. XML namespaces are not read: a
+  Visio, 3MF), so an unnamed one contradicts every type outside `application/` and `model/` (a ZIP sent as `application/pdf`
+  passes; one sent as an image or a font does not). XML namespaces are not read: a
   character reference spells one as well as the URI does, so a check of them would promise what it cannot keep
   (M10-K9). The HTML tag must end in whitespace, `>` or `/`, a little wider than WHATWG's space or `>`: a parser reads
   those the same.
@@ -35,8 +36,8 @@ Entries continue from 1.
 ### M10-K2: the declared type at `/upload`, the content at `/complete`
 
 - **Decision:** a `beforeUpload` hook refuses a request when a file in it was sent as a type M10-K3 refuses, before
-  anything is signed. An `afterVerify` hook then judges the content, first match wins: (1) the detected type is one
-  M10-K3 refuses; (2) it contradicts a declared type other than `application/octet-stream`; (3) the declared type is
+  anything is signed. An `afterVerify` hook then judges, first match wins: (0) the declared type again, for a token
+  signed before the plugin or its lists changed (tokens live 24 hours); (1) the detected type is one M10-K3 refuses; (2) it contradicts a declared type other than `application/octet-stream`; (3) the declared type is
   `application/octet-stream` and no type the content agrees with is in `accept`. Content that matches no signature
   passes as its declared type.
 - **Why:** checking only at `/complete` signed a `PUT` for a file sent as `text/html`; a page that never called
@@ -56,9 +57,12 @@ Entries continue from 1.
 - **Decision:** refused whatever the route accepts: `text/html`, `application/xhtml+xml`, WHATWG's unknown types
   (`unknown/unknown`, `application/unknown`), the program types (`application/vnd.microsoft.portable-executable`,
   `application/x-msdownload`, `application/x-msdos-program`, `application/x-dosexec`, `application/x-executable`,
-  `application/x-elf`, `application/x-sharedlib`, `application/x-mach-binary`, `application/x-mach-o-executable`),
-  every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, and the shell script types (`text/x-shellscript`,
-  `application/x-sh`, `application/x-shellscript`, `text/x-sh`). Every XML type (`text/xml`, `application/xml`,
+  `application/x-elf`, `application/x-sharedlib`, `application/x-mach-binary`, `application/x-mach-o-executable`,
+  and the Windows installer and HTML application types `application/x-msi`, `application/x-ms-installer`,
+  `application/hta`),
+  every JavaScript MIME type essence of WHATWG MIME Sniffing §4.6, the shell script types (`text/x-shellscript`,
+  `application/x-sh`, `application/x-shellscript`, `text/x-sh`) and `text/vbscript`. A Windows installer's content
+  (an OLE compound file) is not detected: Word and Excel files before 2007 share that container. Every XML type (`text/xml`, `application/xml`,
   `text/xsl` and any `+xml`, SVG among them) passes only when the file was sent as an XML type that the route's
   `accept` lists exactly. `allow` lifts these refusals per type; `deny` adds to them and wins over `allow`.
 - **Why:** the design names HTML, executables, scripts and SVG. The SVG rule is widened to every XML type because a
@@ -72,9 +76,10 @@ Entries continue from 1.
 
 ### M10-K4: a refusal is `FILE_TYPE_NOT_ALLOWED`; no new code
 
-- **Decision:** every refusal is `FILE_TYPE_NOT_ALLOWED` (400, not retryable) with one of three messages: at
+- **Decision:** every refusal is `FILE_TYPE_NOT_ALLOWED` (400, not retryable) with one of four messages: at
   `/upload`, "One of the files was sent as <type>, which this upload does not accept. Pick another file."; at
-  `/complete`, "This file is <what it is>, which this upload does not accept. Pick another file." or "This file is
+  `/complete`, "This file was sent as <type>, which …" (a token signed before the plugin), "This file is <what it
+  is>, which this upload does not accept. Pick another file." or "This file is
   <what it is>, but it was sent as <declared type>. Give it the right extension, or pick another file." What it is comes
   from the detection table ("a JPEG image", "a program"); the declared type is the normalized MIME type `/upload`
   signed. A failure to read the bucket throws, which the handler answers as the retryable `SERVER_ERROR` it gives any
@@ -82,7 +87,8 @@ Entries continue from 1.
 - **Why:** the code already means "this file's type is not allowed here" at `/upload`, which is what the person must
   hear; an app showing it needs no new branch. `VERIFICATION_FAILED` means the stored size or type differs from the
   token, which is not this case. A message names what the file was sent as when only that is known, and what the bytes
-  show when they decide. The client drops a non-retryable failure and asks `/upload` for a new ticket on `retry()`, so
+  show when they decide. It never names the file: the name is the client's text, which messages do not echo
+  (`accept.ts` echoes an extension only when it is plain), and the page that sent the request knows its files. The client drops a non-retryable failure and asks `/upload` for a new ticket on `retry()`, so
   no client change is needed. A read failure says nothing about the file, so it must not refuse it.
 - **If wrong:** an app that must tell a refusal at `/upload` from one at `/complete` reads the endpoint from where the
   error surfaced; a code of its own would be a new public code.
