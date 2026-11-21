@@ -17,14 +17,16 @@ describe("toSafeInteger", () => {
   });
 
   test.each([
-    { name: "decimal text past 2^53", value: "9007199254740993" },
-    { name: "a bigint past 2^53", value: 9007199254740992n },
-    { name: "a fraction", value: 1.5 },
-    { name: "fractional text", value: "1.5" },
-    { name: "a decimal-like fraction", value: { toString: () => "2.50" } },
-    { name: "null", value: null },
-  ])("refuses $name, naming the column", ({ value }) => {
-    expect(() => toSafeInteger(value, "reserved_bytes")).toThrow(/reserved_bytes; expected a whole number up to 2\^53/);
+    { name: "decimal text past 2^53", value: "9007199254740993", returned: '"9007199254740993"' },
+    { name: "a bigint past 2^53", value: 9007199254740992n, returned: "bigint 9007199254740992" },
+    { name: "a fraction", value: 1.5, returned: "number 1.5" },
+    { name: "fractional text", value: "1.5", returned: '"1.5"' },
+    { name: "a decimal-like fraction", value: { toString: () => "2.50" }, returned: "object 2.50" },
+    { name: "null", value: null, returned: "object null" },
+  ])("refuses $name, naming the value and the column", ({ value, returned }) => {
+    expect(() => toSafeInteger(value, "reserved_bytes")).toThrow(
+      new Error(`The database returned ${returned} for reserved_bytes; expected a whole number up to 2^53.`),
+    );
   });
 });
 
@@ -41,6 +43,8 @@ describe("toDate", () => {
   });
 
   test("refuses text that is not a time", () => {
-    expect(() => toDate("yesterday", "created_at")).toThrow(/created_at; expected a time/);
+    expect(() => toDate("yesterday", "created_at")).toThrow(
+      new Error('The database returned "yesterday" for created_at; expected a time.'),
+    );
   });
 });

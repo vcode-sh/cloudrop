@@ -16,14 +16,27 @@ const executor = (dialect: string): SqlExecutor =>
 
 const NO_SQLITE_SCHEMA = "SQLite has no schemas: remove schema from { tables }.";
 
+const NAME_RULE = 'is not allowed. Use letters, digits and "_", not starting with a digit:';
+
 test.each([
-  { name: "a quote", tables: { files: 'files"; DROP TABLE x; --' } },
-  { name: "a leading digit", tables: { usage: "1usage" } },
-  { name: "an empty name", tables: { files: "" } },
-])("a table name with $name is refused with INVALID_CONFIG naming the option", ({ tables }) => {
-  const option = Object.keys(tables)[0];
+  {
+    name: "a quote",
+    tables: { files: 'files"; DROP TABLE x; --' },
+    message: `The files table name "files\\"; DROP TABLE x; --" ${NAME_RULE} { tables: { files: "..." } }.`,
+  },
+  {
+    name: "a leading digit",
+    tables: { usage: "1usage" },
+    message: `The usage table name "1usage" ${NAME_RULE} { tables: { usage: "..." } }.`,
+  },
+  {
+    name: "an empty name",
+    tables: { files: "" },
+    message: `The files table name "" ${NAME_RULE} { tables: { files: "..." } }.`,
+  },
+])("a table name with $name is refused with INVALID_CONFIG naming the option", ({ tables, message }) => {
   expect(() => sqlStore(executor("postgres"), { tables })).toThrow(
-    expect.objectContaining({ code: "INVALID_CONFIG", message: expect.stringContaining(`{ tables: { ${option}`) }),
+    expect.objectContaining({ code: "INVALID_CONFIG", message }),
   );
 });
 
@@ -46,7 +59,10 @@ test("a schema is refused on SQLite, which has no schemas", () => {
 
 test("an executor of another dialect is refused with INVALID_CONFIG", () => {
   expect(() => sqlStore(executor("mysql"))).toThrow(
-    expect.objectContaining({ code: "INVALID_CONFIG", message: expect.stringContaining('"mysql"') }),
+    expect.objectContaining({
+      code: "INVALID_CONFIG",
+      message: 'The executor\'s dialect "mysql" is not supported. Use "postgres" or "sqlite".',
+    }),
   );
 });
 

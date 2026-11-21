@@ -128,7 +128,11 @@ describe("cloudropPgTables and cloudropSqliteTables", () => {
     { name: "cloudropPgTables", tables: () => cloudropPgTables({ tables: { files: "my files" } }) },
     { name: "cloudropSqliteTables", tables: () => cloudropSqliteTables({ tables: { files: "my files" } }) },
   ])("$name refuses a table name the store would refuse, naming the option", ({ tables }) => {
-    expect(tables).toThrow(invalidConfig(expect.stringContaining("The files table name")));
+    expect(tables).toThrow(
+      invalidConfig(
+        'The files table name "my files" is not allowed. Use letters, digits and "_", not starting with a digit: { tables: { files: "..." } }.',
+      ),
+    );
   });
 
   test('cloudropPgTables puts the tables in "public" when tables.schema says so, as the store qualifies them', () => {
