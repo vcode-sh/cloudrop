@@ -45,4 +45,11 @@ describe("parseEnvFile", () => {
       LAST: "2",
     });
   });
+
+  it("consumes a multi-line value under a name with dots or hyphens, so its lines set no variable", () => {
+    expect(parseEnvFile('my.key="line1\nCLOUDROP_SECRET=inside\nend"\nAFTER=1')).toEqual({
+      "my.key": "line1\nCLOUDROP_SECRET=inside\nend",
+      AFTER: "1",
+    });
+  });
 });

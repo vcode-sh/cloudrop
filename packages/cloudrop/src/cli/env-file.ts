@@ -3,7 +3,9 @@
 // several lines up to its closing quote; `\n` in double quotes is a line break, and a quote never closed is kept as
 // written (both measured on Node 24.22). In an unquoted value, `#` starts a comment. Nothing is expanded or run.
 
-const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/;
+// Any name Node accepts (such as my.key or 1-x), so a multi-line value under it is consumed whole and none of its lines
+// reads as a variable of its own. A line starting with # is a comment.
+const LINE = /^\s*(?:export\s+)?([^\s=#][^\s=]*)\s*=\s*(.*?)\s*$/;
 const QUOTES = new Set(['"', "'", "`"]);
 
 /** The quoted value that starts in `raw` on line `start`, and the last line it uses. */
