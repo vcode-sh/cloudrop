@@ -179,9 +179,11 @@ describe("Postgres lock order", () => {
         })
         .catch(() => undefined);
     });
+    // Once the completion holds f-0: a revoke sent before could end both rows first and wait for nothing.
+    const pid = await claimed;
     const revoking = store.revoke("u-1", NOW);
     try {
-      await untilOneWaits(db, BLOCKED_BY, [await claimed], "The revoke never waited for the completion.");
+      await untilOneWaits(db, BLOCKED_BY, [pid], "The revoke never waited for the completion.");
       // The file nobody held is ended already; the sign-out waits only for the one being completed.
       expect((await store.get("f-1"))?.status).toBe("aborted");
     } finally {
