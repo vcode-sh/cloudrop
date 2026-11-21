@@ -414,10 +414,16 @@ breaks an app that has not migrated yet, and an app that never calls `api.allFil
   ```
 
 - **Drizzle:** `cloudropPgTables()` and `cloudropSqliteTables()` declare the index, so `drizzle-kit generate` writes
-  the migration, with no question to answer:
+  the migration, with no question to answer. For the Postgres tables:
 
   ```sql
   CREATE INDEX "cloudrop_files_created_at_idx" ON "cloudrop_files" ("created_at");
+  ```
+
+  For the SQLite tables, D1's included:
+
+  ```sql
+  CREATE INDEX `cloudrop_files_created_at_idx` ON `cloudrop_files` (`created_at`);
   ```
 
 - **Prisma:** add `@@index([createdAt])` to your `CloudropFile` model, as the shipped models have it, and

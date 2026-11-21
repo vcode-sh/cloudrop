@@ -1978,3 +1978,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md#upgrading-from-05`, `docs/guide/store.md#upgrading-from-01`.
 
+### M11-R194: the guide shows Drizzle's upgrade statement for the SQLite tables too
+
+- **Decision:** The Drizzle bullet of "Upgrading from 0.5" shows both statements `drizzle-kit generate` writes: the
+  double-quoted one for `cloudropPgTables()` and, for `cloudropSqliteTables()`, ``CREATE INDEX
+  `cloudrop_files_created_at_idx` ON `cloudrop_files` (`created_at`);``.
+- **Why:** the bullet named both table sets and showed only the Postgres statement, which `M11-L8` had read from the
+  Hono example's migration. Generated with drizzle-kit 1.0.0-rc.5 from `cloudropSqliteTables()`, the SQLite
+  migration quotes with backticks; a reader comparing their migration with the guide would see a difference that is
+  none.
+- **If wrong:** none; SQLite accepts either quoting, and the index is the same.
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md#upgrading-from-05`.
+
