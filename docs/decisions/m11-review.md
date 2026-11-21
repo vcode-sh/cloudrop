@@ -409,6 +409,24 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/server/schema.ts`, `src/server/upload-metadata.test.ts`, `src/server/handler-failures.test.ts`,
   `docs/guide/server.md`, `docs/guide/errors.md`.
 
+### M11-R43: a hook's `request` has its body read, and the guide and JSDoc say what to read instead
+
+- **Decision:** The handler keeps reading the body once and passing the same `Request` on. The guide's new section
+  "The request's body is already read" and the JSDoc of `request` in `AuthorizeContext` (which `owner`, `prefix` and
+  `key` share), `CompleteContext` (`onComplete`, `afterComplete`), `BeforeUploadContext`, `AfterVerifyContext` and
+  `DeleteContext` say that `request.json()` and `request.text()` throw and that headers, `url`, the validated `metadata`
+  and `file` are what a hook reads. The context types moved to `src/server/route-context.ts`, because `route.ts` had
+  three lines left under its cap.
+- **Why:** the guide called `request` "a standard `Request`", and `authorize: async ({ request }) => request.json()`
+  answered `500` with `Body is unusable`. Handing hooks a second `Request` with the bytes would let `authorize` read a
+  body the server has not validated, beside `metadata`, which it has, and would copy up to 64 KiB per request for it.
+- **If wrong:** an app that needs the raw body in a hook cannot have it; it sends the value as `metadata`.
+  `docs/guide/store.md` describes `onDelete`'s `request` and was another agent's to edit in this round: it does not
+  repeat the sentence yet.
+- **Status:** in force.
+- **Visible in:** `src/server/route-context.ts`, `src/server/plugins.ts`, `src/server/delete-context.ts`,
+  `src/server/upload-authorize.test.ts`, `docs/guide/server.md#the-requests-body-is-already-read`.
+
 ### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
 
 - **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC

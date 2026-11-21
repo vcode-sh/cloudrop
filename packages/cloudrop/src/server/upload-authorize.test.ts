@@ -44,6 +44,21 @@ describe("POST /upload: authorization comes first", () => {
     });
   });
 
+  // The guide and the hooks' JSDoc say so (M11-R43): a hook reads the request's headers and url, never its body.
+  it("gives authorize the request with its headers and url, and its body already read", async () => {
+    const seen: unknown[] = [];
+    const reading = route({
+      accept: "*/*",
+      maxSize: "1GB",
+      authorize: ({ request }) => {
+        seen.push({ user: request.headers.get("x-user"), url: request.url, bodyUsed: request.bodyUsed });
+        return {};
+      },
+    });
+    await upload(serverFixture({ files: reading }), { route: "files", files: [png()] });
+    expect(seen).toEqual([{ user: "42", url: "https://app.example.com/api/cloudrop/upload", bodyUsed: true }]);
+  });
+
   // The authorize result rides in every token, which the browser can read: it must be a small JSON object.
   it.for<{ name: string; auth: unknown; log: string }>([
     {

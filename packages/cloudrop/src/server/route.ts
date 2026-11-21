@@ -1,7 +1,15 @@
 import { CloudropError, configError } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
-import type { Jsonified, UploadedFile } from "../protocol/types.ts";
+import type { UploadedFile } from "../protocol/types.ts";
 import type { DeleteContext } from "./delete-context.ts";
+import type {
+  AfterCompleteContext,
+  AuthorizeContext,
+  CompleteContext,
+  CompleteData,
+  KeyContext,
+  OwnerContext,
+} from "./route-context.ts";
 import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
 import type { RouteFunction } from "./store-route.ts";
@@ -56,38 +64,6 @@ export function refusalError(refusal: Refusal): CloudropError {
 export function allowAnyone(): object {
   return {};
 }
-
-/** Names cloudrop puts into every route context; an authorize result's own fields with these names are replaced. */
-type ReservedName = "request" | "metadata" | "file";
-
-export interface AuthorizeContext<TMetadata> {
-  request: Request;
-  metadata: TMetadata;
-}
-
-/** `owner` sees the live authorize result inside `/upload`, once for all of its files. */
-export type OwnerContext<TAuth, TMetadata> = Omit<TAuth, ReservedName> & { request: Request; metadata: TMetadata };
-
-/** `prefix` and `key` see the live authorize result; this runs inside `/upload`, once per file. */
-export type KeyContext<TAuth, TMetadata> = OwnerContext<TAuth, TMetadata> & {
-  file: { id: string; name: string; size: number; type: string; ext: string };
-};
-
-/** `onComplete` runs inside `/complete`, so it sees what the token carried: the JSON form of each value. */
-export type CompleteContext<TAuth, TMetadata> = Omit<Jsonified<TAuth>, ReservedName> & {
-  request: Request;
-  file: UploadedFile;
-  /** undefined on a route without a schema, and possibly undefined when the schema's output can be. */
-  metadata: Jsonified<TMetadata> | (undefined extends TMetadata ? undefined : never);
-};
-
-/** What `/complete` sends as `data`: the JSON form of the result, and null where `onComplete` gave undefined or nothing. */
-export type CompleteData<TResult> = Jsonified<TResult> | (undefined extends TResult ? null : never);
-
-/** `afterComplete` sees what `onComplete` sees, plus the `data` the client was sent. */
-export type AfterCompleteContext<TAuth, TMetadata, TResult> = CompleteContext<TAuth, TMetadata> & {
-  data: CompleteData<Awaited<TResult>>;
-};
 
 /** A store's extra context (an adapter's `tx`) replaces an authorize field of the same name. */
 type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : Omit<TContext, keyof TExtra> & TExtra;

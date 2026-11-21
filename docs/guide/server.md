@@ -198,6 +198,9 @@ const attachment = route(
 `key`, the `file` (`id`, `name`, `size`, `type`, `ext`). `onComplete` receives the stored `file` (`id`, `key`, `name`,
 `size`, `type`, and `url`, the public URL on a public route or `null`).
 
+In every callback and plugin hook, `request` is for its headers and `url`:
+[its body is already read](#the-requests-body-is-already-read).
+
 ### Keys
 
 The server chooses every key; the client's file name never reaches it. The name appears only in the stored
@@ -256,8 +259,9 @@ authorize: async ({ request }) => {
 
 ### Read the session
 
-`request` is a standard `Request`, whatever framework mounts the handler. With
-[better-auth](https://www.better-auth.com), pass its headers to `getSession`:
+`request` is a standard `Request`, whatever framework mounts the handler, with its body already read (see
+[below](#the-requests-body-is-already-read)). With [better-auth](https://www.better-auth.com), pass its headers to
+`getSession`:
 
 ```ts
 import { route, unauthorized } from "cloudrop";
@@ -297,6 +301,23 @@ authorize: async ({ request }) => {
 
 An app that sends a bearer token instead of a cookie reads `request.headers.get("authorization")`; the client side is in
 [Client](client.md#send-a-bearer-token).
+
+### The request's body is already read
+
+The handler reads and parses the body before any of your code runs, and a `Request` body can be read once. So in
+`authorize`, `owner`, `prefix`, `key`, `onComplete`, `afterComplete`, the plugin hooks `beforeUpload` and `afterVerify`,
+and `onDelete` (which gets a `request` only for a replacement), `request.json()`, `request.text()` and
+`request.formData()` throw (on Node: `Body is unusable`). The hook fails with it: from `authorize`, the upload answers
+`SERVER_ERROR` (HTTP 500).
+
+Read these instead:
+
+- `request.headers`: cookies, `authorization`, anything the client's [`headers` option](client.md#send-a-bearer-token)
+  sends;
+- `request.url`: the URL the handler was called at;
+- `metadata`: what the page sent with the upload, validated by the route's schema. It is the one channel for the
+  page's own data, so declare a `metadata` schema for anything `authorize` needs beyond the session;
+- `file`, in `prefix`, `key`, `onComplete` and the plugin hooks.
 
 ## The upload token and what it allows
 

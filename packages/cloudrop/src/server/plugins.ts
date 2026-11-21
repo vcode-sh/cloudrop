@@ -16,6 +16,7 @@ export interface PluginFile {
 }
 
 export interface BeforeUploadContext {
+  /** The `/upload` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
   route: string;
   /** The route's `accept`, which every file in `files` has passed: ["image/*", "application/pdf"]. */
@@ -26,6 +27,7 @@ export interface BeforeUploadContext {
 }
 
 export interface AfterVerifyContext {
+  /** The `/complete` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
   route: string;
   /** The route's `accept`, as the server checked the declared type against it: ["image/*", "application/pdf"]. */

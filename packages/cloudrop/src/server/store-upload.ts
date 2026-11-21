@@ -4,7 +4,7 @@
 import { CloudropError, fail, ok, quotaExceeded, type Result } from "../errors.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import { abortContexts, type PluginFile, runOnAbort } from "./plugins.ts";
-import type { OwnerContext } from "./route.ts";
+import type { OwnerContext } from "./route-context.ts";
 import type { CloudropStore } from "./store.ts";
 import { cancelled, storeCall } from "./store-calls.ts";
 import type { UploadTokenPayload } from "./token.ts";

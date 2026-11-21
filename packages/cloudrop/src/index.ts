@@ -31,13 +31,8 @@ export type {
   ServerHooks,
 } from "./server/plugins.ts";
 export {
-  type AfterCompleteContext,
-  type AuthorizeContext,
   allowAnyone,
-  type CompleteContext,
   forbidden,
-  type KeyContext,
-  type OwnerContext,
   type Refusal,
   type Route,
   type RouteCallbacks,
@@ -46,6 +41,13 @@ export {
   route,
   unauthorized,
 } from "./server/route.ts";
+export type {
+  AfterCompleteContext,
+  AuthorizeContext,
+  CompleteContext,
+  KeyContext,
+  OwnerContext,
+} from "./server/route-context.ts";
 export type { StandardSchema } from "./server/schema.ts";
 export type { Size } from "./server/size.ts";
 export type {

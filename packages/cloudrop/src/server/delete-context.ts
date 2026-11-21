@@ -17,6 +17,9 @@ export interface DeleteContext {
    * row; undefined when it passed none, and for a replacement.
    */
   context: unknown;
-  /** The `/complete` request of the upload that replaces this file; only with `reason: "replaced"`. */
+  /**
+   * The `/complete` request of the upload that replaces this file, for its headers and `url`; only with
+   * `reason: "replaced"`. Its body is already read, so `request.json()` and `request.text()` throw.
+   */
   request?: Request;
 }
