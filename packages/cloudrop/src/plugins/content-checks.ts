@@ -29,6 +29,9 @@ const REFUSED: ReadonlySet<string> = new Set([
   "application/xhtml+xml",
   "unknown/unknown",
   "application/unknown",
+  // A browser navigated to it renders each body part by the part's own type, text/html among them (HTML Standard
+  // §7.5.5, Loading multipart/x-mixed-replace documents, and §17.2).
+  "multipart/x-mixed-replace",
   // Programs: the types the sniffer gives them (sniff.ts) and their common aliases.
   "application/vnd.microsoft.portable-executable",
   "application/x-msdownload",

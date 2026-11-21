@@ -56,6 +56,13 @@ describe("contentChecks at /upload: the declared type, before anything is signed
     // A browser sniffs a file of this type, and may render it as a web page (WHATWG MIME Sniffing §7).
     { name: "the unknown type", accept: "*/*", type: "unknown/unknown", expected: refused("unknown/unknown") },
     { name: "a Windows installer", accept: "*/*", type: "application/x-msi", expected: refused("application/x-msi") },
+    // Firefox renders each part of it by the part's own type, an HTML part as a web page.
+    {
+      name: "a multipart replacing stream",
+      accept: "*/*",
+      type: "multipart/x-mixed-replace",
+      expected: refused("multipart/x-mixed-replace"),
+    },
     { name: "a PDF", accept: "*/*", type: "application/pdf", expected: signed },
   ])("$name", async ({ accept, type, expected }) => {
     expect(await ask(accept, [{ name: "file", type }])).toEqual(expected);
