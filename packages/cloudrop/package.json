@@ -45,6 +45,10 @@
       "types": "./dist/react.d.ts",
       "default": "./dist/react.js"
     },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
     "./adapters/sql": {
       "types": "./dist/adapters/sql.d.ts",
       "default": "./dist/adapters/sql.js"

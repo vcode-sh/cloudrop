@@ -4,7 +4,7 @@
 
 import type { FetchLike } from "../storage/driver.ts";
 import type { Credentials } from "../storage/sigv4.ts";
-import type { Bytes, FakeBucket, FakeRequest } from "./fake-r2/bucket.ts";
+import type { Bytes, FakeBucket, FakeRequest, StoredObject } from "./fake-r2/bucket.ts";
 import { bucketConfig, copy } from "./fake-r2/copy.ts";
 import { abortUpload, completeUpload, createUpload, listParts, uploadPart } from "./fake-r2/multipart.ts";
 import { deleteObject, getObject, listObjects, putObject } from "./fake-r2/objects.ts";
@@ -24,7 +24,12 @@ export interface FakeR2Options {
 
 export interface FakeR2 {
   fetch: FetchLike;
+  /** Multipart uploads created and neither completed nor aborted. */
   pendingUploads(): number;
+  /** The object stored under `key`, as the bucket holds it: read it, never change it. */
+  object(key: string): StoredObject | undefined;
+  /** Every stored key, sorted. */
+  keys(): string[];
 }
 
 interface Route {
@@ -89,5 +94,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
   return {
     fetch: (input, init) => handle(new Request(input, init)),
     pendingUploads: () => bucket.uploads.size,
+    object: (key) => bucket.objects.get(key),
+    keys: () => [...bucket.objects.keys()].sort(),
   };
 }
