@@ -18,8 +18,9 @@ export const SVG: Uint8Array<ArrayBuffer> = bytes('<svg xmlns="http://www.w3.org
 export const TEXT: Uint8Array<ArrayBuffer> = bytes("hello");
 
 /**
- * The start of a 64-bit Windows program as Microsoft's linker writes it: the MS-DOS header (e_lfanew at 0x3C = 0x80),
- * the DOS stub that prints its message, then the PE signature and the AMD64 machine type (Microsoft PE Format).
+ * The start of a 64-bit Windows program as GNU ld and lld-link lay it out, without MSVC's Rich header: the MS-DOS
+ * header (e_lfanew at 0x3C = 0x80), the DOS stub that prints its message, then the PE signature and the AMD64 machine
+ * type (Microsoft PE Format).
  */
 export const PROGRAM: Uint8Array<ArrayBuffer> = bytes(
   "MZ",

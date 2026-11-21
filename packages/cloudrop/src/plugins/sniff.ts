@@ -59,17 +59,30 @@ function sniffId3(bytes: Uint8Array): Sniffed | null {
 }
 
 /**
- * A program that starts with an MS-DOS header. A Windows program is found as Windows' loader finds it (Microsoft PE
- * Format, "MS-DOS Stub" and "Signature"): e_lfanew, at 3C, gives the offset of "PE\0\0". A DOS program, or one whose
- * signature lies past the bytes read, by the header's own fields (The MS-DOS Encyclopedia, Article 4, the .EXE file
- * header): fewer than 512 bytes on the last 512-byte page, at least one page, and a header of at least two paragraphs
- * (its 28 bytes) that fits in those pages. Text cannot form such a header: the last-page count needs a byte 00 or 01.
+ * What e_lfanew leads to: Microsoft PE Format's "PE\0\0", and the "NE" of 16-bit Windows (Microsoft's Executable-File
+ * Header Format) and the "LE" and "LX" of OS/2 and Windows drivers (IBM's Linear eXecutable Module Format).
  */
-function sniffWindows(bytes: Uint8Array): Sniffed | null {
+const NEW_HEADERS = [ascii("PE\0\0"), ascii("NE"), ascii("LE"), ascii("LX")];
+
+/** Whether e_lfanew, `at`, leads to a header: one of NEW_HEADERS, or past the bytes read, room for one in the file. */
+function leadsToHeader(bytes: Uint8Array, at: number, size: number): boolean {
+  if (at + 4 > bytes.length) return at + 4 <= size;
+  return NEW_HEADERS.some((header) => startsWith(bytes, header, at));
+}
+
+/**
+ * A program that starts with an MS-DOS header. A Windows program is found as Windows' loader finds it (Microsoft PE
+ * Format, "MS-DOS Stub" and "Signature"), by "MZ" and e_lfanew, at 3C, the offset of its own header. Past the bytes
+ * read, the offset is taken when that header still fits in the file: text there reads as at least 09 09 09 09, so only
+ * a text file over 151 MB could. A DOS program by its header's own fields (The MS-DOS Encyclopedia, Article 4, the
+ * .EXE file header): fewer than 512 bytes on the last 512-byte page, and a header of at least two paragraphs (its 28
+ * bytes) that fits in the file's pages. Text cannot form one: the last-page count needs a byte 00 or 01.
+ */
+function sniffWindows(bytes: Uint8Array, size: number): Sniffed | null {
   if (bytes.length < 28 || !startsWith(bytes, ascii("MZ"))) return null;
-  if (bytes.length >= 64 && startsWith(bytes, ascii("PE\0\0"), uint32LE(bytes, 0x3c))) return WINDOWS;
+  if (bytes.length >= 64 && leadsToHeader(bytes, uint32LE(bytes, 0x3c), size)) return WINDOWS;
   const [lastPage, pages, paragraphs] = [uint16LE(bytes, 2), uint16LE(bytes, 4), uint16LE(bytes, 8)];
-  return lastPage < 512 && pages > 0 && paragraphs >= 2 && paragraphs * 16 <= pages * 512 ? WINDOWS : null;
+  return lastPage < 512 && paragraphs >= 2 && paragraphs * 16 <= pages * 512 ? WINDOWS : null;
 }
 
 /**
@@ -82,10 +95,10 @@ function sniffMp3([sync, flags = 0, rates = 0]: Uint8Array): Sniffed | null {
   return header && rates >> 4 !== 15 && ((rates >> 2) & 0x03) !== 3 ? MP3 : null;
 }
 
-/** The type the first bytes of a file show, or null when they show none this module knows. */
-export function sniff(bytes: Uint8Array): Sniffed | null {
+/** The type the first bytes of a file of `size` bytes show, or null when they show none this module knows. */
+export function sniff(bytes: Uint8Array, size: number = bytes.length): Sniffed | null {
   for (const [pattern, sniffed] of SIGNATURES) if (startsWith(bytes, pattern)) return sniffed;
-  const binary = sniffId3(bytes) ?? sniffWindows(bytes) ?? sniffContainer(bytes);
+  const binary = sniffId3(bytes) ?? sniffWindows(bytes, size) ?? sniffContainer(bytes);
   // FF FE is UTF-16's byte order mark, and text after it can read as an MPEG audio header: text is tried first.
   return binary ?? (hasBom(bytes) ? null : sniffMp3(bytes)) ?? sniffText(bytes);
 }

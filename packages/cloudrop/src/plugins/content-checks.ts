@@ -138,7 +138,7 @@ export function contentChecks(options?: ContentCheckOptions): CloudropPlugin {
         return refused && notAccepted(`One of the files was sent as ${refused.type}`);
       },
       async afterVerify({ file, accept, storage }) {
-        return checkContent(file.type, sniff(await firstBytes(storage, file)), accept, lists);
+        return checkContent(file.type, sniff(await firstBytes(storage, file), file.size), accept, lists);
       },
     },
   };

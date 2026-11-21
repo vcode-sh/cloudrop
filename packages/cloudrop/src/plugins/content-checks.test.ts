@@ -83,6 +83,44 @@ describe("contentChecks: the file's content against its declared type and the ro
       expected: passed,
     },
     {
+      // The type Linux desktops give a .pl file (freedesktop.org shared-mime-info).
+      name: "a Perl script sent as application/x-perl on a route that allows scripts",
+      input: {
+        accept: "application/x-perl",
+        file: { name: "a.pl", type: "application/x-perl" },
+        body: bytes("#!/usr/bin/perl\nprint 1;\n"),
+        options: { allow: ["text/x-shellscript"] },
+      },
+      expected: passed,
+    },
+    {
+      name: "an untyped shell script on a route that allows scripts and takes text/x-sh",
+      input: {
+        accept: ["text/x-sh", "application/octet-stream"],
+        file: { name: "run", type: "" },
+        body: bytes("#!/bin/sh\necho hi\n"),
+        options: { allow: ["text/x-shellscript"] },
+      },
+      expected: passed,
+    },
+    {
+      // Only the first 4 KiB is read; e_lfanew points past it, at a header the file is long enough to hold.
+      name: "a program whose PE header lies past the first 4 KiB, sent as a PDF",
+      input: {
+        accept: "*/*",
+        file: { name: "a.pdf", type: "application/pdf" },
+        body: bytes(
+          "MZ",
+          new Array(58).fill(0),
+          [0, 0x10, 0, 0],
+          new Array(0x1000 - 64).fill(0),
+          "PE\0\0",
+          [0x64, 0x86],
+        ),
+      },
+      expected: refused("This file is a program, which this upload does not accept. Pick another file."),
+    },
+    {
       // The browser could not type it, so nothing contradicts; the content's own type must be accepted.
       name: "an untyped PNG on a route that accepts only untyped files",
       input: { accept: "application/octet-stream", file: { name: "data", type: "" }, body: PNG },

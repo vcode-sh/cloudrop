@@ -7,8 +7,16 @@ import { ascii, kind, type Sniffed, startsWith } from "./bytes.ts";
 export const HTML: Sniffed = kind("text/html", "a web page (HTML)", "application/xhtml+xml");
 const SVG = kind("image/svg+xml", "an SVG image");
 const XML = kind("application/xml", "an XML document", "text/xml", "*+xml");
-/** A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type. */
-const SCRIPT = kind("text/x-shellscript", "a script", "application/x-sh", "application/x-shellscript", "text/*");
+/**
+ * A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type, and with
+ * the types freedesktop.org's shared-mime-info gives shell, Perl, Ruby and PHP scripts.
+ */
+const SCRIPT = kind(
+  "text/x-shellscript",
+  "a script",
+  ..."text/x-sh text/* application/x-sh application/x-shellscript".split(" "),
+  ..."application/x-perl application/x-ruby application/x-php".split(" "),
+);
 
 /**
  * WHATWG MIME Sniffing §7.1, the rules for identifying an unknown MIME type: these tags, in any case, after whitespace,
