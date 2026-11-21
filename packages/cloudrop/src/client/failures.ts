@@ -3,16 +3,6 @@
 
 import { CloudropError } from "../errors.ts";
 
-/** Failures that a new attempt with the same ticket cannot fix (ruling M3-U31), so neither can a resume (M4-F1). */
-export const NEEDS_NEW_TICKET: Set<string | undefined> = new Set([
-  "UPLOAD_EXPIRED",
-  "INVALID_TOKEN",
-  "UPLOAD_REJECTED",
-  "VERIFICATION_FAILED",
-  // The upload is gone and nothing of it was stored (M3-U74): its ticket can never finish it.
-  "NO_SUCH_UPLOAD",
-]);
-
 /** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
 export const withFile = (error: CloudropError, { id, file }: { id: string; file: File }): CloudropError =>
   // The spread copies the error's own fields (retryable, status, storageCode, parts, content), never its message or
@@ -73,20 +63,34 @@ export const serverUnreachable = (): CloudropError =>
     retryable: true,
   });
 
+// The errors of requests that never left the page. Kept beside the error rather than as a field of CloudropError, which
+// is public and would promise it.
+const unsent = new WeakSet<CloudropError>();
+
+/**
+ * False only when the client gave `error`'s request up before sending it; a request that was sent may have reached the
+ * server whatever came back. Only a /complete that left the page may have finished its file (M11-R82).
+ */
+export const wasSent = (error: CloudropError): boolean => !unsent.has(error);
+
+function notSent(message: string, cause: unknown): CloudropError {
+  const error = new CloudropError("NETWORK_ERROR", message, { retryable: true, cause });
+  unsent.add(error);
+  return error;
+}
+
 /** The headers option threw, rejected, gave what Headers refuses, or took longer than the request may (M8-L6). */
 export const headersFailed = (cause: unknown): CloudropError =>
-  new CloudropError(
-    "NETWORK_ERROR",
+  notSent(
     "The headers option gave no headers for a request to the upload server, so it was not sent. Check the function passed as headers, then try again.",
-    { retryable: true, cause },
+    cause,
   );
 
 /** The account option threw, rejected, gave what is not an account, or took longer than the request may (M10-A). */
 export const accountFailed = (cause: unknown): CloudropError =>
-  new CloudropError(
-    "NETWORK_ERROR",
+  notSent(
     "The account option gave no account for a request to the upload server, so it was not sent. Check the function passed as account, then try again.",
-    { retryable: true, cause },
+    cause,
   );
 
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers

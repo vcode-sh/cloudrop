@@ -2,11 +2,12 @@
 // /abort exactly when no /complete attempt may have finished it, so a definite failure leaves no object or open
 // multipart upload behind and a doubtful one never deletes a file that may be recorded; upload() answers the failure
 // without waiting for that /abort. Oracle: the objects and open uploads the fake bucket holds once the /abort the
-// fixture forwarded has settled, and the requests the fixture saw.
+// fixture forwarded has settled, and the requests the fixture saw. A /complete that never left the page (the headers
+// function failed) is no doubt (M11-R82): the stored file is removed, by upload() at once and by abort() after start().
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCloudropClient } from "../client.ts";
-import type { Result } from "../errors.ts";
+import { type ClientOptions, createCloudropClient } from "../client.ts";
+import type { CloudropError } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault, storageBusy, unfinished } from "../testing/client-fixture.ts";
@@ -19,7 +20,7 @@ const files = route({ accept: "application/octet-stream", maxSize: "100MB", auth
  * A client on the fake bucket. `fault` answers every request but /upload and /abort; /upload is forwarded and its key
  * kept, and /abort is forwarded and its settling kept in `aborted`, so a test can wait for the background /abort.
  */
-function setup(fault: Fault) {
+function setup(fault: Fault, options: ClientOptions = {}) {
   const seen = { key: "", aborted: Promise.resolve() };
   const fixture = clientFixture(
     { files },
@@ -38,12 +39,13 @@ function setup(fault: Fault) {
       },
     },
   );
-  return { fixture, seen, client: createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch }) };
+  const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, ...options });
+  return { fixture, seen, client };
 }
 
 const small = () => new File([offsetBytes(1000)], "small.bin", { type: "application/octet-stream" });
 const large = () => new File([offsetBytes(8 * MiB + 5)], "large.bin", { type: "application/octet-stream" });
-const errorOf = ({ error }: Result<unknown>) => ({ code: error?.code, retryable: error?.retryable });
+const errorOf = ({ error }: { error: CloudropError | null }) => ({ code: error?.code, retryable: error?.retryable });
 const sixCompletes = Array(6).fill("POST /complete");
 
 beforeEach(() => {
@@ -154,6 +156,51 @@ describe("upload, when it fails after /upload", () => {
     expect({ error: errorOf(result), last: fixture.requests.at(-1) }).toEqual({
       error: { code: "RATE_LIMITED", retryable: true },
       last: "POST /abort",
+    });
+  });
+});
+
+describe("a /complete that was never sent", () => {
+  /** A client whose headers function throws for the six /complete attempts, then works again for the /abort. */
+  function unsentCompletes() {
+    let failures = 6;
+    const setUp = setup(() => undefined, {
+      headers: () => {
+        if (setUp.fixture.requests.includes("PUT object") && failures-- > 0) throw new Error("No session token.");
+        return {};
+      },
+    });
+    return setUp;
+  }
+
+  it.each([
+    {
+      name: "upload() removes the stored file",
+      run: (client: ReturnType<typeof setup>["client"]) => client.upload("files", small()),
+    },
+    {
+      name: "abort() after start() removes the stored file",
+      run: async (client: ReturnType<typeof setup>["client"]) => {
+        const job = client.start("files", small());
+        const result = await job.done;
+        job.abort();
+        return result;
+      },
+    },
+  ])("$name", async ({ run }) => {
+    const { fixture, seen, client } = unsentCompletes();
+    const result = await run(client);
+    // Either /abort is sent in the background: wait until it left, then until the server answered it.
+    await vi.waitFor(() => expect(fixture.requests).toContain("POST /abort"));
+    await seen.aborted;
+    expect({
+      error: errorOf(result),
+      requests: fixture.requests,
+      head: (await fixture.server.storage.head(seen.key)).data,
+    }).toEqual({
+      error: { code: "NETWORK_ERROR", retryable: true },
+      requests: ["POST /upload", "PUT object", "POST /abort"],
+      head: null,
     });
   });
 });

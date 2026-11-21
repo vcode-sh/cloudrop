@@ -270,12 +270,22 @@ The one exception: a file after a `/complete` that may have succeeded is kept, n
 - `job.retry()` does that for every failed file and resolves with an `UploadResult` of the job's current outcomes once
   every file has settled. Its `data` is `null` when its `/upload` for every file was refused, as with `done`.
 - A retry reuses the file's ticket when it can, so the parts already stored in the bucket are not sent again and the
-  bytes stay counted.
-- It asks `/upload` for a new ticket when the old one expired or was given up, or when the failure was one a new attempt
-  with the same ticket cannot fix: `UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UPLOAD_REJECTED`, `VERIFICATION_FAILED`,
-  `NO_SUCH_UPLOAD`, or a file that never got a ticket. `job.retry()` asks for all of those files in one `/upload`. On a
-  new ticket the file starts again under a new key, and its `bytes` drop to 0.
-- When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload.
+  bytes stay counted. What the file failed with decides:
+
+  | The file failed with | `retry()` |
+  | --- | --- |
+  | A retryable error (`NETWORK_ERROR`, `RATE_LIMITED`, a retryable `STORAGE_ERROR` or `SERVER_ERROR`), or a refusal of the request and not of the upload (`INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `NOT_FOUND` and the handler's other refusals, a `SERVER_ERROR` or `STORAGE_ERROR` for good) | Same ticket: sends the parts not yet stored, then `/complete`. |
+  | `NOT_UPLOADED` or `PARTS_MISSING`: `/complete` found bytes missing that the bucket had acknowledged | Same ticket: sends those bytes again, then `/complete`. |
+  | Any other error: the ticket is over (`UPLOAD_EXPIRED`, `INVALID_TOKEN`, `UNKNOWN_ROUTE`, `NO_SUCH_UPLOAD`), the server ended the upload and removed what was stored (`VERIFICATION_FAILED`, `ALREADY_EXISTS`, `FILE_TYPE_NOT_ALLOWED` or another refusal at `/complete`), or the bucket refused the bytes (`UPLOAD_REJECTED`) | New ticket from `/upload`. |
+  | Nothing yet from the server: `/upload` refused the file, or never answered | New ticket from `/upload`. |
+
+- A ticket is also replaced when it expired, when it can no longer sign the parts still to send, and when the page gave
+  it up (`pagehide`). `job.retry()` asks for every file that needs a ticket in one `/upload`. On a new ticket the file
+  starts again under a new key, and its `bytes` drop to 0. A file refused for what it is, such as its type, is refused
+  again unless the server's rules changed: ask the person for another file instead.
+- When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload, whatever the
+  page's clock says about the ticket. Once the server has answered that the ticket is over, the next retry asks for a
+  new one.
 - `retry()` of a file that is still running waits for it to settle. Of a done or aborted file, it answers that outcome
   at once.
 - `job.done` keeps each file's first outcome, whatever a retry does later. The snapshot shows the current one.

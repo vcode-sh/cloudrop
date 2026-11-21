@@ -7,7 +7,7 @@
 import type { CloudropError } from "../errors.ts";
 import { counted, keptForResume } from "./close.ts";
 import { type Entry, held, settle, settled } from "./entry.ts";
-import { aborted, NEEDS_NEW_TICKET, withFile } from "./failures.ts";
+import { aborted, withFile } from "./failures.ts";
 import { letGo } from "./persist.ts";
 import { sendAndComplete, type Upload, type UploadContext } from "./upload.ts";
 
@@ -34,8 +34,9 @@ export function drop(context: UploadContext, upload: Upload): Promise<void> {
  */
 export function giveUp(context: UploadContext, upload: Upload): void {
   const { error } = upload.entry;
+  // A retryable failure never ends its ticket (retryStep, M11-R80), so it is all a resume needs.
   const resumable = upload.ticket.kind === "multipart" && context.records.enabled && error?.retryable;
-  if (!resumable || NEEDS_NEW_TICKET.has(error.code)) return void drop(context, upload);
+  if (!resumable) return void drop(context, upload);
   upload.dropped = true;
   upload.unlock();
 }

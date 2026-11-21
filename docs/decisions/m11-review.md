@@ -796,3 +796,93 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `scripts/check-package.sh`.
 
+### M11-R80: `retry()` follows one table of what each failure leaves of the ticket
+
+- **Decision:** `retryStep(error)` in `src/client/retry-step.ts` is the one place that says what a failure leaves of
+  its upload's ticket, and `retry()`, `giveUp` and `discard()` read it. It answers `resend` for `NOT_UPLOADED` and
+  `PARTS_MISSING`; `same` for every retryable error and for `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`,
+  `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND`, `SERVER_ERROR` and `STORAGE_ERROR`;
+  `new` for every other error, a code this client does not know included. It replaces the list `NEEDS_NEW_TICKET`
+  (`M3-U31`), whose default was the same ticket. `retry()` decides in this order: no ticket, or one the page gave up
+  (`M3-U33`): a new ticket. `new`: a new ticket. A `/complete` in doubt (`M3-U30`): `/complete` alone. A ticket that
+  expired, or cannot sign what is still to send (`M9-H3`): a new ticket. Otherwise the same ticket; for `resend`, the
+  parts the answer named are sent again first, and every part when it named none.
+
+  | Answer | From | What it leaves: object, multipart upload, row | `retry()` |
+  | --- | --- | --- | --- |
+  | Any refusal or no answer: `UNAUTHORIZED`, `FORBIDDEN`, `UNKNOWN_ROUTE`, `INVALID_METADATA`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `ACCOUNT_CHANGED`, `QUOTA_EXCEEDED`, `INVALID_INPUT`, `UPLOAD_EXPIRED` (the row was revoked meanwhile), `STORAGE_ERROR`, `RATE_LIMITED`, `SERVER_ERROR`, `NETWORK_ERROR`, the handler's refusals below | `/upload` | Nothing: the file has no ticket. What `/upload` reserved for a refused file it released. An answer lost on the way leaves rows and multipart uploads nobody holds, for the sweep and the lifecycle rule | new: `/upload` is asked again, since its answer depends on the session, the quota and the server's rules of that moment |
+  | `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND` | the handler, before it reads the token, at `/sign` and `/complete`; `INVALID_INPUT` also for a part list `/sign` refuses | Everything as it was | same: the request was turned away, not the upload; it passes once the proxy, `basePath` or `trustedOrigins` is fixed |
+  | `SERVER_ERROR`, retryable (a hook threw, the store failed, another request is completing, a setting is missing) or not (the handler caught a throw); an answer that is not cloudrop's | `/sign`, `/complete` | Everything as it was; after `/complete` the file may be complete | same; after `/complete`, `/complete` alone |
+  | `STORAGE_ERROR`, retryable or not; `RATE_LIMITED` | `/sign`, `/complete` | Everything as it was. A refusal whose delete failed keeps the object, and the next `/complete` discards it | same |
+  | `NETWORK_ERROR` | the client: no answer, or the `headers` function failed | Everything as it was; a `/complete` that left the page may have completed the file (`M11-R82`) | same; `/complete` alone when in doubt |
+  | `INVALID_TOKEN` | `/sign`, `/complete` | Everything as it was; the token is not this server's | new |
+  | `UPLOAD_EXPIRED` | `/sign` (expired, in its last 15 minutes, or its row is not pending), `/complete` (expired, or its row was ended or is gone) | Stateless: the object or parts stay. Store: the row is ended, or the sweep ends it | new |
+  | `UNKNOWN_ROUTE` | `/sign`, `/complete` | Everything as it was; a deploy removed the token's route | new, which `/upload` refuses while the job's route is gone |
+  | `NOT_UPLOADED` | `/complete`, single `PUT` | No object under the key; the row stays pending | resend: the `PUT`, then `/complete` |
+  | `PARTS_MISSING` | `/complete`, multipart | The upload is open; the row stays pending | resend: the named parts, then `/complete` (after the two repair rounds of `M3-S13`) |
+  | `VERIFICATION_FAILED` | `/complete` | The object is deleted, or is another writer's and kept; the row is `rejected` | new |
+  | `NO_SUCH_UPLOAD` | `/complete`; the bucket (`404 NoSuchUpload`, `M9-H4`) | The multipart upload is gone and no object of it is stored | new |
+  | `ALREADY_EXISTS` | `/complete`, multipart | The multipart upload is aborted; the row is `rejected` | new |
+  | `FILE_TYPE_NOT_ALLOWED` | `/complete` (`contentChecks()`, `M10-K4`) | The object is deleted; the row is `rejected` | new |
+  | Any other code, not retryable | `/complete`: a plugin's `afterVerify` refusal (the object is deleted, the row `rejected`) or a replacing route's `onDelete` refusal (`M11-D3`: the object and the pending row are kept) | As named | new |
+  | `UPLOAD_REJECTED` | the bucket: `403` for the signature or after a renewed link, `501`, any other `4xx` | Nothing of this `PUT`; earlier parts stay for the lifecycle rule (`M3-U55`) | new |
+  | `STORAGE_ERROR`, `RATE_LIMITED`, `NETWORK_ERROR` | the bucket: `5xx`, `408`, `400 RequestTimeout` (`M11-R88`); `429`, `503`; no readable answer | Parts that landed stay | same |
+  | `ABORTED`; a done file | a cancel | As the cancel left it | nothing: `retry()` answers the outcome as it is (`M3-U37`) |
+  | `INVALID_INPUT`, `CLIENT_CLOSED` | the client, for the arguments of `start()` or a closed client | The job has no files | nothing: `retry()` answers the refusal |
+  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `STORAGE_ERROR` | `resume()`'s checks | The record is as it was | the checks run again (`M3-U90`) |
+
+  `INVALID_CONFIG` is thrown, and `STORAGE_UNREACHABLE`, `STORAGE_DENIED`, `INVALID_PART` and `CHECKSUM_MISMATCH` never
+  leave the server (`storageFailure`); one a hook returns follows its `retryable`.
+- **Why:** two dead ends, both reproduced. After `contentChecks()` refused a file at `/complete` the server had deleted
+  the object, and `retry()` sent `/complete` with the old ticket for ever: `NOT_UPLOADED` without a store,
+  `UPLOAD_EXPIRED` with one, although `M10-K4` said a retry asks for a new ticket. After a proxy answered a single `PUT`
+  for the bucket, `/complete` answered `NOT_UPLOADED`, part 1 stayed counted as landed, and every `retry()` sent only
+  `/complete`. Both came from the same default: a code missing from a list kept the ticket. The default is now the
+  other way round, because a refusal for good that the client cannot place is most often the server ending the upload,
+  and then only a new ticket can store the file; the codes that leave the ticket good are few and named. A
+  `PARTS_MISSING` whose list a proxy dropped looped the same way and now sends every part.
+- **If wrong:** a replacing route whose `onDelete` refuses at `/complete` keeps the object and the pending row, and the
+  retry sends the file again under a new key instead of `/complete` alone; the first object and row go at the sweep. A
+  person who retries a file refused for its content sends it again to be refused again: the client cannot know whether
+  the server's rules changed, and `/upload`'s own refusals are asked again the same way. A stateless server keeps a
+  single-`PUT` object whose ticket was replaced (`M3-U55`).
+- **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on.
+- **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
+  `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
+  `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Retry").
+
+### M11-R81: a `/complete` in doubt ends with the server's word
+
+- **Decision:** an answer of `/complete` that says the ticket is over (`new` in `M11-R80`) outranks the doubt of an
+  earlier `/complete`: the next `retry()` asks `/upload` for a new ticket. `NOT_UPLOADED` clears the doubt, as
+  `PARTS_MISSING` and `NO_SUCH_UPLOAD` do, so that retry sends the file again and a cancel sends `/abort`. The first
+  retry after a doubt still sends `/complete` alone, whatever the clock says (`M3-U30`), and a cancel still sends no
+  `/abort` for a ticket whose doubt was never cleared.
+- **Why:** `M3-U30` accepted that a file in doubt whose ticket expired "can never be confirmed done by `retry()`", so
+  every later `retry()` sent a `/complete` that could only answer `UPLOAD_EXPIRED`. The same held for a doubt followed
+  by `NOT_UPLOADED`, `VERIFICATION_FAILED` or a content refusal. Once the server has answered, the old ticket can settle
+  nothing more, and the message already tells the person to start again; `retry()` now does that. With a store the
+  answer proves no completion was recorded: a completed row is replayed, also after expiry.
+- **If wrong:** without a store, a `/complete` that finished unheard, followed by an expiry and a retry, stores the
+  file twice and runs `onComplete` twice, as the person's own new upload would. `NOT_UPLOADED` after a completion that
+  finished unheard means the app deleted the object since; the retry stores it again under the same key.
+- **Status:** in force. Amends `M3-U30`'s "If wrong".
+- **Visible in:** `src/client/retry-file.ts` (`needsTicket`), `src/client/upload.ts` (`complete`),
+  `src/client/retry-dead-ends.test.ts`.
+
+### M11-R82: only a `/complete` that left the page may have finished the file
+
+- **Decision:** the errors of a request the client gave up before sending it (the `headers` or `account` function
+  threw, rejected, gave nothing usable or did not answer within the request's time) are marked as unsent
+  (`maySent` in `src/client/failures.ts`), and a `/complete` that failed that way leaves no doubt. Their code stays
+  `NETWORK_ERROR`, retryable.
+- **Why:** reproduced: with a `headers` function that failed for every `/complete`, `upload()` kept the stored object
+  for good and `abort()` after `start()` sent no `/abort`, because any `NETWORK_ERROR` of `/complete` counted as "may
+  have finished". Nothing was sent, so nothing can have finished. Every other failure of `send()` is built after
+  `fetch` was called and still counts: a browser does not say whether a failed request left. `account` runs for
+  `/upload` only, where no decision reads the mark.
+- **If wrong:** none known. A custom `fetch` that rejects before sending is still counted as sent, which keeps the file.
+- **Status:** in force.
+- **Visible in:** `src/client/failures.ts` (`maySent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
+  (`complete`), `src/client/upload-abort.test.ts`.
+

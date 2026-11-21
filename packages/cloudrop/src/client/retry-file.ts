@@ -1,42 +1,50 @@
-// retry() of a failed file (spec §4.7, rulings M3-U30, M3-U31, M3-U34, M3-U36, M3-U37): the same ticket when a new
+// retry() of a failed file (spec §4.7, rulings M3-U30, M3-U34, M3-U36, M3-U37, M11-R80): the same ticket when a new
 // attempt with it can succeed, so the parts that landed are not sent again; otherwise a new ticket from /upload, shared
 // by every file of one job.retry() that needs one.
 
 import type { CloudropError } from "../errors.ts";
 import type { Entry } from "./entry.ts";
-import { NEEDS_NEW_TICKET } from "./failures.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
+import { retryStep } from "./retry-step.ts";
 import type { FileOutcome } from "./types.ts";
 import { canSign } from "./upload.ts";
 
 /**
- * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): never when
- * a /complete may have finished the file, which only /complete with its ticket can tell; always without a ticket,
- * with one that expired, or can no longer sign parts still to send (M9-H3), or whose /abort was sent, or after a
- * failure in M3-U31.
+ * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): always
+ * without a ticket, with one whose /abort was sent, or after a failure that ended it (retryStep, M11-R80). Otherwise
+ * never while a /complete may have finished the file, which only /complete with its ticket can tell; and always with
+ * a ticket that expired, or can no longer sign what is still to send (M9-H3).
  */
 function needsTicket({ upload, error, landed }: Entry): boolean {
-  if (!upload) return true;
+  if (!upload || upload.dropped) return true;
+  const step = error ? retryStep(error) : "same";
+  if (step === "new") return true;
   if (upload.mayBeComplete) return false;
   const { ticket } = upload;
   const expired = Date.parse(ticket.expiresAt) <= Date.now();
-  // Past its signing time a ticket still completes, so it is kept while only /complete is left. A PARTS_MISSING error
-  // names parts that are still counted as landed until the retry queues them again.
+  // Past its signing time a ticket still completes, so it is kept while only /complete is left. What a "resend" sends
+  // again is still counted as landed until the retry queues it.
   const partCount = ticket.kind === "single" ? 1 : ticket.partCount;
-  const unsent = error?.code === "PARTS_MISSING" || landed.size < partCount;
-  return upload.dropped || expired || (unsent && !canSign(ticket)) || NEEDS_NEW_TICKET.has(error?.code);
+  const unsent = step === "resend" || landed.size < partCount;
+  return expired || (unsent && !canSign(ticket));
 }
 
 /** Queues a failed file again without telling the page. A new ticket starts from no parts and no bytes (M3-U36); the
  * speed starts from 0 when the file sends again, as on every start. */
 function requeue(job: Job, entry: Entry, fresh: boolean): void {
+  const { upload, error, landed } = entry;
   job.context.leftovers.release(entry);
   if (fresh) forgetTicket(job.context, entry);
-  else if (entry.upload) {
-    // The same ticket repairs from round 0 again (M3-U50), and sends again the parts its last /complete found missing.
-    entry.upload.repairs = 0;
-    if (entry.error?.code === "PARTS_MISSING") for (const part of entry.error.parts ?? []) entry.landed.delete(part);
+  else if (upload) {
+    // The same ticket repairs from round 0 again (M3-U50).
+    upload.repairs = 0;
+    if (error && retryStep(error) === "resend") {
+      // The parts /complete named are sent again; when it named none (NOT_UPLOADED, or a PARTS_MISSING whose list a
+      // proxy dropped), every part is, since /complete alone would get the same answer for ever.
+      if (error.parts?.length) for (const part of error.parts) landed.delete(part);
+      else landed.clear();
+    }
   }
   entry.error = null;
   entry.status = "queued";

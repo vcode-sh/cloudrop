@@ -95,8 +95,11 @@ of R2's two billed operation classes.
   `/upload` once for a new ticket with the record's route and metadata, and sends the whole file under a new key, its
   `bytes` from 0, with no failure in between. The old parts wait for the bucket's lifecycle rule. When that `/upload` is
   refused, the file ends `failed` with its error.
-- **Any other failure** ends the file `failed` and keeps its record. `retry()` asks `/complete` again, and so does a
-  `resume()` after a reload that left the record (see [When a record is deleted](#when-a-record-is-deleted)).
+- **Any other failure** ends the file `failed` and keeps its record. `retry()` then does what
+  [any retry does](client.md#retry): it asks `/complete` again when the failure left the ticket good, such as a network
+  or server failure, and asks `/upload` for a new ticket when the server ended the upload, such as a file refused for
+  its content. A `resume()` after a reload that left the record asks `/complete` again (see
+  [When a record is deleted](#when-a-record-is-deleted)).
 
 ## What is stored
 

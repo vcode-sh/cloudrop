@@ -6,9 +6,10 @@
 
 import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
-import { lockRefused, NEEDS_NEW_TICKET, notListed, uploadInUse } from "./failures.ts";
+import { lockRefused, notListed, uploadInUse } from "./failures.ts";
 import { lockUpload } from "./locks.ts";
 import { expiresSoon } from "./records.ts";
+import { retryStep } from "./retry-step.ts";
 import { claim, type UploadContext } from "./upload.ts";
 
 export async function discard(context: UploadContext, upload: unknown): Promise<Result<{ aborted: boolean }>> {
@@ -35,7 +36,7 @@ export async function discard(context: UploadContext, upload: unknown): Promise<
       const answer = await context.endpoints.abort(record.token, { keep: true });
       // A token the server refuses for good cannot abort anything, now or later; any other failure may pass on another
       // try, so the record stays for it.
-      if (answer.error && !NEEDS_NEW_TICKET.has(answer.error.code)) return fail(answer.error);
+      if (answer.error && retryStep(answer.error) !== "new") return fail(answer.error);
       // Deleted before the lock goes, so no other tab finds the record free in between. Its result is not read: the
       // server's part is done, and a record that survives a failed delete is aborted again harmlessly.
       await context.records.remove(id);

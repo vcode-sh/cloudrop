@@ -9,7 +9,7 @@ import type { BucketOutcome } from "./bucket.ts";
 import type { Lifetime } from "./close.ts";
 import type { Endpoints, Ticket } from "./endpoints.ts";
 import type { Entry } from "./entry.ts";
-import { aborted, uploadExpired } from "./failures.ts";
+import { aborted, uploadExpired, wasSent } from "./failures.ts";
 import type { Leftovers } from "./lifecycle.ts";
 import { type PartSender, sendParts } from "./parts.ts";
 import type { Pool } from "./pool.ts";
@@ -75,7 +75,10 @@ function bodyOf(ticket: Ticket, file: File, partNumber: number): Blob {
 export interface Upload {
   readonly ticket: Ticket;
   readonly entry: Entry;
-  /** Some /complete got no answer or a SERVER_ERROR, so the server may have completed the file: a cancel keeps it. */
+  /**
+   * Some /complete that left the page got no answer or a SERVER_ERROR, so the server may have completed the file: a
+   * cancel keeps it.
+   */
   mayBeComplete: boolean;
   /** The PARTS_MISSING repair rounds started so far. */
   repairs: number;
@@ -191,13 +194,16 @@ export async function sendAndComplete(
   // Without the signal: the server may finish a /complete (and run onComplete) after the browser stopped waiting (S14).
   const complete = async (): Promise<Result<CompleteResponse<unknown>>> => {
     const done = await context.endpoints.complete(ticket.token);
-    const code = done.error?.code;
+    const { error } = done;
+    const code = error?.code;
     // PARTS_MISSING clears the doubt wherever it arrives: the server sends it only while the multipart upload is still
     // open, so no earlier /complete finished the file and /abort deletes nothing recorded (ruling S-9). NO_SUCH_UPLOAD
     // too: the server sends it once it found the upload gone and no object of it stored (server/complete.ts, M3-U83).
-    if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD") upload.mayBeComplete = false;
-    // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16).
-    else upload.mayBeComplete ||= code === "NETWORK_ERROR" || code === "SERVER_ERROR";
+    // And NOT_UPLOADED: the bucket holds no object under the key, so /abort has nothing to delete (M11-R80).
+    if (code === "PARTS_MISSING" || code === "NO_SUCH_UPLOAD" || code === "NOT_UPLOADED") upload.mayBeComplete = false;
+    // Otherwise sticky: a later answer does not undo an earlier /complete that may have finished (S14, M3-H16). One
+    // the client never sent finished nothing (M11-R82).
+    else if (error) upload.mayBeComplete ||= code === "SERVER_ERROR" || (code === "NETWORK_ERROR" && wasSent(error));
     return done;
   };
   for (;;) {
