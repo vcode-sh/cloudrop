@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SingleTicket } from "../protocol/types.ts";
-import { serverFixture, tokenPayload } from "../testing/server-fixture.ts";
+import { APP_ORIGIN, serverFixture, tokenPayload } from "../testing/server-fixture.ts";
 import { files, NOW, png, upload } from "../testing/upload-fixture.ts";
 import { allowAnyone, route } from "./route.ts";
 import type { StandardSchema } from "./schema.ts";
@@ -67,6 +67,48 @@ describe("POST /upload: metadata", () => {
       status: 500,
       code: "SERVER_ERROR",
       logged: log,
+    });
+  });
+
+  // JSON.parse reads any depth, but JSON.stringify and a schema's own walk recurse: 5,000 levels in a 10 KB body
+  // overflowed the stack before authorize ran, an error log line for any anonymous caller (M11-R42).
+  describe("nested deeply, on a schema that passes any value through", () => {
+    const passThrough = {
+      "~standard": { version: 1, vendor: "test", validate: (value: unknown) => ({ value }) },
+    } as StandardSchema;
+
+    /** Posts metadata of `depth` arrays around a 1, written as text: the test's own JSON.stringify would overflow. */
+    async function uploadNested(depth: number) {
+      const authorize = vi.fn(allowAnyone);
+      const fixture = serverFixture({
+        files: route({ accept: "*/*", maxSize: "1GB", metadata: passThrough, authorize }),
+      });
+      const response = await fixture.cloudrop.handler(
+        new Request(`${APP_ORIGIN}/api/cloudrop/upload`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"route":"files","files":[${JSON.stringify(png())}],"metadata":${"[".repeat(depth)}1${"]".repeat(depth)}}`,
+        }),
+      );
+      const { error } = (await response.json()) as { error?: unknown };
+      return { status: response.status, error, authorized: authorize.mock.calls.length, logged: fixture.logger.errors };
+    }
+
+    it.for([5000, 33])("refuses %d levels before authorize runs, without an error log", async (depth) => {
+      expect(await uploadNested(depth)).toEqual({
+        status: 400,
+        error: {
+          code: "INVALID_METADATA",
+          message: "The metadata is nested more than 32 levels deep. Send a flatter value.",
+          retryable: false,
+        },
+        authorized: 0,
+        logged: [],
+      });
+    });
+
+    it("accepts 32 levels", async () => {
+      expect(await uploadNested(32)).toEqual({ status: 200, error: undefined, authorized: 1, logged: [] });
     });
   });
 });

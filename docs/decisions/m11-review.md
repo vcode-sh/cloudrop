@@ -384,6 +384,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/server/origins.ts`, `src/server/handler-cors.test.ts`, `src/server/config.test.ts`,
   `docs/guide/server.md#what-an-origin-is`, `docs/guide/deployment.md#a-webview-or-a-browser-extension`.
 
+### M11-R42: metadata nested more than 32 levels is `INVALID_METADATA`, before anything walks it
+
+- **Decision:** `/upload` refuses metadata with a value inside more than 32 nested arrays and objects: `400
+  INVALID_METADATA`, "The metadata is nested more than 32 levels deep. Send a flatter value.", no error log, before the
+  route's schema and `authorize` run. The depth is counted by a loop, one level per turn. Nothing else needed a change:
+  - `JSON.parse` of the body reads any depth in a loop (measured below); the 64 KiB body cap bounds it at 32,768 levels.
+  - `isPlainObject` reads one prototype and walks nothing; the readers of `/upload`, `/sign`, `/complete` and `/abort`
+    check types with `typeof` and `Array.isArray`. A test sends 30,000 levels in each field: `400`, nothing logged.
+  - `JSON.stringify` of `authorize`'s answer, of `onComplete`'s result and of the token payload runs on the
+    application's own values. A request reaches them only through `metadata`, now at most 32 deep; a deep value the
+    application builds itself is its bug, answered `500` with a log line as before.
+  - The token is parsed only after its HMAC verifies and is at most 16,384 characters, so its depth is the server's.
+- **Why:** on a route whose schema passes values through (`z.any()`), `"metadata": [[[…]]]` 5,000 deep, a 10 KB body,
+  answered `500 SERVER_ERROR` with `RangeError: Maximum call stack size exceeded` in the log, before `authorize`: an
+  anonymous caller could fill the error log. A recursive schema (`z.lazy`) overflows the same way inside its own
+  validation, which is why the check runs first and on the input. Measured 2026-11-21 at the top of an empty stack:
+  Node 24.22.2 parses 2,000,000 levels and `JSON.stringify` throws by 5,000 (1,000 passes); Bun 1.4.4 parses the same
+  and throws by 200,000 (30,000 passes). A deeper call stack, such as a framework's middleware, lowers both, so a
+  number is safer than catching the `RangeError`, which would also hide a schema's own `RangeError` (an invalid date).
+- **If wrong:** an app that sends metadata deeper than 32 levels in under 2 KiB gets `INVALID_METADATA` where it got
+  `200`; none is known. Raise `MAX_METADATA_DEPTH` in `src/server/schema.ts`.
+- **Status:** in force.
+- **Visible in:** `src/server/schema.ts`, `src/server/upload-metadata.test.ts`, `src/server/handler-failures.test.ts`,
+  `docs/guide/server.md`, `docs/guide/errors.md`.
+
 ### M11-R46: a preflight allows every header name, and an `OPTIONS` that is no preflight is told so
 
 - **Decision:** A trusted origin's preflight is answered with the header list it asked for whenever each name is an RFC

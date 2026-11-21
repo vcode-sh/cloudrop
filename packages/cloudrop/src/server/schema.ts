@@ -27,7 +27,22 @@ export type SchemaOutput<TSchema> = TSchema extends StandardSchema<unknown, infe
 /** Metadata travels inside every upload token (spec §5.2); the same 2 KiB cap as object metadata keeps tokens small. */
 export const MAX_METADATA_JSON_BYTES: number = 2048;
 
+/**
+ * Deeper metadata is refused before anything walks it. JSON.parse reads any depth in a loop, but a schema's validation
+ * and JSON.stringify recurse, so depth alone, in a body far under the size cap, could overflow the stack (M11-R42).
+ */
+const MAX_METADATA_DEPTH = 32;
+
 const invalidMetadata = (message: string): CloudropError => new CloudropError("INVALID_METADATA", message);
+
+/** Whether parsed JSON has a value inside more than `limit` nested arrays and objects. A loop, one level per turn. */
+function nestsDeeperThan(value: unknown, limit: number): boolean {
+  let level = [value];
+  for (let depth = 0; depth <= limit && level.length > 0; depth++) {
+    level = level.flatMap((item) => (item && typeof item === "object" ? Object.values(item) : []));
+  }
+  return level.length > 0;
+}
 
 /** Control characters, Unicode line and paragraph separators, and bidi overrides and isolates (Trojan Source). */
 const UNSAFE_IN_LOGS = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/gu;
@@ -56,6 +71,9 @@ export async function validateMetadata(
     return value === undefined
       ? ok({ value: undefined, json: undefined })
       : fail(invalidMetadata("This upload takes no metadata. Remove it."));
+  }
+  if (nestsDeeperThan(value, MAX_METADATA_DEPTH)) {
+    return fail(invalidMetadata("The metadata is nested more than 32 levels deep. Send a flatter value."));
   }
   const result = await schema["~standard"].validate(value);
   if (result.issues) {

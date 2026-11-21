@@ -317,7 +317,8 @@ What happens in `/upload`:
    [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client). Never reuse a key for a new
    ask: a request with a key ends the pending uploads of earlier requests with the same key, route and owner. On a
    route without `owner`, or when it answers null, the key does nothing.
-3. The route's metadata schema validates the metadata (`INVALID_METADATA`).
+3. The route's metadata schema validates the metadata (`INVALID_METADATA`). Metadata nested more than 32 arrays or
+   objects deep is refused before the schema sees it, and its JSON must fit in 2 KiB.
 4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
    built. A refused file does not stop the others.

@@ -138,4 +138,39 @@ describe("cloudrop.handler failures", () => {
     const response = await setup().post("upload", uploadBody);
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
+
+  // 30,000 arrays deep fits under the 64 KiB body cap. JSON.parse reads it in a loop, and nothing outside the
+  // metadata check walks what it returns, so depth alone can neither overflow the stack nor fill the error log (M11-R42).
+  it.for<{ name: string; endpoint: string; body: (deep: string) => string; code: string }>([
+    { name: "the body itself", endpoint: "upload", body: (deep) => deep, code: "INVALID_INPUT" },
+    {
+      name: "a file",
+      endpoint: "upload",
+      body: (deep) => `{"route":"avatar","files":[${deep}]}`,
+      code: "INVALID_INPUT",
+    },
+    {
+      name: "metadata on a route that takes none",
+      endpoint: "upload",
+      body: (deep) => `{"route":"avatar","files":[{"name":"a.png","size":10,"type":"image/png"}],"metadata":${deep}}`,
+      code: "INVALID_METADATA",
+    },
+    { name: "a token", endpoint: "sign", body: (deep) => `{"token":${deep}}`, code: "INVALID_TOKEN" },
+    {
+      name: "an abort's keep",
+      endpoint: "abort",
+      body: (deep) => `{"token":"a.b","keep":${deep}}`,
+      code: "INVALID_TOKEN",
+    },
+  ])("answers 400 without an error log when $name is nested 30,000 deep", async ({ endpoint, body, code }) => {
+    const fixture = setup();
+    const response = await fixture.cloudrop.handler(
+      new Request(`${APP_ORIGIN}/api/cloudrop/${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body(`${"[".repeat(30_000)}${"]".repeat(30_000)}`),
+      }),
+    );
+    expect({ ...(await outcome(response)), logged: fixture.logger.errors }).toEqual({ status: 400, code, logged: [] });
+  });
 });
