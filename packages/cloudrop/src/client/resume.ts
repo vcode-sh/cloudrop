@@ -54,6 +54,32 @@ export async function forget(context: UploadContext, options: unknown): Promise<
   return cleared.error ? cleared : ok({ forgotten: cleared.data });
 }
 
+const turns = new WeakMap<UploadContext, Map<string, Promise<void>>>();
+
+/**
+ * One check at a time per upload in a page: a resume() waits for the checks of an earlier resume() of the same upload.
+ * The first call then always decides: once it holds the lock a later one is UPLOAD_IN_USE, and once it is refused or
+ * cancelled a later one runs. Otherwise the call whose file check ended first took the lock (M9-H7).
+ */
+function takeTurn(context: UploadContext, id: string): { ready: Promise<void>; end: () => void } {
+  const waiting = turns.get(context) ?? new Map<string, Promise<void>>();
+  turns.set(context, waiting);
+  const ready = waiting.get(id) ?? Promise.resolve();
+  // Not Promise.withResolvers, which would raise the browser floor to Safari 17.4 (M8-Q8).
+  let resolve = () => {};
+  const mine = new Promise<void>((done) => {
+    resolve = done;
+  });
+  waiting.set(id, mine);
+  return {
+    ready,
+    end: () => {
+      resolve();
+      if (waiting.get(id) === mine) waiting.delete(id);
+    },
+  };
+}
+
 /** The record of upload `id` with its lock taken, or why it cannot be resumed, checked in M3-U76's order. */
 async function check(
   context: UploadContext,
@@ -67,6 +93,22 @@ async function check(
     release();
     return refusal;
   };
+  const turn = takeTurn(context, id);
+  try {
+    await turn.ready;
+    return await checkInTurn(context, id, file, release, refuse);
+  } finally {
+    turn.end();
+  }
+}
+
+async function checkInTurn(
+  context: UploadContext,
+  id: string,
+  file: File,
+  release: () => void,
+  refuse: (refusal: CloudropError) => CloudropError,
+): Promise<CloudropError | { record: UploadRecord; unlock: () => void }> {
   const { data, error } = await context.records.list(context.namespace);
   // A store that cannot be read says so; a record that is gone, expired or another namespace's cannot be resumed.
   const record = data?.find((saved) => saved.id === id);

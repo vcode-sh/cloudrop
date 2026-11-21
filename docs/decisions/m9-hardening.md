@@ -110,6 +110,20 @@ The measurements behind the first range are in
 - **Status:** in force.
 - **Visible in:** `src/server/api.ts`.
 
+### M9-H7: two resume() calls of one upload in a page take turns
+
+- **Decision:** the resume check (record, file, lock, in `M3-U76`'s order) runs one at a time per upload in a page: a
+  `resume()` waits for the checks of an earlier `resume()` of the same upload. The first call then always decides: once
+  it holds the lock a later one answers `UPLOAD_IN_USE`, and once it is refused or cancelled a later one runs. The
+  claim that hides the upload from `resumable()` is still taken at the call, before any await (`M4-F22`).
+- **Why:** CI failed the release commit of 0.3.0 on "a second resume() of one upload while the first runs is
+  UPLOAD_IN_USE": the lock went to whichever call finished hashing its file first, so under load the first call lost
+  (reproduced 2 in 40 runs on a loaded machine; 0 in 80 with the turns). Refusing a second call at once while the first
+  is held was tried first and broke the cases where a resume right after a refused or cancelled one must run.
+- **If wrong:** a second call waits for the first one's checks, a few milliseconds of IndexedDB and hashing.
+- **Status:** in force.
+- **Visible in:** `src/client/resume.ts`.
+
 ### M9-H50: `pgExecutor` listens for the `error` event of the client it checks out
 
 - **Decision:** `pgExecutor`'s transactions and batches attach a listener for the `error` event to the client they

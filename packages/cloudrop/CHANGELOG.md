@@ -51,6 +51,8 @@ Found by testing against a real R2 bucket and as a new user before this release 
   credentials (`M9-H2`); a `401` (R2's answer to an unknown access key) points at the access key ID and secret instead
   of the object key (`M9-H5`).
 - A part sent to a multipart upload aborted elsewhere fails as `NO_SUCH_UPLOAD`, not `UPLOAD_REJECTED` (`M9-H4`).
+- Two `resume()` calls of one upload in the same page could let the second one win when the first one's file check
+  was slower; the first call now always decides (`M9-H7`).
 - `api.deletePrefix` refused a folder whose name has accents when R2 listed a key in the other Unicode form, so the
   folder could never be deleted (`M9-H6`).
 - With `transaction: true`, a node-postgres connection that dies while `onComplete` runs no longer stops the process;
