@@ -20,8 +20,8 @@ user's files, and can stop a file from landing on the wrong account after someon
   and `deny`. Guide: [Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md) (`M10-K`).
 - **`onDelete({ file, owner, reason, tx? })` route hook**, `reason` `"deleted"`, `"replaced"` or `"erased"`: runs when
   `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes a completed file. With `transaction: true`
-  it runs inside the deletion's transaction, exactly once, so an audit row or a pointer commits with it; otherwise before
-  the deletion, at least once. A throw keeps the file. Guide: [onDelete](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#ondelete) (`M10-D4` to `M10-D9`).
+  it runs inside the deletion's transaction, exactly once, so an audit row or a pointer commits with it; otherwise
+  before the deletion, at least once. A throw keeps the file. Guide: [onDelete](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#ondelete) (`M10-D4` to `M10-D9`).
 - **`api.files` filters:** `name` (a case-insensitive ASCII substring), `type` (exact, or a top-level prefix such as
   `"image/"`) and `order` (`"newest"`, the default, or `"oldest"`), the same on Postgres, SQLite, D1 and the memory
   store. A cursor is refused when it is passed with other filters or another order. No migration (`M10-D1` to
