@@ -50,16 +50,22 @@ interface FilesQuery extends FileFilters {
 }
 
 /**
- * An owner or a file id: 1 to 255 characters, none of them NUL. Postgres text cannot hold U+0000, so no row has one, and
- * the store would fail on it: refused here, it is the caller's mistake and not a retryable SERVER_ERROR.
+ * An owner or a file id: 1 to 255 characters, none of them NUL or a lone surrogate. Postgres text cannot hold U+0000,
+ * so no row has one, and the store would fail on it: refused here, it is the caller's mistake and not a retryable
+ * SERVER_ERROR. A lone surrogate is stored as U+FFFD, by Postgres's drivers and by SQLite, so two owners that differ
+ * only in one would be one owner in the database, with one quota (M11-R60).
  */
 export const isOwnerOrId = (value: unknown): value is string =>
-  typeof value === "string" && value !== "" && value.length <= MAX_OWNER_LENGTH && !value.includes("\u0000");
+  typeof value === "string" &&
+  value !== "" &&
+  value.length <= MAX_OWNER_LENGTH &&
+  !value.includes("\u0000") &&
+  value.isWellFormed();
 
 export const badOwner = (): Result<never> =>
   fail(
     invalidInput(
-      `Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000), as owner() returned it.`,
+      `Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000) or a lone surrogate, as owner() returned it.`,
     ),
   );
 

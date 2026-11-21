@@ -507,10 +507,12 @@ createCloudrop({
 });
 ```
 
-- `owner` names who a file counts against: a user, team or workspace id of 1 to 255 characters without NUL (U+0000,
-  which Postgres text cannot hold), or null for no one. It runs once per `/upload`, before plugins' `beforeUpload`,
-  and sees the authorize result, the request and the metadata, not the files. It is not the authorize result signed
-  into the token.
+- `owner` names who a file counts against: a user, team or workspace id of 1 to 255 characters, or null for no one.
+  It must be well-formed text without NUL: Postgres text cannot hold U+0000, and a database stores a lone surrogate
+  (half of a surrogate pair, such as a string cut in the middle of an emoji) as U+FFFD, which would make one owner of
+  two. Another value fails the upload as the route's bug, and the file API refuses it with `INVALID_INPUT`. It runs
+  once per `/upload`, before plugins' `beforeUpload`, and sees the authorize result, the request and the metadata,
+  not the files. It is not the authorize result signed into the token.
 - The store counts each owner's usage whether or not you set `quota`, so turning a quota on later needs no backfill.
 - The rule is `reserved + stored + size <= limit` (stored is `activeBytes` in `api.usage`), checked file by file in
   the order sent: a file that does not fit is refused with `QUOTA_EXCEEDED` (HTTP 403, not retryable), and the files

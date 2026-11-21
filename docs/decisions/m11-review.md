@@ -1278,6 +1278,32 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/server/handler.ts`, `src/server/handler-origin-hint.test.ts`.
 
+### M11-R60: an owner or a file id with a lone surrogate is refused
+
+- **Decision:** `isOwnerOrId` and `readOwner` also require `String.prototype.isWellFormed()`. A route whose `owner()`
+  returns such a string fails the `/upload` as the route's bug (500, logged: "owner must return null or a string of 1
+  to 255 characters without NUL (U+0000) or a lone surrogate."); `api.usage`, `revokeUploads`, `eraseOwner`,
+  `reconcile`, `files`, `allFiles`, `file`, `deleteFile` and a cursor whose id has one answer `INVALID_INPUT` before
+  any store call. The other text that reaches the database was checked and needs nothing new in the store's files:
+  route names (`[A-Za-z0-9_-]`), idempotency keys (the same letters), types (a checked MIME type) and claims (a UUID)
+  are ASCII; ids are the server's own; keys are refused unless well-formed and free of control characters
+  (`keyProblem`); metadata and `result` are stored as the text of `JSON.stringify`, which writes a lone surrogate and
+  NUL as `\ud800` and `\u0000` escapes (read back equal on Postgres); file names are refused unless well-formed.
+- **Why:** node-postgres, postgres.js and node:sqlite encode a lone surrogate as U+FFFD. Measured on Postgres 18.6
+  and node:sqlite: after a reserve for `"u\ud800"` and one for `"u\ud801"`, `usage` of the first counted both files
+  and `owners` listed one owner, `"u\ufffd"`, so the two shared a quota, and `usage`, `revokeUploads` and
+  `eraseOwner` for one acted on the other's files. `M9-H51` refuses NUL for the same kind of reason.
+  `isWellFormed` is in Node 20 and every Workers runtime, below the package's floor of Node 24, and `/upload` and the
+  name filter already call it.
+- **If wrong:** an app whose user ids hold a lone surrogate (a string cut in the middle of a pair) gets a logged 500
+  on `/upload` where before it got rows under another owner. One gap stays outside the store's files: a file name
+  with NUL passes `/upload`'s check (`src/server/upload-request.ts`, `readDescriptor`) and on Postgres fails the
+  reserve of the whole request with a retryable `SERVER_ERROR` ("unsupported Unicode escape sequence"); SQLite stores
+  it. Nothing is merged or corrupted, but the answer blames the server for the client's name.
+- **Status:** in force.
+- **Visible in:** `src/server/owner-files.ts`, `src/server/store-upload.ts`, `src/server/store-api.test.ts`,
+  `src/server/store-upload.test.ts`, `docs/guide/store.md`.
+
 ### M11-R61: the Postgres store locks several rows in byte order of id, and a call ended as a deadlock runs once more
 
 - **Decision:** on Postgres, `reserve`'s superseding update and `revoke` take their rows through

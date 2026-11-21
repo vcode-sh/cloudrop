@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete, files } from "../testing/complete-fixture.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
-import { hello, NOW, owned, storeFixture, TEXT } from "../testing/store-fixture.ts";
+import { hello, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { FileApi } from "./api.ts";
 import type { FilesOptions } from "./owner-files.ts";
 import { route } from "./route.ts";
@@ -240,6 +240,30 @@ describe("cloudrop.api with a store", () => {
       data: null,
       error: expect.objectContaining({ code: "INVALID_INPUT" }),
     });
+  });
+
+  it("every call that takes an owner or a file id refuses a lone surrogate, before the store sees it", async () => {
+    // Postgres and SQLite store a lone surrogate as U+FFFD, so "u\ud800" and "u\ud801" would be one owner there:
+    // one quota, and each one's usage, revoke and erase acting on the other's files (M11-R60).
+    const { store, calls } = recordCalls(memoryStore());
+    const { api } = storeFixture({ owned }, { store }).cloudrop;
+    const [owner, id] = ["u\ud800", "f\udfff"];
+    const answers = await Promise.all([
+      api.usage(owner),
+      api.revokeUploads({ owner }),
+      api.eraseOwner(owner),
+      api.reconcile({ owner }),
+      api.files({ owner }),
+      api.allFiles({ owner }),
+      api.file(id),
+      api.deleteFile(id),
+      api.files({ owner: "u1", cursor: `1763380800000:${id}` }),
+    ]);
+    expect(answers.map((answer) => answer.error?.code)).toEqual(Array.from({ length: 9 }, () => "INVALID_INPUT"));
+    expect(answers[0]?.error?.message).toBe(
+      "Pass the owner, a string of 1 to 255 characters without NUL (U+0000) or a lone surrogate, as owner() returned it.",
+    );
+    expect(calls).toEqual([]);
   });
 });
 

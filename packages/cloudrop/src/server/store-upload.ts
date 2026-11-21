@@ -17,10 +17,17 @@ export async function readOwner(route: RouteConfig, context: OwnerContext<object
   if (!route.definition.owner) return null;
   const owner: unknown = await route.definition.owner(context);
   if (owner === null) return null;
-  // The file API takes the same owners (isOwnerOrId); Postgres text cannot hold NUL.
-  if (typeof owner !== "string" || owner.length < 1 || owner.length > MAX_OWNER_LENGTH || owner.includes("\u0000")) {
+  // The file API takes the same owners (isOwnerOrId): Postgres text cannot hold NUL, and a database stores a lone
+  // surrogate as U+FFFD, which would make one owner of two.
+  if (
+    typeof owner !== "string" ||
+    owner.length < 1 ||
+    owner.length > MAX_OWNER_LENGTH ||
+    owner.includes("\u0000") ||
+    !owner.isWellFormed()
+  ) {
     throw new TypeError(
-      `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000).`,
+      `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000) or a lone surrogate.`,
     );
   }
   return owner;
