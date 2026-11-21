@@ -183,3 +183,16 @@ describe("contentChecks: a ZIP whose entries name no package (M11-R133)", () => 
     expect(await contentOutcome(input)).toEqual(expected);
   });
 });
+
+// Windows registers .zip as application/x-zip-compressed, and Chromium and Firefox ask the system before their own
+// table says application/zip (net/base/mime_util.cc, kSecondaryMappings; nsExternalHelperAppService.cpp, extras).
+describe("contentChecks: a package in a ZIP sent as the type Windows gives a .zip (M11-R253)", () => {
+  it.for([
+    // A folder of lecture notes, zipped: the folder's name is an Office application's, the file is an archive.
+    { name: "a ZIP whose first entry is ppt/lecture1.txt", body: zipEntry("ppt/lecture1.txt", "notes") },
+    { name: "an EPUB book", body: zipEntry("mimetype", "application/epub+zip") },
+  ])("passes $name", async ({ body }) => {
+    const input = { accept: "*/*", file: { name: "a.zip", type: "application/x-zip-compressed" }, body };
+    expect(await contentOutcome(input)).toEqual(passed);
+  });
+});

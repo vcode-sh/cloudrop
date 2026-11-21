@@ -3145,3 +3145,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/storage/sigv4.ts`, `src/storage/sigv4.test.ts` (four signatures computed with `node:crypto`),
   `src/storage/s3/copy.r2.integration.test.ts` (live R2: a copy in parts of an object whose disposition holds `C3
   A0`, `C2 A0` and ends in `E4 BD A0`), `scripts/test-live-r2.ts`, `docs/research/r2-spike-findings.md`.
+
+### M11-R253: a package in a ZIP agrees with every type a browser gives a `.zip`
+
+- **Decision:** the kinds read from a ZIP's entries (Word, Excel and PowerPoint by their folder, OpenDocument and
+  EPUB by their `mimetype` entry) agree with `application/zip`, `application/x-zip-compressed` and
+  `application/x-zip`. A ZIP that names no package is unchanged: it never contradicted an `application/` type, and
+  is still judged as `application/zip`, so `deny: ["application/zip"]` refuses it under any of the three names.
+- **Why:** they agreed with `application/zip` alone. Windows registers `.zip` as `application/x-zip-compressed`, and
+  both browsers ask the system before their own table: in Chromium's `net/base/mime_util.cc` `zip` is in
+  `kSecondaryMappings`, read after the platform ("b) Underlying platform. c) kSecondaryMappings"), and in Firefox's
+  `uriloader/exthandler/nsExternalHelperAppService.cpp` it is in `extraMimeEntries`, read after the OS ("1.
+  defaultMimeEntries array 2. OS-provided information 3. our extras array"). shared-mime-info
+  (`freedesktop.org.xml.in`) lists `application/x-zip-compressed` and `application/x-zip` as aliases of
+  `application/zip`. Reproduced: a ZIP whose first entry is `ppt/lecture1.txt`, sent as
+  `application/x-zip-compressed` to `accept: "*/*"`, was refused "This file is a PowerPoint presentation, but it
+  was sent as application/x-zip-compressed", and so was an EPUB; 0.5.0 answered the same. A folder named `word/`,
+  `xl/` or `ppt/` says which application a package is for, not that the archive is one.
+- **If wrong:** with `deny: ["application/zip"]` alone, an archive whose entries name a package and which Windows
+  sent as `application/x-zip-compressed` now passes where it was a `mismatch`: `deny` matches neither the declared
+  type nor the package's. The guide already says a recognised package is its own type and that anyone can put a
+  `word/` entry into a ZIP; a server that must refuse archives denies both ZIP names, which refuses them at
+  `/upload`.
+- **Status:** in force.
+- **Visible in:** `src/plugins/sniff-containers.ts` (`ARCHIVE`), `src/plugins/content-checks-containers.test.ts`,
+  `docs/guide/plugins.md` (rule 4).

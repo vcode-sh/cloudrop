@@ -95,18 +95,19 @@ const ZIP: Sniffed = {
   loose: ["application/*", "model/*"],
 };
 /**
+ * The types a browser gives a .zip, which every package in a ZIP agrees with: application/zip, and on Windows, whose
+ * registry Chromium (net/base/mime_util.cc: "zip" is in kSecondaryMappings, behind the platform) and Firefox
+ * (nsExternalHelperAppService.cpp: in extraMimeEntries, behind the OS) ask first, application/x-zip-compressed.
+ * shared-mime-info lists that one and application/x-zip as aliases (M11-R253).
+ */
+const ARCHIVE = ["application/zip", "application/x-zip*"];
+/**
  * Office Open XML keeps its main part in a folder of its own (ECMA-376 Part 1, §11.3.10 word/document.xml, §12.3.23
  * xl/workbook.xml, §13.3.6 ppt/presentation.xml, the names Office writes). An application's templates, slide shows and
  * macro-enabled files share its folder, so each agrees with its application's types, Open XML and Microsoft's own.
  */
 const office = (family: string, microsoft: string, type: string, name: string) =>
-  kind(
-    `${OFFICE}${family}.${type}`,
-    name,
-    `${OFFICE}${family}.*`,
-    `application/vnd.ms-${microsoft}*`,
-    "application/zip",
-  );
+  kind(`${OFFICE}${family}.${type}`, name, `${OFFICE}${family}.*`, `application/vnd.ms-${microsoft}*`, ...ARCHIVE);
 const OFFICE_FOLDERS: readonly [string, Sniffed][] = [
   ["word/", office("wordprocessingml", "word", "document", "a Word document")],
   ["xl/", office("spreadsheetml", "excel", "sheet", "an Excel workbook")],
@@ -171,11 +172,7 @@ function packageType(bytes: Uint8Array): Sniffed | null {
   let first = true;
   for (const { name, stored } of zipEntries(bytes)) {
     if (first && name === "mimetype" && PACKAGE_TYPE.test(stored)) {
-      return kind(
-        stored,
-        stored === "application/epub+zip" ? "an EPUB book" : "an OpenDocument file",
-        "application/zip",
-      );
+      return kind(stored, stored === "application/epub+zip" ? "an EPUB book" : "an OpenDocument file", ...ARCHIVE);
     }
     first = false;
     const found = OFFICE_FOLDERS.find(([folder]) => name.startsWith(folder));

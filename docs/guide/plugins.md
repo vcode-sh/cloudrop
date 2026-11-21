@@ -49,7 +49,9 @@ At `/complete`, a file whose **first bytes show**:
 4. **A type that contradicts the declared type.** A JPEG sent as `image/png`, a PDF sent as `text/plain`, a ZIP sent as
    an image. A content type agrees with its common aliases: `audio/x-wav` with a WAV, `image/heif` with a HEIC, a
    Word template or a macro-enabled document with a Word file, a WebM, MP4, 3GP, Matroska or Ogg file with its
-   audio and its video types. A ZIP whose entries do not say what it is agrees with
+   audio and its video types. A Word, Excel, PowerPoint, OpenDocument or EPUB file is a ZIP, and agrees with
+   `application/zip` and with `application/x-zip-compressed`, the type a browser on Windows gives a `.zip`: a zipped
+   folder named `ppt/` reads as a PowerPoint file and still passes as an archive. A ZIP whose entries do not say what it is agrees with
    any `application/` or `model/` type, since many formats are ZIP archives (APK, JAR, Visio, 3MF); a ZIP sent as
    `application/pdf` passes for the same reason, while one sent as an image or a font does not.
 5. **For a file the browser could not type, a type the route does not accept.** Such a file is sent as
