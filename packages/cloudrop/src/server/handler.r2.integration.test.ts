@@ -3,6 +3,7 @@
 // Everything is written under a fresh live-test/cloudrop-<32 hex>/ prefix and deleted by the contract teardown.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { putObject } from "../client/bucket.ts";
 import type {
   CompleteResponse,
   ErrorResponse,
@@ -11,9 +12,10 @@ import type {
   SingleTicket,
   UploadResponse,
 } from "../protocol/types.ts";
-import { MiB } from "../rules.ts";
+import { MiB, R2_RULES } from "../rules.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { r2 } from "../storage/presets.ts";
+import { createS3Driver } from "../storage/s3-driver.ts";
 import { toHex } from "../storage/sigv4.ts";
 import { tokenPayload } from "../testing/server-fixture.ts";
 import { offsetBytes, randomPrefix, tearDownRun } from "../testing/storage-contract.ts";
@@ -127,7 +129,7 @@ describe("upload protocol on live R2", () => {
     expect((await call<CompleteResponse>("complete", { token: ticket.token })).status).toBe(200);
   });
 
-  it("aborts a multipart upload on R2", async () => {
+  it("aborts a multipart upload on R2, after which the client fails a part as NO_SUCH_UPLOAD", async () => {
     const upload = await call<UploadResponse>("upload", {
       route: "live",
       files: [{ name: "big.bin", size: 9 * MiB, type: "application/octet-stream" }],
@@ -137,6 +139,36 @@ describe("upload protocol on live R2", () => {
     openUploads.push({ key: ticket.key, uploadId });
     expect((await call("abort", { token: ticket.token })).status).toBe(200);
     expect((await storage?.listParts(ticket.key, uploadId))?.error?.code).toBe("NO_SUCH_UPLOAD");
+    // R2 answers the part with a readable 404 NoSuchUpload (M9-H4).
+    const [last] = ticket.parts.slice(-1) as [SignedPart];
+    const sent = await putObject(fetch, last, new Blob([offsetBytes(MiB)]), new AbortController().signal);
+    expect(sent).toMatchObject({ kind: "rejected", error: { code: "NO_SUCH_UPLOAD", retryable: false } });
+  });
+
+  it("stores a type with parameters as its essence, which completion verifies (M9-H1)", async () => {
+    const upload = await call<UploadResponse>("upload", {
+      route: "live",
+      files: [{ name: "export.csv", size: 7, type: "text/csv;charset=UTF-8" }],
+    });
+    const ticket = upload.body.files[0] as SingleTicket;
+    expect(await put(ticket.put, offsetBytes(7))).toBe(200);
+    expect((await call<CompleteResponse>("complete", { token: ticket.token })).body.file?.type).toBe("text/csv");
+    expect((await cloudrop.api.head(ticket.key)).data?.type).toBe("text/csv");
+  });
+
+  it("reports a HEAD signed 20 minutes off R2's clock as the clock, not the credentials (M9-H2)", async () => {
+    const env = process.env as Record<(typeof SETTINGS)[number], string>;
+    const skewed = createS3Driver({
+      endpoint: `https://${env.CLOUDROP_R2_ACCOUNT_ID.toLowerCase()}.r2.cloudflarestorage.com`,
+      region: "auto",
+      bucket: env.CLOUDROP_R2_BUCKET,
+      credentials: { accessKeyId: env.CLOUDROP_R2_ACCESS_KEY_ID, secretAccessKey: env.CLOUDROP_R2_SECRET_ACCESS_KEY },
+      rules: R2_RULES,
+      now: () => new Date(Date.now() + 20 * 60_000),
+    });
+    expect((await skewed.head(`${prefix}missing.txt`)).error?.message).toBe(
+      "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+    );
   });
 
   it("erases a folder with deletePrefix and proves it empty", async () => {
