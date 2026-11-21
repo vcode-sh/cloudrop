@@ -17,6 +17,12 @@ afterEach(() => {
 const first = { deleted: true, cleaned: false };
 const again = { deleted: false, cleaned: false };
 
+const unreachable = {
+  code: "SERVER_ERROR",
+  retryable: true,
+  message: "The server could not reach its upload records. Try again in a moment.",
+};
+
 const kept = {
   code: "SERVER_ERROR",
   retryable: true,
@@ -111,17 +117,33 @@ describe("onDelete with api.deleteFile", () => {
       const ticket = await uploaded();
       const { api } = fixture.cloudrop;
       memory.injectFailure("end", 0);
-      expect((await api.deleteFile(ticket.id)).error).toEqual(
-        expect.objectContaining({
-          code: "SERVER_ERROR",
-          retryable: true,
-          message: "The server could not reach its upload records. Try again in a moment.",
-        }),
-      );
+      expect((await api.deleteFile(ticket.id)).error).toEqual(expect.objectContaining(unreachable));
+      expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
+        `cloudrop: the store failed to delete file ${ticket.id}.`,
+      ]);
       expect([await status(ticket.id), memory.appRows()]).toEqual(["completed", []]);
       expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, ...first });
     },
   );
+
+  it.for([
+    { name: "lease: the read before onDelete", mode: "lease", afterThrow: false },
+    { name: "lease: the read after onDelete threw", mode: "lease", afterThrow: true },
+    { name: "transaction: the read after onDelete threw", mode: "transaction", afterThrow: true },
+  ] as const)("$name fails: deleteFile answers the store's error and keeps the file", async ({ mode, afterThrow }) => {
+    const down = () => Promise.reject(new Error("The database is down."));
+    const { fixture, state, uploaded, status } = deleting(mode, {
+      answer: () => {
+        if (!afterThrow) return;
+        state.read = down;
+        throw new Error("The audit table is down.");
+      },
+    });
+    const ticket = await uploaded();
+    if (!afterThrow) state.read = down;
+    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error).toEqual(expect.objectContaining(unreachable));
+    expect(await status(ticket.id)).toBe("completed");
+  });
 
   it.for(MODES)("%s: a file whose route the server no longer has is deleted without any hook", async (mode) => {
     const { memory, seen, uploaded } = deleting(mode);
@@ -149,6 +171,20 @@ describe("onDelete with api.deleteFile", () => {
     calls.length = 0;
     expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error).toBeNull();
     expect(calls).toEqual(["end"]);
+  });
+
+  it("without onDelete on its route, a replacing completion makes only the store calls it made before onDelete", async () => {
+    const { store, calls } = recordCalls(leaseStore());
+    const avatar = route(
+      { accept: "*/*", maxSize: 1024, replace: true, authorize: () => ({ userId: "u1" }) },
+      { owner: ({ userId }) => userId },
+    );
+    const fixture = storeFixture({ avatar }, { store });
+    const ticket = await fixture.single("avatar", TEXT);
+    await fixture.send(ticket.put, hello);
+    calls.length = 0;
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    expect(calls).toEqual(["get", "claim", "complete"]);
   });
 
   it("refuses options that are not an object", async () => {
@@ -274,11 +310,11 @@ describe("onDelete with replace", () => {
     expect((await complete(fixture, fast.token)).status).toBe(200);
     paused.open();
     expect((await slowCompletion).status).toBe(200);
-    // The late one, run after the record, gets the replacing request too.
-    expect(seen.map(({ id, reason, request }) => [id, reason, request])).toEqual([
-      [first.id, "replaced", true],
-      [first.id, "replaced", true],
-      [fast.id, "replaced", true],
+    // The late one, run after the record, gets the replacing request too, and the row as it was while completed.
+    expect(seen.map(({ id, reason, status, request }) => [id, reason, status, request])).toEqual([
+      [first.id, "replaced", "completed", true],
+      [first.id, "replaced", "completed", true],
+      [fast.id, "replaced", "completed", true],
     ]);
     expect([await status(first.id), await status(fast.id), await status(slow.id)]).toEqual([
       "deleted",

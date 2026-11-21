@@ -535,3 +535,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Each test was seen failing on the code before the fix.
 - **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete-race.test.ts`,
   `src/adapters/drizzle-handler.db.integration.test.ts`, `src/testing/delete-fixture.ts` (`state.read`).
+
+### M11-R151: the tests of deletion and erasure fail when their branch is removed
+
+- **Decision:** Every branch of `src/server/erase.ts` and `src/server/store-delete.ts` was removed or inverted in turn
+  (95 one-line mutations) with the unit lane run on each, and tests were added or sharpened until each mutation a
+  caller can see fails one. In `eraseOwner`: the last read of the live statuses (an `/upload` reserved before the run
+  and recorded during it), both signal checks inside a run (between two files of a page, and between two pages, with
+  no store call after the abort), the signal check before the run (an unfinished upload stays unrevoked), every page
+  read, the `graceMs` a caller passes, `rejected` and `expired` rows, a row marked cleaned too early, a row that
+  cannot be marked cleaned, the store's error for a failed revocation, listing or last read, and options that are not
+  an object. In deletions: a failed read before the hook and after a throw, the log line of a failed deletion, the row
+  a late replacement's hook sees, and what a replacement lists (only its own route, nothing without an owner, every
+  page, nothing on a route without `onDelete`, and the store's error when the listing fails).
+- **Why:** the review removed the last live read and both mid-run signal checks and every test stayed green. The cause
+  was the frozen test clock: every file was created at the very millisecond the run started, so the check for an
+  upload that started during the run answered for the reads it was meant to back up. The same clock hid two more: the
+  live statuses read together (`M8-A5`) and `done` needing no failure. Those tests now move the clock before the run.
+- **If wrong:** three mutations change nothing a caller can see and are left without a test: marking a row cleaned
+  that is marked already (`store.cleaned` ignores it), and treating a route without `onDelete` as hooked in
+  `hookedRoute` and in `afterReplacing` (the missing hook is not called). Each only saves a call.
+- **Status:** in force.
+- **Visible in:** `src/server/erase.test.ts`, `src/server/store-delete.test.ts`,
+  `src/server/store-delete-race.test.ts`, `src/server/store-delete-replace.test.ts`.
