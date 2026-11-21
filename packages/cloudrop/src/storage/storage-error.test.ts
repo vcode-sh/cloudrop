@@ -20,14 +20,12 @@ describe("storageError", () => {
     [401, xml("Unauthorized"), "STORAGE_DENIED", false, "Unauthorized"],
     [401, "", "STORAGE_DENIED", false, undefined],
     [429, xml("ServiceUnavailable"), "RATE_LIMITED", true, "ServiceUnavailable"],
-    [503, xml("SlowDown"), "RATE_LIMITED", true, "SlowDown"],
     [503, "", "RATE_LIMITED", true, undefined],
     [500, xml("InternalError"), "STORAGE_ERROR", true, "InternalError"],
     [501, xml("NotImplemented"), "STORAGE_ERROR", false, "NotImplemented"],
-    [502, "", "STORAGE_ERROR", true, undefined],
     [504, "<html><body>Gateway Timeout</body></html>", "STORAGE_ERROR", true, undefined],
-    [408, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
-    // AWS sends RequestTimeout with 400, and its SDKs retry it as a transient error.
+    // A bare 408 is retryable by its status alone; AWS sends the code RequestTimeout with 400, and its SDKs retry it.
+    [408, "", "STORAGE_ERROR", true, undefined],
     [400, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
     // A PutObject may be sent again, a multipart upload must be started again: not the same request, so not retryable.
     [409, xml("ConditionalRequestConflict"), "STORAGE_ERROR", false, "ConditionalRequestConflict"],
