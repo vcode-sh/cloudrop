@@ -1239,3 +1239,27 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   other short text there, as it can in `message`.
 - **Status:** in force; amends `M11-K3`'s "a plugin that sets a value outside the three reasons sends it".
 - **Visible in:** `src/server/http.ts`, `src/server/handler-failures.test.ts`.
+
+### M11-R138: a refusal claims the row, so it also ends one a stopped request left `completing`
+
+- **Decision:** with a store, a refusal at `/complete` (an `afterVerify` refusal, a failed verification) first calls
+  `claim` with a claim of its own, as a completion does, and then ends the row it holds with
+  `end("completing", "rejected")`; only then is the object deleted and `onAbort` run. `claim` takes a `pending` row
+  and a `completing` one whose claim is older than `completionLeaseMs`, and answers `busy` for a live claim, the
+  stored answer for a completed row and `UPLOAD_EXPIRED` for an ended or missing one, each answered as before.
+- **Why:** the refusal ended the row with `end("pending", "rejected")`, which changes nothing on a `completing` row.
+  A request that claimed the row and then stopped (a crash, a deploy) left it `completing`; once its lease ran out,
+  `/complete` verified the file again, was refused again, could not end the row and answered "Another request is
+  completing this upload" with `Retry-After: 2`, on every retry until the sweep ended the row as `failed`, keeping
+  the refused object (review finding G8, reproduced in lease and transaction mode). The claim rules already say who
+  may take such a row (`M5-T19`: a claim is live through exactly the lease, and one millisecond later the row can be
+  taken; `M5-T27`: a live claim is busy), so the refusal uses them instead of a rule of its own: a completion that is
+  really in flight holds a live claim and is not touched.
+- **If wrong:** a refusal now costs two store calls, not one. A request that stops between its claim and its `end`
+  leaves the row `completing`, and the next `/complete` after the lease refuses and ends it. An `onComplete` that
+  runs longer than the lease can lose its row to a refusal, as it could already lose it to a second completion
+  (`M5-T27`); `completionLeaseMs` is the setting for both. `FileCalls.end` takes `"completing"` as well as
+  `"pending"`; the store's own `end` always did.
+- **Status:** in force; `src/server/store-complete-refuse.test.ts` (busy at the lease's last millisecond, rejected
+  one later, in both modes), and `store-complete.test.ts` still holds a refusal off a completion in flight.
+- **Visible in:** `src/server/store-complete.ts`, `src/server/store-calls.ts`.

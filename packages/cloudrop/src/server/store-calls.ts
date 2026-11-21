@@ -30,7 +30,7 @@ export interface FileCalls {
   claim(claim: string, leaseMs: number): Promise<Result<ClaimOutcome>>;
   release(claim: string): Promise<Result<boolean>>;
   complete(claim: string, result: string | null, replace: boolean): Promise<Result<Completion>>;
-  end(from: "pending", to: "aborted" | "rejected"): Promise<Result<Transition>>;
+  end(from: "pending" | "completing", to: "aborted" | "rejected"): Promise<Result<Transition>>;
 }
 
 /** The store calls of one token's file, each logged with the file and its route. */

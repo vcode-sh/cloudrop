@@ -63,14 +63,20 @@ const lostClaim = (record: FileRecord | null, file: UploadedFile): Answer =>
   record?.completedAt ? replay(record, file) : fail(unfinished());
 
 /**
- * A refusal takes the row first: only a refusal that ended it may delete the object (M5 spec §5.5 step 4). The row then
- * decides, so a failed delete is left to the sweep's cleanup pass and the refusal is answered.
+ * A refusal takes the row first: only a refusal that ended it may delete the object (M5 spec §5.5 step 4). It claims
+ * the row as a completion would, so it takes a pending row and one a stopped request left `completing` past its
+ * lease, and is told `busy` while another request's claim is live (M11-R138); then it ends the row it holds. The row
+ * then decides, so a failed delete is left to the sweep's cleanup pass and the refusal is answered.
  */
 async function refuse(completion: Completion, refusal: Extract<Verdict, { kind: "refused" }>): Promise<Answer> {
-  const ended = await completion.calls.end("pending", "rejected");
+  const { calls, config, file, token } = completion;
+  const claimed = await calls.claim(crypto.randomUUID(), config.completionLeaseMs);
+  if (claimed.error) return claimed;
+  if (claimed.data.kind !== "claimed") return claimAnswer(claimed.data, file);
+  const ended = await calls.end("completing", "rejected");
   if (ended.error) return ended;
-  if (ended.data.changed) return cleanUpRefused(completion.config, completion.token, refusal, { rowEnded: true });
-  return settled(ended.data.record, completion.file);
+  if (ended.data.changed) return cleanUpRefused(config, token, refusal, { rowEnded: true });
+  return settled(ended.data.record, file);
 }
 
 /** onComplete, then its result as the JSON the row keeps; `extra` is the store's `tx`. */
