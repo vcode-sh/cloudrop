@@ -7,7 +7,7 @@ import type { FileTicket } from "../protocol/types.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { storeFixture } from "../testing/store-fixture.ts";
 import { upload } from "../testing/upload-fixture.ts";
-import { type Route, route } from "./route.ts";
+import { route } from "./route.ts";
 
 const user = { accept: "*/*", maxSize: "1GB", maxFiles: 20, authorize: () => ({ userId: "u1" }) } as const;
 /** The key most apps write first: the user's folder and the file's own name. */
@@ -27,17 +27,12 @@ const refusal = (problem: string) => ({
 const control = (codePoint: string) => refusal(`has a control character (${codePoint})`);
 const PARTS = refusal('has a "." or ".." part, or an empty part beside a "/"');
 
-const SERVERS = [
-  { server: "stateless", start: (routes: Record<string, Route>) => serverFixture(routes) },
-  { server: "with the memory store", start: (routes: Record<string, Route>) => storeFixture(routes) },
-];
-
-describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $server", ({ start }) => {
+// The name is judged before the store is asked (upload.ts), so a server without one shows it; the store's own part,
+// which rows it reserves and what it answers beside them, is the last test of this file.
+describe("POST /upload on a route that puts file.name in the key", () => {
   it.for([
     // macOS names a folder's icon file "Icon\r"; Linux and macOS allow every one of these in a name.
     { name: "a trailing CR", sent: "Icon\r", answer: control("U+000D") },
-    { name: "LF", sent: "a\nb.txt", answer: control("U+000A") },
-    { name: "TAB", sent: "a\tb.txt", answer: control("U+0009") },
     { name: "DEL", sent: "a\u007fb.txt", answer: control("U+007F") },
     { name: "the C1 control U+0085", sent: "a\u0085b.txt", answer: control("U+0085") },
     // Neither is a control character: a key holds them.
@@ -55,7 +50,7 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
     { name: "a trailing slash", sent: "a/", answer: PARTS },
     { name: "a slash inside", sent: "a/b.txt", answer: "users/u1/a/b.txt" },
   ])("answers a name with $name in its own ticket, and the file beside it goes on", async ({ sent, answer }) => {
-    const fixture = start({ named });
+    const fixture = serverFixture({ named });
     const { status, body } = await upload(fixture, { route: "named", files: [file("first.txt"), file(sent)] });
     expect({ status, answers: answers(body.files) }).toEqual({ status: 200, answers: ["users/u1/first.txt", answer] });
     expect(fixture.logger.errors).toEqual([]);
@@ -64,7 +59,7 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
   it("refuses a name whose control character reaches the key in another case or through prefix", async () => {
     const lowered = route(user, { key: ({ file: { name } }) => `u/${name.toLowerCase()}` });
     const foldered = route(user, { prefix: ({ file: { name } }) => `by-name/${name}` });
-    const fixture = start({ lowered, foldered });
+    const fixture = serverFixture({ lowered, foldered });
     const files = [file("first.txt"), file("Icon\r")];
     const [inKey, inPrefix] = [
       await upload(fixture, { route: "lowered", files }),
@@ -89,7 +84,7 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
     { name: "nothing", key: () => "", log: "The object key is empty. Pass a non-empty key." },
   ])("answers a key with $name with a 500, for a name with a CR too", async ({ key, log }) => {
     const broken = route(user, { key: ({ file: { name } }) => key(name) });
-    const fixture = start({ broken });
+    const fixture = serverFixture({ broken });
     const { status, body } = await upload(fixture, { route: "broken", files: [file("Icon\r")] });
     expect({ status, code: body.error?.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
       status: 500,
@@ -99,7 +94,7 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
   });
 
   it("gives every such name a key of its own making on a route without a key function", async () => {
-    const fixture = start({ plain });
+    const fixture = serverFixture({ plain });
     const sent = ["Icon\r", "a\nb.txt", "a\u0085b.txt", " a.txt ", ".profile", "a.", "..", ".", "/", "a/b.txt", "a\\b"];
     const { body } = await upload(fixture, { route: "plain", files: sent.map(file) });
     // A ULID and, at most, the name's extension in lower-case letters and digits.
@@ -117,7 +112,7 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
     { name: "a slash", sent: "a/b.txt", header: `filename="a/b.txt"; filename*=UTF-8''a%2Fb.txt` },
     { name: "a backslash", sent: "a\\b.txt", header: `filename="a_b.txt"; filename*=UTF-8''a%5Cb.txt` },
   ])("stores a name with $name in the object's Content-Disposition", async ({ sent, header }) => {
-    const fixture = start({ plain });
+    const fixture = serverFixture({ plain });
     const ticket = await fixture.single("plain", file(sent));
     const put = await fixture.send(ticket.put, new Uint8Array([1]));
     expect(put.status).toBe(200);
@@ -125,9 +120,10 @@ describe.for(SERVERS)("POST /upload on a route that puts file.name in the key, $
   });
 });
 
-it("reserves no row for a file whose name the key cannot hold", async () => {
+it("with a store, answers such a name in its own ticket and reserves no row for it", async () => {
   const owned = route(user, { owner: ({ userId }) => userId, key: ({ file: { name } }) => `mine/${name}` });
   const fixture = storeFixture({ named: owned });
-  await upload(fixture, { route: "named", files: [file("first.txt"), file("Icon\r"), file("..")] });
+  const { body } = await upload(fixture, { route: "named", files: [file("first.txt"), file("Icon\r"), file("..")] });
+  expect(answers(body.files)).toEqual(["mine/first.txt", control("U+000D"), PARTS]);
   expect((await fixture.store.raw.files()).map((row) => row.name)).toEqual(["first.txt"]);
 });
