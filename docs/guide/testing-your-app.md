@@ -17,16 +17,17 @@ npm i -D vitest
 
 Three functions do the work:
 
-- `testBucket()` is an in-process bucket. It keeps R2's measured rules (signed requests, expiry, equal part sizes) and
-  checks the signature of every request, so a request the real bucket would refuse is refused here too. Pass
-  `bucket.storage` to `createCloudrop`.
+- `testBucket()` is an in-process bucket with R2's measured rules: equal part sizes, the 7-day limit on presigned URLs,
+  create-only writes. It checks every request's signature, so a request signed for another bucket, after its expiry
+  or with changed headers is refused. Pass `bucket.storage` to `createCloudrop`.
 - `testClient(cloudrop, { bucket })` is the real `cloudrop/client` client, wired to `cloudrop.handler` and the bucket.
   `headers` stands in for the session a browser's cookies would carry.
 - `memoryStore()` is an in-memory [database store](store.md), for an app that uses `owner`, `quota`, `afterComplete`
   or `replace`.
 
 The examples share these imports and this setup. `signedIn` stands in for your app's session lookup: in your tests,
-import your real routes instead.
+import your real routes instead. A route built with your database store's `store.route` belongs to that store; see
+[`memoryStore`](#memorystoreoptions) for those.
 
 ```ts
 import { expect, test } from "vitest";
@@ -190,7 +191,7 @@ test("answers the client with what onComplete returned", async () => {
 ## A multipart file
 
 Files above `multipartThreshold` go up in parts, as in the browser. Lower the threshold in the test so a few MiB are
-enough; parts are 8 MiB, so 9 MiB makes two:
+enough; parts are 8 MiB below 256 MiB, so 9 MiB makes two:
 
 ```ts
 test("uploads a file larger than multipartThreshold in parts and stores every byte", async () => {
@@ -222,9 +223,13 @@ test("uploads a file larger than multipartThreshold in parts and stores every by
 The client is the real one, so progress, retries, multipart, `abort()` and `close()` run their real code. What a test
 cannot see:
 
+- **Your framework.** The client reaches `cloudrop.handler` directly. Your route file, the adapter
+  (`toNextHandler`, `toNodeHandler`) and middleware in front of it, such as a body parser that reads the body first,
+  do not run, so a test passes even when the handler is mounted at the wrong path. Check that the `basePath` of your
+  page's `createCloudropClient`, your mount and `createCloudrop` agree.
 - **The page's origin.** The client runs on `http://localhost` and reaches the server there, as a same-origin page:
-  each request carries `Origin: http://localhost`. A cross-origin setup and `trustedOrigins` are not exercised; see
-  [Deployment](deployment.md) for those.
+  each request carries `Origin: http://localhost`, whatever `headers` says. A cross-origin setup and `trustedOrigins`
+  are not exercised; see [Deployment](deployment.md) for those.
 - **Cookies.** A browser sends your session cookie by itself; here `headers` does it, for every request to the server
   and never for the bucket, as the browser does. `headers` can be a function, called before each request.
 - **Bucket CORS.** The test bucket answers every request; a real bucket refuses a browser's `PUT` that its CORS rule
@@ -235,6 +240,8 @@ cannot see:
 - **Resume after reload.** The client keeps nothing in IndexedDB: `resumable()` lists nothing, so one test's
   unfinished upload never shows in the next.
 - **The network.** Nothing is slow, dropped or refused on the way.
+- **R2 itself.** The bucket checks signatures with cloudrop's own signer, so it proves the request is signed as cloudrop
+  signs, not that R2 accepts it. cloudrop's own test lanes check that against R2.
 - **The clock.** The server and the bucket read the same clock, so `vi.useFakeTimers({ toFake: ["Date"] })` and
   `vi.setSystemTime()` fix the date for both.
 
@@ -250,7 +257,7 @@ cannot see:
 | Member | What it is |
 | --- | --- |
 | `storage` | The driver for `createCloudrop({ storage })`: `r2()` pointed at this bucket. |
-| `fetch` | Reaches the bucket, for a presigned URL your test fetches itself, such as one from `cloudrop.api.getUrl()`. |
+| `fetch` | Reaches the bucket with a signed request, such as a URL from `cloudrop.api.getUrl()`. A `publicUrl` is not served: read a public file with `object(key)`. |
 | `object(key)` | The stored object, or `null`: `key`, `size`, `type`, `disposition`, `metadata` (the `x-amz-meta-*` headers without the prefix), `parts` (`null` for a single `PUT`), `body` (a copy of the bytes) and `uploadedAt`. |
 | `keys()` | Every stored key, sorted. |
 | `pendingUploads()` | Multipart uploads started and neither completed nor aborted. `0` after a test means none was left behind. |
@@ -262,16 +269,18 @@ Returns a `CloudropClient`, typed from your server as `createCloudropClient<type
 | Option | What it does |
 | --- | --- |
 | `bucket` | Required: the test bucket the server stores in. |
-| `headers` | Headers for every request to the server, never to the bucket: an object such as `{ cookie: "session=alice" }`, or a function, possibly async, that returns them. |
-| `basePath` | The server's `basePath`, a path. Default `"/api/cloudrop"`. |
+| `headers` | Headers for every request to the server, never to the bucket: an object such as `{ cookie: "session=alice" }`, or a function, possibly async, that returns them. `origin` is always `http://localhost`. |
+| `basePath` | The server's `basePath`: a path without a trailing slash. Default `"/api/cloudrop"`. |
 
 A missing `bucket`, or a `basePath` that is not a path, throws `INVALID_CONFIG`.
 
 ### `memoryStore(options?)`
 
-`memoryStore()` returns a store without transactions: `onComplete` runs under a lease, as with `sqlStore(executor)`.
+`memoryStore()`, or `memoryStore({ transaction: false })`, returns a store without transactions: `onComplete` runs under a lease, as with `sqlStore(executor)`.
 `memoryStore({ transaction: true })` adds `transaction` and `store.route`, as `sqlStore(executor, { transaction: true })`
 does; `onComplete` of a route built with `store.route` receives `tx`, which is `undefined`, since there is no database
-to write through. Test the writes your `onComplete` makes through `tx` against your real database.
+to write through. A route built with another store's `store.route`, such as your database store's, is refused by
+`createCloudrop`; build the routes your tests share with plain `route()`, or from a function that takes the store. Test
+the writes your `onComplete` makes through `tx` against your real database.
 
 Each store is empty when created; create one per test.

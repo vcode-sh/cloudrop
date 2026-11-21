@@ -52,7 +52,10 @@ export interface TestObject {
 export interface TestBucket {
   /** The driver to pass to `createCloudrop({ storage })`: `r2()` pointed at this bucket. */
   readonly storage: StorageDriver;
-  /** Reaches the bucket, for a presigned URL your test fetches itself, such as one from `api.getUrl`. */
+  /**
+   * Reaches the bucket with a signed request, such as a URL from `api.getUrl`. A `publicUrl` is not served: read a
+   * public file with `object(key)`.
+   */
   readonly fetch: FetchLike;
   /** The object stored under `key`, or null. */
   object(key: string): TestObject | null;
@@ -67,10 +70,11 @@ export interface TestClientOptions {
   bucket: TestBucket;
   /**
    * Headers for every request to the server, never to the bucket: the session a browser's cookies would carry, such as
-   * `{ cookie: "session=alice" }`, or a function that returns them before each request.
+   * `{ cookie: "session=alice" }`, or a function that returns them before each request. `origin` is always the page's
+   * own, `http://localhost`, as a browser sends it.
    */
   headers?: ClientOptions["headers"];
-  /** The server's `basePath`. Default "/api/cloudrop". */
+  /** The server's `basePath`, a path without a trailing slash. Default "/api/cloudrop". */
   basePath?: string;
 }
 
@@ -80,10 +84,13 @@ const CREDENTIALS = { accessKeyId: "cloudrop-test-key", secretAccessKey: "cloudr
 const PAGE_ORIGIN = "http://localhost";
 // The brand createCloudrop reads to tie a route to its store; Symbol.for, so copies of cloudrop agree (server/route.ts).
 const STORE = Symbol.for("cloudrop.store");
+/** A path such as /api/cloudrop: no origin, trailing slash, query or fragment. */
+const PATH = /^(?:\/[^/?#\s]+)+$/;
 
 /** A bucket for tests, with no network: pass `bucket.storage` to `createCloudrop`, then read what landed. */
-export function testBucket(options: TestBucketOptions = {}): TestBucket {
-  const { publicUrl, cors, lifecycle } = options;
+export function testBucket(options?: TestBucketOptions | null): TestBucket {
+  // null counts as no options, as createCloudrop reads its own.
+  const { publicUrl, cors, lifecycle } = options ?? {};
   const bucketConfig = cors === undefined && lifecycle === undefined ? undefined : { cors, lifecycle };
   const fake = createFakeR2({ bucket: "uploads", credentials: CREDENTIALS, bucketConfig });
   return {
@@ -126,10 +133,10 @@ export function testClient<TCloudrop extends InferableCloudrop>(
       "testClient needs the test bucket the server stores in: testClient(cloudrop, { bucket }).",
     );
   }
-  if (typeof basePath !== "string" || !basePath.startsWith("/")) {
+  if (typeof basePath !== "string" || !PATH.test(basePath)) {
     throw new CloudropError(
       "INVALID_CONFIG",
-      'basePath must be the path the server is mounted at, such as "/api/cloudrop".',
+      'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
     );
   }
   const server = `${PAGE_ORIGIN}${basePath}`;
@@ -149,9 +156,10 @@ export function testClient<TCloudrop extends InferableCloudrop>(
  * `transaction` and `store.route`, like `sqlStore(executor, { transaction: true })`; its `tx` is undefined, since
  * there is no database to write through (M9-T7).
  */
-export function memoryStore(): CloudropStore;
 export function memoryStore(options: { transaction: true }): TransactionalStore<undefined>;
-export function memoryStore(options: { transaction?: boolean } = {}): CloudropStore<undefined> {
+export function memoryStore(options?: { transaction?: false } | null): CloudropStore;
+export function memoryStore(options?: { transaction?: boolean } | null): CloudropStore<undefined>;
+export function memoryStore(options?: { transaction?: boolean } | null): CloudropStore<undefined> {
   // The repository's own tests reach past the store (raw tables, injected failures); an app's test gets the store only.
   const {
     transaction,
@@ -161,7 +169,7 @@ export function memoryStore(options: { transaction?: boolean } = {}): CloudropSt
     appRows: _rows,
     ...methods
   } = createMemoryStore();
-  if (!options.transaction) return methods;
+  if (!options?.transaction) return methods;
   const store = {
     ...methods,
     transaction: (run) => transaction((_tx, inner) => run(undefined, inner)),

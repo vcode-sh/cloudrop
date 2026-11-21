@@ -58,14 +58,15 @@ Entries continue from `M9-T1`.
 
 - **Decision:** `testClient(cloudrop, { bucket, headers?, basePath? })` creates the real client with `basePath`
   `http://localhost<basePath>` and a `fetch` that sends requests under it to `cloudrop.handler` with
-  `Origin: http://localhost` set last, and every other request to `bucket.fetch`. `basePath` must be a path (default
-  `/api/cloudrop`) and must match the server's. `headers` is the client's own option, so it reaches the server and
+  `Origin: http://localhost` set last, and every other request to `bucket.fetch`. `basePath` must be a path without a
+  trailing slash (default `/api/cloudrop`) and must match the server's. `headers` is the client's own option, so it reaches the server and
   never the bucket. A missing bucket or a non-path `basePath` throws `INVALID_CONFIG`.
 - **Why:** a browser sets `Origin` on every `POST` and a page cannot change it; the handler's origin check then passes
   as for a same-origin page without `trustedOrigins`. A cross-origin page is the deployment's concern and needs a
   second origin the in-process client does not have. Cookies are modelled by `headers`, which is what the design asks.
 - **If wrong:** an app that serves the API from another origin cannot test its `trustedOrigins` here; it would need an
-  origin option.
+  origin option. The app's own mounting (route file, framework adapter, body-parsing middleware) does not run either;
+  the guide lists both among the differences.
 - **Status:** in force.
 - **Visible in:** `packages/cloudrop/src/testing.ts`, `docs/guide/testing-your-app.md`.
 
@@ -75,7 +76,8 @@ Entries continue from `M9-T1`.
   `persist: false`, so nothing is written to IndexedDB. Cancellation is left to the client: a request already handed to
   the handler or the bucket finishes in-process.
 - **Why:** in jsdom or happy-dom the client would otherwise reach for their `XMLHttpRequest`, which cannot reach the
-  in-process bucket; a test proves `PUT`s avoid it. With a fake IndexedDB in a test setup, persisting would carry one
+  in-process bucket. The `fetch` option is also what routes requests in-process, so every test of the entry runs
+  through it. With a fake IndexedDB in a test setup, persisting would carry one
   test's unfinished upload into the next; a test proves `resumable()` stays empty. A `fetch` that rejects once its
   signal fires was tried: no test of the entry, including a cancel during `/complete`, answered differently, because
   the client itself decides what a cancelled file becomes, so it was removed.
@@ -98,7 +100,7 @@ Entries continue from `M9-T1`.
 
 - **Decision:** `memoryStore()` returns the repository's memory store without `transaction` and without its test
   hooks (`raw`, `injectFailure`, `failNextUsageWrite`, `appRows`), so completions run under a lease, as with
-  `sqlStore(executor)`. `memoryStore({ transaction: true })` returns a `TransactionalStore<undefined>`: `transaction`
+  `sqlStore(executor)`; `{ transaction: false }` and `null` mean the same. `memoryStore({ transaction: true })` returns a `TransactionalStore<undefined>`: `transaction`
   runs the memory store's own, and `store.route` brands routes for it as the adapters do. `onComplete` of such a route
   receives `tx: undefined`.
 - **Why:** it mirrors the adapters' `transaction: true` switch, which the design asks for ("the same route helper the

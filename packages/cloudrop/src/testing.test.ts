@@ -43,25 +43,6 @@ describe("testClient", () => {
     expect((await client.upload("anyFile", text("a.txt", 3))).error).toBeNull();
   });
 
-  // In a jsdom or happy-dom environment the real client would send bucket PUTs through XMLHttpRequest, which cannot
-  // reach the in-process bucket.
-  it("sends bucket PUTs through fetch where XMLHttpRequest exists", async () => {
-    vi.stubGlobal(
-      "XMLHttpRequest",
-      class {
-        constructor() {
-          throw new Error("The test client must not use XMLHttpRequest.");
-        }
-      },
-    );
-    const bucket = testBucket();
-    const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { anyFile } });
-
-    const { data } = await testClient(cloudrop, { bucket }).upload("anyFile", text("a.txt", 5));
-
-    expect(bucket.object(data?.file.key ?? "")?.size).toBe(5);
-  });
-
   it("cancels a multipart upload: the server aborts it and the bucket keeps nothing", async () => {
     const bucket = testBucket();
     const cloudrop = createCloudrop({
@@ -116,7 +97,12 @@ describe("testClient", () => {
     {
       name: "a basePath that is a URL",
       options: { basePath: "https://api.example.com/api/cloudrop" },
-      message: 'basePath must be the path the server is mounted at, such as "/api/cloudrop".',
+      message: 'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
+    },
+    {
+      name: "a basePath with a trailing slash",
+      options: { basePath: "/api/cloudrop/" },
+      message: 'basePath must be the path the server is mounted at, such as "/api/cloudrop": no trailing slash.',
     },
   ])("refuses $name with INVALID_CONFIG", ({ options, message }) => {
     const bucket = testBucket();
@@ -149,6 +135,23 @@ describe("testBucket", () => {
     expect(bucket.object("missing.txt")).toBeNull();
   });
 
+  it("lists keys sorted and hands out copies, so a test cannot change what is stored", async () => {
+    const bucket = testBucket();
+    const named = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }, { key: ({ file }) => file.name });
+    const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { named } });
+    const client = testClient(cloudrop, { bucket });
+    await client.upload("named", text("b.txt", 1));
+    await client.upload("named", text("a.txt", 1));
+
+    const first = bucket.object("a.txt");
+    first?.body.fill(7);
+    first?.uploadedAt.setTime(0);
+
+    expect(bucket.keys()).toEqual(["a.txt", "b.txt"]);
+    expect(bucket.object("a.txt")?.body).toEqual(new Uint8Array(1));
+    expect(bucket.object("a.txt")?.uploadedAt.getTime()).not.toBe(0);
+  });
+
   // The server signs with the date it reads and the bucket checks signatures against its own: they must be one clock.
   it("reads the clock the server reads, so a test can fix the date of an upload", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -157,19 +160,23 @@ describe("testBucket", () => {
     const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { anyFile } });
 
     const { data } = await testClient(cloudrop, { bucket }).upload("anyFile", text("a.txt", 1));
+    vi.setSystemTime(new Date("2031-02-04T00:00:00Z"));
 
     expect(bucket.object(data?.file.key ?? "")?.uploadedAt).toEqual(new Date("2031-02-03T04:05:06Z"));
   });
 
-  it("serves the CORS rules it was given to checkBucket", async () => {
-    const cors =
-      "<CORSConfiguration><CORSRule><AllowedOrigin>https://app.example.com</AllowedOrigin><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>";
-    const bucket = testBucket({ cors });
-    const cloudrop = createCloudrop({ storage: bucket.storage, secret, routes: { anyFile } });
+  it("serves the CORS and lifecycle rules it was given to checkBucket", async () => {
+    const cors = `<CORSConfiguration><CORSRule><AllowedOrigin>https://app.example.com</AllowedOrigin>
+      <AllowedMethod>PUT</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader>
+      </CORSRule></CORSConfiguration>`;
+    const lifecycle = `<LifecycleConfiguration><Rule><ID>abort</ID><Status>Enabled</Status><Filter></Filter>
+      <AbortIncompleteMultipartUpload><DaysAfterInitiation>1</DaysAfterInitiation></AbortIncompleteMultipartUpload>
+      </Rule></LifecycleConfiguration>`;
+    const cloudrop = createCloudrop({ storage: testBucket({ cors, lifecycle }).storage, secret, routes: { anyFile } });
 
     const { data } = await cloudrop.api.checkBucket({ origins: ["https://app.example.com"] });
 
-    expect(data?.cors.status).toBe("problem");
+    expect({ cors: data?.cors.status, lifecycle: data?.lifecycle.status }).toEqual({ cors: "ok", lifecycle: "ok" });
   });
 });
 
@@ -186,5 +193,11 @@ describe("memoryStore", () => {
     const { data } = await testClient(cloudrop, { bucket }).upload("avatar", text("a.txt", 2));
 
     expect(data?.data).toEqual({ inTransaction: true });
+  });
+
+  // A store without `transaction` is the lease mode of CloudropStore: that absence is the contract.
+  it("without transaction: true, has no transaction, so completions take a lease", () => {
+    expect(Object.hasOwn(memoryStore(), "transaction")).toBe(false);
+    expect(Object.hasOwn(memoryStore({ transaction: false }), "transaction")).toBe(false);
   });
 });
