@@ -33,7 +33,8 @@ At `/upload`, before anything is signed, a request with a file **sent as** one o
    `application/x-msdownload`), every JavaScript type WHATWG lists (`text/javascript`, `text/x-javascript`,
    `text/jscript` and the rest), the shell script types and `text/vbscript`, and Windows installers
    (`application/x-msi`) and HTML applications (`application/hta`). Also `unknown/unknown` and `application/unknown`, which a
-   browser sniffs and may render as a page. `allow` lets a type through.
+   browser sniffs and may render as a page, and `multipart/x-mixed-replace`, whose parts a browser renders each by its
+   own type, an HTML part as a page. `allow` lets a type through.
 2. **An XML type the route does not name.** A browser renders XML, and runs the scripts an SVG or an XHTML element in
    it carries. `text/xml`, `application/xml`, `text/xsl` and every `+xml` type, `image/svg+xml` among them, pass only
    when the route's `accept` lists that exact type, such as `accept: ["image/png", "image/svg+xml"]`; `image/*` and
@@ -55,7 +56,7 @@ At `/complete`, a file whose **first bytes show**:
 
 A file whose first bytes match none of the formats below passes as the type it was sent as, which the route accepted
 and rule 1 and 2 let through. Plain text, CSV, JSON and most text formats have no signature, so they pass this way.
-JavaScript has none either: a script is refused by its declared type, or by a `#!` line.
+JavaScript has none either: a script is refused by its declared type, or by a `#!` line naming its interpreter.
 
 ### What happens to a refused file
 
@@ -106,7 +107,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | AVIF, HEIC, HEIF | `image/avif`, `image/heic`, `image/heif` | ISO BMFF `ftyp` box, major brand `avif`, `heic` and kin, `mif1` | AVIF §9.1; ISO/IEC 23008-12 |
 | MP4, M4A, MOV, 3GP | `video/mp4`, `audio/mp4`, `video/quicktime`, `video/3gpp` | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
 | WebM, Matroska | `video/webm`, `video/x-matroska` | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
-| MP3 | `audio/mpeg` | `ID3`, or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
+| MP3 | `audio/mpeg` | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
 | WAV | `audio/wav` | `RIFF`, 4 bytes, `WAVE` | WHATWG §6.2 |
 | Ogg | `audio/ogg` | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |
@@ -114,10 +115,10 @@ The plugin applies to every route. A type that one route takes and another must 
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
 | Word, Excel, PowerPoint | the Office Open XML types | a ZIP with an entry under `word/`, `xl/` or `ppt/` among the entries in the first 4 KiB | ECMA-376 Part 1 |
 | OpenDocument, EPUB | the type in the archive | a ZIP whose first entry `mimetype` names it | ODF 1.3 Part 2 §3.3; EPUB OCF 3.3 §4.2.1 |
-| Windows program | `application/vnd.microsoft.portable-executable` | `MZ` | Microsoft PE Format |
+| Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0` where the offset at `0x3C` points, or a DOS header with fewer than 512 bytes on its last page, at least one page and a header that fits | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
 | Linux program | `application/x-executable` | `7F 45 4C 46` | System V ABI, ELF header |
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
-| Script | `text/x-shellscript` | `#!` | `execve(2)` |
+| Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/` | `execve(2)` |
 | SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg` | SVG 2 |
 | Web page | `text/html` | a tag such as `<html`, `<script`, `<div`, `<p`, `<!DOCTYPE html` or `<!--` at the start, an `html` root, or one of those tags as the root after a comment or doctype in a document without `<?xml` | WHATWG §7.1 |
 | XML | `application/xml` | `<?xml` | WHATWG §7.1 |
@@ -134,6 +135,9 @@ Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitesp
 - **Archives are not opened.** A ZIP of programs passes as a ZIP. There is no virus scanning.
 - **`deny` sees what the first bytes show.** A ZIP behind a one-byte prefix, which ZIP readers still open, shows no
   ZIP signature.
+- **A text file that starts with `#!` and a path is refused as a script,** even on a route that takes `text/*`. A
+  route that takes source code adds `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type,
+  such as `text/x-python` or `text/plain`.
 - **Text that starts like a web page is refused.** A Markdown file that opens with `<p align="center">`, `<div>` or a
   `<!--` comment reads as HTML, as a browser would read it.
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An

@@ -7,10 +7,10 @@ Entries continue from 1.
 
 - **Decision:** at `/complete`, `contentChecks()` reads bytes `0` to `min(size, 4096) - 1` of the stored file with
   `storage.getRange` and detects one of: PNG, JPEG, GIF, WebP, WAV, PDF, Ogg, FLAC, MP3 (an ID3v2 tag or an MPEG audio
-  frame header), the ISO BMFF brands (AVIF, HEIC and HEIF, MP4, M4A, QuickTime, 3GPP), the EBML DocType (WebM,
+  frame header; the ID3 tag by its whole header, M10-K10), the ISO BMFF brands (AVIF, HEIC and HEIF, MP4, M4A, QuickTime, 3GPP), the EBML DocType (WebM,
   Matroska), ZIP and the packages inside it (Office Open XML by an entry under `word/`, `xl/` or `ppt/`, OpenDocument
-  and EPUB by their first `mimetype` entry), Windows, Linux and macOS programs (`MZ`, ELF, Mach-O and universal
-  binaries), a `#!` line, and as text after a UTF-8 or UTF-16 byte order mark and leading whitespace: SVG (an `svg`
+  and EPUB by their first `mimetype` entry), Windows, Linux and macOS programs (an MS-DOS header, ELF, Mach-O and
+  universal binaries), a `#!` line naming an interpreter's path, and as text after a UTF-8 or UTF-16 byte order mark and leading whitespace: SVG (an `svg`
   root element after the prolog), HTML (WHATWG's tags at the start, an `html` root, or one of the tags as the
   unprefixed root of a document without an XML declaration) and XML (`<?xml`). Each row cites its specification in `src/plugins/sniff*.ts`; the table with sources is in
   [Plugins](../guide/plugins.md#what-it-recognises). A detection carries the declared types it agrees with: aliases;
@@ -28,7 +28,8 @@ Entries continue from 1.
   (M10-K9). The HTML tag must end in whitespace, `>` or `/`, a little wider than WHATWG's space or `>`: a parser reads
   those the same.
 - **If wrong:** a format that starts with one of these signatures by chance would be refused as a contradiction; none
-  is known among the types `accept.ts` lists. `MZ` refuses any file that starts with those two letters.
+  is known among the types `accept.ts` lists. A signature short enough for text to start with is read with its header
+  fields (M10-K10, M10-K11).
 - **Status:** in force. `src/plugins/sniff.test.ts` holds one vector per signature and the near misses.
 - **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-containers.ts`, `src/plugins/sniff-text.ts`,
   `docs/guide/plugins.md`.
@@ -55,7 +56,7 @@ Entries continue from 1.
 ### M10-K3: web pages, programs and scripts are refused by default; XML needs its type named
 
 - **Decision:** refused whatever the route accepts: `text/html`, `application/xhtml+xml`, WHATWG's unknown types
-  (`unknown/unknown`, `application/unknown`), the program types (`application/vnd.microsoft.portable-executable`,
+  (`unknown/unknown`, `application/unknown`), `multipart/x-mixed-replace`, the program types (`application/vnd.microsoft.portable-executable`,
   `application/x-msdownload`, `application/x-msdos-program`, `application/x-dosexec`, `application/x-executable`,
   `application/x-elf`, `application/x-sharedlib`, `application/x-mach-binary`, `application/x-mach-o-executable`,
   and the Windows installer and HTML application types `application/x-msi`, `application/x-ms-installer`,
@@ -68,7 +69,10 @@ Entries continue from 1.
 - **Why:** the design names HTML, executables, scripts and SVG. The SVG rule is widened to every XML type because a
   browser renders `text/xml`, `text/xsl` and `application/rss+xml` too, and an element in the SVG or XHTML namespace
   runs its scripts there; "named exactly" means `image/*` or `*/*` let no XML through by accident. A browser sniffs the
-  unknown types (WHATWG §7) and may render the file as a page.
+  unknown types (WHATWG §7) and may render the file as a page. A browser navigated to a `multipart/x-mixed-replace`
+  response renders each body part as a document of the part's own type (HTML Standard §7.5.5, Loading
+  `multipart/x-mixed-replace` documents; §17.2 names `text/html` parts as its security concern), so an HTML part runs
+  from a bucket URL like a page; Firefox does this today (review finding, 2026-11-21).
 - **If wrong:** a route that takes RSS or other XML on purpose lists the type in `accept`; one that takes HTML adds it
   to `allow` and `accept`.
 - **Status:** in force.
@@ -172,3 +176,45 @@ Entries continue from 1.
   serve XML and SVG from a domain of their own or as downloads, and keep private routes private.
 - **Status:** in force.
 - **Visible in:** `docs/guide/plugins.md`.
+
+### M10-K10: `MZ` and `ID3` count only with the header they open
+
+- **Decision:** a file is a Windows program when it starts with `MZ`, is at least 28 bytes long, and either (a) is at
+  least 64 bytes long and `e_lfanew` (the 32-bit little-endian value at `0x3C`) points, inside the bytes read, at
+  `PE\0\0`, or (b) its MS-DOS header describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2), at
+  least one 512-byte page (`e_cp`, at 4), and a header of at least two 16-byte paragraphs (`e_cparhdr`, at 8) that fits
+  in those pages. A file is an ID3-tagged recording when it starts with `ID3`, is at least 10 bytes long, its major
+  version is 2 to 4, its revision is under `FF`, the low four bits of its flags are clear, and each of the four size
+  bytes is under `80`.
+- **Why:** two or three letters are text that people write: a CSV whose first cell is `MZ` (Mozambique's country
+  code) was refused as a program, and a note that starts "ID3 tags are" contradicted every text type (review finding,
+  2026-11-21). The rules come from the formats' own definitions: Microsoft's PE Format ("MS-DOS Stub" and "Signature":
+  the offset at `0x3C` leads to `PE\0\0`, which is all Windows' loader reads, so a packed program with zeroed DOS
+  fields is still found by (a)); The MS-DOS Encyclopedia, Article 4, for the `.EXE` header, whose last-page count is
+  the image length modulo 512, so (b) finds a DOS program and a Windows program whose signature lies past 4 KiB;
+  ID3v2.4.0 structure §3.1, whose detection pattern is `49 44 33 yy yy xx zz zz zz zz` with `yy` under `FF` and `zz`
+  under `80`, and whose versions 2.2 to 2.4 define no flag in the low four bits. Text cannot form either header: the
+  last-page count under 512 needs a byte `00` or `01` at offset 3, and a version byte of 2 to 4 is a control character.
+- **If wrong:** a DOS program with a damaged header and no PE signature in the first 4 KiB passes as its declared type;
+  Windows does not run DOS programs on 64-bit systems, and the declared type is still judged. A file with an ID3
+  header of a future version 5 is not read as MP3, which keeps only its declared type.
+- **Status:** in force; `src/plugins/sniff.test.ts` holds a real PE header, one with only `e_lfanew` set, a DOS
+  program, ID3v2.3 and v2.4 tags, and the CSV, the prose and each broken header field as near misses.
+- **Visible in:** `src/plugins/sniff.ts`, `docs/guide/plugins.md`.
+
+### M10-K11: a `#!` line naming a path stays refused, and once allowed agrees with any text type
+
+- **Decision:** a file is a script when it starts with `#!`, any spaces or tabs, and `/`. It stays refused by default,
+  also on a route that takes `text/*`; `allow: ["text/x-shellscript"]` lets scripts through, and an allowed script then
+  agrees with every `text/` type as well as the shell script types, so a Python script sent as `text/x-python` or
+  `text/plain` passes.
+- **Why:** the design refuses scripts, and a script is the one text file a system runs as it stands once downloaded;
+  a route that takes source code is the exception, and says so with `allow`. `execve(2)` defines the line as `#!`, the
+  interpreter's path and an optional argument, and Linux's `binfmt_script` skips the blanks between; scripts name the
+  path in full, so prose such as "#!important" is no longer taken for a script (review finding, 2026-11-21). Before,
+  an allowed script sent as `text/x-python` still failed as a contradiction, which left `allow` unusable for scripts.
+- **If wrong:** a script whose `#!` line names a relative path is not detected and passes as its declared type,
+  which `/upload` judged; the kernel resolves such a path from the working directory, which no portable script relies
+  on.
+- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/content-checks.test.ts`.
+- **Visible in:** `src/plugins/sniff-text.ts`, `docs/guide/plugins.md`.

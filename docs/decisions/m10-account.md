@@ -82,7 +82,12 @@ Rulings for the client's `account` option, the server's check and the React guid
   the same account and is refused again; only a reload, which shows the account signed in now, helps. 409, as the
   request conflicts with the server's state, not with the user's rights (403 would read as `FORBIDDEN`).
 - **If wrong:** an app whose `owner()` answers differently for the same person over time (a tenant switch inside one
-  session) refuses uploads after the switch until a reload; that is the guard's purpose.
+  session) refuses uploads after the switch until a reload; that is the guard's purpose. Because `owner()` answering
+  `null` skips the comparison, a page whose `account` names a user still uploads, with no owner, when its session has
+  signed out in another tab: the guard is safe only on a route whose `authorize` refuses anonymous sessions, which then
+  answers that `/upload` with `UNAUTHORIZED` before `owner()` is read. A route that lets anonymous users upload and
+  wants such a page refused reads the percent-encoded `x-cloudrop-account` header in `authorize` and refuses there
+  (review finding, 2026-11-21).
 - **Status:** in force. Contract: `src/server/upload-account.test.ts`; in a real browser, the `examples/vite-react`
   row "after a sign-in as someone else in another tab…".
 - **Visible in:** `src/server/upload.ts`, `src/server/upload-request.ts`, `src/server/http.ts`, `src/errors.ts`,

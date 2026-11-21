@@ -93,7 +93,9 @@ const client = createCloudropClient<typeof cloudrop>({ namespace: userId, accoun
   `/abort` or a bucket `PUT`. The later calls need no check: each carries the upload token, which names the owner
   `/upload` saw.
 - **Ignored without an owner.** On a route without `owner`, when `owner` returns `null`, and when the client sends no
-  account (an older page during a deploy), the upload is checked as before.
+  account (an older page during a deploy), the upload is checked as before. So the guard is safe only when the route's
+  `authorize` refuses anonymous sessions: otherwise a page whose account signed out in another tab still uploads, as a
+  file with no owner.
 - **From a page on another origin,** the preflight that a cross-origin `/upload` already sends asks for this header too,
   and the handler allows it for a page on a `trustedOrigins` origin. A proxy or framework that answers preflights itself
   must allow `x-cloudrop-account`.
