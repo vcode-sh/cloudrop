@@ -1637,3 +1637,41 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `docs/guide/store.md` ("Known costs") still describes the old cost.
 - **Visible in:** `src/client/launch.ts`, `src/client/entry.ts`, `src/client/launch.test.ts`,
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Stalled requests").
+
+### M11-R93: the client reads a bucket answer as the storage layer does, and a test holds the two together
+
+- **Decision:** `classifyAnswer` (`src/client/bucket.ts`) retries a bucket answer whose S3 code is `OperationAborted`,
+  whatever its status, as it retries `RequestTimeout` (`M11-R88`): within the part's attempts, then the retryable
+  `STORAGE_ERROR` "The storage service failed. Try again in a moment.", which keeps the ticket (`M11-R80`). It was
+  `UPLOAD_REJECTED`. `src/client/bucket-agreement.test.ts` feeds 38 answers to the client (through `putObject`) and to
+  `storageError` and fails on any difference that is not in its list. What is compared is what the answer says to do:
+  retry, and with which code (`RATE_LIMITED` also slows the client's pool down), or stop. A stop names its code only
+  for `NO_SUCH_UPLOAD`, which `retry()` and `resume()` read from both sides (`M9-H4`); every other refusal of the
+  bucket is the client's `UPLOAD_REJECTED`, whatever the driver calls it (`STORAGE_DENIED`, `INVALID_PART`,
+  `CHECKSUM_MISMATCH`, `NOT_FOUND`), since those codes never leave the server. Two differences are meant:
+
+  | Answer | Storage layer | Client | Why a browser's `PUT` differs |
+  | --- | --- | --- | --- |
+  | `403` with `ExpiredRequest`, `AccessDenied`, `RequestTimeTooSkewed`, `NotEntitled` or no code | stop (`STORAGE_DENIED`) | renew the URL once, then stop | The server signs a request as it sends it, so its `403` is its credentials or its clock. The page holds a URL signed minutes ago, which may only have expired; R2 says `ExpiredRequest` and RustFS `AccessDenied` for the same expiry, so the code cannot narrow it (decision S10). `403 SignatureDoesNotMatch` stops on both sides |
+  | `412 PreconditionFailed` | stop (`ALREADY_EXISTS`) | stored | The page's `PUT` is create-only under a key of its own, so a `412` is its own earlier attempt, which stored the object and whose answer was lost (spec §5.4). `/complete` then checks whose object it is |
+
+  The other 32 answers agree, `409 ConditionalRequestConflict` (stop, `M11-R23`) and `409 ObjectLockedByBucketPolicy`
+  (stop) among them.
+- **Why:** the two tables were written apart, and `OperationAborted` was in one only. AWS's conditional-writes page
+  says of the `409` a conditional `PutObject` can get: "uploads may be retried after receiving a `409 Conflict` error"
+  (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html>, read 2026-11-21); the storage
+  layer has retried `OperationAborted` since its second commit (`d0007ae`, 2026-11-15), which no decision records.
+  AWS's error list (<https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html>) did not load its table for
+  this review either, so the code's own wording is not quoted here. R2's error list
+  (<https://developers.cloudflare.com/r2/api/error-codes/>, read 2026-11-21) has no `OperationAborted`,
+  `RequestTimeout` or `ConditionalRequestConflict`; its `409`s are `BucketNotEmpty`, `BucketConflict` and
+  `ObjectLockedByBucketPolicy`, and `docs/research/r2-spike-findings.md` measured no `409` to a `PUT`. So on R2 the
+  rule is unmeasured and most likely never met; it is there for S3 and for what speaks its dialect. The client keeps
+  `ConditionalRequestConflict` a stop although a `PutObject` may be sent again: under a key of the upload's own, the
+  delete that causes it is this upload's `/abort`, and sending the bytes again would store a file the person
+  cancelled.
+- **If wrong:** a storage service that answers `OperationAborted` for a `PUT` it will never take costs five more
+  attempts before the file fails, with a retryable error instead of `UPLOAD_REJECTED`. An answer in neither list is
+  not compared: a new rule on one side needs its row in the test.
+- **Status:** in force.
+- **Visible in:** `src/client/bucket.ts`, `src/client/bucket-agreement.test.ts`, `docs/guide/errors.md`.

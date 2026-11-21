@@ -29,9 +29,17 @@ export type BucketOutcome =
 const STORAGE_CODE = /<Code>([A-Za-z]{1,64})<\/Code>/;
 
 /**
+ * S3 codes that say the same request may pass later, whatever their status: a body S3 stopped waiting for, which it
+ * answers with 400, not 408, and AWS's SDKs retry as transient (M11-R88); and a conflicting operation still running,
+ * answered with 409 (M11-R93).
+ */
+const TRANSIENT_CODES: ReadonlySet<string | undefined> = new Set(["RequestTimeout", "OperationAborted"]);
+
+/**
  * A storage answer that is not a success, from its status, body and Retry-After header, as the server's driver
- * classifies: by status; the body's S3 code only tells a bad signature from an expired URL, a gone upload from
- * another 404, and a body the storage stopped waiting for from another 400.
+ * classifies (storage/storage-error.ts; bucket-agreement.test.ts holds the two side by side): by status; the body's S3
+ * code only tells a bad signature from an expired URL, a gone upload from another 404, and a transient failure from
+ * another 4xx.
  */
 export function classifyAnswer(status: number, body: string, retryAfter: string | null): BucketOutcome {
   const storageCode = STORAGE_CODE.exec(body)?.[1];
@@ -44,9 +52,8 @@ export function classifyAnswer(status: number, body: string, retryAfter: string 
   }
   // R2 throttles with 429 and the S3 code ServiceUnavailable (spike Q9), so the status decides.
   if (status === 429 || status === 503) return { kind: "retry", error: storageBusy(), retryAfterMs };
-  // 501 Not Implemented: the storage service lacks the feature, so a retry can never succeed. S3 answers a body it
-  // stopped waiting for with 400 RequestTimeout, not 408, and AWS's SDKs retry that as transient (M11-R88).
-  if (status === 408 || (status >= 500 && status !== 501) || storageCode === "RequestTimeout") {
+  // 501 Not Implemented: the storage service lacks the feature, so a retry can never succeed.
+  if (status === 408 || (status >= 500 && status !== 501) || TRANSIENT_CODES.has(storageCode)) {
     return { kind: "retry", error: storageDown(), retryAfterMs };
   }
   // A part of an upload that was aborted (another tab, the sweep, the bucket's lifecycle rule): no new URL revives it.
