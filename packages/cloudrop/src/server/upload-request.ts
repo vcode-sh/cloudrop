@@ -7,7 +7,7 @@ import { ACCOUNT_HEADER, type FileDescriptor, MAX_NAME_LENGTH } from "../protoco
 import { formatBytes } from "../storage/validate.ts";
 import { matchAccept, normalizeType } from "./accept.ts";
 import { ROUTE_NAME, type RouteConfig, type ServerConfig } from "./config.ts";
-import { generatedKey, newFileId, normalizeKey } from "./key.ts";
+import { generatedKey, keyForFile, newFileId } from "./key.ts";
 import type { PluginFile } from "./plugins.ts";
 
 /**
@@ -89,6 +89,10 @@ export function readRequest(
   });
 }
 
+/** A refusal of one file for its name; `problem` follows "This file's name". The name itself is never echoed. */
+const nameRefused = (problem: string): CloudropError =>
+  invalidInput(`This file's name ${problem}. Rename the file, then add it again.`);
+
 /** The file's key and stored type, or why the route refuses it. */
 export function prepareFile(
   route: RouteConfig,
@@ -96,7 +100,7 @@ export function prepareFile(
   context: { request: Request; metadata: unknown; auth: object },
 ): PluginFile | CloudropError {
   const unusable = nameProblem(descriptor.name);
-  if (unusable) return invalidInput(`This file's name ${unusable}. Rename the file, then add it again.`);
+  if (unusable) return nameRefused(unusable);
   const type = normalizeType(descriptor.type);
   if (type === null) {
     return new CloudropError("FILE_TYPE_NOT_ALLOWED", "The file's type is not a valid MIME type. Pick another file.");
@@ -129,8 +133,10 @@ export function prepareFile(
       `Route "${route.name}": prefix must be a relative folder such as "users/42", without a leading slash.`,
     );
   }
-  const key = normalizeKey(definition.key ? definition.key(keyContext) : generatedKey(folder, id, match.ext));
-  // The key comes from the application's prefix or key function, so a bad one is a server bug, not the user's.
+  const key = keyForFile(definition.key ? definition.key(keyContext) : generatedKey(folder, id, match.ext), name);
+  // A route may put the file's name in the key, and a name is the user's: one the key cannot hold refuses this file.
+  if ("nameProblem" in key) return nameRefused(key.nameProblem);
+  // Anything else in the key comes from the application's prefix or key function: a server bug, not the user's.
   if ("problem" in key) throw new TypeError(`Route "${route.name}" built an unusable key: ${key.problem}`);
   return { id, key: key.key, name, size: descriptor.size, type };
 }

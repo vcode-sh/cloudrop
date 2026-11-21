@@ -203,13 +203,22 @@ In every callback and plugin hook, `request` is for its headers and `url`:
 
 ### Keys
 
-The server chooses every key; the client's file name never reaches it. The name appears only in the stored
-`Content-Disposition` header. Keys from `prefix` and `key` are checked the same way: `.` and `..` segments, empty
-segments, a leading `/`, control characters and keys over 1024 bytes are refused, and Unicode is normalized to NFC.
-`prefix` must also return a string without a leading `/`.
+The server chooses every key; the client's file name reaches it only when your own `prefix` or `key` function puts
+it there. Otherwise the name appears only in the stored `Content-Disposition` header. Keys from `prefix` and `key` are
+checked the same way: `.` and `..` segments, empty segments, a leading `/`, control characters and keys over 1024
+bytes are refused, and Unicode is normalized to NFC. `prefix` must also return a string without a leading `/`.
 
 A bad key is a bug in your route, not the user's mistake: the check throws, `/upload` answers `SERVER_ERROR` (HTTP 500)
 and the server logs which route built the key and why it was refused.
+
+One bad key is the user's: a key built from `file.name`. Real names hold what a key cannot: macOS names a folder's
+icon file `Icon` and a carriage return, and Linux and macOS allow tabs and line breaks in a name. When the key is
+unusable only for control characters the name has, or for a `.`, a `..` or an empty part (a leading, trailing or
+doubled `/`) the name has, that file alone is refused with `INVALID_INPUT` ("This file's name has a control
+character (U+000D), which this upload cannot store. Rename the file, then add it again."), and the request's other
+files go on. Everything else in a name goes into the key as it is: a `/` starts a folder, and a `\`, a no-break
+space, and a leading or trailing space or dot stay. Replace what your keys should not hold, or leave the name out of
+the key, as the default key does: `<prefix>/<ulid><ext>` takes only letters and digits of the name's extension.
 
 A custom `key` must be unique. A rejected or aborted upload's object is deleted by key once a `HEAD`, or a create-only
 completion, shows the object is this upload's. That delete is not conditional: another file stored under the same key
@@ -335,7 +344,8 @@ What happens in `/upload`:
    normalized to NFC before they are counted (1 to 255 Unicode code points) and stored. A name with a NUL character,
    which Postgres cannot store, or with a lone surrogate (text that is not valid Unicode) is refused for that file
    alone with `INVALID_INPUT`, and the request's other files go on; every other character is kept, control characters
-   included, and reaches the `Content-Disposition` header percent-encoded. `idempotencyKey` is optional:
+   included, and reaches the `Content-Disposition` header percent-encoded (a route that puts the name in the key
+   refuses more: see [Keys](#keys)). `idempotencyKey` is optional:
    16 to 128 letters, digits, `-` or `_` (`INVALID_INPUT` otherwise). The client sends a new one for each ask and the
    same one on every retry of it; without a store it is checked and ignored, with one a retry
    [supersedes the attempt whose answer was lost](store.md#what-changes-for-the-client). Never reuse a key for a new

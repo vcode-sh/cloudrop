@@ -52,6 +52,42 @@ export function normalizeKey(key: unknown): { key: string } | { problem: string 
   return problem === null ? { key: normalized } : { problem };
 }
 
+/** The characters keyProblem calls control characters: Unicode's Cc, U+0000 to U+001F and U+007F to U+009F. */
+const CONTROLS = /\p{Cc}/gu;
+const isNoName = (part: string): boolean => part === "" || part === "." || part === "..";
+
+/**
+ * `normalizeKey` for the key a route's `prefix` or `key` function built for the file named `name`. A name comes from
+ * the person, not from the route, and a real one can hold what a key cannot: macOS names a folder's icon file
+ * "Icon\r". So the key is judged a second time with the name's share of the trouble replaced: each control character
+ * the name has too, and, when the name has a ".", a ".." or an empty part between slashes, each such part of the key.
+ * A key that is then fine was unusable because of the name alone, and `nameProblem` says why in words that follow
+ * "This file's name"; whatever is still wrong is the route's own (M11-R222).
+ */
+export function keyForFile(
+  built: unknown,
+  name: string,
+): { key: string } | { problem: string } | { nameProblem: string } {
+  const key = normalizeKey(built);
+  if ("key" in key || typeof built !== "string") return key;
+  const noName = name.split("/").some(isNoName);
+  const repaired = built
+    .replace(CONTROLS, (char) => (name.includes(char) ? "_" : char))
+    .split("/")
+    .map((part) => (noName && isNoName(part) ? "_" : part))
+    .join("/");
+  const rest = normalizeKey(repaired);
+  if ("problem" in rest) return rest;
+  // The code point, never the character: the message is shown and logged.
+  const [control] = built.match(CONTROLS) ?? [];
+  const codePoint = control?.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0");
+  return {
+    nameProblem: control
+      ? `has a control character (U+${codePoint}), which this upload cannot store`
+      : 'has a "." or ".." part, or an empty part beside a "/", which this upload cannot store',
+  };
+}
+
 // Raster images, video and audio display inline. Everything else downloads, including SVG, HTML and XML, which a
 // browser would run as a page on the bucket's public domain: that closes stored XSS by default (spec §7.5).
 const INLINE = /^(?:image\/(?!svg\+xml$)|video\/|audio\/)[a-z0-9][a-z0-9!#$&^_.+-]*$/;

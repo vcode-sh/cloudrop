@@ -2058,7 +2058,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   every name. Not settled here: a route whose own `key` function puts the file's name into the key still fails the
   whole request with a non-retryable `SERVER_ERROR` for a name with a control character (`Icon\r` among other
   files), as in 0.5.0, because `normalizeKey` refuses the key and the handler reads that as the route's bug.
-- **Status:** in force. `src/server/upload-texts.test.ts` runs each row of the table through the handler on the fake
+- **Status:** in force; the case left open under "If wrong" is settled by `M11-R222`.
+  `src/server/upload-texts.test.ts` runs each row of the table through the handler on the fake
   R2 with the memory store; `src/server/upload-texts.db.integration.test.ts` sends a NUL name, `Icon\r` and metadata
   with NUL in one request to Postgres (before the fix: three retryable `SERVER_ERROR`s). The lone-surrogate row of
   `src/server/upload-requests.test.ts` moved there, with its new answer.
@@ -2482,3 +2483,46 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M11-R212` ("A ZIP64 entry from a writer that can seek back ... still ends the walk").
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff-zip.test.ts`, `src/plugins/sniff-fuzz.test.ts`,
   `src/testing/file-samples.ts`, `scripts/size-limit.config.ts`, `docs/guide/plugins.md`.
+
+### M11-R222: a name the key cannot hold refuses that file, when the route put the name in the key
+
+- **Decision:** `/upload` judges the key a route's `prefix` or `key` function built a second time, with the name's
+  share of the trouble replaced (`keyForFile`, `src/server/key.ts`): each control character of the key that the
+  file's name has too, and, when the name has a `.`, a `..` or an empty part between slashes, each such part of the
+  key. When the key is then usable, the name alone made it unusable, and that file is rejected in its own ticket
+  with `INVALID_INPUT`: "This file's name has a control character (U+000D), which this upload cannot store. Rename
+  the file, then add it again.", or "has a "." or ".." part, or an empty part beside a "/"". The message gives the
+  first control character's code point and never the name. The request's other files go on, with or without a
+  store, and no row is reserved for the refused file. A key that is still unusable is the route's bug as before: a
+  `TypeError`, `SERVER_ERROR` (HTTP 500), and the log names what is wrong without the name's share. What a name may
+  put into a key, by character:
+
+  | In the name | In a key built from it |
+  | --- | --- |
+  | CR, LF, TAB, DEL, U+0085 and every other control character (Unicode `Cc`) | that file refused |
+  | the names `.` and `..`, a leading, trailing or doubled `/` | that file refused |
+  | a `/` between two parts | kept: a folder |
+  | `\`, a no-break space, U+2028, a leading or trailing space or dot | kept as sent |
+  | NUL, a lone surrogate | refused before the key is built (`M11-R196`) |
+
+- **Why:** reproduced through the real handler on the fake R2, stateless and with the memory store: on a route with
+  ``key: ({ userId, file }) => `users/${userId}/${file.name}` ``, a request of `first.txt` and `Icon\r` was answered
+  `SERVER_ERROR`, HTTP 500, not retryable, for both files (0.5.0 did the same, by `M11-R196`). `Icon\r` is the name macOS gives a
+  folder's icon file, so dropping a folder on such a route failed every file in it. `normalizeKey` is right to refuse
+  the key and never rewrites one (two names would share a key); what was wrong is whose mistake it was read as. The
+  route's part of a key is the same for every name, so a route that is itself wrong still fails for plain names and
+  is found; the name's part is tested by what the name itself has, which also covers a name the route changed on the
+  way (`file.name.toLowerCase()`, a `prefix` built from it). The default key takes only `[a-z0-9]{1,16}` of the
+  name's extension, so every name in the table gets a ticket there, and the stored `Content-Disposition` carries
+  each name as `M11-R196` says: `filename` with `_` for what is not printable ASCII, `filename*` percent-encoded
+  (`a%C2%A0b.txt`, `%20a.txt%20`, `a%2Fb.txt`).
+- **If wrong:** a route whose own part of the key has an empty or dot part answers a name that has one too with
+  `INVALID_INPUT`, not a 500; every plain name still gets the 500 that shows the bug. Two things a name can still do
+  to a key stay the route's bug: a key over 1024 bytes (a name of 255 four-byte characters is 1020 bytes; ext4 and
+  APFS cap a real name at 255 bytes and NTFS at 255 UTF-16 units, 765 bytes) and a lone surrogate a route makes by cutting a name inside a character
+  (`file.name.slice(0, 50)`). A `prefix` that starts with `/` because the name does is refused as the route's, by
+  the check that runs before the key is built. A route that wants `/` or `\` out of its keys replaces them itself.
+- **Status:** in force. Settles the case `M11-R196` left open. `src/server/upload-name-keys.test.ts` runs each row
+  of the table through the handler, stateless and with the memory store.
+- **Visible in:** `src/server/key.ts` (`keyForFile`), `src/server/upload-request.ts` (`prepareFile`),
+  `src/server/upload-name-keys.test.ts`, `docs/guide/server.md`.
