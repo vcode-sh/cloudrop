@@ -27,8 +27,8 @@ export interface FilesPage {
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
-/** The store's cursor, `<milliseconds>:<id>`: anything else is refused here, before the store sees it. */
-const CURSOR = /^\d{1,15}:.+$/s;
+/** The last time an ISO string without a sign names, which is how Postgres is given a time: 9999-12-31T23:59:59.999Z. */
+const LAST_TIME_MS = 253_402_300_799_999;
 
 /** The listing the store is asked for, every option checked. */
 interface FilesQuery {
@@ -38,12 +38,28 @@ interface FilesQuery {
   cursor: string | null;
 }
 
-/** An owner or a file id: 1 to 255 characters. */
+/**
+ * An owner or a file id: 1 to 255 characters, none of them NUL. Postgres text cannot hold U+0000, so no row has one, and
+ * the store would fail on it: refused here, it is the caller's mistake and not a retryable SERVER_ERROR.
+ */
 export const isOwnerOrId = (value: unknown): value is string =>
-  typeof value === "string" && value !== "" && value.length <= MAX_OWNER_LENGTH;
+  typeof value === "string" && value !== "" && value.length <= MAX_OWNER_LENGTH && !value.includes("\u0000");
 
 export const badOwner = (): Result<never> =>
-  fail(invalidInput(`Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters, as owner() returned it.`));
+  fail(
+    invalidInput(
+      `Pass the owner, a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000), as owner() returned it.`,
+    ),
+  );
+
+/**
+ * A store cursor, `<milliseconds>:<id>`, as `list` and `stale` make them: refused before the store sees it when it has
+ * another shape, or a time or an id no row can have.
+ */
+export function isStoreCursor(cursor: string): boolean {
+  const match = /^(\d{1,15}):(.+)$/s.exec(cursor);
+  return match !== null && Number(match[1]) <= LAST_TIME_MS && isOwnerOrId(match[2]);
+}
 
 function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
   if (!isPlainObject(given))
@@ -57,7 +73,7 @@ function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
   }
-  if (cursor !== undefined && (typeof cursor !== "string" || !CURSOR.test(cursor))) {
+  if (cursor !== undefined && (typeof cursor !== "string" || !isStoreCursor(cursor))) {
     return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
   }
   return ok({ owner, route: route ?? null, limit, cursor: cursor ?? null });

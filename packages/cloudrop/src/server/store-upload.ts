@@ -17,9 +17,10 @@ export async function readOwner(route: RouteConfig, context: OwnerContext<object
   if (!route.definition.owner) return null;
   const owner: unknown = await route.definition.owner(context);
   if (owner === null) return null;
-  if (typeof owner !== "string" || owner.length < 1 || owner.length > MAX_OWNER_LENGTH) {
+  // The file API takes the same owners (isOwnerOrId); Postgres text cannot hold NUL.
+  if (typeof owner !== "string" || owner.length < 1 || owner.length > MAX_OWNER_LENGTH || owner.includes("\u0000")) {
     throw new TypeError(
-      `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters.`,
+      `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000).`,
     );
   }
   return owner;

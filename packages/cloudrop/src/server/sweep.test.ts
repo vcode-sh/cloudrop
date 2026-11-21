@@ -319,6 +319,8 @@ describe("api.sweep: paging and failures", () => {
     { name: "a cursor it did not issue", options: { cursor: "garbage" } },
     { name: "an expire cursor whose position was edited", options: { cursor: "expire:not-a-cursor" } },
     { name: "a cleanup cursor without the row's id", options: { cursor: "cleanup:1763380800000:" } },
+    { name: "a cleanup cursor whose id has a NUL character", options: { cursor: "cleanup:1763380800000:\u0000" } },
+    { name: "an expire cursor after the year 9999", options: { cursor: "expire:253402300800000:f" } },
   ] satisfies { name: string; options: Parameters<FileApi["sweep"]>[0] }[])(
     "answers INVALID_INPUT for $name, before any store call",
     async ({ options }) => {

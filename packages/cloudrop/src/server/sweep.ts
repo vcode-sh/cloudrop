@@ -6,6 +6,7 @@ import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
+import { isStoreCursor } from "./owner-files.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
@@ -58,10 +59,10 @@ export interface SweepReport {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 /**
- * The pass, then the store's own cursor: `<milliseconds>:<id>` as `stale` promises, empty for the cleanup pass's
- * start. A cursor that was edited is refused here, before the store sees it.
+ * The pass, then the store's own cursor (`isStoreCursor`), empty for the cleanup pass's start. A cursor that was edited
+ * is refused here, before the store sees it.
  */
-const CURSOR = /^(expire|cleanup):((?:\d{1,15}:.+)?)$/s;
+const CURSOR = /^(expire|cleanup):(.*)$/s;
 
 type Pass = "expire" | "cleanup";
 
@@ -81,7 +82,8 @@ interface Run extends Position {
 /** A sweep cursor read back into its position, or null when no sweep made it. */
 function readCursor(cursor: string): Position | null {
   const match = CURSOR.exec(cursor);
-  return match ? { pass: match[1] as Pass, cursor: match[2] || null } : null;
+  if (!match || (match[2] && !isStoreCursor(match[2]))) return null;
+  return { pass: match[1] as Pass, cursor: match[2] || null };
 }
 
 function readAll(options: Record<string, unknown>): Result<{ all: boolean; signal: AbortSignal | undefined }> {

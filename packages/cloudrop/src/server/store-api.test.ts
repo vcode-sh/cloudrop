@@ -168,6 +168,9 @@ describe("cloudrop.api with a store", () => {
     { name: "usage with an owner over 255 characters", call: (api: FileApi) => api.usage("x".repeat(256)) },
     { name: "revokeUploads without an owner", call: (api: FileApi) => api.revokeUploads({} as { owner: string }) },
     { name: "reconcile with an empty owner", call: (api: FileApi) => api.reconcile({ owner: "" }) },
+    // Postgres text cannot hold U+0000: the store would fail, and a retryable SERVER_ERROR would ask for retries.
+    { name: "deleteFile with a NUL character in the id", call: (api: FileApi) => api.deleteFile("f\u0000") },
+    { name: "eraseOwner with a NUL character in the owner", call: (api: FileApi) => api.eraseOwner("u\u0000") },
   ])("$name answers INVALID_INPUT", async ({ call }) => {
     const fixture = storeFixture({ owned });
     expect((await call(fixture.cloudrop.api)) as object).toEqual({
@@ -214,6 +217,9 @@ describe("cloudrop.api.files", () => {
     { name: "a route the server does not have", options: { owner: "u1", route: "avatars" } },
     { name: "a limit over 1000", options: { owner: "u1", limit: 1001 } },
     { name: "a cursor no listing returned", options: { owner: "u1", cursor: "page-2" } },
+    { name: "a cursor with a NUL character", options: { owner: "u1", cursor: "1763380800000:\u0000" } },
+    // 9999-12-31T23:59:59.999Z is the last time an ISO string without a sign, which Postgres reads, can name.
+    { name: "a cursor after the year 9999", options: { owner: "u1", cursor: "253402300800000:f" } },
   ])("refuses $name with INVALID_INPUT", async ({ options }) => {
     const fixture = storeFixture({ owned });
     expect((await fixture.cloudrop.api.files(options)).error?.code).toBe("INVALID_INPUT");

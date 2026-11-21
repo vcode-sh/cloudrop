@@ -216,6 +216,7 @@ describe("POST /upload with a store", () => {
     { name: "an empty owner", owner: "" },
     { name: "an owner over 255 characters", owner: "x".repeat(256) },
     { name: "a number", owner: 42 },
+    { name: "a NUL character, which Postgres text cannot hold", owner: "u\u0000" },
   ])("answers 500, writes nothing and logs the route's bug when owner returns $name", async ({ owner }) => {
     const broken = route(
       { accept: "*/*", maxSize: "1GB", authorize: () => ({}) },
@@ -226,7 +227,7 @@ describe("POST /upload with a store", () => {
     expect(response.status).toBe(500);
     expect(await fixture.store.raw.files()).toEqual([]);
     expect(String(fixture.logger.errors[0]?.error)).toBe(
-      'TypeError: Route "broken": owner must return null or a string of 1 to 255 characters.',
+      'TypeError: Route "broken": owner must return null or a string of 1 to 255 characters without NUL (U+0000).',
     );
   });
 
