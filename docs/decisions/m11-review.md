@@ -2281,3 +2281,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   in `BUCKET` or `ENDPOINT`, which holds for cloudrop's names and for the names the tests rename them to.
 - **Status:** in force. Completes `M11-R177`.
 - **Visible in:** `src/cli/printed-commands.ts`, `src/cli/printed-commands.test.ts`, `src/cli/command-fixture.ts`.
+
+### M11-R209: `testBucket.object(key)` answers the key as it was last written
+
+- **Decision:** the `key` of the object `testBucket().object(key)` answers is the stored form, the one `keys()` and a
+  listing answer, whichever Unicode form the test asked by. `TestObject.key`, `TestBucket.object`, `TestBucket.keys`
+  and the testing guide's table say so.
+- **Why:** since `M11-R26` the fake keeps one object for a key's NFC and NFD forms and lists the form last written, as
+  R2 does, and `object()` takes either form; but it answered the key it had been asked by. Reproduced: an object
+  written under `cafe` + U+0301 and asked for by its NFC form answered the NFC key, while `keys()` answered the NFD
+  one, so a test comparing the two saw two keys for one object.
+- **If wrong:** a test that asked by one form and compared `object(key).key` with what it asked sees the stored form
+  now. For keys in one form, every key cloudrop itself makes, nothing changes.
+- **Status:** in force. Completes `M11-R26`.
+- **Visible in:** `src/testing.ts`, `src/testing.test.ts`, `docs/guide/testing-your-app.md`.
+
+### M11-R210: two tests that proved less than they said now prove it
+
+- **Decision:** `api.deletePrefix`'s case for a key listed in another Unicode form of its prefix (`M9-H6`) runs on
+  the fake R2: a key written in NFD, deleted by its NFC prefix, with a neighbouring key left in the bucket. The
+  boundary cases of `r2()` and `s3()` bucket names (`a1b`, 63 characters, a dot for S3) assert the path of a URL the
+  driver signs, `/<bucket>/a.txt`, where they asserted only that nothing was thrown.
+- **Why:** the `deletePrefix` case stubbed `list` and `deleteMany`, so it proved what the code does with a listing the
+  test invented; since `M11-R26` the fake answers as R2 was measured to, and the test now fails when the comparison
+  of key and prefix stops folding the forms (fault probe: `key.startsWith(prefix)` without `normalize`, red). A
+  `not.toThrow()` passes for a preset that accepts a name and then addresses another bucket.
+- **If wrong:** nothing: tests only.
+- **Status:** in force.
+- **Visible in:** `src/server/api.test.ts`, `src/storage/presets-settings.test.ts`.

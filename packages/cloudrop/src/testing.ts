@@ -33,6 +33,10 @@ export interface TestBucketOptions {
 
 /** An object as the test bucket stores it. */
 export interface TestObject {
+  /**
+   * The key as it was last written, which is what `keys()` and a listing answer. The bucket keeps one object for a
+   * key's NFC and NFD forms, as R2 does, so this can differ from the key `object()` was asked by.
+   */
   key: string;
   size: number;
   /** The stored Content-Type, or null. */
@@ -57,9 +61,9 @@ export interface TestBucket {
    * public file with `object(key)`.
    */
   readonly fetch: FetchLike;
-  /** The object stored under `key`, or null. */
+  /** The object stored under `key`, in either Unicode form of it, or null. */
   object(key: string): TestObject | null;
-  /** Every stored key, sorted. */
+  /** Every stored key as it was last written, sorted. */
   keys(): string[];
   /** Multipart uploads started and neither completed nor aborted. */
   pendingUploads(): number;
@@ -106,7 +110,7 @@ export function testBucket(options?: TestBucketOptions | null): TestBucket {
       if (!stored) return null;
       const { body, headers } = stored;
       return {
-        key,
+        key: stored.key,
         size: body.byteLength,
         type: headers.type ?? null,
         disposition: headers.disposition ?? null,

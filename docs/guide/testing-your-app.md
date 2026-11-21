@@ -332,8 +332,8 @@ cannot see:
 | --- | --- |
 | `storage` | The driver for `createCloudrop({ storage })`: `r2()` pointed at this bucket. |
 | `fetch` | Reaches the bucket with a signed request, such as a URL from `cloudrop.api.getUrl()`. A `publicUrl` is not served: read a public file with `object(key)`. |
-| `object(key)` | The stored object, or `null`: `key`, `size`, `type`, `disposition`, `metadata` (the `x-amz-meta-*` headers without the prefix), `parts` (`null` for a single `PUT`), `body` (a copy of the bytes) and `uploadedAt`. |
-| `keys()` | Every stored key, sorted. |
+| `object(key)` | The stored object, or `null`: `key` (as it was last written: the bucket keeps one object for a key's NFC and NFD forms, as R2 does, and takes either), `size`, `type`, `disposition`, `metadata` (the `x-amz-meta-*` headers without the prefix), `parts` (`null` for a single `PUT`), `body` (a copy of the bytes) and `uploadedAt`. |
+| `keys()` | Every stored key as it was last written, sorted. |
 | `pendingUploads()` | Multipart uploads started and neither completed nor aborted. `0` after a test means none was left behind. |
 
 ### `testClient(cloudrop, options)`

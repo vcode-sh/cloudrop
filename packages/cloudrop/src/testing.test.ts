@@ -196,6 +196,14 @@ describe("testBucket", () => {
   });
 
   // The server signs with the date it reads and the bucket checks signatures against its own: they must be one clock.
+  // R2 keeps one object for a key's NFC and NFD forms and lists the form last written (M11-R26).
+  it("answers an object under the key as it was last written, whichever Unicode form it is asked by", async () => {
+    const bucket = testBucket();
+    const [nfc, nfd] = ["caf\u00e9.txt", "cafe\u0301.txt"];
+    await bucket.storage.put(nfd, "hello", { type: "text/plain" });
+    expect([bucket.object(nfc)?.key, bucket.object(nfd)?.key, bucket.keys()]).toEqual([nfd, nfd, [nfd]]);
+  });
+
   it("reads the clock the server reads, so a test can fix the date of an upload", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2031-02-03T04:05:06Z"));
