@@ -270,15 +270,19 @@ describe("fake R2 copy", () => {
       call(fake, "PUT", `/d.txt?${new URLSearchParams({ partNumber, uploadId })}`, {
         headers: { "x-amz-copy-source": "/test/src.txt", "x-amz-copy-source-range": range },
       });
-    for (const [partNumber, range] of [
-      ["0", "bytes=0-3"],
-      ["1", "bytes=0-10"],
-      ["1", "bytes=5-2"],
-    ] as const) {
+    const answer = async (partNumber: string, range: string) => {
       const response = await copyPart(partNumber, range);
-      expect(response.status, `${partNumber} ${range}`).toBe(400);
-      expect(await code(response)).toBe("InvalidArgument");
-    }
+      return [response.status, await code(response)];
+    };
+    expect({
+      "part 0": await answer("0", "bytes=0-3"),
+      "a range past the source's end": await answer("1", "bytes=0-10"),
+      "a reversed range": await answer("1", "bytes=5-2"),
+    }).toEqual({
+      "part 0": [400, "InvalidArgument"],
+      "a range past the source's end": [400, "InvalidArgument"],
+      "a reversed range": [400, "InvalidArgument"],
+    });
   });
 });
 
