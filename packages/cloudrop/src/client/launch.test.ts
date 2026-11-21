@@ -1,6 +1,7 @@
 // Contract: every /upload ask carries an idempotencyKey of its own, and every automatic retry of that ask sends the
-// same one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request. Oracle: the
-// bodies of the /upload requests the fixture saw.
+// same one (M5-T102), so a server with a store can tell a retry after a lost answer from a new request. A runtime
+// without crypto.getRandomValues (React Native's Hermes) still uploads, each ask with a key of its own in the shape the
+// server accepts (M11-R83). Oracle: the bodies of the /upload requests the fixture saw.
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
@@ -51,6 +52,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -72,4 +74,22 @@ it("sends one key through all six attempts, and retry() asks with a new one", as
   const { data } = await job.retry();
   expect(data?.files.map((file) => file.status)).toEqual(["done", "done"]);
   expect(shape(keys)).toEqual(["a", "a", "a", "a", "a", "a", "b"]);
+});
+
+it.each([
+  { name: "without crypto.getRandomValues", crypto: {} },
+  { name: "without crypto", crypto: undefined },
+])("uploads on a runtime $name, each ask with its own key", async ({ crypto }) => {
+  // The fallback draws from Math.random, which beforeEach pinned to 0.
+  vi.restoreAllMocks();
+  const { keys, client } = setup(() => undefined);
+  // start() makes the key before it returns; the server in this process needs its crypto back for the requests.
+  vi.stubGlobal("crypto", crypto);
+  const jobs = [client.start("files", fileOf("a.bin")), client.start("files", fileOf("b.bin"))];
+  vi.unstubAllGlobals();
+  const results = await Promise.all(jobs.map((job) => job.done));
+
+  expect(results.map((result) => result.error)).toEqual([null, null]);
+  expect(keys.filter((key) => typeof key !== "string" || !/^[0-9a-f]{32}$/.test(key))).toEqual([]);
+  expect(new Set(keys).size).toBe(2);
 });

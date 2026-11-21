@@ -886,3 +886,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/failures.ts` (`maySent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
   (`complete`), `src/client/upload-abort.test.ts`.
 
+### M11-R83: without `crypto.getRandomValues`, the `/upload` key comes from `Math.random`
+
+- **Decision:** `newRequestKey` (`src/client/launch.ts`) fills its 16 bytes with `crypto.getRandomValues` when the
+  runtime has it and with `Math.random` otherwise; the key keeps its shape, 32 hex digits.
+- **Why:** reproduced: without a global `crypto.getRandomValues`, which React Native's Hermes lacks unless the app adds
+  a polyfill (`M8-Q8` names it as a target), the key threw inside `launch`, `job.done` rejected with a `TypeError` and
+  the file stayed `queued`, though `done` promises never to reject. The key is an idempotency key, not a secret: the
+  server only compares it with the keys of the same owner's pending rows, and supersedes nothing else by it
+  (`M5-T105`), so a guessed key gives a caller nothing they could not send themselves. It only has to differ from that
+  owner's other asks of the last 24 hours, which sixteen draws from an engine's generator do. The client's other two
+  uses were checked: `crypto.randomUUID` is not called, and `crypto.subtle` (`fingerprint.ts`) runs only where records
+  are kept, which needs Web Locks and so a secure context; without it `fingerprintOf` rejects, the record is not saved,
+  `isSameFile` answers false, and the upload goes on (measured in the unit lane, 2026-11-21).
+- **If wrong:** a runtime whose `Math.random` repeats a sequence across sessions of one owner within a day could give
+  two asks one key, and with a store the later ask would end the earlier one's pending rows: that upload then fails
+  with `UPLOAD_EXPIRED` and `retry()` starts it again.
+- **Status:** in force.
+- **Visible in:** `src/client/launch.ts`, `src/client/launch.test.ts`.

@@ -13,10 +13,17 @@ import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retr
 
 /**
  * A new `/upload` idempotency key: 128 random bits as 32 hex digits. Not `crypto.randomUUID()`, which a page outside a
- * secure context (plain http on a LAN address) does not have, while uploads work there.
+ * secure context (plain http on a LAN address) does not have, while uploads work there. Where there is no
+ * `crypto.getRandomValues` either (React Native's Hermes without a polyfill), the bits come from `Math.random`: the key
+ * is no secret. It only has to differ from the same owner's other asks of the last day, since a store supersedes
+ * nothing but that owner's own rows by it (M5-T105, M11-R83).
  */
-const newRequestKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+function newRequestKey(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.random() * 256;
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /**
  * A file /upload refused at `attempt`. A retryable refusal asks again for this file alone, within the budget and after
