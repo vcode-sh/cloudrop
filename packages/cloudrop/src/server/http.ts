@@ -43,16 +43,24 @@ const STATUS = {
 
 export type ResponseHeaders = Record<string, string>;
 
+/** A MIME type's longest form: RFC 6838 §4.2 allows the type and the subtype 127 characters each. */
+const MAX_TYPE_LENGTH = 255;
+const REASONS = ["mismatch", "refused", "not-accepted"] as const;
+const isType = (value: unknown): boolean => typeof value === "string" && value.length <= MAX_TYPE_LENGTH;
+
 /**
  * Only the code, message, retryable flag, part numbers and a type refusal's `content` leave the server: never a cause,
- * stack or storage code. `content` is copied field by field, so nothing else a plugin put in it is sent (M11-K3).
+ * stack or storage code. `content` is sent as two MIME types and one of three reasons, copied field by field, or not
+ * at all: a plugin in plain JavaScript can put a file's key or a whole object there (M11-K3, M11-R137).
  */
 export function errorBody(error: CloudropError): ErrorBody {
   const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable };
   if (error.parts) body.parts = [...error.parts];
-  if (error.content) {
-    const { declared, detected, reason } = error.content;
-    body.content = { declared, detected, reason };
+  const { content } = error;
+  // The types say what these fields are; a plugin in plain JavaScript is not held to them.
+  const typed = content && isType(content.declared) && (content.detected === undefined || isType(content.detected));
+  if (typed && REASONS.includes(content.reason)) {
+    body.content = { declared: content.declared, detected: content.detected, reason: content.reason };
   }
   return body;
 }

@@ -134,6 +134,42 @@ describe("cloudrop.handler failures", () => {
     expect({ status: response.status, ...(await response.json()) }).toStrictEqual(expected);
   });
 
+  // M11-R137. A plugin in plain JavaScript may put anything in `content`; a value that is not a refusal's is not sent.
+  it.for([
+    {
+      name: "an object as the declared type",
+      content: { declared: { key: "uploads/a", name: "a.png" }, reason: "refused" },
+    },
+    { name: "no declared type", content: { detected: "image/png", reason: "mismatch" } },
+    {
+      name: "a list as the detected type",
+      content: { declared: "image/png", detected: ["image/jpeg"], reason: "mismatch" },
+    },
+    { name: "a reason of its own", content: { declared: "image/png", reason: "infected" } },
+    { name: "a reason every object inherits", content: { declared: "image/png", reason: "constructor" } },
+    {
+      name: "a declared type longer than a MIME type can be",
+      content: { declared: `a/${"b".repeat(254)}`, reason: "refused" },
+    },
+    { name: "a string", content: "image/png" },
+  ])("sends no content when a plugin gives it $name", async ({ content }) => {
+    const refusal = new CloudropError("FILE_TYPE_NOT_ALLOWED", "Not this file.", { content: content as never });
+    const plugin: CloudropPlugin = { id: "types", server: { beforeUpload: () => refusal } };
+    const response = await serverFixture({ avatar }, { plugins: [plugin] }).post("upload", uploadBody);
+    expect({ status: response.status, ...(await response.json()) }).toStrictEqual({
+      status: 400,
+      error: { code: "FILE_TYPE_NOT_ALLOWED", message: "Not this file.", retryable: false },
+    });
+  });
+
+  it("sends content with no detected type as the two values it has", async () => {
+    const content = { declared: "text/html", detected: undefined, reason: "refused" } as const;
+    const refusal = new CloudropError("FILE_TYPE_NOT_ALLOWED", "Not this file.", { content });
+    const plugin: CloudropPlugin = { id: "types", server: { beforeUpload: () => refusal } };
+    const response = await serverFixture({ avatar }, { plugins: [plugin] }).post("upload", uploadBody);
+    expect((await response.json()).error.content).toStrictEqual({ declared: "text/html", reason: "refused" });
+  });
+
   it("marks every answer as not cacheable, since it carries tokens and signed URLs", async () => {
     const response = await setup().post("upload", uploadBody);
     expect(response.headers.get("cache-control")).toBe("no-store");

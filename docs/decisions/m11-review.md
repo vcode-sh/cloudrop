@@ -1221,3 +1221,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
 - **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`, `src/plugins/content-checks.ts`,
   `docs/guide/plugins.md#limits`, `docs/decisions/m10-content.md` (two sentences corrected).
+
+### M11-R137: `content` is checked before it is sent, and dropped whole when it is not a refusal's
+
+- **Decision:** `errorBody` sends `content` only when `declared` is a string, `detected` is a string or absent, both
+  are at most 255 characters (RFC 6838 §4.2: 127 each for the type and the subtype), and `reason` is `"mismatch"`,
+  `"refused"` or `"not-accepted"`. Any other value sends no `content` at all; the code, message and `retryable` are
+  sent as before. `CloudropError`'s constructor is left as it is: it still keeps what it was given, for the server's
+  own log.
+- **Why:** `M11-K3` copied the three fields without looking at them, so a JavaScript plugin that built
+  `content: { declared: { key, name }, … }` put a key and a file name on the wire, and one with a reason of its own
+  sent it (review finding G7, reproduced with seven shapes). The client drops such a `content` (`M11-K4`), but the
+  bytes had left the server, which is the rule `M11-K3` exists for. Dropping the whole field, not the bad value,
+  keeps `content` a thing that is either complete or absent, as the client reads it.
+- **If wrong:** a plugin's own fourth reason is no longer sent; no client could read it (`M11-K4`). The two types are
+  not checked as MIME types: text of that length names no key that `/upload` can sign, but a plugin can still put
+  other short text there, as it can in `message`.
+- **Status:** in force; amends `M11-K3`'s "a plugin that sets a value outside the three reasons sends it".
+- **Visible in:** `src/server/http.ts`, `src/server/handler-failures.test.ts`.
