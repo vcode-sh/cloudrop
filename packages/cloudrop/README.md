@@ -105,8 +105,9 @@ files: [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/gu
 ## Checking what was uploaded
 
 The browser declares each file's type, and `accept` checks that declaration. `contentChecks()` from `cloudrop/plugins`
-also checks the bytes: at `/complete` it reads the first 4 KiB of the stored file and refuses, and deletes, a file whose
-content contradicts its type, or that is a web page, a program or a script whatever it was sent as.
+refuses web pages, programs, scripts and unnamed XML types at `/upload`, and checks the bytes at `/complete`: it reads
+the first 4 KiB of the stored file and refuses, and deletes, a file whose content contradicts its type or is one of
+those, whatever it was sent as.
 
 ```ts
 import { contentChecks } from "cloudrop/plugins";
