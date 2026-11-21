@@ -2861,3 +2861,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   are done and the next sweep does not meet them again.
 - **Status:** in force.
 - **Visible in:** `src/server/sweep.ts` (`listingFailed`), `src/server/sweep-all.test.ts`.
+
+### M11-R243: without a store, every `/complete` of a vanished multipart upload tells the plugins again
+
+- **Decision:** the stateless `/complete` of a multipart upload the bucket no longer has keeps `M11-R200`'s answer
+  and effect on every request: `410 NO_SUCH_UPLOAD` and the plugins' `onAbort` with `reason: "rejected"`, also when
+  an `/abort` or an earlier `/complete` already ran `onAbort` for that file. No code changed. `ServerHooks.onAbort`'s
+  documentation and the server guide's "Make hooks idempotent" now name this repeat.
+- **Why:** an `/abort` followed by two `/complete` calls heard `["aborted", "rejected", "rejected"]`. A stateless
+  server has only the token and the bucket, and neither says whether a request already ended this upload for the
+  plugins: the bucket answers `NoSuchUpload` the same after the lifecycle rule, after `/abort` and after an earlier
+  `/complete`. Answering without the hook would take back what `M11-R200` gave, the release of a plugin's
+  reservation when a page that never sends `/abort` finds its upload gone, for every such upload and not only the
+  repeats. The repeat asks nothing new of a plugin: `onAbort` could already run twice for one file (a retried
+  `/abort`), and after `NO_SUCH_UPLOAD` the client asks for a new ticket (`M11-R80`) and sends the old one's
+  `/abort` (`M11-R89`), so the usual course is already `"rejected"` then `"aborted"`. A plugin that releases by
+  `file.id` is unaffected; one that subtracts on every call was wrong before this entry. With a store none of this
+  happens: the row is ended once and later requests are answered from it.
+- **If wrong:** a plugin that counts `onAbort` calls counts a vanished upload once for each request that names it,
+  for the 24 hours its token is valid.
+- **Status:** in force.
+- **Visible in:** `src/server/plugins.ts` (`onAbort`), `src/server/complete-multipart.test.ts`,
+  `docs/guide/server.md` ("Make hooks idempotent").

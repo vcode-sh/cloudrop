@@ -62,11 +62,13 @@ describe("POST /complete: multipart", () => {
     expect([first.status, retried.status, retried.body.file.id]).toEqual([200, 200, ticket.id]);
   });
 
-  it("answers 410 NO_SUCH_UPLOAD for an aborted upload", async () => {
-    const fixture = serverFixture({ files }, { multipartThreshold: 0 });
+  it("answers 410 NO_SUCH_UPLOAD to each late /complete of an upload the client aborted, and tells the plugins again", async () => {
+    const aborted: string[] = [];
+    const plugin: CloudropPlugin = { id: "p", server: { onAbort: ({ reason }) => void aborted.push(reason) } };
+    const fixture = serverFixture({ files }, { multipartThreshold: 0, plugins: [plugin] });
     const ticket = await fixture.multipart("files", BIG);
     await fixture.post("abort", { token: ticket.token });
-    expect(await complete(fixture, ticket.token)).toEqual({
+    const gone = {
       status: 410,
       body: {
         error: {
@@ -75,7 +77,10 @@ describe("POST /complete: multipart", () => {
           retryable: false,
         },
       },
-    });
+    };
+    expect([await complete(fixture, ticket.token), await complete(fixture, ticket.token)]).toEqual([gone, gone]);
+    // A stateless server has no record that it ended this upload, so each request ends it for the plugins (M11-R243).
+    expect(aborted).toEqual(["aborted", "rejected", "rejected"]);
   });
 
   it("never claims another writer's object for an upload that no longer exists, and tells the plugins it is over", async () => {

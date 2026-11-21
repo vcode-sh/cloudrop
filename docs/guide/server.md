@@ -470,11 +470,13 @@ content is not the type it was sent as.
 ### Make hooks idempotent
 
 Hooks can run more than once. A retried or replayed request repeats `afterVerify` and `onComplete` (on `/complete`) and
-`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. `onDelete` can run twice for
-one file too; with a transaction only its writes through `tx` commit once. Make their side effects
-idempotent by the stable `file.id`: for example, insert with `file.id` as the primary key and ignore a duplicate. A
-database store answers a finished upload's retries from its row instead (see
-[what it guarantees](store.md#what-it-guarantees)).
+`onAbort` (on `/abort`), and a resumed upload runs `afterVerify` and `onComplete` again. Without a store, every
+`/complete` of a multipart upload the bucket no longer has runs `onAbort` with `reason: "rejected"` again, also after
+an `/abort` that already ran it: the server keeps no record of the upload it ended, and the client's own `/abort` of
+that ticket follows as one more. `onDelete` can run twice for one file too; with a transaction only its writes through
+`tx` commit once. Make their side effects idempotent by the stable `file.id`: for example, insert with `file.id` as
+the primary key and ignore a duplicate. A database store answers a finished upload's retries from its row instead
+(see [what it guarantees](store.md#what-it-guarantees)).
 
 The client also sends a slow call again. A `/complete` slower than 120 s, or an `/upload` slower than 30 s, counts as no
 answer and is retried (see [Stalled requests](client.md#stalled-requests)), so keep `onComplete` and `authorize` well

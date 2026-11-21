@@ -57,7 +57,8 @@ export interface ServerHooks {
    * is ended through an `/abort` that keeps nothing: after a cancel, or after a failure no `/complete` may have
    * finished, which the client cleans up at once. Release a reservation here. Nothing runs when an abandoned upload's
    * token expires, so a reservation also needs its own expiry. It can run more than once for one file; make it
-   * idempotent by `file.id`.
+   * idempotent by `file.id`. Without a store the server keeps no record of an upload it ended, so every `/complete` of
+   * a multipart upload the bucket no longer has runs it again with "rejected", also after an `/abort` that ran it.
    */
   onAbort?(context: AbortContext): Awaitable<void>;
   /** Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route. */
