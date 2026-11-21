@@ -2577,3 +2577,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M11-R41` (the pattern alone no longer decides) and `M11-R111`.
 - **Visible in:** `src/server/origins.ts`, `src/server/origins.test.ts`, `src/server/origins-fuzz.test.ts`,
   `docs/guide/server.md#what-an-origin-is`.
+
+### M11-R231: the store guide gives Drizzle its driver as `{ client }`
+
+- **Decision:** the Drizzle setup block of `docs/guide/store.md` reads
+  `const pool = new Pool({ … }); const db = drizzle({ client: pool });`, and a paragraph under it says which form each
+  line of drizzle-orm takes: `{ client }` on both for node-postgres, postgres.js, better-sqlite3 and libsql; the driver
+  alone (`drizzle(pool)`) on 0.45 only; and for D1 the binding alone (`drizzle(env.DB)`) on both.
+- **Why:** the block was `drizzle(new Pool({ connectionString }))`. On drizzle-orm 1.0.0-rc.5, the line the next
+  bullet recommends, that is `TS2345` (a `Pool` is not a `string` or a configuration), and run from JavaScript Drizzle
+  builds a pool of its own: `drizzle(pool).$client === pool` is `false` and its options hold no connection string, so
+  `drizzleStore` would use a database the app never named. Measured on 2026-11-21 by type-checking both forms for the
+  five drivers against the workspace's 1.0.0-rc.5 and against 0.45.4 in a copy with its own install (the method of
+  `scripts/check-drizzle-versions.sh`): `{ client }` passes eight of eight for the four drivers above, the driver
+  alone passes on 0.45.4 and fails on rc.5 for all four, and D1 takes only the binding on both. Every `ts` block of the
+  guide, 25 of them, was then written out as a module with only the names the prose around it supplies and
+  type-checked against the workspace's types (23 with Node's types, the two Worker blocks with
+  `@cloudflare/workers-types`, the Prisma block against the client `test:db` generates); the six blocks that use
+  Drizzle were checked against 0.45.4 as well. The setup block was the only one that failed. Five deliberate faults
+  in a copy of the blocks were all reported, so the check reads them.
+- **If wrong:** a later 1.x release candidate may change the forms again; the check is not a gate, so nothing would
+  say so. The same call stands in the adapter's own text, which this entry did not change: the usage example of
+  `src/adapters/drizzle.ts`, two comments, and the message that refuses a single `Client`
+  (`src/adapters/drizzle/postgres.ts`).
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md` ("Drizzle: `cloudrop/adapters/drizzle`").

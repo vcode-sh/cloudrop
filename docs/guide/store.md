@@ -185,9 +185,16 @@ import { drizzleStore } from "cloudrop/adapters/drizzle";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const db = drizzle(new Pool({ connectionString: process.env.DATABASE_URL }));
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle({ client: pool });
 export const store = drizzleStore(db, { dialect: "postgres", transaction: true });
 ```
+
+Give Drizzle the driver as `{ client }`: both lines of drizzle-orm take that form for node-postgres, postgres.js,
+better-sqlite3 and libsql. 0.45 also takes the driver alone, `drizzle(pool)`; 1.0 does not. There TypeScript refuses
+it, and from JavaScript Drizzle sets the pool aside and opens one of its own with node-postgres's defaults, so the
+store talks to another database than the one you named. D1 is the other way round: on both lines it takes the binding
+alone, `drizzle(env.DB)`.
 
 - **Postgres:** `drizzle-orm/node-postgres` over a `Pool` (a single `Client` is refused), or `drizzle-orm/postgres-js`.
   With `transaction: true`, `store.route` gives `onComplete` Drizzle's transaction as `tx`:
