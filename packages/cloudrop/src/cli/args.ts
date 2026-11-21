@@ -26,11 +26,11 @@ const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--var", "--jurisdictio
 // A refused origin is repeated only when it is written as one, scheme://host[:port] with at most a last "/". A URL
 // with a path or a query may hold a token, as a presigned URL does, and other text may be a setting's value pasted in
 // the wrong place (M11-R234). One with an "@" has the origin rule's own sentence, which repeats nothing.
-const WRITTEN_AS_ORIGIN = /^[^:/?#\s]+:\/\/[^/?#\s]*\/?$/;
+const REPEATABLE_ORIGIN = /^[^:/?#\s]+:\/\/[^/?#\s]*\/?$/;
 
 /** What is wrong with the `number`th --origin, if anything. */
 function originOption(value: string, number: number): string | null {
-  if (WRITTEN_AS_ORIGIN.test(value) || value.includes("@")) return originProblem(value);
+  if (REPEATABLE_ORIGIN.test(value) || value.includes("@")) return originProblem(value);
   const problem = originProblem(value, `--origin number ${number}`);
   return (
     problem &&

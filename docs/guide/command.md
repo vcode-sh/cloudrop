@@ -24,7 +24,9 @@ The command reads `--origin` with the rule the server reads `trustedOrigins` wit
 ([What an origin is](server.md#what-an-origin-is)), so what one takes the other takes. An app's own scheme is an origin
 too: `capacitor://localhost`, `tauri://localhost`, `chrome-extension://<id>`. `ws://`, `wss://` and `ftp://` are
 refused: no page is loaded over them. So is a host no browser loads a page from, such as `https://a.example$(id)`: a
-host is an address, or a name of letters, digits, `-` and `_` in parts joined by single dots.
+host is an address, or a name of letters, digits, `-` and `_` in parts joined by single dots. And so is anything the
+URL parser cannot read, such as a port over 65535 (`https://app.example.com:99999`): no rule written for it would
+match a request.
 
 ## Settings
 
