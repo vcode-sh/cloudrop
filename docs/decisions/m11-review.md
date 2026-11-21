@@ -2408,9 +2408,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   not see.
 - **If wrong:** two servers whose clocks differ by more than `graceMs` (at least 15 minutes, 1 hour by default) can
   still hide such an upload from the run; a server that far from the storage service's clock cannot sign a request
-  it accepts, so it can start no multipart upload, and its single-`PUT` URLs expire as they are made. A file that
-  became final within the milliseconds of the run itself keeps one run from `done`, and the next one reports it.
-  The "Clock skew" paragraph of `docs/guide/store.md` still names only a clock that runs ahead; it was outside this
+  it accepts, so it can start no multipart upload, and its single-`PUT` URLs expire as they are made. A run that
+  lasts longer than 15 minutes can check such a young file's key for the last time and still count the file as
+  waiting; the next run reports `done`. The "Clock skew" paragraph of `docs/guide/store.md` still names only a clock that runs ahead; it was outside this
   change.
 - **Status:** in force.
 - **Visible in:** `src/server/erase.ts` (`lastReads`), `src/server/erase-clocks.test.ts`.
