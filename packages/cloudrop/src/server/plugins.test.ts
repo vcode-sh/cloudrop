@@ -96,6 +96,7 @@ describe("runAfterVerify", () => {
     const verified = {
       request: context.request,
       route: "files",
+      accept: ["*/*"],
       file: { ...file, url: null },
       metadata: undefined,
       auth: {},

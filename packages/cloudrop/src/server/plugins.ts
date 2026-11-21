@@ -1,5 +1,5 @@
-// The server half of the plugin contract (spec §8). The plugins themselves arrive in M5; this file fixes the hooks they
-// can use and the order and failure rules the handler applies to them.
+// The server half of the plugin contract (spec §8): the hooks plugins can use and the order and failure rules the
+// handler applies to them. The plugins cloudrop ships are in cloudrop/plugins (src/plugins.ts).
 
 import { CloudropError } from "../errors.ts";
 import type { UploadedFile } from "../protocol/types.ts";
@@ -26,6 +26,8 @@ export interface BeforeUploadContext {
 export interface AfterVerifyContext {
   request: Request;
   route: string;
+  /** The route's `accept`, as the server checked the declared type against it: ["image/*", "application/pdf"]. */
+  accept: readonly string[];
   file: UploadedFile;
   metadata: unknown;
   auth: unknown;

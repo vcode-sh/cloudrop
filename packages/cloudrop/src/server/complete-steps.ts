@@ -32,9 +32,12 @@ export async function checkAfterVerify(
   file: UploadedFile,
 ): Promise<Verdict> {
   const { route, metadata, owner: auth } = token;
+  // The token's route was found before the token reached here.
+  const accept = config.routes.get(route)?.accept ?? [];
   let refused: CloudropError | undefined;
   try {
-    refused = await runAfterVerify(config.plugins, { request, route, file, metadata, auth, storage: config.storage });
+    const context = { request, route, accept, file, metadata, auth, storage: config.storage };
+    refused = await runAfterVerify(config.plugins, context);
   } catch (error) {
     config.logger.error(`cloudrop: a plugin's afterVerify failed for route "${route}".`, error);
     return { kind: "failed", error: unfinished() };
