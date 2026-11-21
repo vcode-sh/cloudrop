@@ -144,6 +144,8 @@ for (const outcome of data?.files ?? []) {
 - Unlike other results, `data` stays when some files failed. It is `null` only when nothing started: wrong arguments, or
   `/upload` refused the whole job (such as `TOO_MANY_FILES`).
 - An error that belongs to one file carries `error.file`, `{ id, name }`.
+- A file [`contentChecks()`](plugins.md#what-a-refusal-carries) refused carries `error.content`,
+  `{ declared, detected?, reason }`: what the check found, for wording the refusal yourself.
 - A value typed `File | File[]` fits neither `upload()` signature: pass it to `start()` and await `start(...).done`.
 
 ### Reset the file input

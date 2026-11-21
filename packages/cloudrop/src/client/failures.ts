@@ -15,7 +15,8 @@ export const NEEDS_NEW_TICKET: Set<string | undefined> = new Set([
 
 /** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
 export const withFile = (error: CloudropError, { id, file }: { id: string; file: File }): CloudropError =>
-  // The spread copies the error's own fields (retryable, status, storageCode, parts), never its message or cause.
+  // The spread copies the error's own fields (retryable, status, storageCode, parts, content), never its message or
+  // cause.
   new CloudropError(error.code, error.message, { ...error, file: { id, name: file.name }, cause: error });
 
 export const aborted = (): CloudropError =>

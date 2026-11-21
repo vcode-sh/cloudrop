@@ -26,6 +26,8 @@ const refused = (type: string) => ({
     code: "FILE_TYPE_NOT_ALLOWED",
     message: `One of the files was sent as ${type}, which this upload does not accept. Pick another file.`,
     retryable: false,
+    // No bytes exist yet, so the declared type is all a refusal names (M11-K2).
+    content: { declared: type, reason: "refused" },
   },
   tickets: [],
 });

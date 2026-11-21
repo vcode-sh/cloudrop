@@ -58,7 +58,8 @@ async function uploadAndComplete(file: { name: string; type: string }, body: Uin
   expect(put.status).toBe(200);
   const completed = await call<CompleteResponse>("complete", { token: ticket.token });
   const kept = (await cloudrop.api.head(ticket.key)).data?.size ?? null;
-  return { status: completed.status, code: completed.body.error?.code ?? null, kept };
+  const { code = null, content = null } = completed.body.error ?? {};
+  return { status: completed.status, code, content, kept };
 }
 
 it.for([
@@ -68,13 +69,15 @@ it.for([
   // Larger than the 4 KiB read: R2 answers the range with its first 4,096 bytes.
   { name: "a PNG over 4 KiB", file: { name: "big.png", type: "image/png" }, body: bytes(PNG, new Uint8Array(5000)) },
 ])("keeps $name whose content agrees with its type", async ({ file, body }) => {
-  expect(await uploadAndComplete(file, body)).toEqual({ status: 200, code: null, kept: body.length });
+  expect(await uploadAndComplete(file, body)).toEqual({ status: 200, code: null, content: null, kept: body.length });
 });
 
-it("refuses a web page sent as a PNG and deletes it from the bucket", async () => {
+it("refuses a web page sent as a PNG, says what it found and deletes it from the bucket", async () => {
   expect(await uploadAndComplete({ name: "photo.png", type: "image/png" }, HTML)).toEqual({
     status: 400,
     code: "FILE_TYPE_NOT_ALLOWED",
+    // Read from the bytes R2 served for the ranged GET (M11-K1).
+    content: { declared: "image/png", detected: "text/html", reason: "refused" },
     kept: null,
   });
 });

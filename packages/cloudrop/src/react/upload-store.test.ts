@@ -9,8 +9,11 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Activity, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { contentChecks } from "../plugins/content-checks.ts";
+import { createUploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import type { Fault } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault } from "../testing/client-fixture.ts";
+import { JPEG } from "../testing/file-samples.ts";
 import { gate } from "../testing/persist-fixture.ts";
 import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 
@@ -63,6 +66,25 @@ describe("what useUpload renders", () => {
       failed: 1,
       aborted: 0,
       count: 2,
+    });
+  });
+
+  // M11-K5: a page words a type refusal itself from the failed file's `error.content`.
+  it("gives a file contentChecks() refused its error with `content`, in `files` and in upload()'s result", async () => {
+    const photos = route({ accept: "image/*", maxSize: "1MB", authorize: allowAnyone });
+    const fixture = clientFixture({ photos }, { plugins: [contentChecks()] });
+    const { useUpload } = createUploadHooks({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false });
+    const { result } = renderHook(() => useUpload("photos"));
+    const answer = await act(() => result.current.upload(new File([JPEG], "photo.png", { type: "image/png" })));
+    const [file] = result.current.files;
+    const content = { declared: "image/png", detected: "image/jpeg", reason: "mismatch" };
+
+    expect({
+      file: [file?.status, file?.error?.code, file?.error?.content],
+      answer: [answer?.error?.code, answer?.error?.content],
+    }).toEqual({
+      file: ["failed", "FILE_TYPE_NOT_ALLOWED", content],
+      answer: ["FILE_TYPE_NOT_ALLOWED", content],
     });
   });
 

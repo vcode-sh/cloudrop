@@ -4,8 +4,10 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { allowAnyone, createCloudrop, route } from "./index.ts";
+import { contentChecks } from "./plugins.ts";
 import { fakeIndexedDb } from "./testing/fake-indexeddb.ts";
 import { fakeLocks } from "./testing/fake-locks.ts";
+import { JPEG } from "./testing/file-samples.ts";
 import { memoryStore, testBucket, testClient } from "./testing.ts";
 
 const secret = "a-test-secret-of-at-least-32-characters";
@@ -79,6 +81,26 @@ describe("testClient", () => {
 
     expect(error?.code).toBe("ABORTED");
     expect({ keys: bucket.keys(), pending: bucket.pendingUploads() }).toEqual({ keys: [], pending: 0 });
+  });
+
+  // An app tests the copy it builds from a refusal's `content` (M11-K5).
+  it("gives a file contentChecks() refuses its error with `content`, and the bucket keeps nothing", async () => {
+    const bucket = testBucket();
+    const cloudrop = createCloudrop({
+      storage: bucket.storage,
+      secret,
+      routes: { anyFile },
+      plugins: [contentChecks()],
+    });
+    const photo = new File([JPEG], "photo.png", { type: "image/png" });
+
+    const { error } = await testClient(cloudrop, { bucket }).upload("anyFile", photo);
+
+    expect({ code: error?.code, content: error?.content, keys: bucket.keys() }).toEqual({
+      code: "FILE_TYPE_NOT_ALLOWED",
+      content: { declared: "image/png", detected: "image/jpeg", reason: "mismatch" },
+      keys: [],
+    });
   });
 
   // An app's tests would otherwise share one IndexedDB, so one test's unfinished upload would show in the next.

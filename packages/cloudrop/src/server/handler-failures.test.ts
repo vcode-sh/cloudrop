@@ -107,6 +107,33 @@ describe("cloudrop.handler failures", () => {
     },
   );
 
+  // M11-K3. `content` is typed, but a plugin may pass a wider object or come from plain JavaScript: only the three
+  // fields are sent, and only with the code they explain.
+  const found = { declared: "image/png", detected: "image/jpeg", reason: "mismatch" } as const;
+  it.for([
+    {
+      name: "sends a type refusal's content field by field",
+      code: "FILE_TYPE_NOT_ALLOWED",
+      expected: {
+        status: 400,
+        error: { code: "FILE_TYPE_NOT_ALLOWED", message: "Not this file.", retryable: false, content: found },
+      },
+    },
+    {
+      name: "sends no content with another code",
+      code: "QUOTA_EXCEEDED",
+      expected: { status: 403, error: { code: "QUOTA_EXCEEDED", message: "Not this file.", retryable: false } },
+    },
+  ] as const)("$name", async ({ code, expected }) => {
+    const content = { ...found, key: "uploads/a.png", name: "a.png", bytes: [0xff, 0xd8] };
+    const plugin: CloudropPlugin = {
+      id: "types",
+      server: { beforeUpload: () => new CloudropError(code, "Not this file.", { content }) },
+    };
+    const response = await serverFixture({ avatar }, { plugins: [plugin] }).post("upload", uploadBody);
+    expect({ status: response.status, ...(await response.json()) }).toStrictEqual(expected);
+  });
+
   it("marks every answer as not cacheable, since it carries tokens and signed URLs", async () => {
     const response = await setup().post("upload", uploadBody);
     expect(response.headers.get("cache-control")).toBe("no-store");

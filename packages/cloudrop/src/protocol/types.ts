@@ -1,7 +1,7 @@
 // The upload protocol (spec §5): the only module the client and the server share. Types and constants only, so the
 // client bundle never pulls in server code.
 
-import type { CloudropErrorCode } from "../errors.ts";
+import type { CloudropErrorCode, ContentRefusal } from "../errors.ts";
 
 /** The four JSON endpoints, each at `<basePath>/<endpoint>`, all `POST`. */
 export type Endpoint = "upload" | "sign" | "complete" | "abort";
@@ -138,6 +138,8 @@ export interface ErrorBody {
   retryable: boolean;
   /** PARTS_MISSING only: the part numbers to upload again. */
   parts?: number[];
+  /** FILE_TYPE_NOT_ALLOWED from a type check only: what it found in the file (M11-K1). */
+  content?: ContentRefusal;
 }
 
 /** Every non-2xx response has this body. */

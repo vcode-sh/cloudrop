@@ -4,7 +4,13 @@
 
 // CloudropError comes through the published entry, so a refusal is an instance of the class the server checks for
 // (M10-K5, as M9-T2 does for cloudrop/testing).
-import { type AfterVerifyContext, CloudropError, type CloudropPlugin, type StorageDriver } from "../index.ts";
+import {
+  type AfterVerifyContext,
+  CloudropError,
+  type CloudropPlugin,
+  type ContentRefusal,
+  type StorageDriver,
+} from "../index.ts";
 import { acceptsType, isAcceptEntry } from "../server/accept-entry.ts";
 import { type Sniffed, sniff } from "./sniff.ts";
 
@@ -92,26 +98,38 @@ function agrees(sniffed: Sniffed, declared: string): boolean {
   });
 }
 
-const notAccepted = (what: string) =>
-  new CloudropError("FILE_TYPE_NOT_ALLOWED", `${what}, which this upload does not accept. Pick another file.`);
+/** A refusal with `content`, which says in data what `message` says in English (M11-K1). */
+const refusal = (message: string, content: ContentRefusal) =>
+  new CloudropError("FILE_TYPE_NOT_ALLOWED", message, { content });
+
+const notAccepted = (what: string, content: ContentRefusal) =>
+  refusal(`${what}, which this upload does not accept. Pick another file.`, content);
 
 /** The refusal of a file sent as `declared` whose first bytes show `sniffed`, or undefined when it may be kept. */
 function checkContent(declared: string, sniffed: Sniffed | null, accept: readonly string[], lists: Lists) {
-  // /upload refused these already; a token signed before the plugin or its lists changed was not judged there.
-  if (isRefused(declared, declared, accept, lists)) return notAccepted(`This file was sent as ${declared}`);
+  // /upload refused these already; a token signed before the plugin or its lists changed was not judged there. The
+  // declared type decides, so `detected` is left out whatever the bytes show (M11-K2).
+  if (isRefused(declared, declared, accept, lists)) {
+    return notAccepted(`This file was sent as ${declared}`, { declared, reason: "refused" });
+  }
   if (!sniffed) return undefined;
-  if (isRefused(sniffed.type, declared, accept, lists)) return notAccepted(`This file is ${sniffed.name}`);
+  const detected = sniffed.type;
+  const what = `This file is ${sniffed.name}`;
+  if (isRefused(detected, declared, accept, lists)) return notAccepted(what, { declared, detected, reason: "refused" });
   // A browser that could not type the file sent it as application/octet-stream: nothing to contradict, so the content's
   // own type must be accepted (M10-K2).
   if (declared === OCTET_STREAM) {
-    const types = [sniffed.type, ...sniffed.agrees.filter((entry) => !entry.includes("*"))];
-    return types.some((type) => acceptsType(accept, type)) ? undefined : notAccepted(`This file is ${sniffed.name}`);
+    const types = [detected, ...sniffed.agrees.filter((entry) => !entry.includes("*"))];
+    return types.some((type) => acceptsType(accept, type))
+      ? undefined
+      : notAccepted(what, { declared, detected, reason: "not-accepted" });
   }
   if (agrees(sniffed, declared)) return undefined;
-  return new CloudropError(
-    "FILE_TYPE_NOT_ALLOWED",
-    `This file is ${sniffed.name}, but it was sent as ${declared}. Give it the right extension, or pick another file.`,
-  );
+  return refusal(`${what}, but it was sent as ${declared}. Give it the right extension, or pick another file.`, {
+    declared,
+    detected,
+    reason: "mismatch",
+  });
 }
 
 /** The first bytes of the stored file. An empty file has none: R2 answers any range of it with 416. */
@@ -136,7 +154,10 @@ export function contentChecks(options?: ContentCheckOptions): CloudropPlugin {
       // A refusal here refuses the whole request, before anything is signed, so no such file reaches the bucket.
       beforeUpload({ files, accept }) {
         const refused = files.find(({ type }) => isRefused(type, type, accept, lists));
-        return refused && notAccepted(`One of the files was sent as ${refused.type}`);
+        return (
+          refused &&
+          notAccepted(`One of the files was sent as ${refused.type}`, { declared: refused.type, reason: "refused" })
+        );
       },
       async afterVerify({ file, accept, storage }) {
         return checkContent(file.type, sniff(await firstBytes(storage, file), file.size), accept, lists);

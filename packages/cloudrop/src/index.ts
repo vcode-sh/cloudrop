@@ -1,4 +1,10 @@
-export { CloudropError, type CloudropErrorCode, type CloudropErrorOptions, type Result } from "./errors.ts";
+export {
+  CloudropError,
+  type CloudropErrorCode,
+  type CloudropErrorOptions,
+  type ContentRefusal,
+  type Result,
+} from "./errors.ts";
 export type {
   InferableCloudrop,
   RouteMetadata,

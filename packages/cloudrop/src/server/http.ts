@@ -43,10 +43,17 @@ const STATUS = {
 
 export type ResponseHeaders = Record<string, string>;
 
-/** Only the code, message, retryable flag and part numbers leave the server: never a cause, stack or storage code. */
+/**
+ * Only the code, message, retryable flag, part numbers and a type refusal's `content` leave the server: never a cause,
+ * stack or storage code. `content` is copied field by field, so nothing else a plugin put in it is sent (M11-K3).
+ */
 export function errorBody(error: CloudropError): ErrorBody {
   const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable };
   if (error.parts) body.parts = [...error.parts];
+  if (error.content) {
+    const { declared, detected, reason } = error.content;
+    body.content = { declared, detected, reason };
+  }
   return body;
 }
 

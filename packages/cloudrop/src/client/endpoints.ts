@@ -91,7 +91,7 @@ interface PostOptions {
   timeoutMs?: number;
 }
 
-// The body's retryable and parts are the error's options.
+// The body's retryable, parts and content are the error's options.
 const toError = (body: ErrorBody): CloudropError => new CloudropError(body.code, body.message, body);
 
 export function createEndpoints(

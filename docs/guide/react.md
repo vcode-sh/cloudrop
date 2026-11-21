@@ -468,6 +468,7 @@ where the message alone is not the right thing to show:
 | `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close()`, with or without `{ abort: true }`, at sign-out or from `useCloseOtherUsers`. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
 | `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say the file was not uploaded because the account changed. |
 | `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
+| `FILE_TYPE_NOT_ALLOWED` with `error.content` | [`contentChecks()`](plugins.md#what-a-refusal-carries) refused the file. | The message, or your own words built from `error.content`, as below. |
 
 ```tsx
 function FileError({ error }: { error: CloudropError | null }) {
@@ -478,6 +479,24 @@ function FileError({ error }: { error: CloudropError | null }) {
       {error.code === "ACCOUNT_CHANGED" && <button type="button" onClick={() => location.reload()}>Reload</button>}
     </p>
   );
+}
+```
+
+**Your own words for a type refusal.** The message is English. `error.content` says the same in data: the type the
+file was sent as, the type its bytes show when they decided, and one of three reasons. Build your copy from it, and fall
+back to the message when it is absent (an older server, or a refusal that is not `contentChecks()`'s):
+
+```tsx
+// `t` is your app's translate function; `typeName` turns "image/jpeg" into your words for it.
+function typeRefusal(error: CloudropError): string {
+  const { content } = error;
+  if (!content) return error.message;
+  const declared = typeName(content.declared);
+  // The refused type: what the bytes show, or what the file was sent as when no bytes decided.
+  const found = typeName(content.detected ?? content.declared);
+  if (content.reason === "mismatch") return t("upload.mismatch", { found, declared }); // "This is a JPEG, not a PNG."
+  if (content.reason === "not-accepted") return t("upload.notAccepted", { found }); // "JPEG files are not accepted."
+  return t("upload.refused", { found }); // "Web pages cannot be uploaded here."
 }
 ```
 

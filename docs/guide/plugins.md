@@ -75,6 +75,33 @@ what their own `beforeUpload` reserved. A refusal at `/complete` is an `afterVer
 When the bucket cannot be read, the object is kept and the client gets a retryable `SERVER_ERROR`; it completes again
 on its own.
 
+### What a refusal carries
+
+The message is English. An app that words its errors itself, or translates them, reads `error.content` instead, which
+every refusal of `contentChecks()` carries to the client beside `code`, `message` and `retryable`:
+
+```ts
+error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mismatch" }
+```
+
+| Field | What it holds |
+| --- | --- |
+| `declared` | The type the file was sent as: the browser's type for it, or `application/octet-stream` when the browser had none. |
+| `detected` | The type the file's first bytes show, from the [table below](#what-it-recognises). Present when the bytes decided; absent when the declared type alone was refused. |
+| `reason` | Why the file was refused: one of the three below. |
+
+| `reason` | Rules | What it means | `detected` |
+| --- | --- | --- | --- |
+| `"refused"` | 1, 2, 3 and `deny` | The file is a kind this server refuses: a web page, a program, a script, an XML type the route does not name, or a `deny` entry. The refused type is `detected`, or `declared` when there is no `detected`. | At `/upload`, never. At `/complete`, present unless the declared type itself was refused. |
+| `"mismatch"` | 4 | The content is `detected`, but the file was sent as `declared`. | Always. |
+| `"not-accepted"` | 5 | The browser could not type the file, and its content, `detected`, is not a type the route accepts. | Always. |
+
+A refusal at `/upload` refuses the whole request, so there `declared` is the type of the first refused file in it, not
+of each file that failed with it; the error then has no `error.file`. `content` holds these three values and nothing
+else: never a file name, a key or a byte of the file. An older client ignores it, and the route's own `accept` refusal
+(a type not in `accept`, without the plugin) carries none, so keep `error.message` as the fallback. Building your own
+copy from it in React: [Errors to show](react.md#errors-to-show).
+
 The content is judged only when `/complete` runs. A page that uploads a file and never completes it leaves the object
 in the bucket under the type it was sent as, which `/upload` already checked, until the bucket's lifecycle rule or, with
 a store, the sweep removes it. A browser shows such an object as that type.

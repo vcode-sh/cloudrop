@@ -15,6 +15,7 @@ Every public call returns `{ data, error }` instead of throwing for an expected 
 | `message` | One or two sentences for a person: what happened and what to do next. Show this; never parse it. |
 | `retryable` | `true` when the same request may succeed later. |
 | `parts` | `PARTS_MISSING` only: the part numbers to send again. |
+| `content` | `FILE_TYPE_NOT_ALLOWED` from [`contentChecks()`](plugins.md#what-a-refusal-carries), or from a plugin of your own that sets it: `{ declared, detected?, reason }`, the type the file was sent as, the type its bytes show and why it was refused. Word the refusal from it in your own language. |
 | `file` | In a job, the file the error belongs to: `{ id, name }`. |
 | `status`, `storageCode` | On the server only: the storage service's HTTP status and own error code, for logs. Never shown to users. |
 
@@ -27,7 +28,7 @@ if (error) {
 ```
 
 Messages never contain credentials, presigned URLs or raw storage responses. The handler sends a client only an error's
-`code`, `message`, `retryable` and `parts`; everything else goes to your server's `logger`.
+`code`, `message`, `retryable`, `parts` and `content`; everything else goes to your server's `logger`.
 
 **The client has already retried.** A retryable error that reaches your code has been through the client's attempts
 (up to 6 per request, with backoff). Offer the user a retry button rather than retrying in a loop: `retry()` on a job or
@@ -66,7 +67,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `INVALID_METADATA` | 400 | No | The metadata failed the route's schema, is over 2 KiB as JSON, or was sent to a route without a schema. The message names the first problem. | Fix the metadata the page sends. |
 | `TOO_MANY_FILES` | 400 | No | More files than the route's `maxFiles` in one `/upload`. Refuses the whole job. | Send fewer files at once, or raise `maxFiles`. |
 | `FILE_TOO_LARGE` | 400 | No | A file is over the route's `maxSize`. Refuses that file only. | Ask the user for a smaller file. |
-| `FILE_TYPE_NOT_ALLOWED` | 400 | No | At `/upload`: a file's type is not in `accept`, is not a valid MIME type, or its extension does not match its type. Refuses that file only. With [`contentChecks()`](plugins.md#contentchecks), also at `/upload` for a file sent as a web page, a program, a script or an XML type the route does not name (refusing the whole request), and at `/complete` when the file's content contradicts its type or is such a type, or a file sent as `application/octet-stream` turns out to be a type `accept` does not take; the object is deleted. | Show the message. Ask the user for another file, or to rename it so the extension matches. |
+| `FILE_TYPE_NOT_ALLOWED` | 400 | No | At `/upload`: a file's type is not in `accept`, is not a valid MIME type, or its extension does not match its type. Refuses that file only. With [`contentChecks()`](plugins.md#contentchecks), also at `/upload` for a file sent as a web page, a program, a script or an XML type the route does not name (refusing the whole request), and at `/complete` when the file's content contradicts its type or is such a type, or a file sent as `application/octet-stream` turns out to be a type `accept` does not take; the object is deleted. A `contentChecks()` refusal carries [`content`](plugins.md#what-a-refusal-carries); the route's own `accept` refusal carries none. | Show the message, or your own words built from `error.content`. Ask the user for another file, or to rename it so the extension matches. |
 | `ACCOUNT_CHANGED` | 409 | No | With a database store and a route with `owner`: the client's [`account`](client.md#guard-against-a-changed-account) names another user than `owner` returns for the request's session, as after a sign-in as someone else in another tab. Refuses the whole `/upload`, before any plugin or reservation. | Show the message: the person reloads the page, which then shows the account signed in now, and uploads again. |
 | `QUOTA_EXCEEDED` | 403 | No | With a database store and `quota`: the file would take its owner past their storage limit (reserved plus stored bytes). Refuses that file only; the others of the same `/upload` may fit. | Show the message. The user frees space or the app raises their `quota`; then start the upload again. |
 | `INVALID_TOKEN` | 400 | No | The upload token is not valid: not signed by a configured secret, or damaged. | Start the upload again. The client's `retry()` does this. |

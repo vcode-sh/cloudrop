@@ -28,7 +28,7 @@ export type {
   UploadJob,
   UploadResult,
 } from "./client/types.ts";
-export { CloudropError, type CloudropErrorCode, type Result } from "./errors.ts";
+export { CloudropError, type CloudropErrorCode, type ContentRefusal, type Result } from "./errors.ts";
 // The wire types of the four endpoints, and the route inference types a client user annotates with (InferableCloudrop,
 // RouteMetadata, RouteName, RouteResult; S4, ruling M3-H13), which the root entry exports too.
 export type {

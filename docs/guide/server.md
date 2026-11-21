@@ -421,6 +421,11 @@ const quota: CloudropPlugin = {
 A `beforeUpload` refusal refuses every file of the job with its code and message. `FORBIDDEN` says the user is signed
 in but may not upload this; the message says what to do (see [Errors](errors.md#upload-endpoint-errors)).
 
+A plugin of your own that refuses a file for its type can say what it found, as `contentChecks()` does: pass
+`{ content: { declared, detected, reason } }` as the third argument of a `FILE_TYPE_NOT_ALLOWED` error (see
+[What a refusal carries](plugins.md#what-a-refusal-carries)). The client is sent those three fields and nothing else
+the object holds; with any other code, `content` is left out.
+
 Nothing runs when an abandoned upload's token expires, so a reservation also needs its own expiry. A database store's
 `quota` reserves and releases bytes for you, with no plugin (see [Database store](store.md#owners-and-quota)).
 cloudrop's own plugins are in `cloudrop/plugins`: [`contentChecks()`](plugins.md#contentchecks) refuses a file whose

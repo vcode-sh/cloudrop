@@ -43,12 +43,31 @@ export type CloudropErrorCode =
 /** Codes only the client produces; the server's status table has no entry for them. */
 export type ClientErrorCode = "UPLOAD_REJECTED" | "ABORTED" | "NETWORK_ERROR" | "UPLOAD_IN_USE" | "CLIENT_CLOSED";
 
+/** What a type check found in a file it refused (M11-K1). The two types are MIME types, never a name, key or byte. */
+export interface ContentRefusal {
+  /** The type the file was sent as. */
+  declared: string;
+  /**
+   * The type the file's first bytes show, when they decided. Absent when the declared type alone was refused, as at
+   * `/upload`, where no bytes exist yet.
+   */
+  detected?: string;
+  /**
+   * "mismatch": the content is another type than declared. "refused": `detected`, or `declared` without it, is a kind
+   * this server refuses (a web page, a program, a script, an XML type the route does not name, a `deny` entry).
+   * "not-accepted": the file was sent untyped and its content's type is not in the route's `accept`.
+   */
+  reason: "mismatch" | "refused" | "not-accepted";
+}
+
 export interface CloudropErrorOptions {
   retryable?: boolean;
   status?: number;
   storageCode?: string;
   /** PARTS_MISSING: the part numbers to upload again. */
   parts?: readonly number[];
+  /** FILE_TYPE_NOT_ALLOWED: what the check found. Left out of an error with any other code. */
+  content?: ContentRefusal;
   /** The file of a job this error belongs to. */
   file?: { id: string; name: string };
   cause?: unknown;
@@ -62,10 +81,15 @@ export class CloudropError extends Error {
   /** The storage service's own error code, for logs. Never shown to end users. */
   readonly storageCode: string | undefined;
   /**
-   * PARTS_MISSING only: the part numbers the client must upload again before it retries `/complete`. The one field
-   * besides `code`, `message` and `retryable` that reaches the client. Undefined for every other code.
+   * PARTS_MISSING only: the part numbers the client must upload again before it retries `/complete`. With `content`,
+   * the only fields besides `code`, `message` and `retryable` that reach the client. Undefined for every other code.
    */
   readonly parts: readonly number[] | undefined;
+  /**
+   * FILE_TYPE_NOT_ALLOWED from a type check such as `contentChecks()`: the type the file was sent as, the type its
+   * bytes show and why it was refused, for an app that words the refusal itself. Undefined for every other error.
+   */
+  readonly content: ContentRefusal | undefined;
   /** The file of a job this error belongs to; undefined for an error of the whole job or of the server. */
   readonly file: { id: string; name: string } | undefined;
 
@@ -77,6 +101,7 @@ export class CloudropError extends Error {
     this.status = options.status;
     this.storageCode = options.storageCode;
     this.parts = options.parts;
+    this.content = code === "FILE_TYPE_NOT_ALLOWED" ? options.content : undefined;
     this.file = options.file;
   }
 }

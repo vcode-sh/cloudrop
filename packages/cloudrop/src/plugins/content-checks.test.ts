@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
-import type { SignedPart } from "../protocol/types.ts";
 import type { CloudropPlugin } from "../server/plugins.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { complete } from "../testing/complete-fixture.ts";
@@ -34,13 +33,17 @@ async function outcome(input: Case) {
   return { status, error: answer.error ?? null, kept, aborted };
 }
 
-const refused = (message: string) => ({
+/** A refusal as the client is sent it: `content` says in data what `message` says in English (M11-K1, M11-K2). */
+const refused = (message: string, content: { declared: string; detected: string; reason: string }) => ({
   status: 400,
-  error: { code: "FILE_TYPE_NOT_ALLOWED", message, retryable: false },
+  error: { code: "FILE_TYPE_NOT_ALLOWED", message, retryable: false, content },
   kept: false,
   aborted: ["rejected"],
 });
 const passed = { status: 200, error: null, kept: true, aborted: [] };
+const PE = "application/vnd.microsoft.portable-executable";
+/** What a file the browser could not type is signed as. */
+const UNTYPED = "application/octet-stream";
 
 describe("contentChecks: the file's content against its declared type and the route's accept", () => {
   it.for([
@@ -59,22 +62,35 @@ describe("contentChecks: the file's content against its declared type and the ro
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: JPEG },
       expected: refused(
         "This file is a JPEG image, but it was sent as image/png. Give it the right extension, or pick another file.",
+        { declared: "image/png", detected: "image/jpeg", reason: "mismatch" },
       ),
     },
     {
       name: "a web page sent as image/png",
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: HTML },
-      expected: refused("This file is a web page (HTML), which this upload does not accept. Pick another file."),
+      expected: refused("This file is a web page (HTML), which this upload does not accept. Pick another file.", {
+        declared: "image/png",
+        detected: "text/html",
+        reason: "refused",
+      }),
     },
     {
       name: "a Windows program sent as a PDF",
       input: { accept: "*/*", file: { name: "a.pdf", type: "application/pdf" }, body: PROGRAM },
-      expected: refused("This file is a program, which this upload does not accept. Pick another file."),
+      expected: refused("This file is a program, which this upload does not accept. Pick another file.", {
+        declared: "application/pdf",
+        detected: PE,
+        reason: "refused",
+      }),
     },
     {
       name: "a shell script sent as text",
       input: { accept: "*/*", file: { name: "a.txt", type: "text/plain" }, body: bytes("#!/bin/sh\necho hi\n") },
-      expected: refused("This file is a script, which this upload does not accept. Pick another file."),
+      expected: refused("This file is a script, which this upload does not accept. Pick another file.", {
+        declared: "text/plain",
+        detected: "text/x-shellscript",
+        reason: "refused",
+      }),
     },
     {
       // A script is text: once allowed, a "#!" line agrees with any text type it is sent as.
@@ -123,13 +139,21 @@ describe("contentChecks: the file's content against its declared type and the ro
           [0x64, 0x86],
         ),
       },
-      expected: refused("This file is a program, which this upload does not accept. Pick another file."),
+      expected: refused("This file is a program, which this upload does not accept. Pick another file.", {
+        declared: "application/pdf",
+        detected: PE,
+        reason: "refused",
+      }),
     },
     {
       // The browser could not type it, so nothing contradicts; the content's own type must be accepted.
       name: "an untyped PNG on a route that accepts only untyped files",
       input: { accept: "application/octet-stream", file: { name: "data", type: "" }, body: PNG },
-      expected: refused("This file is a PNG image, which this upload does not accept. Pick another file."),
+      expected: refused("This file is a PNG image, which this upload does not accept. Pick another file.", {
+        declared: UNTYPED,
+        detected: "image/png",
+        reason: "not-accepted",
+      }),
     },
     {
       name: "an untyped PNG on a route that accepts images",
@@ -168,6 +192,11 @@ describe("contentChecks: ZIP-based files", () => {
       input: { accept: "*/*", file: { name: "a.docx", type: `${OFFICE}.wordprocessingml.document` }, body: WORKBOOK },
       expected: refused(
         `This file is an Excel workbook, but it was sent as ${OFFICE}.wordprocessingml.document. Give it the right extension, or pick another file.`,
+        {
+          declared: `${OFFICE}.wordprocessingml.document`,
+          detected: `${OFFICE}.spreadsheetml.sheet`,
+          reason: "mismatch",
+        },
       ),
     },
     {
@@ -196,6 +225,7 @@ describe("contentChecks: ZIP-based files", () => {
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: ARCHIVE },
       expected: refused(
         "This file is a ZIP archive, but it was sent as image/png. Give it the right extension, or pick another file.",
+        { declared: "image/png", detected: "application/zip", reason: "mismatch" },
       ),
     },
   ])("$name", async ({ input, expected }) => {
@@ -208,7 +238,11 @@ describe("contentChecks: XML and SVG by content", () => {
     {
       name: "an SVG sent as a PNG",
       input: { accept: "image/*", file: { name: "a.png", type: "image/png" }, body: SVG },
-      expected: refused("This file is an SVG image, which this upload does not accept. Pick another file."),
+      expected: refused("This file is an SVG image, which this upload does not accept. Pick another file.", {
+        declared: "image/png",
+        detected: "image/svg+xml",
+        reason: "refused",
+      }),
     },
     {
       name: "an SVG on a route that names image/svg+xml",
@@ -218,7 +252,11 @@ describe("contentChecks: XML and SVG by content", () => {
     {
       name: "an untyped XML document on a route that accepts anything",
       input: { accept: "*/*", file: { name: "data", type: "" }, body: bytes("<?xml version='1.0'?><rss/>") },
-      expected: refused("This file is an XML document, which this upload does not accept. Pick another file."),
+      expected: refused("This file is an XML document, which this upload does not accept. Pick another file.", {
+        declared: UNTYPED,
+        detected: "application/xml",
+        reason: "refused",
+      }),
     },
     {
       name: "an XML feed on a route that names its type",
@@ -256,6 +294,7 @@ describe("contentChecks: allow and deny", () => {
       },
       expected: refused(
         "This file is a web page (HTML), but it was sent as image/png. Give it the right extension, or pick another file.",
+        { declared: "image/png", detected: "text/html", reason: "mismatch" },
       ),
     },
     {
@@ -271,7 +310,11 @@ describe("contentChecks: allow and deny", () => {
     {
       name: "deny refuses a type the route accepts, by its content",
       input: { accept: "*/*", file: { name: "data", type: "" }, body: PNG, options: { deny: ["image/*"] } },
-      expected: refused("This file is a PNG image, which this upload does not accept. Pick another file."),
+      expected: refused("This file is a PNG image, which this upload does not accept. Pick another file.", {
+        declared: UNTYPED,
+        detected: "image/png",
+        reason: "refused",
+      }),
     },
   ])("$name", async ({ input, expected }) => {
     expect(await outcome(input)).toEqual(expected);
@@ -291,11 +334,12 @@ describe("contentChecks: allow and deny", () => {
   });
 });
 
+// The bytes show a PNG, but the declared type decides here, so `detected` is left out (M11-K2).
 it("judges the declared type at /complete too, for a token signed before the plugin was installed", async () => {
   const files = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone });
   const before = serverFixture({ files });
-  const ticket = await before.single("files", { name: "a.html", type: "text/html", size: TEXT.length });
-  await before.send(ticket.put, TEXT);
+  const ticket = await before.single("files", { name: "a.html", type: "text/html", size: PNG.length });
+  await before.send(ticket.put, PNG);
   // The same bucket and secret, now with contentChecks.
   const after = serverFixture({ files }, { plugins: [contentChecks()] });
   after.fake.fetch = before.fake.fetch;
@@ -303,64 +347,7 @@ it("judges the declared type at /complete too, for a token signed before the plu
     code: "FILE_TYPE_NOT_ALLOWED",
     message: "This file was sent as text/html, which this upload does not accept. Pick another file.",
     retryable: false,
+    content: { declared: "text/html", reason: "refused" },
   });
   expect(before.fake.keys()).toEqual([]);
-});
-
-describe("contentChecks: reading the bucket", () => {
-  /** The Range header of each GET the server sends from now on. */
-  function recordRanges(fixture: Awaited<ReturnType<typeof uploaded>>["fixture"]): (string | null)[] {
-    const ranges: (string | null)[] = [];
-    const { fetch } = fixture.fake;
-    fixture.fake.fetch = (input, init) => {
-      if ((init?.method ?? "GET") === "GET") ranges.push(new Headers(init?.headers).get("range"));
-      return fetch(input, init);
-    };
-    return ranges;
-  }
-
-  it.for([
-    { name: "the first 4 KiB of a larger file", size: 10_000, ranges: ["bytes=0-4095"] },
-    { name: "a file of exactly 4 KiB whole", size: 4096, ranges: ["bytes=0-4095"] },
-    { name: "a one-byte file whole", size: 1, ranges: ["bytes=0-0"] },
-    // R2 answers any range of an empty object with 416 InvalidRange (measured 2026-11-21).
-    { name: "nothing of an empty file", size: 0, ranges: [] },
-  ])("reads $name", async ({ size, ranges }) => {
-    const { fixture, ticket } = await uploaded({
-      accept: "*/*",
-      file: { name: "a.txt", type: "text/plain" },
-      body: new Uint8Array(size).fill(0x41),
-    });
-    const sent = recordRanges(fixture);
-    expect((await complete(fixture, ticket.token)).status).toBe(200);
-    expect(sent).toEqual(ranges);
-  });
-
-  it("completes, reads and deletes a refused multipart upload", async () => {
-    const files = route({ accept: "image/*", maxSize: "1MB", authorize: allowAnyone });
-    const fixture = serverFixture({ files }, { plugins: [contentChecks()], multipartThreshold: 0 });
-    const ticket = await fixture.multipart("files", { name: "a.png", type: "image/png", size: HTML.length });
-    await fixture.send(ticket.parts[0] as SignedPart, HTML);
-    expect((await complete(fixture, ticket.token)).body.error?.code).toBe("FILE_TYPE_NOT_ALLOWED");
-    expect([fixture.fake.keys(), fixture.fake.pendingUploads()]).toEqual([[], 0]);
-  });
-
-  it("keeps the object and asks the client to retry when the bucket cannot be read", async () => {
-    const { fixture, ticket } = await uploaded({
-      accept: "*/*",
-      file: { name: "a.txt", type: "text/plain" },
-      body: TEXT,
-    });
-    const { fetch } = fixture.fake;
-    fixture.fake.fetch = (input, init) =>
-      (init?.method ?? "GET") === "GET" ? Promise.reject(new TypeError("network down")) : fetch(input, init);
-    expect((await complete(fixture, ticket.token)).body.error).toEqual({
-      code: "SERVER_ERROR",
-      message: "The file was uploaded, but the server could not finish processing it. Try again in a moment.",
-      retryable: true,
-    });
-    expect((await fixture.storage.head(ticket.key)).data?.size).toBe(5);
-    fixture.fake.fetch = fetch;
-    expect((await complete(fixture, ticket.token)).status).toBe(200);
-  });
 });

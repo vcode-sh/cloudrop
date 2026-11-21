@@ -2,7 +2,7 @@
 // a proxy, a wrong basePath or another cloudrop version: each reader returns its typed value, or null for any other
 // shape, so a bad answer becomes an error instead of a TypeError deep in the upload.
 
-import type { CloudropErrorCode } from "../errors.ts";
+import type { CloudropErrorCode, ContentRefusal } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { countParts } from "../part-size.ts";
 import type {
@@ -76,12 +76,28 @@ function isUploadedFile(value: unknown): value is UploadedFile {
   );
 }
 
+const isReason = (value: unknown): value is ContentRefusal["reason"] =>
+  value === "mismatch" || value === "refused" || value === "not-accepted";
+
+/**
+ * A type refusal's `content` (M11-K4): its three fields and nothing else the answer holds, or undefined for any other
+ * shape. A reason this client does not know drops it too, since the type promises one of three; `message` still
+ * explains the refusal.
+ */
+function readContent(value: unknown): ContentRefusal | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const { declared, detected, reason } = value;
+  if (!isString(declared) || !isReason(reason)) return undefined;
+  if (detected === undefined) return { declared, reason };
+  return isString(detected) ? { declared, detected, reason } : undefined;
+}
+
 function readError(value: unknown): ErrorBody | null {
   if (!isPlainObject(value)) return null;
   const { code, message, retryable, parts } = value;
   if (!isString(code) || !isString(message) || typeof retryable !== "boolean") return null;
   // A code this client does not know passes through: a newer server may send one, and `message` still explains it.
-  const body = { code: code as CloudropErrorCode, message, retryable };
+  const body: ErrorBody = { code: code as CloudropErrorCode, message, retryable, content: readContent(value.content) };
   return Array.isArray(parts) && parts.every(isCount) ? { ...body, parts } : body;
 }
 
@@ -122,7 +138,7 @@ export function readCompleted(json: unknown): CompleteResponse<unknown> | null {
     : null;
 }
 
-/** `{ error }` of a non-2xx answer; `parts`, when it is not a list of part numbers, is dropped. */
+/** `{ error }` of a non-2xx answer; `parts` and `content`, when they have another shape than theirs, are dropped. */
 export function readErrorBody(json: unknown): ErrorBody | null {
   return isPlainObject(json) ? readError(json.error) : null;
 }
