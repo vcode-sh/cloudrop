@@ -41,6 +41,34 @@ describe("cloudrop.handler hint for a refused origin", () => {
     ]);
   });
 
+  // A page on another origin posts JSON, so its browser asks first and, refused, never sends the POST (M11-R139).
+  it("hints at a refused preflight, the only request such a page's browser sends, and once for the origin", async () => {
+    const fixture = serverFixture({ avatar });
+    const preflight = new Request(`${APP_ORIGIN}/api/cloudrop/upload`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://shop.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    });
+    const hint =
+      "cloudrop: refused a request from https://shop.example, but this server sees its own origin as https://app.example.com. If a proxy terminates TLS or rewrites Host, add the app's public origin to trustedOrigins.";
+    const refused = await fixture.cloudrop.handler(preflight);
+    expect([refused.status, [...fixture.logger.warnings]]).toEqual([403, [hint]]);
+    await fixture.cloudrop.handler(upload("https://shop.example", `${APP_ORIGIN}/api/cloudrop/upload`));
+    expect(fixture.logger.warnings).toEqual([hint]);
+  });
+
+  it("says nothing about the preflight of a trusted origin", async () => {
+    const fixture = serverFixture({ avatar }, { trustedOrigins: ["https://shop.example"] });
+    const preflight = new Request(`${APP_ORIGIN}/api/cloudrop/upload`, {
+      method: "OPTIONS",
+      headers: { origin: "https://shop.example", "access-control-request-method": "POST" },
+    });
+    expect([(await fixture.cloudrop.handler(preflight)).status, fixture.logger.warnings]).toEqual([204, []]);
+  });
+
   it.for([
     { name: "null", origin: "null" },
     { name: "an origin with a path", origin: "https://evil.example/upload" },

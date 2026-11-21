@@ -64,7 +64,7 @@ function contained(logger: Logger): Logger {
 }
 
 interface Reporters {
-  /** A refused origin that may be the app's own behind a proxy. */
+  /** A refused origin, of a POST or of its preflight, that may be the app's own behind a proxy. */
   origin(request: Request): void;
   /** Settings still missing from the environment. */
   notReady(error: CloudropError): void;
@@ -75,7 +75,11 @@ async function answer(request: Request, config: ServerConfig, report: Reporters)
   if (endpoint === null) {
     return errorResponse(new CloudropError("NOT_FOUND", "There is no cloudrop endpoint at this path. Check basePath."));
   }
-  if (request.method === "OPTIONS") return preflight(request, config.trustedOrigins);
+  if (request.method === "OPTIONS") {
+    // A refused preflight is all a page on another origin ever sends: its POST never follows (M11-R139).
+    if (!checkOrigin(request, config.trustedOrigins).allowed) report.origin(request);
+    return preflight(request, config.trustedOrigins);
+  }
   if (request.method !== "POST") {
     return errorResponse(new CloudropError("METHOD_NOT_ALLOWED", "Send this request as POST."), {
       allow: "POST, OPTIONS",

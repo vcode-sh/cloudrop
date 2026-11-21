@@ -1263,3 +1263,17 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; `src/server/store-complete-refuse.test.ts` (busy at the lease's last millisecond, rejected
   one later, in both modes), and `store-complete.test.ts` still holds a refusal off a completion in flight.
 - **Visible in:** `src/server/store-complete.ts`, `src/server/store-calls.ts`.
+
+### M11-R139: a refused preflight leaves the same log line as a refused POST
+
+- **Decision:** an `OPTIONS` request from an origin that is neither the server's own nor in `trustedOrigins` calls
+  the origin hint before it is answered `403`, as a refused `POST` does. The hint is unchanged: one warning per exact
+  origin, for at most 16 origins per handler, and never for a value that is not an exact origin. A preflight and the
+  `POST` of one origin share that one warning.
+- **Why:** a page on another origin posts `application/json`, which is not a CORS-safelisted type, so its browser
+  sends a preflight first and, refused, never sends the `POST`. The hint was called for the `POST` alone, so a
+  cross-origin page missing from `trustedOrigins` failed with a CORS error in its console and not one line in the
+  server's log (review finding, reproduced).
+- **If wrong:** none known; the limit of 16 origins keeps a flood of preflights out of the log as it does for posts.
+- **Status:** in force.
+- **Visible in:** `src/server/handler.ts`, `src/server/handler-origin-hint.test.ts`.
