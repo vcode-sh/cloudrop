@@ -2883,3 +2883,20 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/server/plugins.ts` (`onAbort`), `src/server/complete-multipart.test.ts`,
   `docs/guide/server.md` ("Make hooks idempotent").
+
+### M11-R244: two paths the fix rounds left without an assertion have one again
+
+- **Decision:** two tests assert what they stopped asserting. `src/server/api.test.ts`, the `deletePrefix` case for
+  a prefix in another Unicode form, reads the keys handed to the storage's `deleteMany` and expects the key in the
+  bytes the bucket listed it in (`M9-H6`: "deletes the key as listed"). `src/server/complete-multipart.test.ts`
+  holds "the client aborted, then a late `/complete` arrives" in its own case, which was there but asserted only
+  the answer: it now sends `/abort` and two `/complete` calls and expects `410 NO_SUCH_UPLOAD` twice and the plugins
+  told `["aborted", "rejected", "rejected"]` (`M11-R243`). No test was added.
+- **Why:** since `M11-R210` the `deletePrefix` case runs on the fake, which holds both Unicode forms of a key as one
+  object, so a `deletePrefix` that deleted the key in the prefix's form passed it; with the delete normalized to NFC
+  as a probe, the new expectation fails and the old ones do not. `M11-R200` changed the set-up of the "another
+  writer's object" case from `/abort` to an abort in the bucket; the `/abort` path was still run by the case above
+  it, which did not look at the hooks.
+- **If wrong:** none; test code only.
+- **Status:** in force.
+- **Visible in:** `src/server/api.test.ts`, `src/server/complete-multipart.test.ts`.

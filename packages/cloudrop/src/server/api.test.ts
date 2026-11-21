@@ -184,17 +184,33 @@ describe("api.deletePrefix", () => {
     expect(deleteMany).not.toHaveBeenCalled();
   });
 
-  it("deletes a key R2 lists in another Unicode form of the prefix, as one object (M9-H6)", async () => {
+  it("deletes a key R2 lists in another Unicode form of the prefix, exactly as it was listed (M9-H6)", async () => {
     // R2 stores "Amélie" in NFC and in NFD as one key and lists it, under either prefix, in the form last written;
     // the fake does the same (M11-R26). The key is written in NFD and the prefix asked in NFC.
     const nfdKey = "users/Ame\u0301lie/a.txt";
-    const fixture = serverFixture({ files });
-    await fixture.storage.put(nfdKey, "a");
-    await fixture.storage.put("users/Amelia/b.txt", "b");
-    const result = await fixture.cloudrop.api.deletePrefix("users/Am\u00e9lie/");
-    expect({ deleted: result.data?.deleted, error: result.error, left: fixture.fake.keys() }).toEqual({
+    const bucket = serverFixture({ files });
+    await bucket.storage.put(nfdKey, "a");
+    await bucket.storage.put("users/Amelia/b.txt", "b");
+    const asked: string[] = [];
+    const { cloudrop } = serverFixture(
+      { files },
+      {
+        storage: {
+          ...bucket.storage,
+          deleteMany: (keys) => {
+            asked.push(...keys);
+            return bucket.storage.deleteMany(keys);
+          },
+        },
+      },
+    );
+    const result = await cloudrop.api.deletePrefix("users/Am\u00e9lie/");
+    // The key goes to the bucket in the listing's own bytes, not in the prefix's form: a store that compares keys
+    // byte for byte would not find the other one.
+    expect({ deleted: result.data?.deleted, error: result.error, asked, left: bucket.fake.keys() }).toEqual({
       deleted: 1,
       error: null,
+      asked: [nfdKey],
       left: ["users/Amelia/b.txt"],
     });
   });
