@@ -135,8 +135,11 @@ import { d1Executor, pgExecutor, postgresJsExecutor, sqliteExecutor, sqlStore } 
 | Cloudflare D1 | `sqlStore(d1Executor(env.DB))` | Refused: lease only (D1 has no interactive transaction) |
 
 Pass a node-postgres `Pool`, never a single `Client`: the store runs a transaction on a connection of its own while
-other requests run their statements. Any other driver fits too: an executor is an object with `dialect`, `query` and an
-atomic, ordered `batch` (`SqlExecutor`), plus `transaction` for `{ transaction: true }`.
+other requests run their statements. Give the pool an error listener, `pool.on("error", (error) => log(error))`, as
+node-postgres asks: without one, a connection that dies while idle in the pool, as in a database restart, stops
+the process. `pgExecutor` handles the connections it has checked out itself. Any other driver fits too: an executor
+is an object with `dialect`, `query` and an atomic, ordered `batch` (`SqlExecutor`), plus `transaction` for
+`{ transaction: true }`.
 
 On Cloudflare Workers, the D1 binding is reachable at module scope through `cloudflare:workers`:
 
@@ -181,7 +184,11 @@ export const store = drizzleStore(db, { dialect: "postgres", transaction: true }
 
 - **Postgres:** `drizzle-orm/node-postgres` over a `Pool` (a single `Client` is refused), or `drizzle-orm/postgres-js`.
   With `transaction: true`, `store.route` gives `onComplete` Drizzle's transaction as `tx`:
-  `await tx.update(users).set({ avatarKey: file.key }).where(eq(users.id, userId))`.
+  `await tx.update(users).set({ avatarKey: file.key }).where(eq(users.id, userId))`. On drizzle-orm 0.45 with
+  node-postgres, Drizzle's transaction does not listen for its connection's errors, so a database restart during
+  `onComplete` stops the process: give every connection a listener,
+  `pool.on("connect", (client) => client.on("error", (error) => log(error)))` (the next statement still fails, and
+  the completion answers a retryable error), or use 1.0.0-rc.5 or later, which listens itself.
 - **SQLite:** `drizzle-orm/better-sqlite3`, `drizzle-orm/libsql` (Turso) or `drizzle-orm/d1`, with
   `{ dialect: "sqlite" }`. No transaction mode: an interactive transaction would hold SQLite's only writer while
   `onComplete` awaits.
@@ -458,9 +465,10 @@ createCloudrop({
 });
 ```
 
-- `owner` names who a file counts against: a user, team or workspace id of 1 to 255 characters, or null for no one. It
-  runs once per `/upload`, before plugins' `beforeUpload`, and sees the authorize result, the request and the
-  metadata, not the files. It is not the authorize result signed into the token.
+- `owner` names who a file counts against: a user, team or workspace id of 1 to 255 characters without NUL (U+0000,
+  which Postgres text cannot hold), or null for no one. It runs once per `/upload`, before plugins' `beforeUpload`,
+  and sees the authorize result, the request and the metadata, not the files. It is not the authorize result signed
+  into the token.
 - The store counts each owner's usage whether or not you set `quota`, so turning a quota on later needs no backfill.
 - The rule is `reserved + stored + size <= limit` (stored is `activeBytes` in `api.usage`), checked file by file in
   the order sent: a file that does not fit is refused with `QUOTA_EXCEEDED` (HTTP 403, not retryable), and the files
@@ -499,6 +507,8 @@ const avatar = store.route(policy, {
   catch it inside a savepoint (Drizzle's nested `tx.transaction`, `SAVEPOINT` with node-postgres).
 - The store waits at most 2 seconds for the file's row lock, so a second `/complete` of the same file is answered busy
   rather than waiting. Your own statements through `tx` keep your session's lock timeout.
+- `revokeUploads`, `eraseOwner` and the sweep wait for the row lock too: one that reaches a file whose completion is
+  running `onComplete` returns once that completion commits or rolls back. Another reason to keep `onComplete` short.
 - Postgres must run at its default isolation level, READ COMMITTED. Under REPEATABLE READ or SERIALIZABLE, concurrent
   uploads fail with serialization errors instead of waiting their turn.
 - `onComplete`'s result must be JSON of at most 16 KiB with a store: it is stored and replayed to every retry. A larger
@@ -737,7 +747,7 @@ failed, reported, cursor }`; pass `cursor` back to continue. It runs two passes:
 `graceMs` (default 1 hour) must be at least 15 minutes, the life of an upload URL, so no new `PUT` can start once a
 row may be cleaned up. A failing row is logged, counted in `failed` and left for the next sweep; the rows after it are
 still swept. Two sweeps at once are safe, and so is a sweep racing a `/complete`: the sweep takes the row before it
-deletes anything.
+deletes anything. Each sweep counts in `cleaned` the rows it marked, so two at once may both count the same row.
 
 The sweep never deletes a completed file, never touches an object whose `cloudrop-id` belongs to another upload or
 that has no row, and runs no plugin `onAbort` (rows carry no authorize result). Keep the bucket's lifecycle rule that

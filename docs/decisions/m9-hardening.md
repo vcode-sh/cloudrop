@@ -96,6 +96,71 @@ The measurements behind the first range are in
 - **Status:** in force.
 - **Visible in:** `src/storage/storage-error.ts`.
 
+### M9-H50: `pgExecutor` listens for the `error` event of the client it checks out
+
+- **Decision:** `pgExecutor`'s transactions and batches attach a listener for the `error` event to the client they
+  take from the pool, for as long as they hold it, and release a client that reported one as broken (the pool discards
+  it). `PgPoolClient` gains the optional members `on` and `removeListener`, which node-postgres's `PoolClient` has.
+- **Why:** node-postgres reports a connection that fails while its client is checked out but idle, between two
+  statements, as an `error` event of that client, and the pool listens only while the client is idle in it. In
+  transaction mode the client is idle for the whole of `onComplete`, so a database restart, a failover or a
+  `pg_terminate_backend` during one completion stopped the app's process with an uncaught `error` (measured on
+  Postgres 18 with pg 8.23: two uncaught errors, "terminating connection due to administrator command" and "Connection
+  terminated unexpectedly", even with the app's `pool.on("error")` in place). With the listener, the next statement
+  fails with that error, the transaction answers a retryable `SERVER_ERROR`, the claim is gone with the connection,
+  and the retry completes on a new connection. postgres.js and Drizzle over postgres.js were measured in the same
+  scenario and do not throw, nor does Drizzle over node-postgres from drizzle-orm 1.0.0-rc.5, which listens itself.
+  drizzle-orm 0.45 (still in the supported range) checks the client out without a listener (`node-postgres/session.js`
+  of 0.45.4), and cloudrop does not reach into Drizzle's session to add one: the guide tells apps on 0.45 with
+  `transaction: true` to give every connection a listener through the pool's `connect` event, which a probe showed
+  keeps the same termination from escaping. The guide also says what node-postgres asks of every app, a
+  `pool.on("error")` listener for idle connections, without which a database restart stops the process whatever cloudrop
+  does.
+- **If wrong:** a custom pool whose clients lack `on` or `removeListener` is used as before, with the old risk.
+- **Status:** in force. `src/adapters/sql-postgres.db.integration.test.ts` ("a connection that dies while onComplete
+  runs …"), seen failing before the fix.
+- **Visible in:** `src/adapters/sql/pg.ts`, `docs/guide/store.md` (the node-postgres and Drizzle sections).
+
+### M9-H51: owners, file ids and cursors that no row can have are refused as `INVALID_INPUT`
+
+- **Decision:** An owner or file id passed to the file API must be 1 to 255 characters without NUL (U+0000), and a
+  route's `owner` callback that answers one with NUL is the route's bug (500, logged, nothing written), as an empty or
+  over-long owner already was. A cursor of `api.files` or `api.sweep` must carry a time of at most
+  253402300799999 (9999-12-31T23:59:59.999Z) and an id that is a valid id. All of these answer `INVALID_INPUT` before
+  the store is called.
+- **Why:** Postgres `text` cannot hold U+0000, and the store binds times as ISO strings, which Postgres reads only up
+  to the year 9999. Measured on Postgres 18: every file API call with such a value (`file`, `deleteFile`, `usage`,
+  `files`, `revokeUploads`, `eraseOwner`, `reconcile`, `sweep` with an edited cursor) failed in the database and
+  answered a retryable `SERVER_ERROR`, inviting a caller to retry a request that can never succeed, and logged a
+  database error. SQLite stored such owners, so the rule is the same on every backend: an owner one store could keep
+  and another could not would make moving between them lose files.
+- **If wrong:** an app whose owner ids contain NUL (none known; ids are user or team ids) must map them. On SQLite,
+  rows an earlier version stored with such an owner are no longer reachable through the file API (`files`, `usage`,
+  `revokeUploads`, `eraseOwner`, `reconcile({ owner })`); `reconcile()` without an owner still recounts them, the sweep
+  still cleans them up, and the app reaches them with its own SQL.
+- **Status:** in force. The `INVALID_INPUT` rows of `src/server/store-api.test.ts` and `src/server/sweep.test.ts`, and
+  the NUL row of `src/server/store-upload.test.ts`, each seen failing before the fix.
+- **Visible in:** `src/server/owner-files.ts`, `src/server/sweep.ts`, `src/server/store-upload.ts`,
+  `docs/guide/store.md#owners-and-quota`.
+
+### M9-H52: what the store, the sweep and the owner file API do under real latency (measured, no change)
+
+- **Decision:** No code changes; the guide states three measured behaviours. In transaction mode, `eraseOwner` (at its
+  first statement, the one `revokeUploads` runs) and the sweep wait for a completion of the same owner or file that is
+  running `onComplete`, since the completion holds the file's row lock: `eraseOwner` was still waiting after 5 seconds
+  and the sweep after 3, while a probe held `onComplete`, and both finished once it returned (in lease mode
+  `eraseOwner` answered in 2 ms with `waiting: 1`). Two sweeps at once each count in `cleaned`
+  the rows they marked, so a row both reached is counted by both (two sweeps over the same 2 rows answered
+  `cleaned: 2` each). A late `PUT` with a URL of a deleted, aborted, revoked, erased or replaced file lands again on
+  real R2, since its key is empty and the URL still valid, and is removed by the sweep or the next `eraseOwner` run;
+  the row is marked cleaned only once its URLs and the grace have run out (`M8-A4`).
+- **Why:** each was probed on the vstack-dev bucket with real Postgres 18 and SQLite
+  (`docs/research/r2-spike-findings.md`, "Store, sweep and owner files under real latency, 2026-11-21"); the rest of
+  that table matched the rulings.
+- **If wrong:** a guide sentence is wrong; nothing else depends on it.
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md#oncomplete-with-tx`, `docs/guide/store.md#the-sweep`.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as

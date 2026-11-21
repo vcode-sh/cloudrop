@@ -849,6 +849,59 @@ zeros: `HEAD` answered a bare `401` (no body), and a `ListObjectsV2` `401` with 
 read both as a generic `STORAGE_ERROR` that pointed at the object key; it now reports `STORAGE_DENIED` with the
 credentials to check (`M9-H5`).
 
+## Store, sweep and owner files under real latency, 2026-11-21
+
+Measured 2026-11-21 on a second bucket (`vstack-dev`, EEUR, an object read/write token), for `M9-H50` to `M9-H52`.
+Node 24.22.2 ran a real cloudrop server in-process (`createCloudrop` with the `r2()` preset) on a real store: Postgres
+18.6 in Docker through `pgExecutor`, in lease mode and with `transaction: true`, and SQLite through `node:sqlite`.
+Requests went through `cloudrop.handler`; every `PUT` went to R2 over HTTPS with the URL the server signed. No clock was
+driven: R2 signed and checked every URL in real time. Where a probe needed a row to look older (the sweep's expire pass,
+an expired lease), it moved the row's time columns back in the database and sent no `PUT` with that row's URLs
+afterwards, so no URL outlived its row's recorded times. The settle rows waited for real: 31 minutes against the
+minimum grace of 15. Output went through `createRedactor`; it held no URL, credential or upload ID.
+
+| Probe (each on SQLite, Postgres lease and Postgres transaction mode unless noted) | Measured |
+|---|---|
+| Two replacing completions of one owner at once, 6 rounds, half with a previous file | Always both 200, one completed file, one object, usage `files: 1`, reserved 0 |
+| A replacing completion racing `deleteFile` of the file it replaces, 4 rounds | Always: old object gone, new kept, `activeBytes` of the new file only |
+| `eraseOwner` while `onComplete` runs | Lease: `waiting: 1`, `done: false` in 1–2 ms; transaction mode: still waiting after 5 s, until `onComplete` returned (`M9-H52`). The next run deleted the file and removed its object |
+| `eraseOwner` while an `/upload` reserves mid-run | `done: false` (the new row seen as waiting); the next run revoked it |
+| `eraseOwner` while the file's `PUT` is under way (4 MiB) | Revoked, `done: false`; the `PUT` landed (200); the next run removed it; `/complete` answered `410 UPLOAD_EXPIRED` |
+| `revokeUploads` racing `/complete`, at 0–240 ms | At 0 ms the revoke won (`410`, usage zero, object left for the sweep); later the completion won (`revoked: 0`) |
+| Two sweeps at once over 6 expired uploads | `expired` 3 + 3, nothing failed, every object removed, reserved 0 |
+| A sweep racing a completion whose lease and row deadline ran out | Lease: ended `failed` and reported, completion `500`, retry `410`, object kept (`M5` sweep); transaction mode: the sweep waited for the row lock (> 3 s) and the completion won |
+| Two `eraseOwner`, two `sweep({ all })` and a `deleteFile` at once | Nothing failed, every object removed, usage zeros, both runs `done: true`; each sweep counted the same 2 rows in `cleaned` (`M9-H52`) |
+| 8 concurrent `/upload` of 1,000 B under a 3,000 B quota | Exactly 3 reserved |
+| Quota lowered between `/upload` and `/complete`; replace under a quota; usage after `eraseOwner` | The reserved file completed; a second 600 B file under 1,000 B was refused, a 400 B one replaced it; zeros after erasure |
+| `reconcile` after corrupting, then deleting, the usage row with 4 reserves racing | Repaired to the recount each time; a repeat repaired nothing |
+| `api.files` with `limit: 1` over 6 files, 5 sharing `created_at`, one deleted between pages | Descending ids, no duplicates, the deleted unread file absent; `limit` 0, 1001 and 1.5 refused |
+| File API with a NUL character, or a cursor time after 9999 | Postgres: every call answered a retryable `SERVER_ERROR` (fixed, `M9-H51`); SQLite answered normally |
+| A Postgres connection killed while `onComplete` runs | Lease: no effect (no connection held), 200. Transaction mode: the process got two uncaught errors from node-postgres (fixed, `M9-H50`); the completion answered retryable, the row stayed `pending` and the retry completed |
+| R2 `DELETE`, then `HEAD`, answering 503 under `deleteFile` and `eraseOwner` | `deleteFile` answered the error with the row already deleted; each retry checked the key again, the third removed the object; `eraseOwner` counted `failed: 1`, then removed it |
+| `store.complete` failing once after `onComplete` (lease mode) | Retryable error; busy until the lease ran out; then completed (`onComplete` ran twice, as `M5` documents); with `replace`, the old file stayed until the retry recorded the new one |
+| The sweep's `cleaned()` failing once after the object was removed | `failed: 1`; the next eligible sweep marked the row |
+| `AbortMultipartUpload` for a completed upload, and twice for one upload | The driver answered success each time, so the sweep and `eraseOwner` converge on refused multipart files |
+
+Late writes, in real time (both Postgres lease and SQLite; T0 is when the URLs were signed):
+
+- A duplicate `PUT` with a still-valid URL **landed again** (200) after `deleteFile`, after `/abort`, after
+  `revokeUploads`, after an `eraseOwner` run and after the file was replaced: each key was empty, so
+  `If-None-Match: *` let it through.
+- A `PUT` started at T0 + 14.5 min, 30 s before its URL ran out, trickled its body for 70 s and **was accepted (200) at
+  T0 + 15.6 min**: R2 checks a presigned URL's expiry when the request starts, not when it ends. That is what the grace
+  is for (`M8-A4`).
+- A `PUT` with the same URLs at T0 + 16 min answered `403`.
+- At T0 + 1 min the sweep found nothing to clean up (ended less than the grace ago); at T0 + 16 min it removed every
+  late object but marked no row, `cleaned: 0`; at T0 + 31 min it marked all 7 rows, `cleaned: 7`, and `eraseOwner`
+  then answered `done: true` without checking again. A replacement whose `DELETE` failed (503 injected) was finished by
+  the same sweep. No object survived its row's settle time.
+
+Not measured: R2 under load or in other regions, Prisma and Drizzle in the late-write rows (they share the SQL core),
+D1 against real R2. Each probe run tore down its prefix and listed it empty (`live-test/cloudrop-<32 hex>/`); two runs
+that the probe harness itself stopped early were cleared by hand from their logged ids and listed empty. One
+multipart upload, left open by a probe that failed before registering it, was found by listing the bucket's open
+uploads and aborted; the listing then showed none. No bucket setting was read or written.
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in
