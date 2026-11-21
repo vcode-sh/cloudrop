@@ -558,3 +558,38 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/server/erase.test.ts`, `src/server/store-delete.test.ts`,
   `src/server/store-delete-race.test.ts`, `src/server/store-delete-replace.test.ts`.
+
+### M11-R152: `EraseReport` says what each counter leaves in the bucket
+
+- **Decision:** The guide's table for `api.eraseOwner` and the JSDoc of `EraseReport` say, per counter, what is in the
+  bucket after the run. `revoked` and `deleted` files have their objects removed later in the same run, where each
+  counts a second time, in `cleaned`, `waiting` or `failed`. `refused` files, and files whose `onDelete` threw
+  (`failed`), are still completed with their objects. `waiting` is two kinds: files still live, whose objects are
+  still there (a completed file its hook kept, a completion under way, an upload started during the run), and ended
+  uploads whose object this run removed but whose URLs, or the grace after them, have not run out. No behaviour
+  changed.
+- **Why:** both texts said of `waiting` that what the files had stored was removed. That holds only for the ended
+  ones: a refused file, a completion under way and an upload begun during the run keep their objects, so an operator
+  reading `waiting: 1` after an erasure request could believe the bucket was empty of that owner.
+- **If wrong:** none known; the counters themselves are as `M8-A5` and `M11-D4` set them.
+- **Status:** in force.
+- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
+
+### M11-R153: an erasure needs the sweep for a completion its server never finished
+
+- **Decision:** `api.eraseOwner` still never ends a `completing` row. One left by a server that died in `/complete`
+  counts in `waiting` on every run, with its object kept, until the sweep ends it as `failed`: past its lease and
+  `graceMs` past its token's deadline, 25 hours after its `/upload` with the defaults. The next run then removes the
+  object and can report `done`. The guide says so under "It needs the sweep", and `EraseReport.done` names it.
+- **Why:** the other choice was to let `eraseOwner` end such a row itself. It would gain no time, since the row may be
+  taken over by a `/complete` until its token's deadline either way. It would need the sweep's rule a second time: the
+  rule lives in each store's `stale` statement, which reads every owner's rows, so `eraseOwner` could share it only by
+  sweeping everyone or by restating it. And it would end a stuck completion without the sweep's `reported` list, the
+  one place an app learns that its `onComplete` may have recorded a file that never completed. Every store app is
+  already told to run the sweep on a schedule, so the safe change before a release is the sentence, not a second path
+  that ends rows.
+- **If wrong:** an app that erases owners and runs no sweep sees `waiting: 1, done: false` for ever for such an owner;
+  the guide names the cause and the cure. A per-owner `stale` would let `eraseOwner` share the rule later.
+- **Status:** in force. `src/server/erase.test.ts` ("waits for the sweep to end a completion its server never
+  finished…") holds the times at the millisecond: not ended at 25 hours, ended one millisecond later.
+- **Visible in:** `docs/guide/store.md#erase-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.

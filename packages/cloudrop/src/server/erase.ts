@@ -24,24 +24,42 @@ export interface EraseOptions {
 }
 
 export interface EraseReport {
-  /** Unfinished uploads ended, so their next /sign or /complete is refused. */
+  /**
+   * Unfinished uploads ended, so their next /sign or /complete is refused. What they had uploaded is removed later in
+   * the run, where each counts again, in `cleaned`, `waiting` or `failed`.
+   */
   revoked: number;
-  /** Completed files deleted: their rows are `deleted` and their bytes released. */
+  /**
+   * Completed files deleted: their rows are `deleted` and their bytes released. Their objects are removed later in the
+   * run, where each counts again, in `cleaned`, `waiting` or `failed`.
+   */
   deleted: number;
-  /** Completed files kept because their route's `onDelete` refused; still completed, they count in `waiting` too. */
+  /**
+   * Completed files kept because their route's `onDelete` refused. Each is still completed, with its object in the
+   * bucket, and counts in `waiting` too.
+   */
   refused: number;
-  /** Ended uploads whose key this run checked once their URLs and the grace had run out: it holds nothing of theirs. */
+  /**
+   * Ended uploads whose key this run checked once their URLs and the grace had run out: the bucket holds nothing of
+   * theirs, and nothing can arrive.
+   */
   cleaned: number;
-  /** Files this run could not handle (a storage or database error, logged with the file's id). */
+  /**
+   * Files this run could not handle, each logged with its id. After a storage or database error the object may still
+   * be in the bucket. A file whose `onDelete` threw is still completed, with its object, and counts in `waiting` too.
+   */
   failed: number;
   /**
-   * Files not provable yet: a completion still under way, an upload that started after this run began, or an ended
-   * upload whose URLs, or the grace after them, have not run out. Their objects were removed where there were any.
+   * Files not proven gone yet, of two kinds. Still live, with what they stored still in the bucket: a completed file its
+   * `onDelete` kept, a completion under way (one its server never finished stays so until the sweep ends it), and an
+   * upload that started after this run began. Or ended so recently that one of its URLs, or a PUT in the grace after
+   * them, can still put an object back: this run removed its object, and a later run checks its key again.
    */
   waiting: number;
   /**
    * True when the run found nothing of the owner unfinished or completed, and every ended upload of theirs had its key
-   * checked once its URLs and the grace after them ran out. Run eraseOwner again until it is.
+   * checked once its URLs and the grace after them ran out. Run eraseOwner again until it is, with the sweep on its
+   * schedule: only the sweep ends a completion its server never finished.
    */
   done: boolean;
 }

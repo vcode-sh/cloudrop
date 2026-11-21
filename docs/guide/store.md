@@ -873,19 +873,20 @@ const { data, error } = await cloudrop.api.eraseOwner(userId);
 if (data?.done) await markErased(userId); // your app's record
 ```
 
-Each run revokes the owner's unfinished uploads, deletes every completed file (row and object, as `deleteFile` does),
-and checks the key of every ended upload the store cannot already prove clean, removing what is still the upload's
-own. It reports:
+Each run revokes the owner's unfinished uploads, deletes every completed file its `onDelete` lets go (the row first,
+then the object, as `deleteFile` does), and checks the key of every ended upload the store cannot already prove clean,
+removing what is still the upload's own. It reports counts of files, and a file can count twice: one deleted in this
+run is in `deleted`, and again in `cleaned` or `waiting` once its key was checked.
 
-| Field | Meaning |
-| --- | --- |
-| `revoked` | Unfinished uploads ended in this run. |
-| `deleted` | Completed files deleted in this run. |
-| `refused` | Completed files kept because their route's [`onDelete` refused](#refuse-a-deletion). Still completed, they count in `waiting` too, so the owner is not `done` until the hook lets them go. |
-| `cleaned` | Ended uploads whose key this run checked once their URLs and the grace had run out. |
-| `failed` | Files a storage or database error kept from being handled; each is logged with its id. |
-| `waiting` | Files that cannot be proven yet: a completion still under way, an upload that started while it ran, or an ended upload whose URLs, or the grace after them, have not run out. What they had stored was removed. |
-| `done` | Nothing of the owner was unfinished or completed, and every ended upload had its key checked after its URLs and the grace ran out. |
+| Field | Meaning | In the bucket after the run |
+| --- | --- | --- |
+| `revoked` | Unfinished uploads ended in this run. | What they had uploaded is removed later in the same run, where each counts again in `cleaned`, `waiting` or `failed`. |
+| `deleted` | Completed files deleted in this run: the row is `deleted` and the owner's bytes are released. | The object is removed later in the same run, where each counts again in `cleaned`, `waiting` or `failed`. |
+| `refused` | Completed files kept because their route's [`onDelete` refused](#refuse-a-deletion). They count in `waiting` too, so the owner is not `done` until the hook lets them go. | Untouched: the file is still completed and its object is there. |
+| `cleaned` | Ended uploads (cancelled, revoked, refused, expired, failed or deleted, in this run or before it) whose key this run checked once their URLs and the grace had run out. | Nothing of theirs, and nothing can arrive any more. |
+| `failed` | Files this run could not handle; each is logged with its id. | After a storage or database error, not known: the object may still be there. A file whose `onDelete` threw is still completed, with its object, and counts in `waiting` too. |
+| `waiting` | Files not proven gone yet. | **Still there** for a file that is still live: a completed file its `onDelete` kept, a completion under way, and an upload that started while the run went on. **Removed, but not for good** for an ended upload whose URLs, or the grace after them, have not run out: this run removed its object, a `PUT` already signed can still put one back, and a later run checks the key again. |
+| `done` | Nothing of the owner was unfinished or completed, and every ended upload had its key checked after its URLs and the grace ran out. | Nothing of the owner's uploads, and nothing can arrive any more. |
 
 **Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards. A URL works for
 15 minutes and never past the upload's token, so the last `PUT` can start 15 minutes after the upload stopped being
@@ -895,9 +896,16 @@ completed or ended longer ago than that are proven in the first run; a recent on
 `waiting`, and a run 1 hour 15 minutes later `done`. Run it again until it reports `done`: it is idempotent, and two
 runs at once are safe.
 
-- **Stuck completions too.** The sweep keeps the object of a completion it ended as `failed`, since its `onComplete`
-  may have recorded it; `eraseOwner` removes it.
-- **`signal`** (an `AbortSignal`) stops a run before the next file, with `done: false`.
+- **It needs the sweep.** `eraseOwner` never ends a completion that is under way, since it may still record the file.
+  One whose server died in the middle of `/complete` stays `completing`: every run counts it in `waiting`, leaves its
+  object where it is and reports `done: false`, however often you run it. [The sweep](#the-sweep) ends it as `failed`
+  once it is past its lease and `graceMs` past its token's deadline: with the defaults, 25 hours after its `/upload`
+  (a token lasts 24 hours, the grace 1 hour). The sweep keeps that object, since its `onComplete` may have recorded
+  it; the next `eraseOwner` removes it and can report `done`. Keep the sweep on its schedule while you erase: without
+  it, such an owner never reports `done`.
+- **`signal`** (an `AbortSignal`) stops a run with `done: false`. The run finishes the file it is on, then handles no
+  further file and reads no further page of them. What the files it had deleted left in the bucket is removed by the
+  next run.
 - **`done` is about the moment it ran.** It reads the owner's unfinished and completed files in one statement before
   it checks the ended ones, so a file that changes status while it runs is not missed, and at the end it is not done
   when any upload of the owner started after the run did, even one already cancelled. An
