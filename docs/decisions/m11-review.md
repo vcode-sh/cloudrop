@@ -2309,3 +2309,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing: tests only.
 - **Status:** in force.
 - **Visible in:** `src/server/api.test.ts`, `src/storage/presets-settings.test.ts`.
+
+### M11-R211: the doctype pattern reads a doctype that never ends once
+
+- **Decision:** the doctype part of `PROLOG_ITEM` (`src/plugins/sniff-text.ts`) is
+  `<!doctype[^[>]*(?:\[[\s\S]*?\]\s*)?>`: the blanks before `>` belong to the name part, and only an internal
+  subset is followed by blanks of its own. It matches what the old pattern matched.
+- **Why:** the old pattern, `<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>`, had two neighbouring parts that both match a
+  blank, so for `<!doctype` followed by blanks and no `>` it tried every split of the run. Measured on Node 24,
+  2026-11-21: 6.8 ms for the 4,096 bytes the plugin reads, 91 ms for 16,000 characters and 1,435 ms for 64,000, four
+  times the time for twice the length; after the change 0.08 ms, 0.25 ms and 1 ms. A `/complete` of such a file held
+  the server's thread for 7 ms, which is 140 files a second for one core. The other patterns of the file were
+  measured the same way and are linear: a comment, a processing instruction, a tag name and a prefixed name that never
+  end, and a doctype whose subset's `]` is never followed by `>`. Both patterns gave the same answer for 400,000
+  random strings of `[ ] > < ! "`, blanks and a letter after `<!doctype`.
+- **If wrong:** the test bounds one read of 64,000 characters at 250 ms, between the 1 ms of a linear read and the
+  1.4 s of a quadratic one; a machine 200 times slower than this one would fail it for a linear pattern.
+- **Status:** in force.
+- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`.

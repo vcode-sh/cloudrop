@@ -44,8 +44,13 @@ const HTML_START = /^<(?:!doctype html[ >]|!--)/i;
 const HTML_ROOTS: ReadonlySet<string> = new Set(
   "html head script iframe h1 div font table a style title b body br p hta:application".split(" "),
 );
-/** What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype. */
-const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
+/**
+ * What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype.
+ * No two neighbouring parts of the doctype can match the same character, so a doctype that never ends is read once:
+ * blanks before its ">" belong to the name part, and only an internal subset is followed by blanks of its own
+ * (M11-R211).
+ */
+const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\]\s*)?>/iy;
 /**
  * An element's start tag: its name, with its namespace prefix when it has one, is captured. The name ends where XML
  * 1.0 §3.1 and an HTML parser end it, at whitespace, "/" or ">": the standard's two tag-terminating bytes and the
