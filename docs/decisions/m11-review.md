@@ -142,3 +142,15 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing.
 - **Status:** in force.
 - **Visible in:** `docs/guide/hono.md`.
+
+### M11-R12: the Vite example's row dismisses a failed file
+
+- **Decision:** a failed row of `examples/vite-react` has Dismiss beside Retry (or Reload, for `ACCOUNT_CHANGED`): the
+  file's `abort()`, which ends it `aborted`, after which Clear finished removes it. It is the same button as Cancel
+  on a running row, with the other label.
+- **Why:** `clear()` keeps a failed file for `retry()` (`M4-B`), and the row offered only Retry, so a file refused for
+  good, such as one over the quota, stayed listed until a reload. The Next example's row already cancels a failed
+  file.
+- **If wrong:** nothing kept: `abort()` on a failed file gives its ticket up, as the Next example's Cancel does.
+- **Status:** in force.
+- **Visible in:** `examples/vite-react/src/components/upload-row.tsx`, `examples/vite-react/src/app.browser.test.ts`.

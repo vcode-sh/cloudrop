@@ -12,9 +12,9 @@ no rewrite. [Hono with better-auth and Drizzle](../../docs/guide/hono.md) walks 
   `credentials: "include"`.
 - `src/components/` is built on the hooks with shadcn on Base UI and Tabler icons:
   - `drop-zone.tsx`: the attachments route, with `getDropProps`, `getInputProps` and `isDragOver`;
-  - `upload-row.tsx`: one upload as shadcn's `Attachment`, with progress, Cancel, Retry and the error's message. It maps
-    cloudrop's statuses onto the Attachment states: `queued` and `paused` are idle, `uploading` is uploading,
-    `completing` is processing, `done` is done, `failed` is error, `aborted` is idle;
+  - `upload-row.tsx`: one upload as shadcn's `Attachment`, with progress, Cancel, Retry, Dismiss and the error's
+    message. It maps cloudrop's statuses onto the Attachment states: `queued` and `paused` are idle, `uploading` is
+    uploading, `completing` is processing, `done` is done, `failed` is error, `aborted` is idle;
   - `unfinished-uploads.tsx`: `useResumable` after a reload: pick the same file again to send the missing parts, or
     discard one upload or all of them with the hook's `discard`, which aborts each on the API;
   - `avatar-picker.tsx`: the avatar route, and the current avatar from `files.avatar`;

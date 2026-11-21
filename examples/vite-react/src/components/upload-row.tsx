@@ -63,7 +63,7 @@ export function announcement(totals: JobSnapshot<unknown>["totals"], isUploading
   );
 }
 
-/** One upload from `useUpload`: name, state, progress, and cancel or retry. */
+/** One upload from `useUpload`: name, state, progress, and cancel, or retry and dismiss for a failed file. */
 export function UploadRow({ file }: { file: UploadItem<unknown> }) {
   const running = file.status === "queued" || file.status === "uploading" || file.status === "paused";
   return (
@@ -75,11 +75,6 @@ export function UploadRow({ file }: { file: UploadItem<unknown> }) {
         {file.status === "uploading" && <Progress value={file.progress * 100} className="mt-1.5" />}
       </AttachmentContent>
       <AttachmentActions>
-        {running && (
-          <AttachmentAction aria-label={`Cancel ${file.name}`} onClick={file.abort}>
-            <IconX />
-          </AttachmentAction>
-        )}
         {/* Another account signed in in another tab: a retry would be refused again, a reload shows who is signed in. */}
         {file.status === "failed" && file.error?.code === "ACCOUNT_CHANGED" && (
           <AttachmentAction aria-label="Reload the page" onClick={() => location.reload()}>
@@ -89,6 +84,15 @@ export function UploadRow({ file }: { file: UploadItem<unknown> }) {
         {file.status === "failed" && file.error?.code !== "ACCOUNT_CHANGED" && (
           <AttachmentAction aria-label={`Retry ${file.name}`} onClick={() => void file.retry()}>
             <IconRefresh />
+          </AttachmentAction>
+        )}
+        {/*
+          A failed file is kept for a retry, and Clear finished leaves it: Dismiss ends it as cancelled, which a retry
+          that would be refused again (a file over the quota, say) otherwise never does.
+        */}
+        {(running || file.status === "failed") && (
+          <AttachmentAction aria-label={`${running ? "Cancel" : "Dismiss"} ${file.name}`} onClick={file.abort}>
+            <IconX />
           </AttachmentAction>
         )}
       </AttachmentActions>

@@ -193,7 +193,7 @@ test("several attachments, one of them in three parts, are listed by files.list,
     .toEqual(["big.bin", "logo.png"]);
 });
 
-test("a file larger than the room left in the quota is refused with QUOTA_EXCEEDED before any byte is sent", async ({
+test("a file larger than the room left in the quota is refused with QUOTA_EXCEEDED before any byte is sent, and can be dismissed", async ({
   page,
 }, testInfo) => {
   // The lane runs the API with UPLOAD_QUOTA_MB=50, and a new user has used none of it.
@@ -208,6 +208,12 @@ test("a file larger than the room left in the quota is refused with QUOTA_EXCEED
   );
   expect(puts).toEqual([]);
   await expect(page.getByText("No files yet.")).toBeVisible();
+
+  // A retry would be refused again: Dismiss ends the row as cancelled, and Clear finished then removes it.
+  await page.getByRole("button", { name: "Dismiss too-big.bin" }).click();
+  await expect(rowStatus(page, "too-big.bin")).toHaveText("Cancelled");
+  await page.getByRole("button", { name: "Clear finished" }).click();
+  await expect(page.getByRole("list", { name: "Uploads" })).toHaveCount(0);
 });
 
 test("a multipart upload interrupted by a reload resumes from the parts the bucket has", async ({ page }, testInfo) => {
