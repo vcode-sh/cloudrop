@@ -185,13 +185,13 @@ Entries continue from 1.
 
 - **Decision:** a file is a Windows or DOS program when it starts with `MZ`, is at least 28 bytes long, and either (a)
   is at least 64 bytes long and `e_lfanew` (the 32-bit little-endian value at `0x3C`) points inside the bytes read at
-  `PE\0\0`, `NE`, `LE` or `LX`, or, where the read cuts the header off (past it, or in its last three bytes after a
-  matching start), at an offset under `09 09 09 09` where four bytes still fit in the file, or (b) its MS-DOS header
-  describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a header of at least two 16-byte
-  paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4). `sniff` takes the file's size
-  for (a); `contentChecks()` passes the size the upload token signed. A file is an ID3-tagged recording when it starts
-  with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision is under `FF`, the low four bits of
-  its flags are clear, and each of the four size bytes is under `80`.
+  `PE\0\0`, `NE`, `LE` or `LX`, or, where the read cuts the header off (past the read, or in the last three bytes read
+  after a matching start), at an offset under `09 09 09 09` where four bytes still fit in the file, or (b) its MS-DOS
+  header describes a program: fewer than 512 bytes on the last page (`e_cblp`, at 2) and a header of at least two
+  16-byte paragraphs (`e_cparhdr`, at 8) that fits in the file's 512-byte pages (`e_cp`, at 4). `sniff` takes the file's
+  size for (a); `contentChecks()` passes the size the upload token signed. A file is an ID3-tagged recording when it
+  starts with `ID3`, is at least 10 bytes long, its major version is 2 to 4, its revision is under `FF`, the low four
+  bits of its flags are clear, and each of the four size bytes is under `80`.
 - **Why:** two or three letters are text that people write: a CSV whose first cell is `MZ` (Mozambique's country code)
   was refused as a program, and a note that starts "ID3 tags are" contradicted every text type (review finding,
   2026-11-21). The rules come from the formats' own definitions. Microsoft's PE Format ("MS-DOS Stub" and "Signature"):
