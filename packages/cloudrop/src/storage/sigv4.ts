@@ -3,6 +3,7 @@
 // checksum headers, and ignores checksum values passed as query parameters (docs/research/r2-spike-findings.md).
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 export const UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
 export const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -117,21 +118,28 @@ export function canonicalQuery(params: URLSearchParams): string {
     .join("&");
 }
 
+/**
+ * A header value as the storage signs it: leading and trailing spaces trimmed, sequential spaces made one
+ * (https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html, "Create a canonical
+ * request"). A value read back from the storage, which a copy in parts sends again, is a byte string, one character
+ * per byte, and fetch sends those bytes. R2 reads them as UTF-8 before it trims and collapses, with JavaScript's
+ * white space: the byte A0 of "\u00e0" (C3 A0) is no space and a no-break space (C2 A0) is one; a signature over
+ * the bytes' own characters answers SignatureDoesNotMatch (measured: M11-R25, M11-R252).
+ */
+function canonicalValue(value: string): string {
+  const text = /[\x80-\xff]/.test(value) ? decoder.decode(Uint8Array.from(value, (char) => char.charCodeAt(0))) : value;
+  return text.trim().replace(/\s+/g, " ");
+}
+
 function canonicalHeaders(url: URL, headers: Record<string, string>): { canonical: string; signedHeaders: string } {
   const all: Record<string, string> = { host: url.host };
-  for (const [name, value] of Object.entries(headers)) all[name.toLowerCase()] = value.trim().replace(/\s+/g, " ");
+  for (const [name, value] of Object.entries(headers)) all[name.toLowerCase()] = canonicalValue(value);
   const names = Object.keys(all).sort();
   return { canonical: names.map((name) => `${name}:${all[name]}\n`).join(""), signedHeaders: names.join(";") };
 }
 
 async function sign(input: SigningInput, amzDate: string, scope: string, canonicalRequest: string): Promise<string> {
-  // A canonical request is ASCII, except for a header value read back from the storage, which a copy in parts sends
-  // again: a byte string, one character per byte, and fetch sends those bytes. The storage verifies what it receives,
-  // so the bytes are hashed, not the characters' UTF-8 (R2 answers SignatureDoesNotMatch to that: M11-R25).
-  const request = /[\x80-\xff]/.test(canonicalRequest)
-    ? Uint8Array.from(canonicalRequest, (char) => char.charCodeAt(0))
-    : canonicalRequest;
-  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(request)].join("\n");
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonicalRequest)].join("\n");
   const key = await signingKey(input.credentials, amzDate.slice(0, 8), input.region);
   return toHex(await hmac(key, stringToSign));
 }

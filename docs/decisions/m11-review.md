@@ -305,7 +305,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a header value with a character above U+00FF cannot come from `Headers.get()` and fetch refuses to send
   one, so its signature does not matter. The unit test's expected signature was computed with `node:crypto` over the
   bytes, not with this signer.
-- **Status:** in force.
+- **Status:** amended by `M11-R252`: the bytes are read as UTF-8 before white space is trimmed and collapsed, and the
+  canonical request is hashed as UTF-8 again.
 - **Visible in:** `src/storage/sigv4.ts`, `src/storage/sigv4.test.ts`, `src/storage/s3/copy.test.ts`,
   `docs/research/r2-spike-findings.md`.
 
@@ -3116,3 +3117,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force; amends `M11-R22`.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/s3/transport.test.ts` (four rows with a Node stream as
   the body).
+
+### M11-R252: a stored header value is canonicalised as the text its bytes spell
+
+- **Decision:** `canonicalValue` (`src/storage/sigv4.ts`) reads a header value that holds a character from U+0080 to
+  U+00FF as bytes of UTF-8 (what is not UTF-8 becomes U+FFFD), then trims it and makes each run of white space one
+  space, and the canonical request is hashed as UTF-8. An ASCII value is canonicalised as before, and the request
+  still carries the stored bytes unchanged. The white space is JavaScript's `\s`, as before, now matched against
+  characters and not against bytes.
+- **Why:** `M11-R25` hashed the right bytes but trimmed and collapsed the byte string first, where the byte `A0` is
+  the character U+00A0, which `trim()` and `\s` count as white space. So `voilà` (`C3 A0`) was signed with a space
+  for its second byte, and a value ending in `你` (`E4 BD A0`) one byte short: R2 answered `403
+  SignatureDoesNotMatch` to the raw `PUT`, and a copy in parts of such an object failed as refused credentials. AWS
+  states the rule for values as "trim any leading or trailing spaces" and "convert sequential spaces to a single
+  space" (IAM User Guide, "Create a signed AWS API request", "Create a canonical request":
+  https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html). That rule read for
+  bytes (only `20`) is not what R2 does either, and the measured behaviour wins: R2 reads the bytes as UTF-8 and
+  then collapses exactly the characters `\s` matches. A tab, a no-break space (`C2 A0`), U+3000, U+2028 and U+FEFF
+  are signed as one space and trimmed at the end; U+0085 and U+200B are not; a byte that is not UTF-8 is signed, and
+  stored, as U+FFFD (`docs/research/r2-spike-findings.md`, "How R2 canonicalises a header value", 22 forms signed
+  with `node:crypto`). RustFS 1.0.5 passed the same signatures for the rows it could be asked.
+- **If wrong:** AWS S3 itself was not measured. If it collapses only the byte `20`, a stored value with a Unicode
+  space (a no-break or ideographic space in a file name) is signed wrong there and its copy in parts fails with
+  `STORAGE_DENIED`, as it did everywhere before; every value without such a character is signed the same under both
+  readings. A value with a character above U+00FF cannot come from `Headers.get()` (`M11-R25`).
+- **Status:** in force; amends `M11-R25`.
+- **Visible in:** `src/storage/sigv4.ts`, `src/storage/sigv4.test.ts` (four signatures computed with `node:crypto`),
+  `src/storage/s3/copy.r2.integration.test.ts` (live R2: a copy in parts of an object whose disposition holds `C3
+  A0`, `C2 A0` and ends in `E4 BD A0`), `scripts/test-live-r2.ts`, `docs/research/r2-spike-findings.md`.

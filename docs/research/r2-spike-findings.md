@@ -880,6 +880,41 @@ cloudrop's signer, sent the header value as the UTF-8 bytes of `café` (`63 61 6
 
 Four runs, each under its own `live-test/cloudrop-<32 hex>/` prefix, each ending with `left objects=0`.
 
+### How R2 canonicalises a header value: UTF-8 first, then white space
+
+Measured 2026-11-21 on the test bucket for `M11-R252`, with a scratch probe (not committed) that signed raw `PUT`s
+with `node:crypto`, not with cloudrop's signer. Each row sent a `content-disposition` as the bytes named and signed a
+canonical request holding another form of them; `200` means R2 computed that form.
+
+| Bytes sent in the value | Canonical form R2 accepted (`200`) | Forms it refused (`403 SignatureDoesNotMatch`) |
+|---|---|---|
+| `voilà`: `… c3 a0 …` | the bytes as sent | `a0` made a space |
+| ends with `你`: `… e4 bd a0` | the bytes as sent | the last byte trimmed |
+| two spaces, three spaces | one space | as sent |
+| a tab; two tabs; space, tab, space | one space | as sent; one tab; two spaces |
+| a no-break space `c2 a0`, between words | one space | as sent |
+| two no-break spaces `c2 a0 c2 a0` | one space | as sent; one no-break space |
+| a no-break space at the end | trimmed | as sent |
+| two ideographic spaces `e3 80 80 e3 80 80` | one space | as sent |
+| two U+2028 `e2 80 a8`, two U+FEFF `ef bb bf` | one space | as sent |
+| two U+0085 `c2 85`, two U+200B `e2 80 8b` | the bytes as sent | one space |
+| a lone `e9` (not UTF-8) | `ef bf bd` (U+FFFD); R2 also **stores** `ef bf bd` | as sent; `c3 a9` |
+| two lone `a0` (not UTF-8) | not found: the U+FFFD form was not tried for this row | as sent; one space |
+
+R2 reads the value's bytes as UTF-8, replacing what is not UTF-8 with U+FFFD, then trims and collapses exactly the
+characters JavaScript's `\s` matches (U+FEFF and U+2028 are white space, U+0085 and U+200B are not), and hashes the
+result as UTF-8. Every accepted row was stored with the bytes as sent, except the lone `e9`. So a stored value R2
+returns is always UTF-8, and AWS's rule ("trim any leading or trailing spaces", "convert sequential spaces to a single
+space") holds for the characters the bytes spell, not for the bytes. RustFS 1.0.5 passed the same signatures for the
+rows it could be asked (as sent for `c3 a0`; one space for tabs and for `c2 a0`), then refused the non-ASCII
+disposition itself with `400`.
+
+A copy in parts of a 5 MiB + 1 KiB object whose disposition is `attachment; filename=voil` + `c3 a0 c2 a0 e4 bd a0`:
+before the fix the raw `PUT` that stores the source answered `403` with cloudrop's signer; after it the `PUT`, the
+copy and the `HEAD` of the copy succeed and the copy's disposition holds the same bytes
+(`src/storage/s3/copy.r2.integration.test.ts`). Three probe runs, each under its own `live-test/cloudrop-<32 hex>/`
+prefix, each deleted by its teardown.
+
 ## Store, sweep and owner files under real latency, 2026-11-21
 
 Measured 2026-11-21 on a second bucket (`vstack-dev`, EEUR, an object read/write token), for `M9-H50` to `M9-H52`.

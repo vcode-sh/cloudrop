@@ -166,12 +166,33 @@ describe("signRequest", () => {
 });
 
 describe("a header value read back from the storage", () => {
-  // HEAD returns a stored header as a byte string, one character per byte, and fetch sends it back the same way. R2
-  // keeps UTF-8 bytes in a content type or disposition another tool wrote, accepts a request signed over those bytes
-  // and answers SignatureDoesNotMatch to one signed over the characters' own UTF-8 (measured 2026-11-21, M11-R25).
-  it("is signed as the bytes fetch sends, not as the UTF-8 of its characters", async () => {
-    // "café" in UTF-8, as Headers.get() returns it.
-    const stored = 'attachment; filename="caf\u00c3\u00a9.txt"';
+  // HEAD returns a stored header as a byte string, one character per byte, and fetch sends it back the same way. The
+  // storage reads those bytes as UTF-8 and only then trims and collapses white space, so the signer must too: R2
+  // answers SignatureDoesNotMatch to a signature over any other form (measured 2026-11-21, M11-R25, M11-R252).
+  // Each signature was computed with node:crypto over a canonical request that holds the bytes named, not with this
+  // signer.
+  it.each([
+    {
+      name: 'the byte A0 inside a character ("voil\u00e0", C3 A0) is no space: the bytes are signed as they are',
+      stored: 'attachment; filename="voil\u00c3\u00a0.txt"',
+      signature: "b9145576c21b2539083530e177acca674d4adc925356fc7e9e2746fd62f6173b",
+    },
+    {
+      name: 'a value that ends with the byte A0 ("\u4f60", E4 BD A0) loses nothing at its end',
+      stored: "attachment; filename=\u00e4\u00bd\u00a0",
+      signature: "516b8c5363c99661d660146a3e946a8338485cd36d9c32e278ac036633b5308b",
+    },
+    {
+      name: "two no-break spaces (C2 A0 C2 A0) are white space: signed as one space",
+      stored: 'attachment; filename="a\u00c2\u00a0\u00c2\u00a0b.txt"',
+      signature: "84c75384e750e22d52626231215cc11ff553635ea9dbf91588f1eed94ee6f535",
+    },
+    {
+      name: "a byte that is not UTF-8 (a lone E9) is signed as U+FFFD (EF BF BD), as R2 reads it",
+      stored: 'attachment; filename="caf\u00e9.txt"',
+      signature: "eaa8d8a6530840af1c7fbf2d39facbd66a7c9cb1a8716ad7124128da9130afb5",
+    },
+  ])("$name", async ({ stored, signature }) => {
     const headers = await signRequest({
       method: "POST",
       url: new URL(`${EXAMPLE_URL}?uploads=`),
@@ -181,10 +202,10 @@ describe("a header value read back from the storage", () => {
       date: EXAMPLE_DATE,
       payloadHash: EMPTY_SHA256,
     });
-    // Computed with node:crypto over a canonical request that holds the bytes 63 61 66 c3 a9, not with this signer.
     expect(headers.authorization).toBe(
-      `${EXAMPLE_CREDENTIAL}SignedHeaders=content-disposition;host;x-amz-content-sha256;x-amz-date, Signature=0cac7d0b4d8e9ef2d9b415269c49c9c3f88edc62c5cb90227d1397f2f44726b1`,
+      `${EXAMPLE_CREDENTIAL}SignedHeaders=content-disposition;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`,
     );
+    // The request carries the stored bytes; only the signature is made over the canonical form.
     expect(headers["content-disposition"]).toBe(stored);
   });
 });

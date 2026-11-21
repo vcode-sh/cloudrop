@@ -27,6 +27,7 @@ const child = spawn(
     "--project",
     "integration",
     "src/storage/s3-driver.r2.integration.test.ts",
+    "src/storage/s3/copy.r2.integration.test.ts",
     "src/server/handler.r2.integration.test.ts",
     "src/plugins/content-checks.r2.integration.test.ts",
     ...process.argv.slice(2),
