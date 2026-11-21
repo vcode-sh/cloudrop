@@ -1,6 +1,7 @@
 // Asking /upload for tickets, then running each file on its share of the answer (spec §4.4). The job's own /upload and
 // a retry's of several files run on the job's signal; a one-file /upload (a re-ask after a refusal, a one-file
-// retry()'s new ticket, a resumed file's start over) runs on that file's own signals (M3-U92).
+// retry()'s new ticket, a resumed file's start over) runs on that file's own signals (M3-U92). A cancel ends the files
+// at once and leaves an /upload in flight to answer, so the tickets it brings can be aborted (M11-R261).
 
 import { CloudropError, fail, type Result } from "../errors.ts";
 import { counted } from "./close.ts";
@@ -10,6 +11,9 @@ import { aborted, unreadableAnswer, withFile } from "./failures.ts";
 import type { Job } from "./job-run.ts";
 import { uploadOf } from "./persist.ts";
 import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retry.ts";
+import type { UploadContext } from "./upload.ts";
+
+type Answer = Result<(Ticket | CloudropError)[]>;
 
 /**
  * A new `/upload` idempotency key: 128 random bits as 32 hex digits. Not `crypto.randomUUID()`, which a page outside a
@@ -45,7 +49,8 @@ async function runEntry(
   whole: boolean,
   attempt: number,
 ): Promise<void> {
-  // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else.
+  // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else. After a cancel
+  // of the whole ask the answer here is ABORTED, and unlessCancelled aborts the tickets (M11-R261).
   if (entry.status === "aborted") {
     const late = answer.error ? undefined : answer.data[index];
     if (late && !(late instanceof CloudropError)) void counted(job.context, job.context.endpoints.abort(late.token));
@@ -58,6 +63,31 @@ async function runEntry(
   if (ticket instanceof CloudropError) return refused(job, entry, ticket, attempt);
   entry.upload = uploadOf(job, entry, ticket);
   await job.runUpload(entry.upload);
+}
+
+/**
+ * `answered`, an /upload's answer, or ABORTED as soon as `signal` fires. The request is not cut then (endpoints.ts):
+ * the server may already have reserved for its files, which only the tickets it answers can free. So the answer is
+ * waited for behind the cancelled files, at most the request's 30 seconds and with no further attempt, and each ticket
+ * it brings gets its /abort. close() waits for all of it, as for any /abort a cancel sent (M11-R261).
+ */
+function unlessCancelled(context: UploadContext, signal: AbortSignal, answered: Promise<Answer>): Promise<Answer> {
+  return new Promise((resolve) => {
+    const cancel = () => {
+      resolve(fail(aborted()));
+      const told = answered.then(({ data }) =>
+        Promise.all(
+          (data ?? []).map((given) => (given instanceof CloudropError ? null : context.endpoints.abort(given.token))),
+        ),
+      );
+      void counted(context, told);
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    void answered.then((answer) => {
+      signal.removeEventListener("abort", cancel);
+      resolve(answer);
+    });
+  });
 }
 
 /**
@@ -94,7 +124,7 @@ function askAlone<T>(
  * Asks one /upload for tickets for `entries`, then runs every file at once (the pool decides who sends); each
  * `entry.run` settles with its file. Resolves with the /upload's refusal when it asked for every file of the job.
  * With `first`, the attempt of the budget it starts at, it asks for its one file alone, on that file's own signals
- * (M3-U92), after `waitMs`: a cancel stops the request and the waits, a pause ends a wait and holds the file, and
+ * (M3-U92), after `waitMs`: a cancel ends the waits and the file, a pause ends a wait and holds the file, and
  * resume() asks at once with the attempt count kept. `first` above 1 is a re-ask after a refusal, so never the whole
  * job, whose /upload has answered. `after`: what the first ask waits for, a retry's /abort of the tickets it replaces.
  */
@@ -118,7 +148,8 @@ export async function launch(
   if (lost) lost.key = null;
   const ask = (at: number) => {
     attempt = at;
-    const start = () => context.endpoints.start(args.route, files, args.metadata, key, signal);
+    const start = () =>
+      unlessCancelled(context, signal, context.endpoints.start(args.route, files, args.metadata, key, signal));
     // Without `after` the request leaves in this step, as before.
     return after ? after.then(start) : start();
   };

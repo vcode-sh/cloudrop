@@ -364,7 +364,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     },
   );
 
-  it("cancelled while its new /upload is in flight, stops that /upload and sends nothing more (I1, M3-U92)", async () => {
+  it("cancelled while its new /upload is in flight, ends at once and aborts the ticket it brings (I1, M11-R261)", async () => {
     const newTicket = gate(nth("POST /upload", 2));
     const setup = await reloaded(
       gate(partThree),
@@ -376,9 +376,9 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     // Queued again while it waits for its new ticket, so a pause applies (M3-U36, M3-U4).
     const waiting = job.getSnapshot().files[0]?.status;
     job.files[0]?.abort();
-    // Lets the /upload through had the cancel not stopped it: a ticket would then bring a PUT or an /abort.
-    newTicket.open();
+    // Settled before the /upload is let through: its ticket then gets an /abort, and no PUT, lock or record.
     const { data } = await job.done;
+    newTicket.open();
     await setup.drained();
 
     expect({
@@ -390,7 +390,7 @@ describe("an upload the probe finds gone starts over in the same run (M3-U74)", 
     }).toEqual({
       waiting: "queued",
       status: "aborted",
-      sent: ["POST /complete", "POST /abort", "POST /upload"],
+      sent: ["POST /complete", "POST /abort", "POST /upload", "POST /abort"],
       stored: {},
       locks: [],
     });

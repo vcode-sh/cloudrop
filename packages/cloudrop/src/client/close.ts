@@ -11,13 +11,16 @@ export interface Lifetime {
   closed: { abort: boolean; stopped: Promise<void> } | null;
   /** The jobs with a file that may still send or be retried: close() stops each (M8-L2). */
   readonly jobs: Set<Job>;
-  /** Every /abort a cancel sent that has not been answered, also one sent before close(), which waits for them. */
+  /**
+   * Every /abort a cancel sent that has not been answered, also one sent before close(), which waits for them, and
+   * every cancelled /upload whose tickets are still to be aborted (launch.ts, M11-R261).
+   */
   readonly aborts: Set<Promise<unknown>>;
 }
 
 export const createLifetime = (): Lifetime => ({ closed: null, jobs: new Set(), aborts: new Set() });
 
-/** `sent`, an /abort that never rejects, counted in the client's unanswered ones until it is answered. */
+/** `sent`, an /abort or a cleanup that never rejects, counted in the client's unanswered ones until it is answered. */
 export function counted<T>({ lifetime }: UploadContext, sent: Promise<T>): Promise<T> {
   lifetime.aborts.add(sent);
   void sent.finally(() => lifetime.aborts.delete(sent));

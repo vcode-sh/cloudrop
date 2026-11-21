@@ -179,19 +179,18 @@ describe("abort of a failed file", () => {
       aborts: seen.aborts.map((sent) => sent.token),
     }).toEqual({ outcome: ["aborted", "ABORTED"], aborts: seen.tokens });
   });
-  it("hears the caller's signal again for a retry of a job /upload refused, and stops its /upload", async () => {
+  it("hears the caller's signal again for a retry of a job /upload refused, and ends it at once", async () => {
     let busy = true;
     let reached = () => {};
     const atUpload = new Promise<void>((resolve) => {
       reached = resolve;
     });
-    const { seen, client } = setup(async ({ label, init }) => {
+    const { seen, client } = setup(async ({ label }) => {
       if (label !== "POST /upload") return undefined;
       if (busy) return storageBusy();
       reached();
-      // Held until the signal fires: the fixture then answers it as a browser does a cancelled fetch.
-      await new Promise((resolve) => init.signal?.addEventListener("abort", resolve));
-      return undefined;
+      // Never answered: a cancel leaves an /upload that left the page to answer (M11-R261), and ends the retry now.
+      return new Promise<never>(() => {});
     });
     const signal = new AbortController();
     const job = client.start("files", fileOf(1000, "a.bin"), { signal: signal.signal });

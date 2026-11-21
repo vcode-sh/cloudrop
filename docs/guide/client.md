@@ -284,9 +284,17 @@ On `localhost` an upload finishes before you can press Pause. Slow it down:
 
 `abort()` on a file, `job.abort()`, or the `signal` you passed cancels: the file's bucket `PUT`s and `/sign` calls stop,
 the file ends `aborted` at once, and the server is told to clean up with `/abort`. `done` settles once the server has
-answered that `/abort`, at most 10 seconds later. A file still waiting for its ticket ends `aborted` at once; a ticket
-that arrives for it later only gets its `/abort`. A failed file ends `aborted` too, and the server is told to drop what
+answered that `/abort`, at most 10 seconds later. A failed file ends `aborted` too, and the server is told to drop what
 it kept for `retry()`.
+
+A file still waiting for its ticket ends `aborted` at once, and `done` does not wait for it. An `/upload` already on
+its way is not cut off, whichever of `abort()`, `job.abort()`, the signal or [`close()`](#close-the-client) cancelled
+its files: your server may have reserved their bytes by then, and only the tickets it answers can give them back. The
+client waits for that answer behind the cancelled files, at most 30 seconds and without another attempt, and sends
+`/abort` for each ticket it brings; a ticket that arrives for one cancelled file of a job that goes on gets its
+`/abort` the same way. An `/upload` that had not left the page yet is not sent. When no answer arrives (the tab
+closed, the connection dropped), a [database store](store.md) keeps what that `/upload` reserved until its
+[sweep](store.md#the-sweep) ends the rows.
 
 A file that is `completing` is the exception: every byte is in the bucket and `/complete` is running on your server,
 so the cancel does not cut that request off. The file stays `completing` until the answer arrives, at most 2 minutes
@@ -455,7 +463,8 @@ await client.forget(); // then delete the user's unfinished uploads
   file's `retry()` sends nothing. `resumable()`, `discard()` and `forget()` keep working. Create a new client for the
   next user.
 - **Every file of every route stops,** queued, uploading, paused, failed or waiting for its ticket, in any phase. A file
-  waiting for its ticket ends `aborted` at once, and its `/upload`, if in flight, is cancelled.
+  waiting for its ticket ends `aborted` at once; its `/upload`, if in flight, is left to answer, and the ticket it
+  brings is aborted, with or without `abort` (see [Cancel](#cancel)).
 - **`close({ abort: true })`,** at sign-out, cancels each file as `abort()` does: its `/abort` goes with its own
   upload token and `keepalive`, so a reload right after does not stop it, and the records of those uploads go. A
   browser lets a page have 64 KiB of `keepalive` request bodies in flight and refuses the rest unsent, so the client
@@ -467,8 +476,9 @@ await client.forget(); // then delete the user's unfinished uploads
   every file when persistence is off or unavailable.
 - **A file whose `/complete` may have finished** is kept, never deleted, either way.
 - **It resolves** once every file it stopped has ended and each `/abort` it sent was answered; it never rejects. A file
-  in the middle of `/complete` waits for that answer, at most 2 minutes. Await it before a sign-out ends what a
-  `headers` function reads, or that function cannot give the `/abort`s their headers.
+  in the middle of `/complete` waits for that answer, at most 2 minutes, and an `/upload` in flight for its own, at
+  most 30 seconds. Await it before a sign-out ends what a `headers` function reads, or that function cannot give the
+  `/abort`s their headers.
 - **The first call decides,** and every later call does nothing but resolve with the first.
 
 In React, the factory returns the same `close()`: [Signed-in users](react.md#signed-in-users).

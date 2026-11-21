@@ -18,7 +18,7 @@ export interface Job {
   readonly context: UploadContext;
   readonly args: Arguments;
   readonly entries: readonly Entry[];
-  /** Fires on abort() of the job and when the caller's signal fires: it stops an /upload in flight. */
+  /** Fires on abort() of the job and when the caller's signal fires: it ends the files of an /upload in flight. */
   readonly signal: AbortSignal;
   /** Ends every file (ruling M3-U38). */
   abort(): void;

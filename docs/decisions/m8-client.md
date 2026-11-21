@@ -23,7 +23,8 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
 - **If wrong:** a sign-out that awaits `close()` while a `/complete` runs waits for its answer, at most 120 s. Not
   awaiting it is safe with cookie sessions: each `/abort` goes with `keepalive`, a save queued before `close()` is
   removed by the cancel after it, and `forget()` and those removals delete the same records in either order.
-- **Status:** in force.
+- **Status:** in force. Amended by `M11-R261`: `close()` also waits for an `/upload` it cancelled in flight, at most
+  30 seconds, and for the `/abort` of each ticket that answer brings.
 - **Visible in:** `src/client.ts`, `src/client/close.ts`, `src/client/job.ts`, `src/client/failures.ts`,
   `src/errors.ts`, `docs/guide/client.md#close-the-client`, `docs/guide/errors.md`.
 
@@ -53,7 +54,8 @@ Rulings for the client changes in 0.2.0: a client-wide stop (`M7-P3`), request o
   collected: `retry()` could still send that file, so `close()` must reach it.
 - **Status:** in force. Regressions: `src/client/close.test.ts` (both modes, three files in three phases, a file
   mid-`/complete`, a failed file holding its ticket) and the Vite example's browser pass "Sign out during a multipart
-  upload ends its row as aborted".
+  upload ends its row as aborted". Amended by `M11-R261`: the `/upload` in flight is no longer cancelled; it is left
+  to answer so that the ticket it brings can be aborted.
 - **Visible in:** `src/client/close.ts`, `src/client/file-run.ts`, `src/client/job-run.ts`, `src/client/upload.ts`.
 
 ### M8-L3: the first `close()` decides

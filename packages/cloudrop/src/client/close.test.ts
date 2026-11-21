@@ -64,7 +64,7 @@ async function threeFilesRunning(namespace: string) {
   const small = setup.client.start("files", smallFile("c.txt"));
   await upload.reached;
   await setup.drained();
-  return { ...setup, big, small, ids: [first?.id, second?.id].sort(), sent: setup.from() };
+  return { ...setup, big, small, upload, ids: [first?.id, second?.id].sort(), sent: setup.from() };
 }
 
 describe("close() when the user changed in another tab", () => {
@@ -158,7 +158,10 @@ describe("close() during /complete", () => {
 describe("close({ abort: true }) at sign-out", () => {
   it("tells the server of every ticket, frees the bucket's uploads, and forget() leaves no record", async () => {
     const setup = await threeFilesRunning("user-1");
-    await setup.client.close({ abort: true });
+    const closing = setup.client.close({ abort: true });
+    // c.txt's /upload is left to answer, and close() waits for the /abort of the ticket it brings (M11-R261).
+    setup.upload.open();
+    await closing;
     // Resolved once each /abort was answered: the bucket already holds no open upload.
     const open = setup.fixture.server.fake.pendingUploads();
     const stopped = { big: await statusesOf(setup.big), small: await statusesOf(setup.small) };
@@ -173,7 +176,7 @@ describe("close({ abort: true }) at sign-out", () => {
       forgotten: forgotten.data,
     }).toEqual({
       stopped: { big: ["b.bin aborted", "a.bin aborted"], small: ["c.txt aborted"] },
-      afterClose: ["POST /abort", "POST /abort"],
+      afterClose: ["POST /abort", "POST /abort", "POST /abort"],
       open: 0,
       stored: {},
       forgotten: { forgotten: 0 },

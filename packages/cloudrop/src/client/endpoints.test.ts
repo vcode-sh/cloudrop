@@ -389,10 +389,10 @@ describe("a server that never answers (M4-F3)", () => {
     });
   });
 
-  it("answers ABORTED, not NETWORK_ERROR, when the caller cancels before the timeout", async () => {
+  it("answers ABORTED, not NETWORK_ERROR, when the caller cancels a /sign before the timeout", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    const result = createEndpoints("/api/cloudrop", silent).start("files", [png], undefined, KEY, controller.signal);
+    const result = createEndpoints("/api/cloudrop", silent).signSingle("token", controller.signal);
     await vi.advanceTimersByTimeAsync(1_000);
     controller.abort();
     expect((await result).error?.code).toBe("ABORTED");

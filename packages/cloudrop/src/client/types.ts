@@ -79,7 +79,8 @@ export interface FileHandle<R = unknown> {
   resume(): void;
   /**
    * Cancels this file only, paused or not: its bucket PUTs and /sign calls stop, it ends aborted at once, and the
-   * server is told of the ticket it holds. A file that is completing is not cut off: it ends when the /complete in
+   * server is told of the ticket it holds. A file still waiting for its ticket ends aborted at once, and the ticket
+   * its /upload brings later is aborted. A file that is completing is not cut off: it ends when the /complete in
    * flight answers, within 2 minutes, as done when the server completed it (the file is stored and onComplete ran) and
    * as aborted otherwise. A failed file ends aborted too, and the server is told to drop what it kept for retry(),
    * unless a /complete may have finished the file or the page already gave its ticket up (pagehide). A done file

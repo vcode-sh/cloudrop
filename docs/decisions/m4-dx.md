@@ -65,7 +65,9 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
 - **If wrong:** after `job.abort()` during `/upload`, a page that compared a file's snapshot error with `done`'s error
   by identity now finds two errors with the same code; `error.file` is now set on them, as `M3-U10` asks of every error
   that belongs to one file.
-- **Status:** in force. Amends `M3-U10`, `M3-U11` and `M3-S15` (dated lines, fix round 1, review M2).
+- **Status:** in force. Amends `M3-U10`, `M3-U11` and `M3-S15` (dated lines, fix round 1, review M2). Amended by
+  `M11-R261`: when `job.abort()` or the caller's signal cancels the job's own `/upload`, that request is no longer cut
+  either, and each ticket it brings gets its `/abort`.
 - **Source:** design §3 F2; code audit of `main` at `907cc77` (probe: statuses `['queued','queued']` 20 ms after the
   cancel, then `POST /upload, POST /abort, PUT object, POST /complete`).
 - **Visible in:** `client/file-run.ts` (`abortFile`), `client/entry.ts` (`settle`), `client/launch.ts` (`runEntry`),

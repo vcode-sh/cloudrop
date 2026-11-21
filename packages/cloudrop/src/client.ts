@@ -61,8 +61,9 @@ export interface UploadOptions<TMetadata = unknown> {
   /** Validated by the route's schema on the server. */
   metadata?: TMetadata;
   /**
-   * Cancels the upload as abort() does: requests stop, the server is told, and the result is ABORTED. A /complete
-   * already in flight is waited for, within 2 minutes; when it completes the file, the result is that file.
+   * Cancels the upload as abort() does: bucket PUTs and /sign calls stop, the server is told, and the result is
+   * ABORTED. A /complete already in flight is waited for, within 2 minutes; when it completes the file, the result is
+   * that file. An /upload in flight is left to answer behind the result, and each ticket it brings is aborted.
    */
   signal?: AbortSignal;
 }
@@ -119,7 +120,8 @@ export interface CloudropClient<TCloudrop extends InferableCloudrop = InferableC
    * when another user signed in in another tab, each multipart upload keeps its record and gets no /abort, so its user
    * can resume it on a new client; `{ abort: true }`, at sign-out, cancels every file as job.abort() does, telling the
    * server. The first call decides; resumable(), discard() and forget() keep working. Resolves once every file it
-   * stopped has ended and each /abort it sent was answered, also for every later call; never rejects.
+   * stopped has ended, an /upload it cancelled in flight has answered (within 30 seconds) and each /abort it sent was
+   * answered, also for every later call; never rejects.
    */
   close(options?: { abort: true }): Promise<void>;
 }

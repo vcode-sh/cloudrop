@@ -29,7 +29,9 @@ export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersIn
 export interface Endpoints {
   /**
    * POST /upload for every file at once: one entry per file, in order; a rejected file is its error, which carries the
-   * answer's Retry-After (M3-U92). `idempotencyKey` names the ask: every retry of one ask sends the same.
+   * answer's Retry-After (M3-U92). `idempotencyKey` names the ask: every retry of one ask sends the same. `signal`
+   * stops the request only until it is sent: the server may reserve for one that left the page, and only the tickets
+   * it answers can free that, so the caller waits for them (launch.ts, M11-R261).
    */
   start(
     route: string,
@@ -78,6 +80,13 @@ const rejectOnAbort = (signal: AbortSignal): Promise<never> =>
     if (signal.aborted) reject(cancelled());
   });
 
+/** Calls `stop` when `signal` fires, or at once when it has; the returned function stops listening. */
+function onAbort(signal: AbortSignal | undefined, stop: () => void): () => void {
+  signal?.addEventListener("abort", stop, { once: true });
+  if (signal?.aborted) stop();
+  return () => signal?.removeEventListener("abort", stop);
+}
+
 /** `given` with names in lower case, as Headers keeps them, and the client's content-type last: it cannot be replaced. */
 const jsonHeaders = (given?: HeadersInit): Record<string, string> => ({
   ...Object.fromEntries(new Headers(given)),
@@ -89,6 +98,8 @@ const refusal = (status: number): CloudropError => (status === 429 ? serverBusy(
 
 interface PostOptions {
   signal?: AbortSignal;
+  /** `signal` no longer stops the request once it is sent; the timeout still does. */
+  answerOnceSent?: boolean;
   keepalive?: boolean;
   timeoutMs?: number;
 }
@@ -120,14 +131,13 @@ export function createEndpoints(
   async function send(
     endpoint: Endpoint,
     body: unknown,
-    { signal, keepalive, timeoutMs = ASK_TIMEOUT_MS }: PostOptions,
+    { signal, answerOnceSent, keepalive, timeoutMs = ASK_TIMEOUT_MS }: PostOptions,
   ): Promise<Result<{ response: Response; text: string }>> {
     // Without AbortSignal.any (ruling M3-U16): one controller that the timeout and the caller's signal both abort.
     const controller = new AbortController();
     const stop = () => controller.abort();
     const timeout = setTimeout(stop, timeoutMs);
-    signal?.addEventListener("abort", stop, { once: true });
-    if (signal?.aborted) stop();
+    const unhear = onAbort(signal, stop);
     // What a failure means depends on how far the request got: no headers, no account, or no answer.
     let failure: (cause: unknown) => CloudropError = headersFailed;
     let reserved = 0;
@@ -146,6 +156,7 @@ export function createEndpoints(
       // Beyond the budget the request goes without keepalive: sent while the page lives, which one the browser refuses
       // is not (M11-R87). A token is ASCII, so the text's length is its bytes.
       reserved = budget.take(keepalive, text.length);
+      if (answerOnceSent) unhear();
       // "include": a page on a trusted origin sends its session cookie, which authorize may read (S8).
       const response = await fetch(`${basePath}/${endpoint}`, {
         method: "POST",
@@ -162,7 +173,7 @@ export function createEndpoints(
     } finally {
       budget.give(reserved);
       clearTimeout(timeout);
-      signal?.removeEventListener("abort", stop);
+      unhear();
     }
   }
 
@@ -198,7 +209,7 @@ export function createEndpoints(
       return post(
         "upload",
         request,
-        { signal },
+        { signal, answerOnceSent: true },
         (json, retryAfterMs) =>
           readTickets(json, files)?.map((ticket) =>
             "kind" in ticket ? ticket : waitAtLeast(toError(ticket), retryAfterMs),

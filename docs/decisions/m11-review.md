@@ -2992,3 +2992,34 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   reproductions), `src/client/finished-kept-fuzz.test.ts` (40 seeded sequences in the unit lane, about 0.5 s),
   `src/client/resume-job.test.ts` (the proven-unfinished row), `docs/guide/resume.md` ("The server is asked first"),
   `docs/guide/react.md` ("Resume after a reload"), `docs/guide/client.md` ("Cancel").
+
+### M11-R261: a cancel leaves an `/upload` in flight to answer, and aborts each ticket it brings
+
+- **Decision:** `job.abort()`, the caller's signal, `close()` and, for an `/upload` that asks for one file, that
+  file's `abort()` no longer cut an `/upload` that has left the page. The files end `aborted` at once and `done`
+  resolves as before, without waiting. The request is left to answer, at most its 30 seconds (`ASK_TIMEOUT_MS`) and
+  with no further attempt, and each ticket the answer brings gets one `/abort` (`unlessCancelled` in
+  `src/client/launch.ts`). A request that has not been sent is still stopped: one whose `headers` or `account`
+  function is running, or that waits for a retry's `/abort`. `close()` waits for that answer and those `/abort`s with
+  every other `/abort` it waits for (`M8-L1`), with or without `abort`: a ticket that arrives then has no record a
+  reload could resume.
+- **Why:** reproduced on a server with a store and a quota of 1,000 bytes: `start()` of a 600-byte file, then
+  `job.abort()` after the server had reserved and before its answer arrived. The fetch was cut, so no ticket came
+  and nothing was aborted: the row stayed `pending`, and the owner's next `start()` was `QUOTA_EXCEEDED` until the
+  sweep. The same through `close()`, and for a one-file retry's new `/upload` cancelled by the file's `abort()`.
+  0.5.0 has the same code. `M4-F2` aborts the ticket that arrives for one file cancelled while the job's `/upload`
+  goes on; when the whole ask was cancelled that ticket never arrived. The other choice was to document the cost. A
+  person who picks the wrong file and cancels at once, then picks the right one, is the ordinary case, and the fix
+  costs one request left open for its answer. It is safe: such a ticket was never given to a file, so it has no
+  lock, no record, no `PUT` and no `/complete`, and a plain `/abort` of it can delete nothing finished.
+- **If wrong:** what a cancelled `/upload` reserved still waits for the sweep when no answer reaches the page: the tab
+  closed, the connection dropped, or the 30 seconds passed. Cancelled files are never retried (`M3-U37`), so nothing
+  sends that ask's key again (`M11-R92`). The server does the work of an `/upload` whose caller cancelled, and a
+  plugin's `onAbort` hears of each ticket. `close()` on a server that does not answer `/upload` resolves after up to
+  40 seconds (the request's 30 and the `/abort`'s 10) instead of at once; it already waits up to 2 minutes for a
+  `/complete` in flight. A custom `fetch` that keeps a request open past the client's timeout holds it as long.
+- **Status:** in force. Amends `M4-F2` (a cancel of the whole ask), `M8-L1` (what `close()` waits for) and `M8-L2`
+  ("its `/upload` in flight is cancelled").
+- **Visible in:** `src/client/launch.ts` (`unlessCancelled`), `src/client/endpoints.ts` (`answerOnceSent`),
+  `src/client/close.ts`, `src/client/cancelled-ask.test.ts`, `src/client/close.test.ts`, `src/client/resume.test.ts`,
+  `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel", "Close the client").
