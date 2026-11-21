@@ -319,7 +319,7 @@ describe("cloudrop setup --apply", () => {
     expect(result.lines.slice(1)).toEqual([
       `dry run      CORS: would add rule "cloudrop-uploads" for ${ORIGIN} and keep 1 other rule ("public-reads").`,
       'dry run      Lifecycle: would add rule "cloudrop-abort-incomplete" (aborts incomplete multipart uploads after 1 day, whole bucket) and keep 1 other rule ("expire-logs").',
-      "Dry run: nothing was written. Run the same command without --dry-run to write.",
+      "Dry run: nothing was written. To write, run it with --apply and without --dry-run.",
     ]);
   });
 

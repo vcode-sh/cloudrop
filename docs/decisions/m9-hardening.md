@@ -298,3 +298,13 @@ The measurements behind the first range are in
 - **Status:** amended by `M9-H1`: the server now reads a type by its essence, so the guide's Bun note says the file is
   accepted as `text/plain`, and the Troubleshooting entry is gone. The quota example keeps `application/pdf`.
 - **Visible in:** `docs/guide/testing-your-app.md`, `src/testing.guide.test.ts`.
+
+### M9-H107: a dry run says to write with `--apply`
+
+- **Decision:** `setup --dry-run` ends with "Dry run: nothing was written. To write, run it with --apply and without
+  --dry-run."
+- **Why:** it said "Run the same command without --dry-run to write", but `setup --dry-run` without `--apply` then only
+  prints the rules (seen while measuring the writes on R2, 2026-11-21).
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/cli/setup.ts`.

@@ -186,7 +186,7 @@ export async function applySetup(
   const doctorCommand = `cloudrop doctor ${options.origins.map((origin) => `--origin ${origin}`).join(" ")}`;
   out.write(
     options.dryRun
-      ? "Dry run: nothing was written. Run the same command without --dry-run to write.\n"
+      ? "Dry run: nothing was written. To write, run it with --apply and without --dry-run.\n"
       : `Done. Check the bucket with ${doctorCommand}; R2 can take up to 30 seconds to apply a change.\n`,
   );
   return 0;
