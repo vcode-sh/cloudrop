@@ -563,7 +563,7 @@ no longer among your `routes` is deleted without one.
 
 | | With `transaction: true` (Postgres) | Without (SQLite, D1, or a lease on Postgres) |
 | --- | --- | --- |
-| When | Inside the deletion's transaction: before cloudrop locks the file and the owner's counters for `deleteFile` and `eraseOwner`, after the completion is recorded for `replace`. | Before the deletion is recorded. |
+| When | Inside the deletion's transaction, before cloudrop locks the file and the owner's counters. | Before the deletion is recorded. |
 | How often | Exactly once for writes through `tx`. Two deletions of one file at once may both run it, but the one that finds the file already deleted rolls its writes back. | At least once, like `onComplete` under a lease: again after a deletion that failed after it is retried, and twice when two calls delete the file at once. Make it idempotent by `file.id`. |
 | A throw | Rolls back the deletion and everything written through `tx`. | Keeps the file: the deletion is not recorded. |
 
@@ -577,16 +577,22 @@ A throw is logged, the file stays, and the call answers:
   recorded (with a transaction, `onComplete`'s writes roll back too), the previous one stays, and the client's retry
   runs both hooks again.
 
-Without a transaction, a replacing completion runs `onDelete` for the files it is about to replace, then records the
-completion. A file of the same owner that completed in between is replaced too: its `onDelete` runs right after, where
-a throw is only logged, as the deletion is already recorded.
+A replacing completion runs `onDelete`, after `onComplete`, for the owner's files it is about to replace, then records
+the completion. When the owner's files change in between (another upload on the route completes, or a `deleteFile`
+takes the previous file):
 
-- **Lock order.** In transaction mode `onDelete` of `deleteFile` and `eraseOwner` runs before cloudrop locks anything,
-  as `onComplete` runs before cloudrop locks the owner's counters, so rows of yours that both write (a counter, the
-  user's row) are taken in the same order and the two take turns. On a `replace: true` route `onDelete` runs after the
-  completion locked the replaced file: have its `onComplete` lock first whatever `onDelete` writes, such as the user's
-  row, or a replacement and a `deleteFile` of the previous file at once can deadlock (Postgres then fails one of them
-  with a retryable error).
+- **with a transaction**, the completion rolls back and the client is asked to retry, which lists the files again;
+- **without one**, a file that completed in between is replaced too, and its `onDelete` runs right after the record,
+  where a throw is only logged. A crash, or a database answer lost after the commit, between the record and that run
+  skips it.
+
+When `onDelete` throws because another deletion got there first (an audit row keyed by the file already exists), the
+file is deleted all the same, and the call answers as it does for a file already deleted.
+
+- **Lock order.** `onDelete` runs before cloudrop locks the file or the owner's counters, as `onComplete` runs before
+  cloudrop records the completion, so rows of yours that both write (a counter, the user's row) are locked before
+  cloudrop's in every path. Write them in the same order in both hooks, and concurrent uploads and deletions of one
+  owner take turns instead of deadlocking.
 - **Keep network calls out**, as in `onComplete`: in transaction mode they hold a connection and row locks, and a
   rollback cannot undo them. Write an outbox row through `tx` instead.
 

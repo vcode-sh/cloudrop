@@ -1,6 +1,7 @@
 // A route's onDelete (M10-D4): run for each completed file that api.deleteFile, a replacing /complete or
-// api.eraseOwner deletes. With a transaction it runs inside the deletion's, exactly once; without one it runs before the
-// deletion is recorded, at least once, as onComplete runs under a lease.
+// api.eraseOwner deletes. It always runs before cloudrop locks the file, so the app's own locks come first, as in
+// onComplete. With a transaction it runs inside the deletion's, exactly once; without one, before the deletion is
+// recorded, at least once, as onComplete runs under a lease.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
@@ -22,21 +23,17 @@ const hookFailed = (route: string): CloudropError =>
     { retryable: true },
   );
 
-/** The row's route when it has an onDelete; undefined otherwise, or when the server no longer has that route. */
-const hookedRoute = (config: ServerConfig, name: string): RouteConfig | undefined => {
-  const route = config.routes.get(name);
+/** The route whose onDelete a completed row runs; undefined for any other row, or a route the server no longer has. */
+function hookedRoute(config: ServerConfig, row: FileRecord | null): RouteConfig | undefined {
+  const route = row?.status === "completed" ? config.routes.get(row.route) : undefined;
   return route?.definition.onDelete ? route : undefined;
-};
-
-/** The row as it was while completed: a deletion changes only its status and `endedAt`. */
-const beforeDeletion = (record: FileRecord): FileRecord => ({ ...record, status: "completed", endedAt: null });
+}
 
 /** The route's onDelete for one file; false when it threw, which is logged. `tx` reaches only a store's own route. */
 async function runOnDelete(
   config: ServerConfig,
   route: RouteConfig,
-  file: FileRecord,
-  reason: DeleteReason,
+  { file, reason }: { file: FileRecord; reason: DeleteReason },
   transaction: InTransaction,
 ): Promise<boolean> {
   const extra = transaction && storeOfRoute(route.definition) ? transaction : {};
@@ -50,17 +47,27 @@ async function runOnDelete(
 }
 
 /**
+ * After onDelete threw: the file was kept, unless another deletion took it meanwhile (a hook may throw just because it
+ * lost that race, such as on a duplicate audit row), and then the answer is the one `end` gives for a deleted row.
+ */
+async function afterThrow(config: ServerConfig, store: Store, id: string, route: string): Promise<Result<Transition>> {
+  const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
+  if (row.error) return row;
+  return row.data?.status === "completed" ? fail(hookFailed(route)) : ok({ changed: false, record: row.data });
+}
+
+/**
  * In one transaction: onDelete, then the row ends as deleted. When another deletion ended it first, onDelete's writes
- * roll back, so only that one's count. onDelete runs before cloudrop locks the row and the owner's usage, so its own
- * locks come first, as in onComplete.
+ * roll back, so only that one's count.
  */
 async function deleteInTransaction(
   config: ServerConfig,
-  transaction: NonNullable<Store["transaction"]>,
+  store: Store & Required<Pick<Store, "transaction">>,
   id: string,
   reason: DeleteReason,
 ): Promise<Result<Transition>> {
   let answer: Result<Transition> = fail(storeUnavailable());
+  let threw: string | undefined;
   // Set before a deliberate rollback, so an adapter that wraps the thrown error cannot hide which throw it was.
   let rolledBack = false;
   const rollBack = (result: Result<Transition>) => {
@@ -69,22 +76,24 @@ async function deleteInTransaction(
     throw new Error("cloudrop: rolled back the deletion.");
   };
   try {
-    await transaction(async (tx, store) => {
-      const row = await store.get(id);
-      const route = row?.status === "completed" ? hookedRoute(config, row.route) : undefined;
-      if (route && row && !(await runOnDelete(config, route, row, reason, { tx }))) {
-        return rollBack(fail(hookFailed(route.name)));
+    await store.transaction(async (tx, scoped) => {
+      const row = await scoped.get(id);
+      const route = hookedRoute(config, row);
+      if (route && row && !(await runOnDelete(config, route, { file: row, reason }, { tx }))) {
+        threw = route.name;
+        return rollBack(answer);
       }
-      const ended = await store.end(id, "completed", "deleted", new Date());
+      const ended = await scoped.end(id, "completed", "deleted", new Date());
       if (!ended.changed) return rollBack(ok(ended));
       answer = ok(ended);
     });
   } catch (error) {
-    if (rolledBack) return answer;
-    config.logger.error(`cloudrop: the store failed to delete file ${id}.`, error);
-    return fail(storeUnavailable());
+    if (!rolledBack) {
+      config.logger.error(`cloudrop: the store failed to delete file ${id}.`, error);
+      return fail(storeUnavailable());
+    }
   }
-  return answer;
+  return threw === undefined ? answer : afterThrow(config, store, id, threw);
 }
 
 /**
@@ -100,39 +109,41 @@ export async function deleteCompleted(
   const end = () =>
     storeCall(config.logger, `delete file ${id}`, () => store.end(id, "completed", "deleted", new Date()));
   if (![...config.routes.values()].some((route) => route.definition.onDelete)) return end();
-  if (store.transaction) return deleteInTransaction(config, store.transaction.bind(store), id, reason);
+  if (store.transaction) return deleteInTransaction(config, { ...store, transaction: store.transaction }, id, reason);
   const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
   if (row.error) return row;
-  const route = row.data?.status === "completed" ? hookedRoute(config, row.data.route) : undefined;
-  if (route && row.data && !(await runOnDelete(config, route, row.data, reason, undefined))) {
-    return fail(hookFailed(route.name));
+  const route = hookedRoute(config, row.data);
+  if (route && row.data && !(await runOnDelete(config, route, { file: row.data, reason }, undefined))) {
+    return afterThrow(config, store, id, route.name);
   }
   return end();
 }
 
 /**
- * Under a lease, before a replacing completion is recorded: onDelete for each file of the owner it is about to replace.
- * Answers their ids; a throw answers as one in onComplete does, and the completion is not recorded.
+ * Before a replacing completion is recorded: onDelete for each file of the owner it is about to replace, with `tx` in a
+ * transaction. Answers their ids, or null when the route has no onDelete; a throw answers as one in onComplete does,
+ * and the completion is not recorded.
  */
 export async function beforeReplacing(
   config: ServerConfig,
-  store: Store,
-  route: RouteConfig,
-  owner: string | null,
-): Promise<Result<Set<string>>> {
+  store: Store | Omit<Store, "transaction">,
+  { route, owner }: { route: RouteConfig; owner: string | null },
+  transaction?: InTransaction,
+): Promise<Result<Set<string> | null>> {
+  if (!route.replace || !route.definition.onDelete) return ok(null);
   const ran = new Set<string>();
-  if (!route.replace || !route.definition.onDelete || owner === null) return ok(ran);
+  if (owner === null) return ok(ran);
+  const query = { owner, statuses: ["completed"] as const, route: route.name, name: null, type: null, limit: PAGE };
   let cursor: string | null = null;
   do {
-    const query = { owner, statuses: ["completed"] as const, route: route.name, name: null, type: null };
     const page: Result<{ records: FileRecord[]; cursor: string | null }> = await storeCall(
       config.logger,
       `list the files of ${owner} on route "${route.name}"`,
-      () => store.list({ ...query, order: "newest", limit: PAGE, cursor }),
+      () => store.list({ ...query, order: "newest", cursor }),
     );
     if (page.error) return page;
     for (const file of page.data.records) {
-      if (!(await runOnDelete(config, route, file, "replaced", undefined))) return fail(unfinished());
+      if (!(await runOnDelete(config, route, { file, reason: "replaced" }, transaction))) return fail(unfinished());
       ran.add(file.id);
     }
     cursor = page.data.cursor;
@@ -141,22 +152,27 @@ export async function beforeReplacing(
 }
 
 /**
- * onDelete for the files a completion replaced, except those `ran` already covered. In a transaction it stops at the
- * first throw, which rolls the completion back; under a lease the deletion is recorded, so each runs and a throw is
- * only logged. False when one threw.
+ * In a transaction: whether the completion replaced exactly the files `beforeReplacing` ran onDelete for. Another
+ * completion or deletion of the owner's files in between makes it false, and the completion rolls back.
+ */
+export const replacedAsListed = (listed: ReadonlySet<string> | null, replaced: readonly FileRecord[]): boolean =>
+  listed === null || (replaced.length === listed.size && replaced.every((file) => listed.has(file.id)));
+
+/**
+ * Under a lease, once the completion is recorded: onDelete for a replaced file that completed after `beforeReplacing`
+ * listed the owner's files. The deletion is recorded, so a throw is only logged.
  */
 export async function afterReplacing(
   config: ServerConfig,
   route: RouteConfig,
+  listed: ReadonlySet<string> | null,
   replaced: readonly FileRecord[],
-  { ran = new Set<string>(), transaction }: { ran?: ReadonlySet<string>; transaction?: InTransaction },
-): Promise<boolean> {
-  if (!route.definition.onDelete) return true;
-  let allRan = true;
+): Promise<void> {
+  if (listed === null) return;
   for (const file of replaced) {
-    if (ran.has(file.id)) continue;
-    allRan = (await runOnDelete(config, route, beforeDeletion(file), "replaced", transaction)) && allRan;
-    if (!allRan && transaction) return false;
+    if (listed.has(file.id)) continue;
+    // The row as it was while completed: a deletion changes only its status and `endedAt`.
+    const before: FileRecord = { ...file, status: "completed", endedAt: null };
+    await runOnDelete(config, route, { file: before, reason: "replaced" }, undefined);
   }
-  return allRan;
 }

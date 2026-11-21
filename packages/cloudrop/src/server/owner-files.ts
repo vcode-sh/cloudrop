@@ -89,13 +89,19 @@ function fingerprint({ route, name, type, order }: Pick<FilesQuery, "route" | "n
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** The name filter as `/upload` normalizes names (NFC), or null for none; an empty name filters nothing. */
+/**
+ * The name filter as `/upload` checks and stores names: well-formed, in NFC, at most 255 characters once normalized. Or
+ * null for none: an empty name filters nothing.
+ */
 function readName(name: unknown): Result<string | null> {
   if (name === undefined || name === "") return ok(null);
-  if (typeof name === "string" && [...name].length <= MAX_NAME_LENGTH && !name.includes("\u0000")) {
-    return ok(name.normalize("NFC"));
-  }
-  return fail(invalidInput(`name must be text of at most ${MAX_NAME_LENGTH} characters without NUL (U+0000).`));
+  const normalized = typeof name === "string" && name.isWellFormed() ? name.normalize("NFC") : "\u0000";
+  if ([...normalized].length <= MAX_NAME_LENGTH && !normalized.includes("\u0000")) return ok(normalized);
+  return fail(
+    invalidInput(
+      `name must be text of at most ${MAX_NAME_LENGTH} characters, without NUL (U+0000) or lone surrogates.`,
+    ),
+  );
 }
 
 function readType(type: unknown): Result<string | null> {
@@ -121,14 +127,14 @@ function readFilters(
   return type.error ? type : ok({ route: route ?? null, name: name.data, type: type.data, order });
 }
 
-/** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing. */
-function readCursor(cursor: unknown, query: Omit<FilesQuery, "cursor">): Result<string | null> {
+/** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing than `mark`'s. */
+function readCursor(cursor: unknown, mark: string): Result<string | null> {
   if (cursor === undefined) return ok(null);
-  const [, mark = "", position = ""] = (typeof cursor === "string" && FILTERED_CURSOR.exec(cursor)) || [];
+  const [, given = "", position = ""] = (typeof cursor === "string" && FILTERED_CURSOR.exec(cursor)) || [];
   if (!isStoreCursor(position)) {
     return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
   }
-  if (mark !== fingerprint(query)) {
+  if (given !== mark) {
     return fail(
       invalidInput(
         "cursor belongs to a listing with another route, name, type or order. Pass the options of the page that returned it, or leave cursor out to start again.",
@@ -138,7 +144,8 @@ function readCursor(cursor: unknown, query: Omit<FilesQuery, "cursor">): Result<
   return ok(position);
 }
 
-function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
+/** The listing the store is asked for, and the fingerprint its cursors carry. */
+function readOptions(config: ServerConfig, given: unknown): Result<{ query: FilesQuery; mark: string }> {
   if (!isPlainObject(given)) {
     return fail(invalidInput("files takes { owner }, and optionally route, name, type, order, limit and cursor."));
   }
@@ -149,9 +156,9 @@ function readOptions(config: ServerConfig, given: unknown): Result<FilesQuery> {
   }
   const filters = readFilters(config, given);
   if (filters.error) return filters;
-  const query = { owner, limit, ...filters.data };
-  const cursor = readCursor(given.cursor, query);
-  return cursor.error ? cursor : ok({ ...query, cursor: cursor.data });
+  const mark = fingerprint(filters.data);
+  const cursor = readCursor(given.cursor, mark);
+  return cursor.error ? cursor : ok({ query: { owner, limit, ...filters.data, cursor: cursor.data }, mark });
 }
 
 export async function listFiles(
@@ -161,12 +168,11 @@ export async function listFiles(
 ): Promise<Result<FilesPage>> {
   const options = readOptions(config, given);
   if (options.error) return options;
-  const query = options.data;
+  const { query, mark } = options.data;
   const page = await storeCall(config.logger, `list the files of ${query.owner}`, () =>
     store.list({ ...query, statuses: ["completed"] }),
   );
   if (page.error) return page;
-  const mark = fingerprint(query);
   const cursor = page.data.cursor === null || mark === "" ? page.data.cursor : `${mark}.${page.data.cursor}`;
   return ok({ items: page.data.records, cursor });
 }

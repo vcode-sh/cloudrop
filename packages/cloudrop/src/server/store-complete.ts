@@ -12,7 +12,7 @@ import { removeDeleted } from "./leftovers.ts";
 import { nowSeconds } from "./presign.ts";
 import type { ClaimOutcome, CloudropStore, FileRecord } from "./store.ts";
 import { cancelled, type FileCalls, fileCalls, storeUnavailable } from "./store-calls.ts";
-import { afterReplacing, beforeReplacing } from "./store-delete.ts";
+import { afterReplacing, beforeReplacing, replacedAsListed } from "./store-delete.ts";
 import { storeOfRoute } from "./store-route.ts";
 import { type UploadTokenPayload, uploadExpired } from "./token.ts";
 
@@ -109,13 +109,13 @@ async function withLease(completion: Completion, store: CloudropStore<unknown>):
   };
   const ran = await resultToStore(completion, {});
   if (ran.error) return handBack(ran);
-  const hooked = await beforeReplacing(config, store, route, completion.owner);
-  if (hooked.error) return handBack(hooked);
+  const listed = await beforeReplacing(config, store, completion);
+  if (listed.error) return handBack(listed);
   const done = await calls.complete(claim, ran.data.json, route.replace);
   if (done.error) return { answer: done, recorded: false };
   if (!done.data.changed) return { answer: lostClaim(done.data.record, file), recorded: false };
   // A file that completed while onDelete ran is replaced too: its onDelete runs now, and a throw is only logged.
-  await afterReplacing(config, route, done.data.replaced, { ran: hooked.data });
+  await afterReplacing(config, route, listed.data, done.data.replaced);
   return { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.data.replaced };
 }
 
@@ -144,11 +144,13 @@ async function inTransaction(
       // Only a route made by the store's own route() expects tx; a plain route keeps an authorize field of that name.
       const ran = await resultToStore(completion, storeOfRoute(completion.route.definition) ? { tx } : {});
       if (ran.error) return rollBack(ran);
+      const listed = await beforeReplacing(config, store, completion, { tx });
+      if (listed.error) return rollBack(listed);
       const replace = completion.route.replace;
       const done = await store.complete(token.id, claim, ran.data.json, new Date(), { replace });
       if (!done.changed) return rollBack(lostClaim(done.record, file));
-      const deleted = await afterReplacing(config, completion.route, done.replaced, { transaction: { tx } });
-      if (!deleted) return rollBack(fail(unfinished()));
+      // onDelete ran for other files than those replaced: undo it, and the client's retry runs it for the right ones.
+      if (!replacedAsListed(listed.data, done.replaced)) return rollBack(fail(unfinished()));
       attempt = { answer: ok({ file, data: ran.data.data }), recorded: true, replaced: done.replaced };
     });
   } catch (error) {

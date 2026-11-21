@@ -83,7 +83,7 @@ export function listFilterCases(suite: StoreSuite): void {
     expect(ids(page)).toEqual(["f-match"]);
   });
 
-  it("list oldest first answers created_at ascending, ties in ascending byte order of id, and pages forward", async () => {
+  it("list oldest first answers created_at ascending, ties in byte order of id, and pages forward with filters", async () => {
     const reserve = (minutes: number, files: NewFile[]) =>
       suite.store.reserve(
         { owner: "u-1", limit: null, expiresAt: at(24 * 60 * MINUTE), requestKey: null, files },
@@ -91,15 +91,16 @@ export function listFilterCases(suite: StoreSuite): void {
       );
     await reserve(1, [newFile("f-old", 1)]);
     // Same created_at: "B" (0x42) sorts before "a" (0x61) in byte order, whatever the collation.
-    await reserve(2, [newFile("f-a", 1), newFile("f-B", 1)]);
+    await reserve(2, [newFile("f-a", 1), newFile("f-B", 1), { ...newFile("f-doc", 1), type: "text/plain" }]);
     await reserve(3, [newFile("f-new", 1)]);
     const page = (cursor: string | null) =>
       suite.store.list({
         owner: "u-1",
         statuses: ["pending"],
-        route: null,
-        name: null,
-        type: null,
+        route: "avatars",
+        // Every filter beside the cursor, so SQLite's positional parameters must bind in the order they appear.
+        name: ".PNG",
+        type: "image/",
         order: "oldest",
         limit: 2,
         cursor,

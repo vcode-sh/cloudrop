@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
 import { type MemoryTx, memoryStore } from "../testing/memory-store.ts";
-import { gate, hello, leaseStore, NOW, storeFixture, TEXT } from "../testing/store-fixture.ts";
+import { gate, hello, leaseStore, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import { route, routeFor } from "./route.ts";
 import type { DeleteContext } from "./store.ts";
 
@@ -27,19 +27,22 @@ interface Seen {
 
 /**
  * A server whose "files" route (one file per owner with `replace`) records each onDelete call, writes an app row through
- * `tx` when it has one, and throws while `failing` is set. `pause` stops the next call until the test opens it.
+ * `tx` when it has one, and throws while `failing` is set, or with `unique` for a file it already ran for (as an
+ * audit insert keyed by the file would). `pause` stops the next call until the test opens it.
  */
 function deleting(mode: Mode, options: { replace?: boolean } = {}) {
   const memory = memoryStore();
   const seen: Seen[] = [];
-  const state = { failing: false, pause: undefined as (() => Promise<void>) | undefined };
+  const state = { failing: false, unique: false, pause: undefined as (() => Promise<void>) | undefined };
   const onDelete = async ({ file, owner, reason, tx }: DeleteContext & { tx?: MemoryTx }) => {
     const pause = state.pause;
     state.pause = undefined;
     await pause?.();
+    const again = seen.some((call) => call.id === file.id);
     seen.push({ id: file.id, owner, reason, status: file.status, tx: tx !== undefined });
     tx?.write(`${reason} ${file.id}`);
     if (state.failing) throw new Error("The audit table is down.");
+    if (state.unique && again) throw new Error("duplicate key value violates unique constraint");
   };
   const policy = { accept: "*/*", maxSize: 1024, replace: options.replace, authorize: () => ({ userId: "u1" }) };
   const callbacks = { owner: ({ userId }: { userId: string }) => userId, onDelete };
@@ -117,6 +120,35 @@ describe("onDelete with api.deleteFile", () => {
     expect(memory.appRows()).toEqual([`deleted ${ticket.id}`]);
   });
 
+  // A hook can throw only because it lost the race, such as on an audit row keyed by the file: the file is gone all the
+  // same, so the loser answers as for a file already deleted.
+  it.for(MODES)("%s: an onDelete that throws after another deletion won answers the file deleted", async (mode) => {
+    const { fixture, memory, state, uploaded, status } = deleting(mode);
+    const ticket = await uploaded();
+    state.unique = true;
+    const first = gate();
+    state.pause = first.pass;
+    const { api } = fixture.cloudrop;
+    const slow = api.deleteFile(ticket.id);
+    await first.arrived;
+    expect(await api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+    first.open();
+    expect(await slow).toEqual({ data: { id: ticket.id }, error: null });
+    expect(await status(ticket.id)).toBe("deleted");
+    expect(memory.appRows()).toEqual(mode === "transaction" ? [`deleted ${ticket.id}`] : []);
+  });
+
+  it("without any onDelete on the server, deleteFile makes only the store call it made before onDelete", async () => {
+    const { store, calls } = recordCalls(memoryStore());
+    const fixture = storeFixture({ owned }, { store });
+    const ticket = await fixture.single("owned", TEXT);
+    await fixture.send(ticket.put, hello);
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
+    calls.length = 0;
+    expect((await fixture.cloudrop.api.deleteFile(ticket.id)).error).toBeNull();
+    expect(calls).toEqual(["end"]);
+  });
+
   it.for(MODES)("%s: a file that never completed runs no onDelete", async (mode) => {
     const { fixture, seen, upload } = deleting(mode);
     const ticket = await upload();
@@ -178,9 +210,41 @@ describe("onDelete with replace", () => {
     ]);
     expect([await status(previous.id), await status(next.id)]).toEqual(["completed", "pending"]);
     expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1 });
+    expect(memory.appRows()).toEqual([]);
     state.failing = false;
     expect((await complete(fixture, next.token)).status).toBe(200);
     expect([await status(previous.id), await status(next.id)]).toEqual(["deleted", "completed"]);
+  });
+
+  it("transaction: a deleteFile racing the replacement of its file rolls its onDelete back", async () => {
+    const { fixture, memory, state, uploaded, upload, status } = deleting("transaction", { replace: true });
+    const previous = await uploaded();
+    const next = await upload();
+    const paused = gate();
+    state.pause = paused.pass;
+    const deletion = fixture.cloudrop.api.deleteFile(previous.id);
+    await paused.arrived;
+    expect((await complete(fixture, next.token)).status).toBe(200);
+    paused.open();
+    expect(await deletion).toEqual({ data: { id: previous.id }, error: null });
+    expect([await status(previous.id), memory.appRows()]).toEqual(["deleted", [`replaced ${previous.id}`]]);
+  });
+
+  it("transaction: a replacement whose file another call deleted meanwhile rolls back, and its retry completes", async () => {
+    const { fixture, memory, state, uploaded, upload, status } = deleting("transaction", { replace: true });
+    const previous = await uploaded();
+    const next = await upload();
+    const paused = gate();
+    state.pause = paused.pass;
+    const completing = complete(fixture, next.token);
+    await paused.arrived;
+    expect((await fixture.cloudrop.api.deleteFile(previous.id)).error).toBeNull();
+    paused.open();
+    // Its onDelete ran for a file the completion then did not replace: undone, and the client is asked to retry.
+    expect((await completing).status).toBe(500);
+    expect([await status(next.id), memory.appRows()]).toEqual(["pending", [`deleted ${previous.id}`]]);
+    expect((await complete(fixture, next.token)).status).toBe(200);
+    expect([await status(next.id), memory.appRows()]).toEqual(["completed", [`deleted ${previous.id}`]]);
   });
 
   // Without a transaction onDelete runs before the replacing completion is recorded. A file that completes in between is

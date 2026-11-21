@@ -78,19 +78,24 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
 
 - **Decision:** On a store with `transaction`, `deleteFile` and `eraseOwner` delete each file in its own transaction:
   read the row, run `onDelete` with `tx`, then `end(completed → deleted)`. When `end` finds the row no longer completed
-  (another deletion committed first), the transaction rolls back, so only one deletion's writes ever commit. A replacing
-  completion runs `onDelete` for each replaced file inside its own transaction, after `store.complete` answered them;
-  a throw rolls the whole completion back, `onComplete`'s writes included.
+  (another deletion committed first), the transaction rolls back, so only one deletion's writes ever commit. A
+  replacing completion, inside its transaction and after `onComplete`, lists the owner's completed files on the route,
+  runs `onDelete` for each, then records the completion; when the files it replaced are not exactly the ones listed
+  (another call deleted or completed one in between), it rolls back and answers the retryable unfinished error, and the
+  client's retry runs again. A throw rolls the whole completion back, `onComplete`'s writes included. When `onDelete`
+  throws and the file turns out to be deleted after all (the hook lost a race, such as on a duplicate audit row), the
+  caller answers as for a file already deleted.
 - **Why:** `end` locks the file row and then the owner's usage row; a completion locks its own row, runs `onComplete`
-  (the app's locks), then the usage row. Run after `end`, an `onDelete` that writes a row `onComplete` also writes (a
-  per-user counter, the user row) waits for that row while holding the usage row the completion waits for: measured on
-  Postgres 18 through Drizzle on both drivers, a fault probe that moved the hook after `end` failed the new case in
-  `drizzle-handler.db.integration.test.ts` with `40P01 deadlock detected` after Postgres's 1 s `deadlock_timeout`. Run first, the
-  app's locks come before cloudrop's in both paths and the two take turns (the case passes). A replaced file is known
-  only once `store.complete` answers, after its row and the usage row are locked, so on a replacing route the guide
-  asks `onComplete` to lock first whatever `onDelete` writes, as the pilot locks the user row.
-- **If wrong:** an app whose `onDelete` on a replacing route writes a row its `onComplete` does not lock can deadlock
-  against a concurrent `deleteFile` of the previous file; Postgres fails one with a retryable `SERVER_ERROR`.
+  (the app's locks), then the replaced rows and the usage row. Run after `end`, an `onDelete` that writes a row
+  `onComplete` also writes (a per-user counter, the user row) waits for that row while holding the usage row the
+  completion waits for: measured on Postgres 18 through Drizzle on both drivers, a fault probe that moved the hook after
+  `end` failed the case in `drizzle-handler.db.integration.test.ts` with `40P01 deadlock detected` after Postgres's 1 s
+  `deadlock_timeout`. Run first, the app's locks come before cloudrop's in every path and the two take turns (the case
+  passes). The first version ran a replacing completion's `onDelete` after `store.complete`, with the replaced row
+  already locked, which the review showed deadlocks against a `deleteFile` of that file when `onDelete` writes a row
+  keyed by the file (the guide's own pointer example); listing first gives every path one order.
+- **If wrong:** a replacing completion that races another completion or a deletion of the owner's files on the route
+  is answered with a retry more often than before; each retry lists again.
 - **Status:** in force.
 - **Visible in:** `src/server/store-delete.ts`, `src/server/store-complete.ts`,
   `src/adapters/drizzle-handler.db.integration.test.ts`, `src/server/store-delete.test.ts`, `docs/guide/store.md`.
@@ -98,17 +103,18 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
 ### M10-D6: without a transaction, `onDelete` runs before the deletion, at least once
 
 - **Decision:** Under a lease (SQLite, D1, Postgres without `transaction: true`) `deleteFile` and `eraseOwner` read the
-  row, run `onDelete`, then `end` it; a throw keeps the file. A replacing completion, after `onComplete`, lists the
-  owner's completed files on the route, runs `onDelete` for each, then records the completion; a throw hands the claim
-  back and records nothing. A file that completed in between is replaced too, and its `onDelete` runs right after the
-  record, where a throw is only logged.
+  row, run `onDelete`, then `end` it; a throw keeps the file, unless another deletion took it meanwhile (`M10-D5`). A
+  replacing completion, after `onComplete`, lists the owner's completed files on the route, runs `onDelete` for each,
+  then records the completion; a throw hands the claim back and records nothing. A file that completed in between is
+  replaced too, and its `onDelete` runs right after the record, where a throw is only logged.
 - **Why:** this is `onComplete`'s rule under a lease (`M5`): before the record, so a throw keeps things as they were,
   and at least once. A completed row has no claim to hold, so two deletions of one file at once can both run the hook,
   and a deletion that fails after it (a database error, a replacing completion whose record fails or loses its lease)
   runs it again on the retry, or leaves the file with a hook run for it. Running it after the record instead would
   skip it on a crash and could not keep the file on a throw.
 - **If wrong:** an app that needs exactly once uses `transaction: true` on Postgres, or makes the hook idempotent by
-  `file.id`, as the guide says.
+  `file.id`, as the guide says. One gap remains, stated in the guide: the late file's `onDelete` runs after the record,
+  so a crash, or a database answer lost after the commit, between the two skips it.
 - **Status:** in force.
 - **Visible in:** `src/server/store-delete.ts` (`deleteCompleted`, `beforeReplacing`, `afterReplacing`),
   `src/server/store-complete.ts` (`withLease`), `docs/guide/store.md#ondelete`.
@@ -151,13 +157,13 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
 ### M10-D10: the bundled server budget goes from 30 to 32 kB (for owner confirmation)
 
 - **Decision:** `scripts/size-limit.config.ts` raises the "cloudrop (bundled)" ceiling from 30 kB to 32 kB. Measured
-  gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.71 kB (+3.9%), `cloudrop` summed 39.76 → 41.48 kB (+4.3%),
+  gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.77 kB (+4.1%), `cloudrop` summed 39.76 → 41.63 kB (+4.7%),
   `adapters/sql` 11.86 → 12.17 kB, `adapters/drizzle` 13.58 → 13.89 kB, `adapters/prisma` 11.33 → 11.65 kB,
   `cloudrop/testing` 13.18 → 13.35 kB; `cloudrop/client`, `cloudrop/react`, `cloudrop/next` and `cloudrop/node`
   unchanged. Every other ceiling stays.
 - **Why:** `M4-F24` set the ceilings with a wide margin for the store and plugins, and 0.3.0 left 0.45 kB of it on the
   bundled server. `onDelete` (its transaction and lease paths, and the replacing completion's) and the filters with
-  their checks and messages add 1.16 kB; none of it is dead weight an app could drop, as every export ships in this
+  their checks and messages add 1.22 kB; none of it is dead weight an app could drop, as every export ships in this
   budget. No entry grew by 5% or more.
 - **If wrong:** the owner sets another ceiling; nothing depends on this number.
 - **Status:** in force until the owner confirms or changes it.

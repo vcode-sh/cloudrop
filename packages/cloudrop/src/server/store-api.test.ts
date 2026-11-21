@@ -260,6 +260,8 @@ describe("cloudrop.api.files", () => {
   it.for([
     { name: "a name with a NUL character", options: { owner: "u1", name: "a\u0000" } },
     { name: "a name over 255 characters", options: { owner: "u1", name: "x".repeat(256) } },
+    // /upload refuses such names, so no row has one, and the backends need not agree on how to compare one.
+    { name: "a name with a lone surrogate", options: { owner: "u1", name: "a\uD800" } },
     { name: "a type without its slash", options: { owner: "u1", type: "image" } },
     { name: "an accept pattern for a type", options: { owner: "u1", type: "image/*" } },
     { name: "an order that is not newest or oldest", options: { owner: "u1", order: "latest" } },
