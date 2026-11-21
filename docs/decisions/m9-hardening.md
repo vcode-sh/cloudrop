@@ -201,7 +201,7 @@ The measurements behind the first range are in
   would have written, an origin no browser sends. The trailing slash and upper case are the usual copy-paste mistakes,
   and the generic message did not say which part was wrong.
 - **If wrong:** none known; S3's single-`*` origins can still be written by hand.
-- **Status:** in force; amends `M9-C1`.
+- **Status:** in force; amends `M9-C1`. Amended by `M11-R115`: a value with an `@` in it is not repeated in the message.
 - **Visible in:** `packages/cloudrop/src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
 
 ### M9-H101: a bucket that does not answer names the settings to check

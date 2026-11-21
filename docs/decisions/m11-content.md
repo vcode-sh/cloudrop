@@ -43,7 +43,9 @@ Entries start from 1.
 - **If wrong:** an app that wants the bytes' type in branch (0) cannot have it; the branch is reached only within the
   24 hours after the plugin or its lists changed.
 - **Status:** in force; `src/plugins/content-checks.test.ts` names the content of every refusing row,
-  `src/plugins/content-checks-upload.test.ts` of every `/upload` row.
+  `src/plugins/content-checks-upload.test.ts` of every `/upload` row. Amended by `M11-R133`: a container (WebM, MP4,
+  Ogg, a plain ZIP) is judged as each type it can be, the type it was sent as among them, so it is not refused on
+  `detected` alone.
 - **Visible in:** `src/plugins/content-checks.ts`, `docs/guide/plugins.md`.
 
 ### M11-K3: the wire body carries `content`, three fields copied one by one
@@ -61,7 +63,9 @@ Entries start from 1.
 - **If wrong:** a plugin that sets a value outside the three reasons sends it, and the client drops the field (M11-K4).
   AGENTS.md still says a client is sent "only the error's code, message, `retryable` and part numbers"; that sentence
   must name `content`.
-- **Status:** in force; `src/server/handler-failures.test.ts` (extra fields of a plugin's object are not sent).
+- **Status:** in force; `src/server/handler-failures.test.ts` (extra fields of a plugin's object are not sent). Amended
+  by `M11-R137`: `content` is checked before it is sent, and left out whole when it is not a refusal's ("a plugin that
+  sets a value outside the three reasons sends it" no longer holds).
 - **Visible in:** `src/protocol/types.ts`, `src/server/http.ts`, `docs/guide/errors.md`, `docs/guide/server.md`.
 
 ### M11-K4: the client reads `content` by shape and drops any other shape

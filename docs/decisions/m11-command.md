@@ -72,6 +72,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   pairs would report "No storage settings found".
 - **If wrong:** the suggested commands grow long with many pairs; they stay copyable.
 - **Status:** in force. The suggested commands still leave out `--env-file` and `--jurisdiction`, as before this change.
+  Its `"$NAME"` form in a printed command is superseded by `M11-R110`: the command names the bucket and the endpoint
+  themselves.
 - **Visible in:** `packages/cloudrop/src/cli/settings.ts`, `src/cli/bucket-access.ts`, `src/cli/instructions.ts`,
   `src/cli/doctor.ts`, `src/cli/setup.ts`, `src/cli/args.ts` (`sameArguments`), `src/cli/command-fixture.ts`
   (`runRenamed`), `src/cli/names.test.ts`.

@@ -1429,7 +1429,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
   would leave the lost attempt's bytes held exactly when the user is at the limit, the case this closes.
 - **If wrong:** a store that supersedes too little keeps today's known cost; too much would end a live upload, which
   the route, owner and pending-only predicate rule out short of a reused random key.
-- **Status:** decided.
+- **Status:** decided. Amended by `M11-R92`: the first `retry()` after an ask whose every attempt lost its answer sends
+  that ask's key again, so its rows are ended.
 - **Source:** task I, 2026-11-17.
 - **Visible in:** `src/server/store.ts`, `src/store/sql/{postgres,sqlite,records}.ts`,
   `src/testing/memory-store-methods.ts`, `src/testing/store-contract/supersede.ts`, the Drizzle tables, both Prisma
@@ -1449,7 +1450,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** brief ruling 3; the deviation keeps uploads working outside secure contexts.
 - **If wrong:** a key per attempt would make every retry a new request and supersede nothing; `launch.test.ts` pins one
   key per ask (fault probe: a new key per attempt turns two of its three cases red).
-- **Status:** decided; the key source deviates from the brief, for the reason above.
+- **Status:** decided; the key source deviates from the brief, for the reason above. Amended by `M11-R92`: the
+  `launch()` of the first retry after an ask that gave no ticket reuses that ask's key.
 - **Source:** task I, 2026-11-17.
 - **Visible in:** `src/client/launch.ts`, `src/client/endpoints.ts`, `docs/guide/client.md`.
 

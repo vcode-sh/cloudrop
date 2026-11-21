@@ -42,7 +42,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   that takes a new ticket, leave its record listed (a second one for the same file, after that retry) until it
   expires, a resume of it ends, or `forget()` runs: deleting it could take a record another tab is resuming.
 - **Status:** in force; narrowed in fix round 1 to failures the same ticket could fix, and a retry's new ticket no
-  longer deletes a given-up record (review I1, M4). Amends `M3-S15`, `M3-U29` and `M3-U33`.
+  longer deletes a given-up record (review I1, M4). Amends `M3-S15`, `M3-U29` and `M3-U33`. Amended by `M11-R91`: a
+  retry that replaces a ticket `pagehide` kept discards that upload first, record included.
 - **Source:** design §3 F1; code audit of `main` at `907cc77`.
 - **Visible in:** `client/file-run.ts` (`giveUp`, `end`), `client/failures.ts` (`NEEDS_NEW_TICKET`),
   `client/job-run.ts` (`forgetTicket`), `client.ts` (`leftovers`), `client/lifecycle.ts`, `client/persist.test.ts`

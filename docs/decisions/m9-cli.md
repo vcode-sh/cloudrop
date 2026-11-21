@@ -38,7 +38,9 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **If wrong:** an app that passes its settings in code gets problems for variables it does not use; the guide says so.
   `doctor` writes nothing, so a read-only token passes it although it cannot upload; the guide says so too (review
   finding, 2026-11-21).
-- **Status:** amended by `M9-H101` (a bucket that does not answer names the settings to check).
+- **Status:** amended by `M9-H101` (a bucket that does not answer names the settings to check). Amended by `M11-R170`
+  (the CORS check judges the rule the service answers with) and by `M11-R205` (it asks for the preflights, treats
+  `Retry-After` as advice and does not look at `ETag`).
 - **Visible in:** `src/cli/doctor.ts`, `src/cli/settings.ts`, `src/server/bucket-check.ts`.
 
 ### M9-C3: what R2 documents for the two writes, and the checksum sent
@@ -130,7 +132,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **If wrong:** the rules can change between the read and the write; S3 has no conditional write for them. R2's answer
   to a reader allowed to see the rules is unmeasured, including whether it keeps IDs.
 - **Status:** amended by `M9-H102` (a refused read is diagnosed by a listing; `--replace` is offered, and acts, only
-  after a `403`, no longer after a `501`).
+  after a `403`, no longer after a `501`). Amended by `M11-R171` (cloudrop's CORS rule may move before a rule that would
+  answer in its place) and by `M11-R205` (such a rule is one that does not expose `Retry-After`).
 - **Visible in:** `src/cli/rules.ts`, `src/cli/setup.ts`, `docs/guide/command.md`.
 
 ### M9-C7: cloudrop's rules, and no second abort rule
@@ -169,13 +172,14 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   setting's value reached its output, including values that came from an env file. A rule ID read from the bucket is
   printed with its control characters escaped, so it cannot drive the terminal or split a finding.
 - **If wrong:** a shell without the variables set needs the bucket name typed into the printed command by hand.
-- **Status:** "no value ever printed" is superseded by `M11-R110` and `M11-R177`: the command never prints a secret
-  (the access key ID, the secret access key, the upload token secret), the R2 account ID or the S3 region, and it does
-  print the bucket's name and the S3 endpoint as words of the Wrangler and AWS CLI commands it suggests, in place of
+- **Status:** "no value ever printed" is superseded by `M11-R110` and `M11-R177`: the command never prints a secret (the
+  access key ID, the secret access key, the upload token secret), the R2 account ID or the S3 region, and it does print
+  the bucket's name and the S3 endpoint as words of the Wrangler and AWS CLI commands it suggests, in place of
   `"$CLOUDROP_R2_BUCKET"` and `"$CLOUDROP_S3_ENDPOINT"`. The rest stands, amended by `M9-H103` (notes for near-miss
   names), `M9-H104` (advice for an unreadable file; Node's exit 9) and `M11-R115` (the path of an unreadable file). The
   live check of 2026-11-21 (no value of the env file in `doctor`'s or `setup --dry-run`'s output) predates `M11-R110`:
-  `doctor` with a token that reads no rules now prints the bucket's name twice.
+  `doctor` with a token that reads no rules now prints the bucket's name twice. Amended by `M11-R112` (the env file is
+  read as Node reads it) and by `M11-R115` (an env file that cannot be read is named by its error code, not its path).
 - **Visible in:** `src/cli/settings.ts`, `src/cli/env-file.ts`, `src/storage/presets.ts`, `src/cli/command-fixture.ts`.
 
 ### M9-C9: a separately built bin on `process`, described by hand

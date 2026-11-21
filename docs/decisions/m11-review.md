@@ -845,7 +845,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   retry sends the file again under a new key instead of `/complete` alone; the first object and row go with the
   `/abort` of `M11-R89`. A person who retries a file refused for its content sends it again to be refused again: the
   client cannot know whether the server's rules changed, and `/upload`'s own refusals are asked again the same way.
-- **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on.
+- **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on. Its
+  table is amended by `M11-R92` (first row: a retry frees the rows a lost answer left) and by `M11-R200`
+  (`NO_SUCH_UPLOAD`: with a store the row is `rejected`).
 - **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
   `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Retry").
@@ -1027,8 +1029,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   a ticket the server had already ended a second time, as after `abort()` of such a file. A resumed upload that starts
   over (`M3-U74`) still sends no `/abort` for its old ticket: its probe answered that the upload is gone, and the one
   case with a pending row left, parts missing in the ticket's last 15 minutes, ends with the sweep.
-- **Status:** in force. Supersedes `M3-U55` for `retry()`. Amended by `M11-R201`: a ticket a `/complete` may have
-  finished gets its `/abort`, with `keep`, once the server has answered that it is over.
+- **Status:** in force. Supersedes `M3-U55` for `retry()`. The last sentence of its "If wrong" is superseded by
+  `M11-R90`: a resumed upload that starts over sends its `/abort` too. Amended by `M11-R201`: a ticket a `/complete`
+  may have finished gets its `/abort`, with `keep`, once the server has answered that it is over.
 - **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
   `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
 
@@ -2354,3 +2357,23 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M11-R132` ("ZIP64 descriptors (8-byte sizes) are not read").
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff-zip.test.ts`, `src/testing/file-samples.ts`,
   `docs/guide/plugins.md`.
+
+### M11-R213: an earlier decision that a review entry changed says so in its own status line
+
+- **Decision:** every entry that a `M11-R` entry amends, supersedes or reverses now names that entry in its own
+  status line, with what changed: `M11-K2` (`M11-R133`), `M11-K3` (`M11-R137`), `M11-C4` (`M11-R110`), `M9-C2`
+  (`M11-R170`, `M11-R205`), `M9-C6` (`M11-R171`, `M11-R205`), `M9-C8` (`M11-R112`, `M11-R115`), `M9-H100`
+  (`M11-R115`), `M3-U30` (`M11-R81`), `M3-U31` (`M11-R80`), `M3-U55` (`M11-R90`), `M3-U94` (`M11-R201`), `M4-F1`
+  (`M11-R91`), `M5-T101` and `M5-T102` (`M11-R92`), `M11-R80` (`M11-R92`, `M11-R200`), `M11-R89` (`M11-R90`,
+  `M11-R201`).
+- **Why:** a reader who opens `M11-K2` reads that `detected` decides a refusal, and nothing there said that
+  `M11-R133` changed it for containers; the pointer stood only in the later entry. `M3-U55` still said it was "in
+  force for a resumed upload that starts over", which `M11-R90` ended. Found by reading the status line of each of
+  the 105 `M11-R` entries for "amends", "supersedes", "reverses", "replaces" and "corrects", and looking in each
+  entry they name for the id of the entry that names it: 18 pairs had none, and all have one now.
+- **If wrong:** an entry changed by a later one whose status line uses other words than those five is not found by
+  that reading; `M11-R136` ("two sentences corrected" in `m10-content.md`) edited its target's text instead, which
+  needs no pointer.
+- **Status:** in force.
+- **Visible in:** `docs/decisions/m11-content.md`, `m11-command.md`, `m9-cli.md`, `m9-hardening.md`, `m3-uploader.md`,
+  `m4-dx.md`, `m5-store.md`, `m11-review.md`.

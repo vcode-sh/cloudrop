@@ -499,7 +499,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   new ticket. A file whose `/complete` may have succeeded and whose ticket has expired can never be confirmed done by
   `retry()`: `/complete` answers `UPLOAD_EXPIRED`, the file ends failed with it, and no new ticket follows, since the
   file may be stored (task 5 concern, audit I6). The app's own `onComplete` record is then the only answer.
-- **Status:** in force (`4f1887a`).
+- **Status:** in force (`4f1887a`). Its "If wrong" is amended by `M11-R81`: once the server has answered that a ticket
+  in doubt is over, the next retry asks for a new one.
 - **Visible in:** `client/retry-file.ts` (`needsTicket`, `retryFiles`), `client/retry-file.test.ts` (the two
   `/complete`-first rows).
 
@@ -513,9 +514,10 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   refused (400, a signature mismatch) would be refused again under the same ticket.
 - **If wrong:** an error missing from the list spends one `retry()` on the old ticket; one wrongly on it re-sends a file
   that could have finished.
-- **Status:** in force (`4f1887a`). Amended by `M3-U74`: `NO_SUCH_UPLOAD` joins the list (in force, resume plan
-  task 4), also after a `/complete` that left doubt (`M3-U83`). Amended by `M3-U92` (in force): a retryable refusal at
-  `/upload` reaches `retry()` only once `start()` or `upload()` has used the file's attempts on it.
+- **Status:** in force (`4f1887a`). Amended by `M3-U74`: `NO_SUCH_UPLOAD` joins the list (in force, resume plan task 4),
+  also after a `/complete` that left doubt (`M3-U83`). Amended by `M3-U92` (in force): a retryable refusal at `/upload`
+  reaches `retry()` only once `start()` or `upload()` has used the file's attempts on it. Its list is superseded by
+  `M11-R80`: `retryStep` decides, and a code it does not name needs a new ticket.
 - **Visible in:** `client/retry-file.ts` (`NEEDS_NEW_TICKET`, `needsTicket`), `client/retry-file.test.ts`.
 
 ### M3-U32: `abort()` on a failed file
@@ -850,7 +852,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   `INVALID_TOKEN`, `UPLOAD_REJECTED` or `VERIFICATION_FAILED` nothing under the old ticket can be reused.
 - **If wrong:** parts landed under an old multipart ticket wait for the bucket's lifecycle rule.
 - **Status:** superseded for `retry()` by `M11-R89`: the replaced ticket gets its `/abort` first, unless a `/complete`
-  may have finished it. Still in force for a resumed upload that starts over (`M3-U74`).
+  may have finished it. It stayed in force for a resumed upload that starts over (`M3-U74`) until
+  `M11-R90` superseded it there too.
 - **Visible in:** `client/retry-file.ts` (`requeue`).
 
 ### M3-U56: `retry()` resolves once every file it waits for has settled
@@ -1617,7 +1620,8 @@ decides); "research decision `<n>`" is its section 5, question `<n>`. Its measur
   `discard()` send nothing for such a record; it costs a write per completion and misses older records.
 - **Status:** in force (task B fix round 2, M4b); amended in fix round 3 (controller ruling): with a store's row `keep`
   changes nothing. A server older than this ignores `keep` and keeps today's behaviour; `docs/guide/resume.md` says to
-  update the server with the client.
+  update the server with the client. Amended by `M11-R201`: a ticket whose doubt the server ended is given up with
+  `keep` too.
 - **Source:** task B re-review N1, controller ruling 2026-11-17.
 - **Visible in:** `server/abort.ts`, `server/abort.test.ts` and `server/store-abort.test.ts` (the `keep` rows: a pending
   row's landed object deleted, a completed file kept),
