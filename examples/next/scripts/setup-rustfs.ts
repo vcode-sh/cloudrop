@@ -65,7 +65,7 @@ console.log(`Preflight from ${PAGE_ORIGIN} allowed`);
 
 const lifecycle = await putBucketConfig(
   "lifecycle",
-  "<LifecycleConfiguration><Rule><ID>abort-incomplete-uploads</ID><Filter><Prefix></Prefix></Filter>" +
+  "<LifecycleConfiguration><Rule><ID>cloudrop-abort-incomplete</ID><Filter><Prefix></Prefix></Filter>" +
     "<Status>Enabled</Status><AbortIncompleteMultipartUpload><DaysAfterInitiation>1</DaysAfterInitiation>" +
     "</AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>",
 );

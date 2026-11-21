@@ -1819,8 +1819,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   cloudrop's name but is disabled, or limited to a prefix, is reported as a problem.
 - **If wrong:** a bucket set up from the old guide keeps a rule named `abort-incomplete-uploads`; it passes every
   check, and `setup --apply` leaves it alone and adds none (`M9-C7`).
-- **Status:** in force. `examples/next/scripts/setup-rustfs.ts` and `examples/hono/scripts/setup-rustfs.ts` still
-  write the old name into their local RustFS bucket.
+- **Status:** in force. `examples/next/scripts/setup-rustfs.ts` and `examples/hono/scripts/setup-rustfs.ts` write
+  the same name since `M11-R206`.
 - **Visible in:** `docs/guide/bucket-setup.md`, `src/server/bucket-check.test.ts`.
 
 ### M11-R176: an origin's host is one a browser loads a page from
@@ -2224,3 +2224,16 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `docs/guide/bucket-setup.md` ("What any bucket needs", "Why the rule exposes ETag", "What checkBucket can tell
   you"), `docs/guide/command.md`, `docs/guide/troubleshooting.md`, `docs/guide/server.md` ("checkBucket"),
   `examples/next/README.md`.
+
+### M11-R206: the examples' RustFS setup writes the lifecycle rule under the command's name
+
+- **Decision:** `examples/next/scripts/setup-rustfs.ts` and `examples/hono/scripts/setup-rustfs.ts` name the lifecycle
+  rule they write `cloudrop-abort-incomplete`, as `cloudrop setup` and the guide do (`M11-R175`). Each script
+  replaces the bucket's lifecycle configuration when it runs, so the next `bun run setup:rustfs` leaves one rule under
+  the new name.
+- **Why:** the two scripts were the last place that wrote `abort-incomplete-uploads`, so a reader who ran an example
+  and then `cloudrop doctor` or `setup --dry-run` against it met a second name for the one rule.
+- **If wrong:** nothing depends on the name: the checks know the rule by what it does (`M11-R175`). A local RustFS
+  bucket set up before keeps the old name until the script runs again.
+- **Status:** in force. Completes `M11-R175`.
+- **Visible in:** `examples/next/scripts/setup-rustfs.ts`, `examples/hono/scripts/setup-rustfs.ts`.
