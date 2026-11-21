@@ -150,10 +150,12 @@ The plugin applies to every route. A type that one route takes and another must 
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
 | Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/` | `execve(2)` |
 | SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg` | SVG 2 |
-| Web page | `text/html` | a tag such as `<html`, `<script`, `<div`, `<p`, `<!DOCTYPE html` or `<!--` at the start, an `html` root, or one of those tags as the root after a comment or doctype in a document without `<?xml` | WHATWG §7.1 |
+| Web page | `text/html` | one of the standard's tags (`<!DOCTYPE html`, `<html`, `<head`, `<script`, `<iframe`, `<h1`, `<div`, `<font`, `<table`, `<a`, `<style`, `<title`, `<b`, `<body`, `<br`, `<p`) at the start, in any case, before a space or `>`; also before a tab, a line break or `/`; also as the root after a comment or a doctype in a document without `<?xml`; an `html` root; or `<!--` at the start, whatever follows | WHATWG §7.1 |
 | XML | `application/xml` | `<?xml` | WHATWG §7.1 |
 
-Text is read after a byte order mark (UTF-8 or UTF-16) and after leading whitespace, as a browser reads it.
+Text is read after a byte order mark (UTF-8 or UTF-16) and after the standard's whitespace bytes (tab, line feed, form
+feed, carriage return, space). A tag is its whole name: `<a,b>`, `<a@b.com>` and `<br2>` are not tags. The standard
+asks for a space or `>` after `<!--` too; Chromium and Firefox take it before any byte, and so does the check.
 
 ### Limits
 

@@ -1045,3 +1045,31 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   include DocTypes named like inherited members, and a new format adds its start to `PREFIXES`.
 - **Status:** in force.
 - **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.test.ts`, `src/plugins/sniff-fuzz.test.ts`.
+
+
+### M11-R131: a tag is its whole name, and `<!--` is a web page before any byte
+
+- **Decision:** text reads as `text/html` when, after the standard's whitespace bytes (`09 0A 0C 0D 20`), it starts
+  with a row of the table in WHATWG MIME Sniffing §7.1 (Living Standard, 19 October 2026, commit `ba4b3c3`): one of
+  the sixteen tags in any case before a tag-terminating byte (space or `>`), or `<!--`. Three choices go past the
+  table, each on purpose: (1) a tag also ends at the standard's other whitespace bytes and at `/` (`<br/>`,
+  `<div` then a line feed), as `M10-K1` ruled; (2) one of the fifteen elements is also found as the unprefixed root
+  after comments or a doctype in a document without `<?xml`, as before; (3) `<!--` needs no byte after it. Nothing
+  else ends a name, so `<a,b>`, `<a@b.com>`, `<b|c>` and `<br2>` are not tags. Leading whitespace is the standard's
+  five bytes only: a vertical tab or a no-break space is content.
+- **Why:** the root element's name was read without looking at what ended it, so `<a,b> denotes the inner product`,
+  `<a@b.com> wrote:` and `<b|c>` were refused as web pages (review finding G6, reproduced). The finding also says the
+  standard matches a bare `<!--`; its current text does not (`3C 21 2D 2D TT`, mask `FF FF FF FF FF`: "followed by a
+  tag-terminating byte", the same in the published page, the commit snapshot and `mimesniff.bs`). Browsers do:
+  Chromium's `kSniffableTags` (`net/base/mime_sniffer.cc`) matches `<!--` as a prefix, and Firefox's
+  `nsUnknownDecoder` does behind `network.mimesniff.non_standard_html_comment`, which is `true` in
+  `StaticPrefList.yaml` ("differs from the mimesniff standard but matches Chrome"). `<!--x-->hello<script>` is
+  therefore a page in both, and showed no type here (reproduced). Chromium matches every tag as a bare prefix
+  (`<address` as `<a`); that is not followed, since it would refuse `<abbr>` and `<price>`, and Firefox and the
+  standard agree on the terminator.
+- **If wrong:** text that opens with `<!--` and is not HTML or SVG (a Markdown file, an XML file without a
+  declaration) is refused as a web page whether or not a space follows; the guide's Limits say so. A page whose first
+  tag ends at a byte outside space, tab, line break, `/` and `>` is not detected, as in both browsers' own tables.
+- **Status:** in force; `src/plugins/sniff-text.test.ts` has every row of the table, in both cases, before each
+  terminator, after the whitespace bytes, and inside a longer name.
+- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `docs/guide/plugins.md`.

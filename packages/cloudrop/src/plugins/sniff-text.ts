@@ -19,21 +19,30 @@ const SCRIPT = kind(
 );
 
 /**
- * WHATWG MIME Sniffing §7.1, the rules for identifying an unknown MIME type: these tags, in any case, after whitespace,
- * end in a space or ">". A "/" and any other whitespace end them here too: a browser's parser reads those the same.
+ * WHATWG MIME Sniffing §7.1, the rules for identifying an unknown MIME type (Living Standard, 19 October 2026): the two
+ * rows of its table that are not an element. "<!DOCTYPE HTML" in any case, before a tag-terminating byte: a space or
+ * ">" (§3). And "<!--": the standard wants a tag-terminating byte after it too, but Chromium (net/base/mime_sniffer.cc,
+ * kSniffableTags) and Firefox (network.mimesniff.non_standard_html_comment, on by default) take it before any byte.
  */
-const HTML_START = /^<(?:!doctype html|html|head|script|iframe|h1|div|font|table|a|style|title|b|body|br|p|!--)[\s/>]/i;
+const HTML_START = /^<(?:!doctype html[ >]|!--)/i;
 /**
- * The same tags as the unprefixed root element of a document without an XML declaration, after comments or a doctype:
- * a browser that renders it as HTML finds them there. In a declared XML document they are the app's own elements.
+ * The table's fifteen elements. Each is matched as the unprefixed root element of a document without an XML
+ * declaration: at the start, as the standard has it, and after comments or a doctype, where a browser that renders the
+ * document as HTML finds it. In a declared XML document they are the app's own elements.
  */
 const HTML_ROOTS: ReadonlySet<string> = new Set(
   "html head script iframe h1 div font table a style title b body br p".split(" "),
 );
 /** What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype. */
-const PROLOG_ITEM = /\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
-/** An element's start tag: its name, with its namespace prefix when it has one, is captured. */
-const START_TAG = /<((?:[\w.-]+:)?[A-Za-z_][\w.-]*)/y;
+const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
+/**
+ * An element's start tag: its name, with its namespace prefix when it has one, is captured. The name ends where XML
+ * 1.0 §3.1 and an HTML parser end it, at whitespace, "/" or ">": the standard's two tag-terminating bytes and the
+ * rest of its whitespace bytes. "<a,b>" and "<a@b.com>" are not tags (M11-R131).
+ */
+const START_TAG = /<((?:[\w.-]+:)?[A-Za-z_][\w.-]*)(?=[\t\n\f\r />])/y;
+/** The standard's whitespace bytes (§3), which every row of its table ignores before the pattern. */
+const LEADING = /^[\t\n\f\r ]+/;
 
 /** UTF-16 code units from `start`, as WHATWG Encoding's BOM sniff selects them; enough to compare ASCII. */
 function utf16(bytes: Uint8Array, start: number, littleEndian: boolean): string {
@@ -81,7 +90,7 @@ function isScript(bytes: Uint8Array): boolean {
 
 export function sniffText(bytes: Uint8Array): Sniffed | null {
   if (isScript(bytes)) return SCRIPT;
-  const text = decode(bytes).trimStart();
+  const text = decode(bytes).replace(LEADING, "");
   if (!text.startsWith("<")) return null;
   // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
   const root = rootElement(text) ?? "";
