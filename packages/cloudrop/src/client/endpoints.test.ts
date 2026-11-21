@@ -174,8 +174,7 @@ describe("start", () => {
       const { endpoints } = setup({ fault: () => Response.json({ files: [ticket] }) });
       // A size no test could hold in memory: the client reads only `size` before the first PUT.
       const file = Object.defineProperty(new File([], "video.bin"), "size", { value: row.size });
-      const { data, error } = await endpoints.start("files", [file], undefined, KEY, live());
-      return error ? error.code : data[0] instanceof CloudropError ? data[0].code : "accepted";
+      return endpoints.start("files", [file], undefined, KEY, live());
     }
 
     it.each([
@@ -187,7 +186,7 @@ describe("start", () => {
       },
       { name: "parts of 5 GiB, the largest", size: 5_368_709_121, partSize: 5_368_709_120, partCount: 2 },
     ])("accepts $name", async (row) => {
-      expect(await started(row)).toBe("accepted");
+      expect((await started(row)).error).toBeNull();
     });
 
     it.each([
@@ -204,7 +203,8 @@ describe("start", () => {
       { name: "a URL for part 3 of 2", size: 8 * MiB + 5, partSize: 8 * MiB, partCount: 2, signs: [1, 3] },
       { name: "a URL for part 0", size: 8 * MiB + 5, partSize: 8 * MiB, partCount: 2, signs: [0] },
     ])("refuses $name", async (row) => {
-      expect(await started(row)).toBe("SERVER_ERROR");
+      // The whole answer is unreadable, as one from another service: not this file alone, and not to be tried again.
+      expect(errorOf(await started(row))).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
     });
   });
 

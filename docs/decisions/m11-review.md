@@ -835,7 +835,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   table is amended by `M11-R92` (first row: a retry frees the rows a lost answer left) and by `M11-R200`
   (`NO_SUCH_UPLOAD`: with a store the row is `rejected`).
 - **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
-  `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
+  `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer
+  at `/complete`; at `/sign` and for the bucket's `PUT`, one row per step and per code only that request can meet),
   `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Retry").
 
 ### M11-R81: a `/complete` in doubt ends with the server's word
@@ -3023,3 +3024,22 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/launch.ts` (`unlessCancelled`), `src/client/endpoints.ts` (`answerOnceSent`),
   `src/client/close.ts`, `src/client/cancelled-ask.test.ts`, `src/client/close.test.ts`, `src/client/resume.test.ts`,
   `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel", "Close the client").
+
+### M11-R262: four behaviours of the client and the hooks that no test held now fail a test when removed
+
+- **Decision:** four tests were added or made stronger, each seen red against the code with the named behaviour
+  removed:
+
+  | Behaviour | Test | Removed to see it fail |
+  | --- | --- | --- |
+  | `NOT_UPLOADED` ends a doubt, so a cancel afterwards sends `/abort` (`M11-R81`) | `src/client/upload-abort.test.ts`, "a doubt the server ended with NOT_UPLOADED" | `NOT_UPLOADED` in the list that clears the doubt (`upload.ts`): the cancel sent nothing |
+  | A read of `useResumable` that answers after a newer one started does not replace the newer list | `src/react/rerender.test.ts`, "when an older read answers after a newer one" | `read === now.reads` (`use-resumable.ts`): the upload `forget()` had removed was listed again |
+  | `useResumable` never shows the records of another factory (`M11-R5`, which was tested for a changed route only) | `src/react/rerender.test.ts`, "from another factory, without a remount" | `listed.source === source`: the first render of the second factory listed the first one's upload |
+  | A ticket whose part plan the client refuses makes the whole `/upload` answer unreadable (`M11-R85`) | `src/client/endpoints.test.ts`, the six "refuses" rows of the part-plan table | the status in `unreadableAnswer(response.status)` replaced by `500`: the rows asserted the code alone and passed |
+
+- **Why:** the final review found each behaviour stated in a decision or a comment and held by no assertion. The six
+  refused rows of the part-plan table all get one message, "The upload server sent an answer this client cannot read
+  (HTTP 200) ...", not retryable; none differs, and each row now asserts the code, the message and `retryable`.
+- **If wrong:** nothing: tests only.
+- **Status:** in force.
+- **Visible in:** the three test files named above.

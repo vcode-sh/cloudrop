@@ -4,13 +4,15 @@
 // without waiting for that /abort. Oracle: the objects and open uploads the fake bucket holds once the /abort the
 // fixture forwarded has settled, and the requests the fixture saw. A /complete that never left the page (the headers
 // function failed) is no doubt (M11-R82): the stored file is removed, by upload() at once and by abort() after start().
+// NOT_UPLOADED ends a doubt (M11-R81): the bucket holds no object under the key, so the cancel that follows tells the
+// server, which then frees what the ticket reserved.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ClientOptions, createCloudropClient } from "../client.ts";
 import type { CloudropError } from "../errors.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { clientFixture, type Fault, storageBusy, unfinished } from "../testing/client-fixture.ts";
+import { clientFixture, type Fault, lostPart, storageBusy, unfinished } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
@@ -202,5 +204,28 @@ describe("a /complete that was never sent", () => {
       requests: ["POST /upload", "PUT object", "POST /abort"],
       head: null,
     });
+  });
+});
+
+describe("a doubt the server ended with NOT_UPLOADED (M11-R81)", () => {
+  it("abort() of the failed file sends /abort", async () => {
+    // A proxy answered the PUT for the bucket, and the first run's six /complete calls failed on the server's side.
+    const { fixture, client } = setup(({ label, nth }) => {
+      if (label === "PUT object") return lostPart();
+      return label === "POST /complete" && nth <= 6 ? unfinished() : undefined;
+    });
+    const job = client.start("files", small());
+    const first = await job.done;
+    const retried = await job.files[0]?.retry();
+    const before = fixture.requests.length;
+    job.abort();
+    // Resolves once every /abort the cancel sent was answered.
+    await client.close();
+
+    expect({
+      first: first.error?.code,
+      retried: retried?.status === "failed" && retried.error.code,
+      sentByCancel: fixture.requests.slice(before),
+    }).toEqual({ first: "SERVER_ERROR", retried: "NOT_UPLOADED", sentByCancel: ["POST /abort"] });
   });
 });

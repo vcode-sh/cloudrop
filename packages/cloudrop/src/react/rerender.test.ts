@@ -2,19 +2,41 @@
 // Contract (M11-R4, M11-R5): a hook follows the latest render without a remount. useUpload from another factory, as
 // from a changed context, uploads through that factory's client and shows its list; an upload still running on the
 // previous factory stays on its client, out of the new list and of the hook's controls. useResumable never shows the
-// records of a route or a factory other than the render's.
-// Oracle: the requests each fixture saw, the statuses the client reports, and the route of every record of every render.
+// records of a route or a factory other than the render's, nor a list read before the one it shows.
+// Oracle: the requests each fixture saw, the statuses the client reports, and the route or the id of every record of
+// every render.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRecords, type UploadRecord } from "../client/records.ts";
 import { createUploadHooks } from "../react.ts";
 import { allowAnyone, route } from "../server/route.ts";
-import { gate, partThree, reloaded } from "../testing/persist-fixture.ts";
+import { gate, partThree, persistFixture, reloaded } from "../testing/persist-fixture.ts";
 import { fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 
 const routes = { notes: route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone }) };
 const done = ["POST /upload", "PUT object", "POST /complete"];
+
+/** An unfinished upload of `namespace`, valid for a day, as the browser's store keeps it. */
+const record = (id: string, namespace: string): UploadRecord => ({
+  id,
+  namespace,
+  route: "files",
+  metadata: undefined,
+  name: `${id}.bin`,
+  size: 52_428_800,
+  type: "application/octet-stream",
+  lastModified: 1_763_200_000_000,
+  fingerprint: "ab".repeat(32),
+  token: `token-${id}`,
+  key: `uploads/${id}.bin`,
+  partSize: 10_485_760,
+  partCount: 5,
+  expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+  savedAt: Date.now() - 1000,
+});
+const ids = (uploads: readonly { id: string }[] | null | undefined) => uploads?.map(({ id }) => id);
 
 beforeEach(() => {
   // Every backoff wait becomes 0 ms.
@@ -95,5 +117,64 @@ describe("useResumable with another route, without a remount", () => {
 
     expect(renders.filter(({ route, listed }) => listed.some((of) => of !== route))).toEqual([]);
     expect(renders.map(({ route }) => route)).toContain("avatars");
+  });
+});
+
+describe("useResumable from another factory, without a remount", () => {
+  it("never shows the previous factory's records", async () => {
+    const setup = persistFixture({ options: { namespace: "ada" } });
+    createRecords(true).save(record("ada-1", "ada"));
+    createRecords(true).save(record("bob-1", "bob"));
+    await setup.db.settled();
+    const factories = {
+      ada: createUploadHooks({ client: setup.client }),
+      bob: createUploadHooks({ client: setup.reload({ namespace: "bob" }) }),
+    };
+    const renders: { user: string; listed: string[] }[] = [];
+    const { result, rerender } = renderHook(
+      ({ user }: { user: "ada" | "bob" }) => {
+        const resumable = factories[user].useResumable();
+        renders.push({ user, listed: resumable.uploads.map((upload) => upload.id) });
+        return resumable;
+      },
+      { initialProps: { user: "ada" } },
+    );
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual(["ada-1"]), fast);
+    rerender({ user: "bob" });
+    await waitFor(() => expect(ids(result.current.uploads)).toEqual(["bob-1"]), fast);
+
+    expect(renders.filter(({ user, listed }) => listed.some((id) => !id.startsWith(user)))).toEqual([]);
+  });
+});
+
+describe("useResumable, when an older read answers after a newer one", () => {
+  it("keeps the newer list", async () => {
+    const setup = persistFixture();
+    createRecords(true).save(record("kept", ""));
+    await setup.db.settled();
+    // The read at mount gets the list with the upload in it, and answers only once `late` resolves.
+    const read = setup.client.resumable;
+    const late = Promise.withResolvers<void>();
+    let stale: string[] | undefined;
+    vi.spyOn(setup.client, "resumable").mockImplementationOnce(async (name) => {
+      const answer = await read(name);
+      stale = ids(answer.data);
+      await late.promise;
+      return answer;
+    });
+    const { useResumable } = createUploadHooks({ client: setup.client });
+    const { result } = renderHook(() => useResumable());
+    await act(() => result.current.forget());
+    const afterForget = ids(result.current.uploads);
+    await act(async () => {
+      late.resolve();
+      await setup.db.settled();
+    });
+
+    expect({ stale, afterForget, afterLateRead: ids(result.current.uploads) }).toEqual({
+      stale: ["kept"],
+      afterForget: [],
+      afterLateRead: [],
+    });
   });
 });
