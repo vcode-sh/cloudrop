@@ -54,10 +54,12 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   has no MD5; a CRC32C would bring its tables into every server bundle (measured: `cloudrop (bundled)` 30.16 kB, over
   its 30 kB budget), while SHA-256 is the digest the signer already computes. RustFS 1.0.5 accepts both writes with it
   (contract lane, 2026-11-21).
-- **If wrong:** R2 may refuse the header or the calls; it is unmeasured, because the live lane never writes bucket
-  settings (`M9-C4`). The first `setup --apply` against R2 would show it as a failed write with the storage's message,
-  and nothing else is affected.
-- **Status:** in force; R2's answer to both writes unmeasured.
+- **If wrong:** R2 may refuse the header or the calls. The first `setup --apply` against R2 would show it as a failed
+  write with the storage's message, and nothing else is affected.
+- **Status:** in force. Measured on R2 on 2026-11-21 with an Admin Read & Write token, on the owner's development
+  bucket at the owner's request: both writes accepted with `x-amz-checksum-sha256`, R2 keeps a CORS rule's `ID` and a
+  lifecycle rule's `ID` and fields, and another rule written back from its `sourceXml` reads back unchanged
+  ([findings](../research/r2-spike-findings.md#setup-writes-on-r2-2026-11-21)). The live lane still never writes.
 - **Visible in:** `src/storage/s3/bucket-writes.ts`, `src/testing/fake-r2/copy.ts`.
 
 ### M9-C4: optional bucket-settings writes, kept out of app bundles, proven on RustFS only

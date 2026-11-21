@@ -908,6 +908,23 @@ that the probe harness itself stopped early were cleared by hand from their logg
 multipart upload, left open by a probe that failed before registering it, was found by listing the bucket's open
 uploads and aborted; the listing then showed none. No bucket setting was read or written.
 
+## setup writes on R2, 2026-11-21
+
+Measured by the coordinator on the owner's development bucket (EEUR) at the owner's request, with an R2 Admin Read &
+Write token, after backing up the bucket's CORS and lifecycle rules with Wrangler. The command was the built
+`dist/cli.js`.
+
+| Row | Measured | cloudrop |
+|---|---|---|
+| Object tokens (the test bucket's and the development bucket's) | `GetBucketCors` and `GetBucketLifecycleConfiguration` `403` | `doctor` reports `NOT CHECKED`, as `M9-C2` says |
+| Admin token: `doctor` for the bucket's two origins | CORS and lifecycle read; `ok` for both | as designed |
+| `setup --apply` for `http://localhost:5173` and `http://127.0.0.1:5173` | `PutBucketCors` with `x-amz-checksum-sha256` `200`; Wrangler lists the bucket's own rule unchanged and cloudrop's beside it | `M9-C3`, `M9-C6` hold on R2 |
+| The same `--apply` again | reads rule `cloudrop-uploads` back by its `ID`; writes nothing | R2 keeps CORS rule IDs |
+| Lifecycle | the bucket's `Default Multipart Abort Rule` already aborts after 1 day: nothing written (`M9-C7`) | as designed |
+| `PutBucketLifecycleConfiguration` with that rule (from its `sourceXml`) and a temporary prefixed rule | `200`; both read back with their IDs, prefixes and days | R2 keeps lifecycle rule IDs and fields |
+| `test:browser:live` (the Next example, two passes) against this bucket | 27 + 3 passed through the rule `setup` wrote; 30 objects deleted | the written rule is enough for real browser uploads |
+| Restore | the temporary rule and `cloudrop-uploads` removed through the same writes; Wrangler's listing identical to the backup | |
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in

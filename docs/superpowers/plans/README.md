@@ -116,9 +116,9 @@ abort plumbing with `replace`, `deleteFile`, `sweep({ all })`, `eraseOwner` and 
 none decided:
 
 - **Done on `main` (unreleased):** `cloudrop/testing` (`M9-T`) and the `cloudrop doctor`/`setup` command (`M9-C`),
-  designed in `docs/superpowers/specs/2026-11-21-testing-and-cli-design.md`. Open: R2's answer to `setup --apply`'s
-  two writes is unmeasured, since the live test bucket is never written; measuring it needs a bucket the owner gives
-  for it and a token allowed to change its settings.
+  designed in `docs/superpowers/specs/2026-11-21-testing-and-cli-design.md`. R2 accepts `setup --apply`'s two
+  writes (measured on the development bucket with an admin token, 2026-11-21), and a real browser uploaded through the
+  rule it wrote.
 - **`api.files` filters:** the pilot kept its own listing for a name search and a join with its profile table.
 - **Who the client uploads for:** the pilot sends the user's id in `headers` so the server refuses an `/upload` sent
   with another account's cookie after a sign-in in another tab (`M7-P3`'s open window). A documented recipe, or a
