@@ -97,6 +97,22 @@ describe("createS3Driver", () => {
       (driver) => driver.put("a.txt", "x", { checksumCrc32c: "4waSgw==x" }),
       checksumMessage,
     ],
+    // A list passes a pattern test as its text would, and the signer would then throw on it.
+    [
+      "a checksum given as a list on put",
+      (driver) => driver.put("a.txt", "x", { checksumCrc32c: ["4waSgw=="] as never }),
+      checksumMessage,
+    ],
+    [
+      "a checksum given as a list on presignPut",
+      (driver) => driver.presignPut("a.txt", { ...presignOptions, checksumCrc32c: ["4waSgw=="] as never }),
+      checksumMessage,
+    ],
+    [
+      "a checksum given as a list on presignPart",
+      (driver) => driver.presignPart("a.txt", "u", 1, { ...presignOptions, checksumCrc32c: ["4waSgw=="] as never }),
+      checksumMessage,
+    ],
     [
       "an empty upload ID on presignPart",
       (driver) => driver.presignPart("a.txt", "", 1, presignOptions),

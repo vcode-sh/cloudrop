@@ -165,3 +165,22 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** the hook holds an id until the list is read again, which is when the example's own set let go of it.
 - **Status:** in force.
 - **Visible in:** `examples/next/components/upload/unfinished-uploads.tsx`, `docs/guide/react.md#build-your-upload-ui`.
+
+### M11-R24: a value of the wrong type from JavaScript answers INVALID_INPUT, in the checksum and in bucket rules
+
+- **Decision:** `checksumProblem` checks that `checksumCrc32c` is a string before it tests its pattern, and
+  `putBucketCors` and `putBucketLifecycle` check each rule's shape before writing XML: a CORS rule is an object whose
+  four lists are lists of text; a lifecycle rule is an object with `sourceXml` as text, or with `prefix` as text and
+  `abortIncompleteMultipartUploadDays` as a whole number from 1. Anything else answers `INVALID_INPUT` naming the shape.
+  What a valid rule may contain beyond that is still left to the service.
+- **Why:** a pattern tests a list or an object as its text, so `checksumCrc32c: ["4waSgw=="]` passed the check on
+  `put`, `presignPut` and `presignPart` and the signer then threw `TypeError: value.trim is not a function`;
+  `putBucketCors([null])`, `putBucketCors([{}])` and `putBucketLifecycle([null])` threw `TypeError` too. A public call
+  answers a Result and never throws. A lifecycle rule without a prefix was written with the prefix `undefined`, as
+  text, which a service accepts as a rule for keys that start with those nine letters. Every other validator in
+  `validate.ts` already checked the type; a table test now passes each one numbers, lists, objects, `null` and booleans.
+- **If wrong:** a caller who passed a `String` object as a checksum, or a lifecycle rule with neither `sourceXml` nor
+  days, gets `INVALID_INPUT` where the first worked by accident and the second was refused by the service.
+- **Status:** in force.
+- **Visible in:** `src/storage/validate.ts`, `src/storage/s3/bucket-writes.ts`, `src/storage/validate.test.ts`,
+  `src/storage/s3-driver.test.ts`, `src/storage/s3/bucket-settings.test.ts`.

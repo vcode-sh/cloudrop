@@ -142,6 +142,7 @@ describe("bucket configuration writes", () => {
     const driver = fake({});
     const rules = [
       {
+  const anyOrigin = { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] };
         id: "R&D <uploads>",
         allowedOrigins: ["https://app.example.com", "http://localhost:5173"],
         allowedMethods: ["PUT"],
@@ -258,6 +259,31 @@ describe("bucket configuration writes", () => {
     const driver = fake(undefined);
     const results = [
       await driver.putBucketCors([
+    ...[
+      { name: "a CORS rule that is null", rule: null },
+      { name: "a CORS rule without its lists", rule: {} },
+      { name: "a CORS rule whose origins are text", rule: { ...anyOrigin, allowedOrigins: "*" } },
+      { name: "a CORS rule with an origin that is not text", rule: { ...anyOrigin, allowedOrigins: [5] } },
+    ].map(({ name, rule }) => ({
+      name,
+      write: (driver: S3Driver) => driver.putBucketCors([rule as never]),
+      message:
+        "Each CORS rule must be an object with allowedOrigins, allowedMethods, allowedHeaders and exposeHeaders, each a list of text.",
+    })),
+    ...[
+      { name: "a lifecycle rule that is null", rule: null },
+      {
+        name: "a lifecycle rule without a prefix",
+        rule: { id: "a", enabled: true, abortIncompleteMultipartUploadDays: 1 },
+      },
+      { name: "a new lifecycle rule without its days", rule: { id: "a", enabled: true, prefix: "" } },
+      { name: "a lifecycle rule whose XML is not text", rule: { ...abortRule, sourceXml: 5 } },
+    ].map(({ name, rule }) => ({
+      name,
+      write: (driver: S3Driver) => driver.putBucketLifecycle([rule as never]),
+      message:
+        "Each lifecycle rule must be an object with its sourceXml as text, or with a prefix as text and abortIncompleteMultipartUploadDays as a whole number from 1.",
+    })),
         { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] },
       ]),
       await driver.putBucketLifecycle([abortRule]),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bodyProblem,
   checksumProblem,
   cursorProblem,
   expiryProblem,
@@ -278,5 +279,68 @@ describe("request token checks", () => {
     { name: "one key as a string", problem: keyListProblem("a.txt" as unknown as string[]), expected: keysMessage },
   ])("checks $name", ({ problem, expected }) => {
     expect(problem).toBe(expected);
+  });
+});
+
+// A JavaScript caller can pass anything: each check answers its message, never a TypeError and never "no problem".
+describe("values of the wrong type", () => {
+  const checksum = { toString: () => "4waSgw==" };
+  const notText = [5, ["4waSgw=="], checksum, null, true];
+  const notNumber = ["5", [5], { valueOf: () => 5 }, null, true];
+  const notList = ["a", 5, { length: 1 }, null];
+  const printable = (field: string) => (value: never) => objectOptionsProblem({ [field]: value });
+  const typeMessage = 'The content type must be printable ASCII, such as "text/plain; charset=utf-8".';
+  const dispositionMessage =
+    "The content disposition must be printable ASCII. Percent-encode other characters, for example filename*=UTF-8''r%C3%A9sum%C3%A9.txt.";
+  const metadataMessage = 'Metadata must be an object of names and text values, such as { "cloudrop-id": "f1" }.';
+  const partsMessage =
+    "Pass at least one part, each with a part number between 1 and 10 and the ETag the storage returned for it.";
+
+  it.each<[string, (value: never) => string | null, unknown[], string]>([
+    ["a key", keyProblem, notText, "The object key must be a string. Pass the key as text."],
+    [
+      "a checksum",
+      checksumProblem,
+      notText,
+      'The CRC32C checksum must be the base64 of 4 bytes, such as "4waSgw==". Compute it from the exact bytes you send.',
+    ],
+    [
+      "an upload ID",
+      uploadIdProblem,
+      notText,
+      "The upload ID is empty or malformed. Pass the uploadId that createMultipart returned.",
+    ],
+    [
+      "a cursor",
+      cursorProblem,
+      notText,
+      "The list cursor is empty or malformed. Pass the nextCursor of the previous page.",
+    ],
+    ["a prefix", prefixProblem, notText, 'The list prefix must be a string. Pass "" to list every object.'],
+    ["a content type", printable("type"), notText, typeMessage],
+    ["a content disposition", printable("disposition"), notText, dispositionMessage],
+    ["metadata", printable("metadata"), [5, "ab", ["x"], null, new Map([["a", "x"]])], metadataMessage],
+    [
+      "a body",
+      bodyProblem,
+      [5, ["x"], { length: 1 }, null, undefined],
+      "The body must be a Uint8Array, an ArrayBuffer, a string or a Blob.",
+    ],
+    ["a page size", limitProblem, notNumber, "The page size must be between 1 and 1000."],
+    ["a size", (value) => sizeProblem(value, 10), notNumber, "Size must be a whole number of bytes, zero or more."],
+    [
+      "an expiry",
+      (value) => expiryProblem(value, 10),
+      notNumber,
+      "Expiry must be a whole number of seconds between 1 and 10.",
+    ],
+    ["a part number", (value) => partNumberProblem(value, 10), notNumber, "Part number must be between 1 and 10."],
+    ["a range start", (value) => rangeProblem(value, 9), notNumber, "The byte range must satisfy 0 <= start <= end."],
+    ["a range end", (value) => rangeProblem(0, value), notNumber, "The byte range must satisfy 0 <= start <= end."],
+    ["a part list", (value) => partsProblem(value, 10), notList, partsMessage],
+    ["a part", (value) => partsProblem([value], 10), [5, "a", ["a"], null], partsMessage],
+    ["a key list", keyListProblem, notList, "deleteMany takes an array of keys. Wrap a single key in an array."],
+  ])("answers the message for %s of any other type", (_name, check, values, message) => {
+    expect(values.map((value) => check(value as never))).toEqual(values.map(() => message));
   });
 });

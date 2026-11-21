@@ -2,7 +2,7 @@
 // must keep rules read them first and pass them back; a lifecycle rule read from the bucket carries its own XML.
 
 import { fail, ok, type Result } from "../../errors.ts";
-import { invalidInput } from "../../input.ts";
+import { invalidInput, isPlainObject } from "../../input.ts";
 import type { BucketCorsRule, BucketLifecycleRule } from "../driver.ts";
 import { escapeXml } from "../xml.ts";
 import { configurationReadError } from "./bucket-settings.ts";
@@ -33,6 +33,33 @@ const emptyProblem = (rules: readonly unknown[], setting: string): string | null
   Array.isArray(rules) && rules.length > 0
     ? null
     : `Pass at least one ${setting} rule: an empty list would remove every rule.`;
+
+const isTextList = (value: unknown): boolean => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+// Only what writing the XML needs, so a rule from plain JavaScript answers a message instead of a TypeError, and a
+// missing prefix is never written as the text "undefined".
+function corsProblem(rules: readonly BucketCorsRule[]): string | null {
+  const valid = rules.every(
+    (rule) =>
+      isPlainObject(rule) &&
+      [rule.allowedOrigins, rule.allowedMethods, rule.allowedHeaders, rule.exposeHeaders].every(isTextList),
+  );
+  return valid
+    ? null
+    : "Each CORS rule must be an object with allowedOrigins, allowedMethods, allowedHeaders and exposeHeaders, each a list of text.";
+}
+
+function lifecycleProblem(rules: readonly BucketLifecycleRule[]): string | null {
+  const valid = rules.every((rule) => {
+    if (!isPlainObject(rule)) return false;
+    if (rule.sourceXml !== undefined) return typeof rule.sourceXml === "string";
+    const days = rule.abortIncompleteMultipartUploadDays;
+    return typeof rule.prefix === "string" && Number.isInteger(days) && (days as number) >= 1;
+  });
+  return valid
+    ? null
+    : "Each lifecycle rule must be an object with its sourceXml as text, or with a prefix as text and abortIncompleteMultipartUploadDays as a whole number from 1.";
+}
 
 /**
  * AWS requires an integrity checksum on both calls (Content-MD5 or an x-amz-checksum-* header). Web crypto has no MD5,
@@ -85,14 +112,14 @@ export function bucketWriteMethods(ctx: S3Context): {
 } {
   return {
     async putBucketCors(rules) {
-      const problem = emptyProblem(rules, "CORS");
+      const problem = emptyProblem(rules, "CORS") ?? corsProblem(rules);
       if (problem) return fail(invalidInput(problem));
       const xml = `<CORSConfiguration${NAMESPACE}>${rules.map(corsRuleXml).join("")}</CORSConfiguration>`;
       return putConfiguration(ctx, "cors", xml);
     },
 
     async putBucketLifecycle(rules) {
-      const problem = emptyProblem(rules, "lifecycle");
+      const problem = emptyProblem(rules, "lifecycle") ?? lifecycleProblem(rules);
       if (problem) return fail(invalidInput(problem));
       const kept = await keptLifecycleHeaders(ctx);
       if (kept.error) return kept;

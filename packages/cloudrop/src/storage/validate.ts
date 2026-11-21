@@ -85,7 +85,10 @@ export function bodyProblem(body: unknown): string | null {
 
 /** Base64 of 4 bytes: five free characters, a sixth that carries only 2 data bits (A, Q, g or w), then "==". */
 export function checksumProblem(checksum: string | undefined): string | null {
-  if (checksum === undefined || /^[A-Za-z0-9+/]{5}[AQgw]==$/.test(checksum)) return null;
+  // The type is checked first: a pattern tests a list or an object as its text, and the signer would then throw on it.
+  if (checksum === undefined || (typeof checksum === "string" && /^[A-Za-z0-9+/]{5}[AQgw]==$/.test(checksum))) {
+    return null;
+  }
   return 'The CRC32C checksum must be the base64 of 4 bytes, such as "4waSgw==". Compute it from the exact bytes you send.';
 }
 
