@@ -63,7 +63,8 @@ describe("cloudrop.handler origins and CORS", () => {
     expect(fixture.storageCalls).toEqual([]);
   });
 
-  it("answers a trusted preflight with POST and the requested headers", async () => {
+  // x-cloudrop-account is the client's account option (M10-A), sent with /upload only.
+  it("answers a trusted preflight with POST and the requested headers, the account header among them", async () => {
     const response = await setup().cloudrop.handler(
       request("/api/cloudrop/upload", {
         method: "OPTIONS",
@@ -71,7 +72,7 @@ describe("cloudrop.handler origins and CORS", () => {
         headers: {
           origin: TRUSTED,
           "access-control-request-method": "POST",
-          "access-control-request-headers": "content-type, authorization",
+          "access-control-request-headers": "content-type, authorization, x-cloudrop-account",
         },
       }),
     );
@@ -86,7 +87,7 @@ describe("cloudrop.handler origins and CORS", () => {
       status: 204,
       origin: TRUSTED,
       methods: "POST",
-      headers: "content-type, authorization",
+      headers: "content-type, authorization, x-cloudrop-account",
       credentials: "true",
       cache: "no-store",
     });

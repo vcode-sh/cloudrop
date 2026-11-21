@@ -132,13 +132,13 @@ function oneFile(result: UploadResult<unknown>): Result<CompleteResponse<unknown
 export function createCloudropClient<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: ClientOptions = {},
 ): CloudropClient<TCloudrop> {
-  const { basePath, headers, fetch, concurrency, order, persist, namespace } = readOptions(options);
+  const { basePath, headers, account, fetch, concurrency, order, persist, namespace } = readOptions(options);
   // Looked up on every request, so a fetch patched later is used, and called on globalThis: a browser throws "Illegal
   // invocation" when fetch runs as a method of another object (S18).
   const send: ClientFetch = fetch ?? ((url, init) => globalThis.fetch(url, init));
   let rank = 0;
   const context: UploadContext = {
-    endpoints: createEndpoints(basePath, send, headers),
+    endpoints: createEndpoints(basePath, send, { headers, account }),
     // Bucket PUTs go through XMLHttpRequest in a browser unless a fetch option was passed (spec §4.1, ruling M3-U6).
     put: createPut(fetch, send),
     pool: createPool(concurrency),

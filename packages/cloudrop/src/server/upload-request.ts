@@ -3,7 +3,7 @@
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
-import { type FileDescriptor, MAX_NAME_LENGTH } from "../protocol/types.ts";
+import { ACCOUNT_HEADER, type FileDescriptor, MAX_NAME_LENGTH } from "../protocol/types.ts";
 import { formatBytes } from "../storage/validate.ts";
 import { matchAccept, normalizeType } from "./accept.ts";
 import { ROUTE_NAME, type RouteConfig, type ServerConfig } from "./config.ts";
@@ -122,4 +122,27 @@ export function prepareFile(
   // The key comes from the application's prefix or key function, so a bad one is a server bug, not the user's.
   if ("problem" in key) throw new TypeError(`Route "${route.name}" built an unusable key: ${key.problem}`);
   return { id, key: key.key, name, size: descriptor.size, type };
+}
+
+/** The header's text, or null when it is not percent-encoded UTF-8. */
+function decoded(header: string): string | null {
+  try {
+    return decodeURIComponent(header);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The page that sent the request names, in the client's `account` option, another account than `owner`, the session's:
+ * someone else signed in in another tab (M10-A). No header: an older page, checked as before. A header that does not
+ * decode names nobody, so it differs.
+ */
+export function accountChanged(request: Request, owner: string): CloudropError | null {
+  const sent = request.headers.get(ACCOUNT_HEADER);
+  if (sent === null || decoded(sent) === owner) return null;
+  return new CloudropError(
+    "ACCOUNT_CHANGED",
+    "The account signed in on this site changed since this page was loaded, so the upload was not started. Reload the page, then upload the file again.",
+  );
 }

@@ -13,7 +13,7 @@ import { isRefusal, refusalError } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
 import { attachUpload, readOwner, releaseUnstarted, reserveFiles } from "./store-upload.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
-import { prepareFile, readRequest } from "./upload-request.ts";
+import { accountChanged, prepareFile, readRequest } from "./upload-request.ts";
 
 /** One file's ticket: create the multipart upload if needed, sign the first URLs and the token. */
 async function startFile(
@@ -110,6 +110,9 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const { plugins, store } = config;
   // Like prefix, a bad owner is the route's bug, found before any plugin reserves anything.
   const rowOwner = store && accepted.length > 0 ? await readOwner(route, { ...auth, request, metadata }) : null;
+  // Only an owner a store records can be compared: without one the header is ignored.
+  const changed = rowOwner === null ? null : accountChanged(request, rowOwner);
+  if (changed) return fail(changed);
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,

@@ -24,6 +24,7 @@ each route's `onComplete` returns.
 | --- | --- | --- |
 | `basePath` | Where the server's handler is mounted: a path on this page's origin, or an absolute URL such as `"https://api.example.com/api/cloudrop"`. No trailing slash, query or fragment. For a handler on another origin, list the page's origin in the server's `trustedOrigins`, or every call gets `ORIGIN_NOT_ALLOWED`. | `"/api/cloudrop"` |
 | `headers` | Headers for the requests to your server (`/upload`, `/sign`, `/complete`, `/abort`), never for bucket `PUT`s: an object, or a function, possibly async, called before each request (see [Send a bearer token](#send-a-bearer-token)). | none |
+| `account` | The signed-in user this page shows, as the route's `owner` returns it, sent with `/upload` only: a string, `""` for nobody, or a function, possibly async, called before each `/upload` (see [Guard against a changed account](#guard-against-a-changed-account)). | none |
 | `fetch` | Replaces the global `fetch`, for tests and runtimes that bring their own. Passing it also sends bucket `PUT`s through it (see [Transports](#transports-xhr-or-fetch)). | global `fetch` |
 | `concurrency` | How many bucket `PUT`s the client sends at once, across all its uploads: `"auto"` or a whole number from 1 to 16 (see [Concurrency and order](#concurrency-and-order)). | `"auto"` |
 | `order` | Which `PUT`s go first when they wait for a connection: `"added"` or `"smallest-first"`. | `"added"` |
@@ -67,6 +68,33 @@ On the server, `authorize` reads `request.headers.get("authorization")`.
   allows the headers a page on a `trustedOrigins` origin asks for.
 - **A request without an `Origin` header,** as a native app sends, needs no `trustedOrigins` entry (see
   [Origins](server.md#origins)).
+
+### Guard against a changed account
+
+A browser sends one session cookie for every tab. When someone signs in as another user in another tab, a file still
+queued in this tab, or retried here, would ask `/upload` with the new session and become the other user's file. Tell the
+client who this page belongs to, and the server refuses that upload:
+
+```ts
+const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId }); // the user this page shows
+```
+
+- **What is compared.** On a route with a [store](store.md) and `owner`, the server compares `account` with what
+  `owner` returns for the request's session. When they differ, the whole `/upload` is refused with `ACCOUNT_CHANGED`,
+  not retryable, before any plugin, reservation or storage call, and each of its files ends `failed`. Its message asks
+  the person to reload the page.
+- **Pass what `owner` returns,** usually the user's id, at most 255 characters. `""` means nobody is signed in on this
+  page: an upload whose session has an owner is refused too.
+- **A function** is called before each `/upload`, retries included; return the user this page shows, not a fresh read
+  of the session, which would always agree. `null` or `undefined` sends no account. When the function throws, rejects
+  or returns something else, the `/upload` is not sent and fails with `NETWORK_ERROR`, as for `headers`.
+- **Only `/upload` carries it,** as the `x-cloudrop-account` header, percent-encoded; never `/sign`, `/complete`,
+  `/abort` or a bucket `PUT`. The later calls need no check: each carries the upload token, which names the owner
+  `/upload` saw.
+- **Ignored without an owner.** On a route without `owner`, on a server without a store, when `owner` returns `null`,
+  and when the client sends no account (an older page during a deploy), the upload is checked as before.
+- **From a page on another origin,** the header makes the browser send a preflight; the handler allows it for a page on
+  a `trustedOrigins` origin. A proxy or framework that answers preflights itself must allow `x-cloudrop-account`.
 
 ## Upload one file
 
@@ -382,5 +410,5 @@ Five codes come from the client and never from the server:
 Every other code, and what to do about it: [Errors](errors.md).
 
 Why the client behaves as it does: the [M3-S decisions](../decisions/m3-slice.md), the
-[M3-U decisions](../decisions/m3-uploader.md) and, for `close()` and `headers`, the
-[M8-L decisions](../decisions/m8-client.md).
+[M3-U decisions](../decisions/m3-uploader.md), for `close()` and `headers`, the
+[M8-L decisions](../decisions/m8-client.md), and for `account`, the [M10-A decisions](../decisions/m10-account.md).

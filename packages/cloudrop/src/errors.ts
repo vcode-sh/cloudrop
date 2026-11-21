@@ -23,6 +23,8 @@ export type CloudropErrorCode =
   | "TOO_MANY_FILES"
   | "FILE_TOO_LARGE"
   | "FILE_TYPE_NOT_ALLOWED"
+  // The client's account (M10-A): the page belongs to another account than the session's.
+  | "ACCOUNT_CHANGED"
   // Database store (M5 spec §5.3): a file over its owner's quota.
   | "QUOTA_EXCEEDED"
   | "INVALID_TOKEN"

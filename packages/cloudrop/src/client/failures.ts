@@ -80,6 +80,14 @@ export const headersFailed = (cause: unknown): CloudropError =>
     { retryable: true, cause },
   );
 
+/** The account option threw, rejected, gave what is not an account, or took longer than the request may (M10-A). */
+export const accountFailed = (cause: unknown): CloudropError =>
+  new CloudropError(
+    "NETWORK_ERROR",
+    "The account option gave no account for a request to the upload server, so it was not sent. Check the function passed as account, then try again.",
+    { retryable: true, cause },
+  );
+
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers
 // carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16"). A bucket
 // CORS rule that misses the page's origin or a signed header looks the same, so for a developer this error usually

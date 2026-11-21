@@ -8,6 +8,11 @@ export type Endpoint = "upload" | "sign" | "complete" | "abort";
 
 /** The largest request body any endpoint reads, in bytes (spec §7.3). */
 export const MAX_BODY_BYTES: number = 65_536;
+/**
+ * The header that carries the client's `account` option, percent-encoded, with `/upload` only. On a route with a store
+ * and `owner`, the server refuses the upload with ACCOUNT_CHANGED when it names another owner (M10-A).
+ */
+export const ACCOUNT_HEADER = "x-cloudrop-account";
 /** The most part URLs one `/upload` file or one `/sign` call returns (spec §5.2). */
 export const PARTS_PER_SIGN: number = 20;
 /** The longest file name accepted, in Unicode code points (spec §7.3). */

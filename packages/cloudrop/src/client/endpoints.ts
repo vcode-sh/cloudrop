@@ -1,18 +1,19 @@
 // The client's calls to the four server endpoints (spec §5). Each answer is checked before it is used (decision S16).
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
-import type {
-  CompleteResponse,
-  Endpoint,
-  ErrorBody,
-  MultipartTicket,
-  SignedPart,
-  SignedRequest,
-  SingleTicket,
-  UploadRequest,
+import {
+  ACCOUNT_HEADER,
+  type CompleteResponse,
+  type Endpoint,
+  type ErrorBody,
+  type MultipartTicket,
+  type SignedPart,
+  type SignedRequest,
+  type SingleTicket,
+  type UploadRequest,
 } from "../protocol/types.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
-import { aborted, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
+import { aborted, accountFailed, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
@@ -22,6 +23,13 @@ export type Ticket = SingleTicket | MultipartTicket;
 
 /** Headers for the upload server only, or a function, possibly async, that gives them before each request (M8-L5). */
 export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
+
+/** The signed-in user's id for /upload only, or a function, possibly async, that gives it; null sends none (M10-A). */
+export type Account = string | (() => string | null | undefined | Promise<string | null | undefined>);
+
+/** At most owner()'s 255 characters (MAX_OWNER_LENGTH on the server); a lone surrogate cannot be percent-encoded. */
+export const isAccount = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 255 && value.isWellFormed();
 
 export interface Endpoints {
   /**
@@ -92,10 +100,21 @@ interface PostOptions {
 // The body's retryable and parts are the error's options.
 const toError = (body: ErrorBody): CloudropError => new CloudropError(body.code, body.message, body);
 
-export function createEndpoints(basePath: string, fetch: ClientFetch, serverHeaders?: ServerHeaders): Endpoints {
+export function createEndpoints(
+  basePath: string,
+  fetch: ClientFetch,
+  { headers: serverHeaders, account }: { headers?: ServerHeaders; account?: Account } = {},
+): Endpoints {
   // Built once, so without a function no request waits before fetch: pagehide's keepalive /abort is sent within the
   // event (M3-U33).
   const fixedHeaders = jsonHeaders(typeof serverHeaders === "function" ? undefined : serverHeaders);
+  /** The account header of an /upload, after the app's headers so that it wins; none for null or undefined. */
+  async function accountHeader(signal: AbortSignal): Promise<Record<string, string>> {
+    const value = typeof account === "function" ? await Promise.race([account(), rejectOnAbort(signal)]) : account;
+    if (value === null || value === undefined) return {};
+    if (!isAccount(value)) throw new TypeError("The account function returned neither a user's id nor null.");
+    return { [ACCOUNT_HEADER]: encodeURIComponent(value) };
+  }
   /**
    * POSTs `body` as JSON and reads the whole answer within `timeoutMs`. Never rejects: no whole answer in time is
    * NETWORK_ERROR, as no answer is; ABORTED only when `signal` fired.
@@ -111,15 +130,19 @@ export function createEndpoints(basePath: string, fetch: ClientFetch, serverHead
     const timeout = setTimeout(stop, timeoutMs);
     signal?.addEventListener("abort", stop, { once: true });
     if (signal?.aborted) stop();
-    let headers: Record<string, string> | undefined;
+    // What a failure means depends on how far the request got: no headers, no account, or no answer.
+    let failure: (cause: unknown) => CloudropError = headersFailed;
     try {
       // A request cancelled before it starts calls no headers function, which may refresh a token over the network.
       if (controller.signal.aborted) throw cancelled();
       // Inside the timeout and the caller's signal (M8-L6).
-      headers =
+      const given =
         typeof serverHeaders === "function"
           ? jsonHeaders(await Promise.race([serverHeaders(), rejectOnAbort(controller.signal)]))
           : fixedHeaders;
+      failure = accountFailed;
+      const headers = endpoint === "upload" ? { ...given, ...(await accountHeader(controller.signal)) } : given;
+      failure = serverUnreachable;
       // "include": a page on a trusted origin sends its session cookie, which authorize may read (S8).
       const response = await fetch(`${basePath}/${endpoint}`, {
         method: "POST",
@@ -132,8 +155,7 @@ export function createEndpoints(basePath: string, fetch: ClientFetch, serverHead
       // A body cut off on the way counts as no answer: for /complete, the server may have finished.
       return ok({ response, text: await response.text() });
     } catch (cause) {
-      if (signal?.aborted) return fail(aborted());
-      return fail(headers ? serverUnreachable() : headersFailed(cause));
+      return fail(signal?.aborted ? aborted() : failure(cause));
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", stop);

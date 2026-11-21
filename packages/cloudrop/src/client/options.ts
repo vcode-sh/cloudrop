@@ -2,7 +2,7 @@
 // (S17, M3-U41, M3-U42, M3-U79, M8-L5), since it needs a code change, not a retry.
 
 import { configError } from "../errors.ts";
-import type { ClientFetch, ServerHeaders } from "./endpoints.ts";
+import { type Account, type ClientFetch, isAccount, type ServerHeaders } from "./endpoints.ts";
 
 export interface ClientOptions {
   /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */
@@ -12,6 +12,13 @@ export interface ClientOptions {
    * object, or a function, possibly async, called before each request, such as one that returns a fresh bearer token.
    */
   headers?: ServerHeaders;
+  /**
+   * The signed-in user this page shows, as the route's `owner` returns it (at most 255 characters; "" for nobody), sent
+   * with /upload only. On a route with a store and `owner`, the server refuses an upload whose session names someone
+   * else, as after a sign-in in another tab, with ACCOUNT_CHANGED. A function, possibly async, is called before each
+   * /upload; null or undefined from it sends nothing, and the upload is checked as without the option.
+   */
+  account?: Account;
   /** Replaces the global fetch, for tests and runtimes that bring their own. Bucket PUTs then go through it too. */
   fetch?: ClientFetch;
   /**
@@ -49,10 +56,10 @@ function isHeaders(headers: unknown): boolean {
   }
 }
 
-type Connection = Required<Pick<ClientOptions, "basePath">> & Pick<ClientOptions, "headers" | "fetch">;
+type Connection = Required<Pick<ClientOptions, "basePath">> & Pick<ClientOptions, "headers" | "account" | "fetch">;
 
 /** Where and how the client reaches the upload server. */
-function readConnection({ basePath = "/api/cloudrop", headers, fetch }: ClientOptions): Connection {
+function readConnection({ basePath = "/api/cloudrop", headers, account, fetch }: ClientOptions): Connection {
   if (typeof basePath !== "string" || !BASE_PATH.test(basePath)) {
     throw configError(
       'basePath must be where the cloudrop handler is mounted, such as "/api/cloudrop" or "https://api.example.com/api/cloudrop": no trailing slash, query or fragment.',
@@ -63,11 +70,16 @@ function readConnection({ basePath = "/api/cloudrop", headers, fetch }: ClientOp
       'headers must be the headers for the upload server, such as { authorization: "Bearer …" }, or a function that returns them.',
     );
   }
+  if (account !== undefined && typeof account !== "function" && !isAccount(account)) {
+    throw configError(
+      "account must be the signed-in user's id as the route's owner returns it, at most 255 characters, or a function that returns it.",
+    );
+  }
   if (fetch !== undefined && typeof fetch !== "function") throw configError("The fetch option must be a function.");
   if (typeof (fetch ?? globalThis.fetch) !== "function") {
     throw configError("No fetch is available here. Pass createCloudropClient({ fetch }).");
   }
-  return { basePath, headers, fetch };
+  return { basePath, headers, account, fetch };
 }
 
 /** The options with their defaults; a wrong one throws its configuration error. */
