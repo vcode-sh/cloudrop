@@ -1108,9 +1108,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   (`application/zip`; sent as an Office Open XML, `application/vnd.ms-*`, OpenDocument or `+zip` type, that type).
   For a container, `deny`, `allow` and the default refusals judge each type it can be, among them the type it was
   sent as: it is refused only when all of them are, with `reason: "refused"` and the container's first type as
-  `detected`. Sent as one of its types, which `/upload` already judged, it therefore passes. Sent untyped, it passes
-  when the route accepts one of the types left; the route's own entries count among the types a ZIP or an Office
-  file can be. Sent as a type it cannot be, it is a `mismatch` as before. A ZIP still does not contradict any other
+  `detected`. Sent as one of its types, which `/upload` already judged, it therefore passes. Sent untyped, nobody said
+  which type it is: it is refused when any type it can be is refused, and otherwise passes when the route accepts one
+  of them; the route's own entries count among the types a ZIP or an Office file can be. Sent as a type it cannot be, it is a `mismatch` as before. A ZIP still does not contradict any other
   `application/` or `model/` type (`M10-K1`), but is judged as `application/zip` there. Every other detection is one
   type, judged as before; RIFF needs no rule, since its form type (`WAVE`, `WEBP`) says what the file is. The names
   in messages no longer claim a kind the bytes do not show: "a WebM file", "an MP4 file", "a 3GP file", "a Matroska
@@ -1123,9 +1123,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   refused by `deny: ["application/zip"]` and, sent untyped, was not accepted by a route that takes Word files (G3).
 - **If wrong:** what `deny` cannot promise. `deny: ["video/*"]` refuses a file sent as a video type and a file
   whose bytes show a video-only format; a video in a WebM, MP4, 3GP, Matroska or Ogg file sent as that container's
-  audio type passes, and so does one sent untyped to a route that accepts the audio type. `deny: ["application/zip"]`
-  does not refuse a plain ZIP sent as, or untyped to a route that takes, an Office, OpenDocument or `+zip` type;
-  a ZIP with an empty `word/` entry passed there already. Telling audio from video takes a parser per container
+  audio type passes. `deny: ["application/zip"]` does not refuse a plain ZIP sent as an Office, OpenDocument or
+  `+zip` type; a ZIP with an empty `word/` entry passed there already. Telling audio from video takes a parser per container
   (track boxes, EBML tracks, Ogg codec headers), which is the scanning work the design leaves for later.
 - **Status:** in force; amends `M11-K2`: `detected` is still the sniffer's first type, and a container sent as one of
   its own types is never refused on it.
@@ -1180,3 +1179,45 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `mismatch`, and the message names the type to add here. A tag does not front WAV or AIFF, which carry it in a chunk.
 - **Status:** in force; `src/plugins/content-checks-containers.test.ts`.
 - **Visible in:** `src/plugins/sniff.ts`, `docs/guide/plugins.md`.
+
+### M11-R136: what shows no signature is named, and four things that passed are now detected
+
+- **Decision:**
+  - **MP3 without a tag** is read by the whole of WHATWG MIME Sniffing §6.2.3: a Layer III frame header (`FF`, the
+    sync bits, layer bits `01`, a bit rate index under 15, a sample rate index under 3) and a second one where the
+    first frame ends. The frame's length is bit rate times 144 (72 for MPEG-2 and 2.5) over the sample rate, plus the
+    padding bit. One header alone is no longer MP3; Layer I and II and the free bit rate are not detected.
+  - **A script** is found by its `#!` line also behind a UTF-8 or UTF-16 byte order mark and behind the whitespace
+    bytes text is read after (blank lines, spaces).
+  - **An OLE compound file** (`D0 CF 11 E0 A1 B1 1A E1`) is detected as `application/x-ole-storage`, "an old Office
+    document or a Windows installer": a container (`M11-R133`) that can be `application/x-msi` or
+    `application/x-ms-installer`, and contradicts no `application/` type. Sent as an `application/` type it passes as
+    that type; sent untyped it is refused, since one of the types it can be is; sent as another top-level type it is
+    a `mismatch`. `allow` of an installer type takes it untyped.
+  - **Sent untyped, a container is refused when any type it can be is refused** (not only when all are, as for a
+    typed one): nobody said which it is. This also makes `deny: ["video/*"]` refuse an untyped WebM.
+  - **An HTML application** is a web page: `application/hta` is a name of that kind (`M11-R134`), and
+    `<hta:application` as the root element reads as `text/html`.
+  - **HTML or XML sent as `application/vnd.ms-excel` or `application/msword`** is still refused as a web page or
+    XML, but no longer contradicts those types, so `allow: ["application/vnd.ms-excel"]` lets it through.
+  - The guide's Limits name what still passes undetected: `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, `.url`, `.lnk`, a DOS
+    `.com`, an HTA that starts with no listed tag, and an installer sent as an old Office type.
+- **Why:** review finding G9 probed each of these. The comment on the MP3 rule said the standard "reads none from
+  fewer" than four bytes and stopped there, so `FF FF 00 00`, a Layer I header with the free bit rate, read as MP3
+  and contradicted whatever the file was sent as (reproduced). The standard's steps go on to parse the frame and
+  match a second header; its prose has slips (`and` for `or` in the sync test, `s - length`, the two rate tables'
+  names and the scale test the other way round from the code), so the arithmetic follows Firefox's `toolkit/components/mediasniffer/mp3sniff.c`, which the steps
+  were written from. `execve` does not run a file whose `#!` is not at byte 0, but POSIX.1-2024 (Shell Command
+  Language §2.9.1.4) has the shell run it as a shell script on `ENOEXEC`, and `sh file` does the same. An untyped
+  `.msi` passed every route that takes `application/octet-stream`; MS-CFB §2.2 gives the signature, which old Word and
+  Excel files share, so only the untyped case and the installer types can be refused. Web applications export HTML
+  tables as `.xls`, and there was no way to take them: allowing `text/html` left a `mismatch`.
+- **If wrong:** an untyped compound file that is a document (a `.doc` from a system with no type for it) is refused
+  and must be sent typed. A real MP3 shorter than one frame and a header, in free format, or whose first frame is
+  followed by junk shows no type and passes as sent; a browser does not sniff it either. Other compound-file formats
+  sent under a non-`application/` type are a `mismatch`. `.lnk` has a signature (the 20 bytes shared-mime-info matches for
+  `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected: it is left out to keep the entry inside its 6 kB, and belongs with the next format added.
+- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
+  `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
+- **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`, `src/plugins/content-checks.ts`,
+  `docs/guide/plugins.md#limits`, `docs/decisions/m10-content.md` (two sentences corrected).

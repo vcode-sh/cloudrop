@@ -10,6 +10,9 @@ const ftyp = (major: string, ...compatible: string[]) =>
   bytes(u32(16 + 4 * compatible.length), "ftyp", major, [0, 0, 0, 0], compatible.join(""));
 
 const typeOf = (input: Uint8Array) => sniff(input)?.type ?? null;
+const zeros = (count: number) => new Array(count).fill(0);
+/** An MPEG-1 Layer III frame header: 128 kbit/s, 44.1 kHz, no padding (ISO/IEC 11172-3 §2.4.2.3). */
+const MP3_HEADER = [0xff, 0xfb, 0x90, 0x64];
 
 describe("sniff: binary signatures", () => {
   it.for([
@@ -25,8 +28,22 @@ describe("sniff: binary signatures", () => {
     { name: "Ogg", input: bytes("OggS", [0, 2]), type: "audio/ogg" },
     { name: "FLAC", input: bytes("fLaC", [0, 0, 0, 0x22]), type: "audio/flac" },
     // ID3v2.4 §3.1: version 4, revision 0, no flags, a syncsafe size of 1,071 bytes.
-    // MPEG-1 Layer III, 128 kbit/s, 44.1 kHz.
-    { name: "MP3 frame", input: bytes([0xff, 0xfb, 0x90, 0x64]), type: "audio/mpeg" },
+    // MPEG-1 Layer III, 128 kbit/s, 44.1 kHz: a frame of 417 bytes (144 x 128000 / 44100), then the next header.
+    { name: "MP3 frames", input: bytes(MP3_HEADER, zeros(413), MP3_HEADER), type: "audio/mpeg" },
+    // The padding bit adds a byte to the frame.
+    { name: "MP3 frames, padded", input: bytes([0xff, 0xfb, 0x92, 0x64], zeros(414), MP3_HEADER), type: "audio/mpeg" },
+    // MPEG-2 Layer III, 64 kbit/s, 22.05 kHz: 208 bytes (72 x 64000 / 22050).
+    {
+      name: "MPEG-2 Layer III frames",
+      input: bytes([0xff, 0xf3, 0x80, 0xc4], zeros(204), [0xff, 0xf3, 0x80, 0xc4]),
+      type: "audio/mpeg",
+    },
+    // MS-CFB §2.2: the header signature of a compound file, which old Office documents and installers share.
+    {
+      name: "an OLE compound file",
+      input: bytes([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], zeros(16), [0x3e, 0, 3, 0, 0xfe, 0xff, 9, 0]),
+      type: "application/x-ole-storage",
+    },
     { name: "Linux program", input: bytes([0x7f], "ELF", [2, 1, 1]), type: "application/x-executable" },
     {
       name: "64-bit macOS program",
@@ -50,6 +67,13 @@ describe("sniff: binary signatures", () => {
     { name: "an MP3-like header with the reserved bit rate 15", input: bytes([0xff, 0xfb, 0xf0, 0x64]) },
     { name: "the first two bytes of an MP3 frame header alone", input: bytes([0xff, 0xfb]) },
     { name: "an MP3-like header with the reserved sample rate 3", input: bytes([0xff, 0xfb, 0x9c, 0x64]) },
+    // WHATWG MIME Sniffing §6.2.3 wants a second header where the first frame ends (M11-R136).
+    { name: "one MP3 frame header and no second", input: bytes(MP3_HEADER, zeros(600)) },
+    { name: "a second MP3 header one byte late", input: bytes(MP3_HEADER, zeros(414), MP3_HEADER) },
+    { name: "four bytes that read as a Layer I header", input: bytes([0xff, 0xff, 0, 0], zeros(600)) },
+    { name: "Layer II frames", input: bytes([0xff, 0xfd, 0x90, 0x64], zeros(413), [0xff, 0xfd, 0x90, 0x64]) },
+    { name: "an MP3 header with the free bit rate 0", input: bytes([0xff, 0xfb, 0x00, 0x64], MP3_HEADER) },
+    { name: "seven bytes of the OLE signature", input: bytes([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a], zeros(9)) },
     { name: "an AAC ADTS header (layer 0)", input: bytes([0xff, 0xf1, 0x50, 0x80]) },
     // FF FE is UTF-16LE's byte order mark, and "h" after it would read as a valid MPEG audio header.
     { name: "UTF-16LE text", input: bytes([0xff, 0xfe], "h\0i\0") },
@@ -62,7 +86,6 @@ describe("sniff: binary signatures", () => {
 });
 
 const PE = "application/vnd.microsoft.portable-executable";
-const zeros = (count: number) => new Array(count).fill(0);
 /** Little-endian 16- and 32-bit fields. */
 const u16 = (value: number) => [value & 0xff, value >> 8];
 const u32le = (value: number) => [...u16(value & 0xffff), ...u16(value >>> 16)];

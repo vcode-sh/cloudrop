@@ -23,6 +23,16 @@ export const LINUX: Sniffed = kind(
 );
 export const MAC: Sniffed = kind("application/x-mach-binary", "a program", "application/x-mach-o-executable");
 
+const OLE: Sniffed = {
+  ...container(
+    "application/x-ole-storage",
+    "an old Office document or a Windows installer",
+    "application/x-msi",
+    "application/x-ms-installer",
+  ),
+  loose: ["application/*"],
+};
+
 const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   // PNG: W3C PNG Specification (Third Edition) §5.2, PNG signature; WHATWG MIME Sniffing §6.1. An animated PNG has the
   // same signature and its own type, image/apng (IANA registration of 2022-11-21, for PNG Third Edition).
@@ -41,6 +51,9 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   [[...ascii("OggS"), 0], container("audio/ogg", "an Ogg file", "audio/opus", "video/ogg", "application/ogg")],
   // FLAC: RFC 9639 §8, the stream marker "fLaC".
   [ascii("fLaC"), kind("audio/flac", "a FLAC recording", "audio/x-flac")],
+  // An OLE compound file (MS-CFB §2.2, header signature): Word, Excel and PowerPoint files before 2007, Outlook
+  // messages, and Windows installers (.msi), which the first bytes do not tell apart (M11-R136).
+  [[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], OLE],
   // Linux programs: System V ABI, ELF header, e_ident[EI_MAG0..3].
   [[0x7f, ...ascii("ELF")], LINUX],
   // macOS programs: Apple's <mach-o/loader.h> MH_MAGIC and MH_MAGIC_64 in either byte order, and <mach-o/fat.h>
@@ -119,16 +132,36 @@ function sniffWindows(bytes: Uint8Array, size: number): Sniffed | null {
   return lastPage < 512 && paragraphs >= 2 && paragraphs * 16 <= pages * 512 ? WINDOWS : null;
 }
 
+/** Layer III bit rates in kbit/s by index, for MPEG-1 and for MPEG-2 and 2.5 (ISO/IEC 11172-3 §2.4.2.3, 13818-3). */
+const RATES = [
+  [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+];
+const SAMPLE_RATES = [44100, 48000, 32000];
+
 /**
- * An MPEG audio frame header without an ID3 tag, as WHATWG MIME Sniffing §6.2.3 matches one: the 11-bit frame sync, a
- * layer other than the reserved 0, a bit rate index other than the invalid 15, a sample rate index other than the
- * reserved 3 (ISO/IEC 11172-3 §2.4.2.3).
+ * A Layer III frame header at `at`, as WHATWG MIME Sniffing §6.2.3 matches one: FF, the rest of the frame sync, the
+ * layer bits 01, a bit rate index other than 15 and a sample rate index other than 3.
+ */
+function isFrame(bytes: Uint8Array, at: number): boolean {
+  const [sync, flags = 0, rates = 0] = bytes.subarray(at, at + 4);
+  return at + 4 <= bytes.length && sync === 0xff && (flags & 0xe6) === 0xe2 && rates >> 4 < 15 && (rates & 0x0c) < 12;
+}
+
+/**
+ * MPEG audio without an ID3 tag, by the standard's "signature for MP3 without ID3" (§6.2.3): a frame header, and a
+ * second one where the first frame ends. The frame's length is computed as Firefox's mp3sniff.c computes it, the code
+ * the standard's steps were written from: bit rate times 144, or 72 for MPEG-2 and 2.5, over the sample rate, plus the
+ * padding bit. Four bytes alone are not enough: FF FF 00 00 reads as a header (M11-R136).
  */
 function sniffMp3(bytes: Uint8Array): Sniffed | null {
-  // The header is four bytes (§2.4.1.3); WHATWG reads none from fewer.
-  const [sync, flags = 0, rates = 0] = bytes;
-  const header = bytes.length >= 4 && sync === 0xff && (flags & 0xe0) === 0xe0 && (flags & 0x06) !== 0;
-  return header && rates >> 4 !== 15 && ((rates >> 2) & 0x03) !== 3 ? MP3 : null;
+  if (!isFrame(bytes, 0)) return null;
+  const [, flags = 0, rates = 0] = bytes;
+  const version = (flags >> 3) & 3;
+  // MPEG-2 halves the sample rate and MPEG-2.5 quarters it.
+  const hertz = (SAMPLE_RATES[(rates >> 2) & 3] ?? 1) >> ([2, 0, 1, 0][version] ?? 0);
+  const length = Math.floor(((RATES[version & 1]?.[rates >> 4] ?? 0) * (version & 1 ? 144000 : 72000)) / hertz);
+  return length && isFrame(bytes, length + ((rates >> 1) & 1)) ? MP3 : null;
 }
 
 /** The type the first bytes of a file of `size` bytes show, or null when they show none this module knows. */

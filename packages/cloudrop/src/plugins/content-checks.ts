@@ -43,7 +43,7 @@ const JAVASCRIPT = [
 
 /** Refused by default, whatever the route accepts (M10-K3). */
 const REFUSED: ReadonlySet<string> = new Set([
-  // Web pages, and programs under the types the sniffer gives them and their common aliases.
+  // Web pages, HTML applications among them, and programs: the types the sniffer gives them and their aliases.
   ...HTML.agrees,
   ...UNKNOWN,
   // A browser navigated to it renders each body part by the part's own type, text/html among them (HTML Standard
@@ -53,8 +53,6 @@ const REFUSED: ReadonlySet<string> = new Set([
   ...LINUX.agrees,
   ...MAC.agrees,
   ...INSTALLER,
-  // HTML applications, which Windows runs outside the browser.
-  "application/hta",
   // Scripts: JavaScript, shell scripts and VBScript.
   ...JAVASCRIPT,
   ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh text/vbscript".split(" "),
@@ -130,22 +128,27 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
   const what = `This file is ${sniffed.name}`;
   // A browser that could not type the file sent it as application/octet-stream: nothing to contradict (M10-K2).
   const typed = declared !== OCTET_STREAM;
+  const agreed = typed && (fits(sniffed.agrees, declared) || fits(sniffed.loose, declared));
   // The types this content can be here: its own names, and of the type it was sent as, or untyped of the route's
   // entries, those it can be.
   const can = [...sniffed.agrees, ...(typed ? [declared] : accept)].filter(
     (type) => !type.includes("*") && fits(sniffed.agrees, type),
   );
-  // A container's bytes do not say which of them the file is, so it is refused only when all of them are (M11-R133).
+  // `allow` lets the content through by any of them, and by the type it was sent as when it agrees with that one.
+  const names = agreed ? [...can, declared] : can;
+  // A container's bytes do not say which of its types the file is (M11-R133).
   const judged = sniffed.container ? can : [detected];
-  const open = judged.filter((type) => !isRefused(type, declared, accept, lists, can));
-  if (!open.length) return notAccepted(what, { declared, detected, reason: "refused" });
-  if (!typed) {
-    // The content's own type must be accepted.
-    return (sniffed.container ? open : can).some((type) => acceptsType(accept, type))
-      ? undefined
-      : notAccepted(what, { declared, detected, reason: "not-accepted" });
+  const open = judged.filter((type) => !isRefused(type, declared, accept, lists, names));
+  // Sent as one of its types, a container is that one, judged above; sent untyped, nobody said which, so one refused
+  // type refuses it (M11-R136).
+  if (typed ? !open.length : open.length < judged.length) {
+    return notAccepted(what, { declared, detected, reason: "refused" });
   }
-  if (fits(sniffed.agrees, declared) || fits(sniffed.loose, declared)) return undefined;
+  // The content's own type must be accepted.
+  if (!typed && !can.some((type) => acceptsType(accept, type))) {
+    return notAccepted(what, { declared, detected, reason: "not-accepted" });
+  }
+  if (!typed || agreed) return undefined;
   return refusal(`${what}, but it was sent as ${declared}. Give it the right extension, or pick another file.`, {
     declared,
     detected,

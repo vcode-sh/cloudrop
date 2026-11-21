@@ -7,7 +7,7 @@ import { contentChecks } from "./content-checks.ts";
 
 /** The kinds refused by default (M10-K3), each with every type it is refused as. */
 const KINDS = [
-  { kind: "a web page", names: ["text/html", "application/xhtml+xml"] },
+  { kind: "a web page", names: ["text/html", "application/xhtml+xml", "application/hta"] },
   { kind: "an unknown type", names: ["unknown/unknown", "application/unknown"] },
   {
     kind: "a Windows program",
@@ -80,8 +80,8 @@ const MACH_O = bytes([0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1]);
 
 /** The kinds the first bytes show, each with the names its detection goes by. */
 const DETECTED = [
-  { kind: "a web page", body: HTML, names: ["text/html", "application/xhtml+xml"] },
-  { kind: "XHTML", body: XHTML, names: ["text/html", "application/xhtml+xml"] },
+  { kind: "a web page", body: HTML, names: KINDS[0]?.names ?? [] },
+  { kind: "XHTML", body: XHTML, names: KINDS[0]?.names ?? [] },
   { kind: "a Windows program", body: PROGRAM, names: KINDS[2]?.names ?? [] },
   { kind: "a Linux program", body: ELF, names: KINDS[3]?.names ?? [] },
   { kind: "a macOS program", body: MACH_O, names: KINDS[4]?.names ?? [] },

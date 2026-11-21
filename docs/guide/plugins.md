@@ -32,7 +32,7 @@ At `/upload`, before anything is signed, a request with a file **sent as** one o
 1. **A web page, a program or a script.** `text/html`, `application/xhtml+xml`, the program types (such as
    `application/x-msdownload`), every JavaScript type WHATWG lists (`text/javascript`, `text/x-javascript`,
    `text/jscript` and the rest), the shell script types and `text/vbscript`, and Windows installers
-   (`application/x-msi`) and HTML applications (`application/hta`). Also `unknown/unknown` and `application/unknown`, which a
+   (`application/x-msi`) and HTML applications (`application/hta`, a web page that Windows runs as a program). Also `unknown/unknown` and `application/unknown`, which a
    browser sniffs and may render as a page, and `multipart/x-mixed-replace`, whose parts a browser renders each by its
    own type, an HTML part as a page. `allow` lets a kind through, by any of its names.
 2. **An XML type the route does not name.** A browser renders XML, and runs the scripts an SVG or an XHTML element in
@@ -122,7 +122,7 @@ goes by kind. Naming one type of a kind allows the kind under each of its names,
 
 | Kind | Names |
 | --- | --- |
-| Web page | `text/html`, `application/xhtml+xml` |
+| Web page | `text/html`, `application/xhtml+xml`, `application/hta` |
 | Windows or DOS program | `application/vnd.microsoft.portable-executable`, `application/x-msdownload`, `application/x-msdos-program`, `application/x-dosexec`, `application/x-ms-dos-executable` |
 | Linux program | `application/x-executable`, `application/x-elf`, `application/x-sharedlib` |
 | macOS program | `application/x-mach-binary`, `application/x-mach-o-executable` |
@@ -159,14 +159,18 @@ contentChecks({ deny: ["video/*"] });
 So `deny: ["video/*"]` refuses every file sent as a video type, at `/upload`, and every file whose bytes show a
 format that is only video (QuickTime) under another name. It does not refuse a WebM, MP4, 3GP, Matroska or Ogg file
 sent as that container's audio type, with or without a video stream inside: telling them apart takes a parser for
-each format, which this check is not. A container sent untyped passes when the route accepts one of its types and
-`deny` does not name that one. RIFF files are different: `WAVE` is audio and `WEBP` an image, and the bytes say so.
+each format, which this check is not. A container sent untyped is refused when `deny` names any type it can be:
+nobody said which one it is. RIFF files are different: `WAVE` is audio and `WEBP` an image, and the bytes say so.
 
 A ZIP that shows no package within the first 4 KiB is treated the same way. Sent as an Office, OpenDocument or `+zip`
 type, it is that type, since ZIP is what such a file is: `deny: ["application/zip"]` refuses a ZIP sent as
 `application/zip`, as `application/x-zip-compressed`, or as any type that is not built on ZIP, and not a document
 whose `word/` folder starts past the bytes read. Anyone can put a `word/` entry into a ZIP, so `deny` never kept a
 determined ZIP out of a route that takes Office files.
+
+An OLE compound file is the container of Word, Excel and PowerPoint files before 2007, of Outlook messages, and of
+Windows installers (`.msi`). Sent as an `application/` type other than an installer's, it passes as that type. Sent
+untyped it is refused, since it may be an installer; `allow: ["application/x-msi"]` takes it.
 
 The plugin applies to every route. A type that one route takes and another must not belongs in each route's `accept`.
 
@@ -181,20 +185,21 @@ The plugin applies to every route. A type that one route takes and another must 
 | AVIF, HEIC, HEIF | `image/avif`, `image/heic`, `image/heif` | ISO BMFF `ftyp` box, major brand `avif`, `heic` and kin, `mif1` | AVIF §9.1; ISO/IEC 23008-12 |
 | MP4, M4A, MOV, 3GP | `video/mp4` (also `audio/mp4`, `audio/x-m4a`), `audio/mp4`, `video/quicktime`, `video/3gpp` (also `audio/3gpp`) | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
 | WebM, Matroska | `video/webm` (also `audio/webm`), `video/x-matroska` (also `audio/x-matroska`) | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
-| MP3, and any file an ID3 tag fronts | `audio/mpeg` (an ID3 tag also `audio/aac`, `audio/vnd.dlna.adts`, `audio/flac`, `audio/mp2`) | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
+| MP3, and any file an ID3 tag fronts | `audio/mpeg` (an ID3 tag also `audio/aac`, `audio/vnd.dlna.adts`, `audio/flac`, `audio/mp2`) | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or a Layer III frame header with a second one where its frame ends | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
 | WAV | `audio/wav` | `RIFF`, 4 bytes, `WAVE` | WHATWG §6.2 |
 | Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |
 | PDF | `application/pdf` | `%PDF-` | ISO 32000-2 §7.5.2; WHATWG §7.1 |
+| Old Office file or Windows installer | `application/x-ole-storage` | `D0 CF 11 E0 A1 B1 1A E1` | MS-CFB §2.2 |
 | ZIP | `application/zip` | `PK 03 04`, or `PK 05 06` when empty | PKWARE APPNOTE §4.3.7, §4.3.16 |
 | Word, Excel, PowerPoint | the Office Open XML types | a ZIP with an entry under `word/`, `xl/` or `ppt/` among the entries in the first 4 KiB, also after entries whose sizes follow their data (streamed archives, as Java and Node writers make them) | ECMA-376 Part 1; PKWARE APPNOTE §4.3.9, §4.4.4 |
 | OpenDocument, EPUB | the type in the archive | a ZIP whose first entry `mimetype` names it | ODF 1.3 Part 2 §3.3; EPUB OCF 3.3 §4.2.1 |
 | Windows or DOS program | `application/vnd.microsoft.portable-executable` | `MZ`, then `PE\0\0`, `NE`, `LE` or `LX` where the offset at `0x3C` points (past the first 4 KiB, an offset under 151 MB in a file long enough to hold it), or a DOS header with fewer than 512 bytes on its last page and a header of at least two paragraphs that fits in its pages | Microsoft PE Format; The MS-DOS Encyclopedia, Article 4 |
 | Linux program | `application/x-executable` | `7F 45 4C 46` | System V ABI, ELF header |
 | macOS program | `application/x-mach-binary` | Mach-O and universal binary magic numbers (also a Java class file) | Apple `mach-o/loader.h`, `mach-o/fat.h` |
-| Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/` | `execve(2)` |
+| Script | `text/x-shellscript` | `#!`, any spaces or tabs, then `/`, at the start or behind a byte order mark or blank lines | `execve(2)`; POSIX.1-2024 Shell Command Language §2.9.1.4 |
 | SVG | `image/svg+xml` | a document whose root element, after any declaration, comment or doctype, is `svg` | SVG 2 |
-| Web page | `text/html` | one of the standard's tags (`<!DOCTYPE html`, `<html`, `<head`, `<script`, `<iframe`, `<h1`, `<div`, `<font`, `<table`, `<a`, `<style`, `<title`, `<b`, `<body`, `<br`, `<p`) at the start, in any case, before a space or `>`; also before a tab, a line break or `/`; also as the root after a comment or a doctype in a document without `<?xml`; an `html` root; or `<!--` at the start, whatever follows | WHATWG §7.1 |
+| Web page | `text/html` | one of the standard's tags (`<!DOCTYPE html`, `<html`, `<head`, `<script`, `<iframe`, `<h1`, `<div`, `<font`, `<table`, `<a`, `<style`, `<title`, `<b`, `<body`, `<br`, `<p`) or `<hta:application` at the start, in any case, before a space or `>`; also before a tab, a line break or `/`; also as the root after a comment or a doctype in a document without `<?xml`; an `html` root; or `<!--` at the start, whatever follows | WHATWG §7.1 |
 | XML | `application/xml` | `<?xml` | WHATWG §7.1 |
 
 Text is read after a byte order mark (UTF-8 or UTF-16) and after the standard's whitespace bytes (tab, line feed, form
@@ -212,14 +217,26 @@ asks for a space or `>` after `<!--` too; Chromium and Firefox take it before an
   was sent as: JavaScript sent as `text/plain` to a route that takes `text/plain` is stored. Without `nosniff`, a
   page may still load such a file with `<script src>` from your origin; the `attachment` disposition cloudrop stores
   stops a browser opening it as a page, not that. Better still, serve user files from a domain of their own.
-- **Windows batch files and PowerShell scripts have no signature.** A `.bat`, `.cmd` or `.ps1` sent as a text type or
-  as `application/octet-stream` passes; keep those types out of `accept` and do not serve such files to be opened.
+- **Some files a system runs show no signature.** Each of these passes as the type it was sent as, or untyped: Windows
+  batch files and PowerShell scripts (`.bat`, `.cmd`, `.ps1`), VBScript and JScript files (`.vbs`, `.js`), internet
+  shortcuts (`.url`, a text file), Windows shortcuts (`.lnk`, which this check does not recognise), DOS `.com`
+  programs, which have no header at all, and an HTML application (`.hta`) that starts with none of the tags in the
+  table. Keep `application/octet-stream` and broad text types out of `accept` where such files must not land, and
+  do not serve stored files to be opened.
+- **An installer sent as an old Office type passes.** An `.msi` and a `.doc` from before 2007 start with the same
+  bytes, so an installer sent as `application/msword` is taken for a document. Only an untyped one, or one sent as
+  an installer type, is refused.
+- **A spreadsheet export that is HTML or XML inside is refused.** Many applications' "Export to Excel" writes an HTML
+  table into a file named `.xls`, and Excel 2003 saves XML. Sent as `application/vnd.ms-excel`, the first is refused
+  as a web page and the second as XML; the same holds for `application/msword`. To take them, add
+  `allow: ["application/vnd.ms-excel"]`: both then pass as that type, which a browser downloads and does not render.
 - **Archives are not opened.** A ZIP of programs passes as a ZIP. There is no virus scanning.
 - **`deny` sees what the first bytes show.** A ZIP behind a one-byte prefix, which ZIP readers still open, shows no
   ZIP signature. A video in a WebM, MP4 or Ogg file sent as an audio type is not told from a recording
   ([Containers](#containers)).
 - **A text file that starts with `#!` and a path is refused as a script,** even on a route that takes `text/*`, and
-  so is other text that opens with `#!/`, such as a list of hash-bang URLs. A route that takes source code adds
+  so is other text that opens with `#!/`, such as a list of hash-bang URLs. The line counts behind a byte order mark
+  or blank lines too: the kernel does not run such a file, but a shell does, as a shell script. A route that takes source code adds
   `allow: ["text/x-shellscript"]`; an allowed script then passes as any text type, such as `text/x-python` or
   `text/plain`, or as `application/x-sh`, `application/x-perl`, `application/x-ruby` or `application/x-php`.
 - **Text that starts like a web page is refused.** A Markdown file that opens with `<p align="center">`, `<div>` or a

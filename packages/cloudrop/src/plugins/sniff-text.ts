@@ -2,11 +2,21 @@
 // (M10-K1). Only the start of the text decides, as in a browser's own sniffing; an XML document is read on to its root
 // element, which decides what a browser renders it as.
 
-import { ascii, kind, type Sniffed, startsWith } from "./bytes.ts";
+import { kind, type Sniffed, startsWith } from "./bytes.ts";
 
-export const HTML: Sniffed = kind("text/html", "a web page (HTML)", "application/xhtml+xml");
+/**
+ * Old Office types whose files may be HTML or XML inside: a web application's "Export to Excel" writes an HTML table,
+ * and Excel and Word 2003 save XML. Such content is still a web page or XML, refused as one; it does not contradict
+ * these types, so `allow` can let it through by them (M11-R136).
+ */
+const loose = ["application/vnd.ms-excel", "application/msword"];
+/** A web page; an HTML application (.hta) is one that Windows runs outside the browser. */
+export const HTML: Sniffed = {
+  ...kind("text/html", "a web page (HTML)", "application/xhtml+xml", "application/hta"),
+  loose,
+};
 const SVG = kind("image/svg+xml", "an SVG image");
-const XML = kind("application/xml", "an XML document", "text/xml", "*+xml");
+const XML: Sniffed = { ...kind("application/xml", "an XML document", "text/xml", "*+xml"), loose };
 /**
  * A script is text in any language, so once a route allows scripts, its "#!" line agrees with every text type, and with
  * the types freedesktop.org's shared-mime-info gives shell, Perl, Ruby and PHP scripts.
@@ -26,12 +36,13 @@ export const SCRIPT: Sniffed = kind(
  */
 const HTML_START = /^<(?:!doctype html[ >]|!--)/i;
 /**
- * The table's fifteen elements. Each is matched as the unprefixed root element of a document without an XML
+ * The table's fifteen elements, and the element that makes a page an HTML application (Microsoft, HTA:APPLICATION
+ * element). Each is matched as the unprefixed root element of a document without an XML
  * declaration: at the start, as the standard has it, and after comments or a doctype, where a browser that renders the
  * document as HTML finds it. In a declared XML document they are the app's own elements.
  */
 const HTML_ROOTS: ReadonlySet<string> = new Set(
-  "html head script iframe h1 div font table a style title b body br p".split(" "),
+  "html head script iframe h1 div font table a style title b body br p hta:application".split(" "),
 );
 /** What may come before an XML document's root element (XML 1.0 §2.8): whitespace, declarations, comments, a doctype. */
 const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!doctype[^[>]*(?:\[[\s\S]*?\])?\s*>/iy;
@@ -79,18 +90,15 @@ export const hasBom = (bytes: Uint8Array): boolean =>
 
 /**
  * A script's first line (execve(2)): "#!", the blanks Linux's binfmt_script skips, and the interpreter's path, which
- * scripts give in full. Prose that opens with "#!", such as "#!important", names no path and is not a script.
+ * scripts give in full. Prose that opens with "#!", such as "#!important", names no path and is not a script. The
+ * line also counts behind a byte order mark or blank lines: execve does not run such a file, but a shell that gets
+ * ENOEXEC runs it as a shell script (POSIX.1-2024, Shell Command Language §2.9.1.4), and so does `sh file`.
  */
-function isScript(bytes: Uint8Array): boolean {
-  if (!startsWith(bytes, ascii("#!"))) return false;
-  let at = 2;
-  while (bytes[at] === 0x20 || bytes[at] === 0x09) at++;
-  return bytes[at] === 0x2f;
-}
+const SCRIPT_START = /^#![ \t]*\//;
 
 export function sniffText(bytes: Uint8Array): Sniffed | null {
-  if (isScript(bytes)) return SCRIPT;
   const text = decode(bytes).replace(LEADING, "");
+  if (SCRIPT_START.test(text)) return SCRIPT;
   if (!text.startsWith("<")) return null;
   // The root element decides first: an SVG may open with a comment, which alone reads as the start of a web page.
   const root = rootElement(text) ?? "";

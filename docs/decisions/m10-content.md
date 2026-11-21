@@ -63,8 +63,8 @@ Entries continue from 1.
   `application/x-mach-binary`, `application/x-mach-o-executable`, and the Windows installer and HTML application types
   `application/x-msi`, `application/x-ms-installer`, `application/hta`), every JavaScript MIME type essence of WHATWG
   MIME Sniffing §4.6, the shell script types (`text/x-shellscript`, `application/x-sh`, `application/x-shellscript`,
-  `text/x-sh`) and `text/vbscript`. A Windows installer's content (an OLE compound file) is not detected: Word and Excel
-  files before 2007 share that container. Every XML type (`text/xml`, `application/xml`, `text/xsl` and any `+xml`, SVG
+  `text/x-sh`) and `text/vbscript`. A Windows installer's content (an OLE compound file) is detected only as that
+  container, which Word and Excel files before 2007 share: it is refused when sent untyped (`M11-R136`). Every XML type (`text/xml`, `application/xml`, `text/xsl` and any `+xml`, SVG
   among them) passes only when the file was sent as an XML type that the route's `accept` lists exactly. `allow` lifts
   these refusals per type; `deny` adds to them and wins over `allow`.
 - **Why:** the design names HTML, executables, scripts and SVG. The SVG rule is widened to every XML type because a
@@ -241,7 +241,7 @@ Entries continue from 1.
 
 - **Decision:** a PNG agrees with `image/apng` as well as `image/png`. `application/x-ms-dos-executable`
   (shared-mime-info's type for `.exe`) is refused at `/upload` and agrees with a Windows program. An MPEG audio frame
-  header counts only with all four of its bytes. The guide's Limits tell the app to serve stored files with
+  header counts only with all four of its bytes (and, since `M11-R136`, only before a second header where its frame ends). The guide's Limits tell the app to serve stored files with
   `X-Content-Type-Options: nosniff` (or from a domain of their own), say that `.bat`, `.cmd` and `.ps1` have no
   signature, that a recognised package (Word, OpenDocument, EPUB) is not `application/zip` for `deny`, and that an
   SVG whose leading comments fill the first 4 KiB reads as HTML; the errors guide names the refusal of a file sent as

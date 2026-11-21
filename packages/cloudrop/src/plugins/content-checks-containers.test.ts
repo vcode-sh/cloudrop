@@ -51,10 +51,6 @@ describe("contentChecks: a container's bytes do not say audio or video (M11-R133
         options: { deny: ["audio/*"] },
       },
     },
-    {
-      name: "an untyped WebM file on a route that takes audio and denies video",
-      input: { ...audioOnly("a", "", WEBM), accept: ["audio/webm", UNTYPED] },
-    },
   ])("passes $name sent as a type its container can be", async ({ input }) => {
     expect(await contentOutcome(input)).toEqual(passed);
   });
@@ -78,13 +74,9 @@ describe("contentChecks: a container's bytes do not say audio or video (M11-R133
       }),
     },
     {
-      name: "an untyped WebM file is refused when every type it can be is denied",
-      input: {
-        accept: "*/*",
-        file: { name: "a", type: "" },
-        body: WEBM,
-        options: { deny: ["video/*", "audio/*"] },
-      },
+      // Nobody said which of its types an untyped container is, so one denied type refuses it (M11-R136).
+      name: "an untyped WebM file is refused on a route that takes audio and denies video",
+      input: { ...audioOnly("a", "", WEBM), accept: ["audio/webm", UNTYPED] },
       expected: refused("This file is a WebM file, which this upload does not accept. Pick another file.", {
         declared: UNTYPED,
         detected: "video/webm",
