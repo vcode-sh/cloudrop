@@ -23,6 +23,21 @@ export type ParsedArgs = { show: "help" | "version" } | { options: CommandOption
 const SETUP_FLAGS = { "--apply": "apply", "--dry-run": "dryRun", "--replace": "replace" } as const;
 const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--var", "--jurisdiction"]);
 
+// A refused origin is repeated only when it is written as one, scheme://host[:port] with at most a last "/". A URL
+// with a path or a query may hold a token, as a presigned URL does, and other text may be a setting's value pasted in
+// the wrong place (M11-R234). One with an "@" has the origin rule's own sentence, which repeats nothing.
+const WRITTEN_AS_ORIGIN = /^[^:/?#\s]+:\/\/[^/?#\s]*\/?$/;
+
+/** What is wrong with the `number`th --origin, if anything. */
+function originOption(value: string, number: number): string | null {
+  if (WRITTEN_AS_ORIGIN.test(value) || value.includes("@")) return originProblem(value);
+  const problem = originProblem(value, `--origin number ${number}`);
+  return (
+    problem &&
+    `${problem} Its value is not repeated here, in case it holds a secret: only text written as scheme://host[:port] is.`
+  );
+}
+
 /** Sets one option that takes a value; returns what is wrong with it, if anything. */
 function setValue(options: CommandOptions, name: string, value: string): string | null {
   if (name === "--env-file") {
@@ -39,7 +54,7 @@ function setValue(options: CommandOptions, name: string, value: string): string 
     return null;
   }
   options.origins.push(value);
-  return originProblem(value);
+  return originOption(value, options.origins.length);
 }
 
 function setFlag(options: CommandOptions, name: keyof typeof SETUP_FLAGS, inline: string | undefined): string | null {
@@ -71,10 +86,9 @@ function splitArgs(args: readonly string[]): Arg[] {
   return split;
 }
 
-// An argument the command does not know is repeated only when it is shaped like an option's or a command's name.
-// Anything else may be a setting's value typed in the wrong place, and the output may go to a log (M11-R115).
+// An argument the command does not know is repeated only when it is shaped like an option's name. Anything else may
+// be a setting's value typed in the wrong place, and the output may go to a log (M11-R115).
 const OPTION_NAME = /^--?[A-Za-z][A-Za-z-]*$/;
-const COMMAND_NAME = /^[A-Za-z][A-Za-z-]{0,19}$/;
 
 function unknownArgument({ name, position }: Arg): string {
   if (OPTION_NAME.test(name)) return `Unknown option "${name}". The options are listed below.`;
@@ -85,12 +99,11 @@ function unknownArgument({ name, position }: Arg): string {
   return `Argument ${position} is not an option. It is not repeated here, in case it is a setting's value. The options are listed below.`;
 }
 
-function unknownCommand(command: string): string {
-  if (command.startsWith("-")) return "Name the command first, doctor or setup, then its options.";
-  return COMMAND_NAME.test(command)
-    ? `Unknown command "${command}". Use doctor or setup.`
+// The word typed as the command is never repeated: one of letters may be a key ID (M11-R234).
+const unknownCommand = (command: string): string =>
+  command.startsWith("-")
+    ? "Name the command first, doctor or setup, then its options."
     : "The first argument is not a command. Use doctor or setup.";
-}
 
 function readOption(options: CommandOptions, arg: Arg): string | null {
   const { name, value, inline } = arg;

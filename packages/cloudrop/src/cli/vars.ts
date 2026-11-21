@@ -15,8 +15,10 @@ function unknownSetting(setting: string, name: string): string {
   if (typedIsName && SETTINGS.includes(name)) {
     return `--var takes the setting first, then your variable: --var ${name}=${setting}.`;
   }
-  const typed = typedIsName ? `"${setting}"` : 'what stands before "="';
-  const meant = nearest(/^cloudrop_/i.test(setting) ? setting : `CLOUDROP_${setting}`, SETTINGS, 2);
+  const ownName = /^cloudrop_/i.test(setting);
+  const meant = nearest(ownName ? setting : `CLOUDROP_${setting}`, SETTINGS, 2);
+  // Repeated only as a setting's name, misspelt or made up: any other name-shaped text may be a key (M11-R234).
+  const typed = typedIsName && (ownName || meant) ? `"${setting}"` : 'what stands before "="';
   const hint = meant ? `Did you mean ${meant}?` : "The settings are listed below.";
   return `--var: ${typed} is not a setting the command reads. ${hint}`;
 }

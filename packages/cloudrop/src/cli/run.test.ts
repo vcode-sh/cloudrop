@@ -4,7 +4,6 @@ import { ENV, ORIGIN, run } from "./command-fixture.ts";
 describe("cloudrop usage", () => {
   it.each([
     { name: "no command", argv: [], message: "Name a command: doctor or setup." },
-    { name: "an unknown command", argv: ["check"], message: 'Unknown command "check". Use doctor or setup.' },
     {
       name: "no origin",
       argv: ["doctor"],
@@ -14,7 +13,7 @@ describe("cloudrop usage", () => {
       name: "an origin with a path",
       argv: ["doctor", "--origin", "https://app.example.com/upload"],
       message:
-        '"https://app.example.com/upload" is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path.',
+        "--origin number 1 is not an origin. Use https://app.example.com: an origin is the scheme, host and port, with no path. Its value is not repeated here, in case it holds a secret: only text written as scheme://host[:port] is.",
     },
     {
       name: "an origin with a trailing slash, in upper case",
@@ -32,13 +31,13 @@ describe("cloudrop usage", () => {
       name: "the opaque origin null",
       argv: ["doctor", "--origin", "null"],
       message:
-        '"null" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
+        "--origin number 1 is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com. Its value is not repeated here, in case it holds a secret: only text written as scheme://host[:port] is.",
     },
     {
-      name: "something that is not a URL",
-      argv: ["doctor", "--origin", "localhost:3530"],
+      name: "a second origin that is not a URL",
+      argv: ["doctor", "--origin", ORIGIN, "--origin", "localhost:3530"],
       message:
-        '"localhost:3530" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.',
+        "--origin number 2 is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com. Its value is not repeated here, in case it holds a secret: only text written as scheme://host[:port] is.",
     },
     {
       name: "a scheme no page is loaded over",
@@ -136,7 +135,7 @@ describe("cloudrop usage", () => {
       name: "--origin --help",
       argv: ["doctor", "--origin", "--help"],
       stderr:
-        '"--help" is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com.\n\n',
+        "--origin number 1 is not an origin. Write it in lowercase as scheme://host[:port] with no path, such as https://app.example.com. Its value is not repeated here, in case it holds a secret: only text written as scheme://host[:port] is.\n\n",
     },
   ])("reads $name as the option's value, not as a call for help", async ({ argv, stderr }) => {
     const result = await run(argv);
@@ -192,9 +191,10 @@ describe("cloudrop usage", () => {
       argv: ["doctor", "--origin", ORIGIN, "--password=hunter2"],
       message: 'Unknown option "--password". The options are listed below.',
     },
+    // A word of letters is not repeated either: a key ID can be one, as MinIO's default is (M11-R234).
     {
-      name: "a first argument that is no command's name",
-      argv: ["hunter2"],
+      name: "a first argument that is no command",
+      argv: ["minioadmin"],
       message: "The first argument is not a command. Use doctor or setup.",
     },
     {

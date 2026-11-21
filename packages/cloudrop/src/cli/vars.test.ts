@@ -52,6 +52,12 @@ describe("cloudrop --var", () => {
       argv: doctor("CLOUDROP_UPLOADS_PATH=UPLOADS_PATH"),
       message: '--var: "CLOUDROP_UPLOADS_PATH" is not a setting the command reads. The settings are listed below.',
     },
+    // Shaped like a name, as an access key ID is: only a setting's name, or one misspelt, is repeated (M11-R234).
+    {
+      name: "a name before = that is no setting's and near none",
+      argv: doctor("AKIAIOSFODNN7EXAMPLE=R2_KEY"),
+      message: '--var: what stands before "=" is not a setting the command reads. The settings are listed below.',
+    },
     {
       name: "something that is no name before =",
       argv: doctor("acme-uploads=R2_BUCKET"),

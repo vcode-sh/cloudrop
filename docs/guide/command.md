@@ -63,13 +63,24 @@ is checked and names the R2 variables to unset to check S3.
 **The command never prints a secret**: not the access key ID, not the secret access key and not the upload token
 secret (`CLOUDROP_SECRET`). It never prints the R2 account ID or the S3 region either. It prints two values, and only
 as words of the Wrangler and AWS CLI commands it suggests: the bucket's name and, for S3, the endpoint. Every other
-line names a variable, never its value. It does not repeat what you typed in the wrong place either, since that may
-be a secret: an argument it does not know is repeated only when it is shaped like an option's name
-(`CLOUDROP_SECRET=...` after the command is named up to its `=`, anything else by its position), an origin with a user
-name or password is refused without being repeated, and an `--env-file` it cannot read is reported by its error code,
-not its path. One thing it cannot tell apart: what follows `=` in `--var` is read as a variable's name and printed as
-one when it is shaped like a name, so a value typed there by mistake, such as a key ID of letters and digits, is
-printed too.
+line names a variable, never its value.
+
+It does not repeat what you typed in the wrong place either, since that may be a secret:
+
+- An argument it does not know is repeated only when it is shaped like an option's name (`--force`).
+  `CLOUDROP_SECRET=...` after the command is named up to its `=`, and anything else by its position.
+- The word typed as the command is never repeated: a key ID can be a word of letters.
+- A refused `--origin` is repeated only when it is written as an origin, `scheme://host[:port]` with at most a last
+  `/`. Any other is named by its number (`--origin number 2`): a URL with a path or a query may hold a token, as a
+  presigned URL does, and other text may be a key. One with a user name or password is never repeated.
+- What stands before `=` in `--var` is repeated only as a setting's name, misspelt (`CLOUDROP_R2_BUCKT`) or made up
+  (`CLOUDROP_UPLOADS_PATH`).
+- An `--env-file` it cannot read is reported by its error code, not its path.
+
+One thing it cannot tell apart: the place of a variable's name in `--var`. What follows `=` is read as a variable's
+name and printed as one when it is shaped like a name, so a value typed there by mistake, such as a key ID of letters
+and digits, is printed too. So is such a word before `=` when a setting's name follows it: the command answers
+`--var R2_BUCKET=CLOUDROP_R2_BUCKET` with the pair turned round.
 
 **The commands it prints run as printed**, in the directory you ran it in:
 

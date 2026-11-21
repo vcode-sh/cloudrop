@@ -102,13 +102,14 @@ function originFault(value: string): Fault | null {
 /**
  * What is wrong with `value` as an origin (M9-H100), or null when a browser can send it as a page's origin. The
  * message repeats the value unless it holds an "@": what stands before one may be a password, and the message goes to
- * a terminal or a log (M11-R115).
+ * a terminal or a log (M11-R115). With `named`, the message says that in the value's place and never repeats it.
  */
-export function originProblem(value: unknown): string | null {
+export function originProblem(value: unknown, named?: string): string | null {
   if (typeof value !== "string") return NOT_TEXT;
   const fault = originFault(value);
   if (!fault) return null;
   const [wrong, fix] = fault;
+  if (named !== undefined) return `${named} ${wrong} ${fix}`;
   return value.includes("@")
     ? `An origin holds no user name or password, so this one is not repeated here. ${fix}`
     : `${JSON.stringify(value)} ${wrong} ${fix}`;
@@ -120,6 +121,6 @@ export const isExactOrigin = (origin: unknown): origin is string => originProble
 /** The list, when every entry is an exact origin; otherwise what is wrong with the first that is not. */
 export function readOrigins(given: unknown): { origins: string[] } | { problem: string } {
   if (!Array.isArray(given)) return { problem: NOT_TEXT };
-  const problem = given.map(originProblem).find((found) => found !== null);
+  const problem = given.map((each) => originProblem(each)).find((found) => found !== null);
   return problem ? { problem } : { origins: given };
 }

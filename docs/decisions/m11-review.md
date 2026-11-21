@@ -1296,7 +1296,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** an honest typo that is not shaped like a name (`doctor orig1n …`) is named by its position, which is
   less direct. A word of letters typed as the command (`cloudrop hunter`) is still repeated. On Node a missing
   `--env-file` never reaches the command: Node exits 9 and prints the path itself (`M9-H104`).
-- **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`.
+- **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`. Amended by `M11-R234`: the word typed as
+  the command is never repeated, a refused `--origin` only when it is written as an origin, and a `--var` setting only
+  as a setting's name.
 - **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
   `src/cli/command-fixture.ts`, `src/server/bucket-check.test.ts`, `docs/guide/command.md#settings`.
 
@@ -2643,3 +2645,35 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; the text follows the code.
 - **Status:** in force.
 - **Visible in:** `docs/guide/errors.md` ("Upload endpoint errors", "Database store file API errors").
+
+### M11-R234: the command repeats a refused `--origin`, a `--var` setting and the command word only when they cannot be a secret
+
+- **Decision:** three more places printed back what was typed, and each now follows `M11-R115`'s rule that text is
+  repeated only when its shape says what it is.
+  - **`--origin`:** a refused value is repeated only when it is written as an origin, `scheme://host[:port]` with at
+    most a last `/`. Any other is named by its number: "--origin number 2 is not an origin. Use
+    https://app.example.com: an origin is the scheme, host and port, with no path. Its value is not repeated here, in
+    case it holds a secret: only text written as scheme://host[:port] is." A value with an `@` keeps `M11-R115`'s
+    sentence. `originProblem` takes the name to use in the value's place as a second argument; the server's
+    `trustedOrigins` and `api.checkBucket` pass none and repeat as before.
+  - **`--var`:** what stands before `=` is repeated only as a setting's name: one that starts with `CLOUDROP_`, or
+    one within two edits of a setting. Any other name-shaped word is "what stands before "="".
+  - **The command:** the first argument is never repeated. `Unknown command "check"` is gone; every word that is no
+    command answers "The first argument is not a command. Use doctor or setup."
+  The guide lists the five rules and the one case the command cannot tell apart: the place of a variable's name in
+  `--var`, on either side of `=`.
+- **Why:** the guide said "The command never prints a secret" and named one exception, and the output goes to
+  terminals and CI logs. A URL with a path or a query is what a presigned URL and a webhook URL with a token are, and
+  `--origin <such a URL>` printed it whole; the correction it is answered with holds scheme, host and port alone, so
+  nothing is lost by leaving the value out. A name-shaped word before `=` in `--var` is what an AWS access key ID is
+  (`AKIA` and sixteen letters and digits). A word of at most 20 letters is what MinIO's default key ID is
+  (`minioadmin`), and an AWS key ID has no digit about once in thirty, so `M11-R115`'s "a word of letters typed as
+  the command is still repeated" printed key IDs the guide promises never to print. Repeating the command word told
+  the person nothing they could not see on their own command line.
+- **If wrong:** an honest typo loses its echo: `--origin localhost:3530` and `--origin null` are named by number, and
+  `cloudrop docter` is not repeated. The server's messages still repeat a `trustedOrigins` entry without an `@`,
+  whatever its shape: it is written in code, not typed at a prompt, and its tests and guide table were left as they
+  are.
+- **Status:** in force. Amends `M11-R115` (the command word, and which origins are repeated) and `M11-C3`.
+- **Visible in:** `src/cli/args.ts`, `src/cli/vars.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
+  `src/cli/vars.test.ts`, `docs/guide/command.md#settings`.
