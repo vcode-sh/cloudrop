@@ -137,8 +137,9 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   `Retry-After`, max age 3600. The lifecycle rule aborts incomplete multipart uploads after 1 day across the bucket
   (`Filter` with an empty `Prefix`). When any enabled rule already aborts them across the bucket (R2's default 7-day
   rule, or cloudrop's own), the lifecycle configuration is left alone. When `cloudrop-abort-incomplete` exists but no
-  longer does that, `setup` refuses (a `PROBLEM`, nothing written): someone edited it, and rewriting it from fields
-  would drop what they added.
+  longer does that, `setup` leaves the lifecycle rules alone and reports a `PROBLEM` (exit 1): someone edited it, and
+  rewriting it from fields would drop what they added. The CORS rule is still written: only an unreadable
+  configuration stops both.
 - **Why:** one rule set, documented once, which `checkBucket` accepts. A second abort rule would change nothing
   `checkBucket` checks, and every write of bucket settings is a risk worth avoiding. One day matches the guide; an
   upload token lasts 24 hours, so no upload can be completed later anyway.
@@ -150,8 +151,11 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 
 - **Decision:** variables are read from the environment and, with `--env-file`, from a file of `NAME=value` lines
   parsed by the command as Node's `--env-file` reads them: optional `export`; single quotes, double quotes or backticks
-  taken as written, with `\n` in double quotes a line break; `#` starting a comment in an unquoted value; one line per
-  value, nothing expanded or run. A quote left open is a usage error naming the line, never its content. A variable set in the environment wins over the file, as with Node's `--env-file`, and a `note` names each
+  taken as written and running over several lines up to the closing quote, with `\n` in double quotes a line break; a
+  quote never closed kept as written; `#` starting a comment in an unquoted value; nothing expanded or run (the
+  multi-line and open-quote cases measured against `node --env-file` on Node 24.22, 2026-11-21, after the second
+  review found that the first parser refused a file Node reads, such as one with a PEM key). A variable set in the
+  environment wins over the file, as with Node's `--env-file`, and a `note` names each
   cloudrop variable set in both. A file that cannot be read is reported by its path and error code only. The command
   prints names, never values, the bucket name included: printed commands use `"$CLOUDROP_R2_BUCKET"` and
   `"$CLOUDROP_S3_ENDPOINT"`. The storage driver is built by the presets' own code from those variables

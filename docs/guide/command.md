@@ -22,8 +22,8 @@ S3-compatible service, and `CLOUDROP_SECRET`. When any `CLOUDROP_R2_*` variable 
 
 - `--env-file <path>` also reads a file of `NAME=value` lines, such as `.env.local`, the way Node's `--env-file` does:
   `export` in front of a name is allowed, a value in single quotes, double quotes or backticks is taken as written
-  (`\n` in double quotes is a line break), and in an unquoted value `#` starts a comment, so quote a value that
-  contains one. A value spans one line, and nothing in the file is run or expanded. A variable set in the environment
+  and may run over several lines (`\n` in double quotes is a line break), and in an unquoted value `#` starts a
+  comment, so quote a value that contains one. Nothing in the file is run or expanded. A variable set in the environment
   wins over the file, as with Node, and the command says so for each cloudrop variable set in both.
 - `--jurisdiction eu` (or `fedramp`) selects the endpoint of an R2 bucket in a jurisdiction, as `r2({ jurisdiction })`
   does.
@@ -85,7 +85,8 @@ With `--apply`, `setup` writes the rules through the S3 API (`PutBucketCors` and
   rule by hand.
 - When another enabled rule already aborts incomplete multipart uploads across the bucket (R2 creates one by default),
   the lifecycle rules are left as they are. When `cloudrop-abort-incomplete` exists but no longer does that (someone
-  disabled it or gave it a prefix), `setup` changes nothing and says so: fix or delete that rule by hand.
+  disabled it or gave it a prefix), `setup` leaves the lifecycle rules alone, still writes the CORS rule, and reports
+  the problem (exit 1): fix or delete that rule by hand.
 - It writes nothing for a setting that would not change.
 - It needs credentials that may read and change bucket settings, such as an R2 Admin Read & Write token. Use it for
   this step only; the app needs no more than Object Read & Write.
@@ -106,6 +107,6 @@ Wrangler's local R2 cannot read or write bucket settings (it answers `501`), and
 | --- | --- |
 | `0` | Nothing is wrong: every check passed or could not run, or `setup` printed, wrote or would write the rules. |
 | `1` | `doctor` found a problem, or `setup` could not read, could not write, or found the settings incomplete. |
-| `2` | A usage error: an unknown command or option, a missing `--origin`, an origin with a path, `--replace` without `--apply` or `--dry-run`, or an `--env-file` that cannot be read or leaves a quote open. |
+| `2` | A usage error: an unknown command or option, a missing `--origin`, an origin with a path, `--replace` without `--apply` or `--dry-run`, or an `--env-file` that cannot be read. |
 
 In CI, `cloudrop doctor` fails the job on a problem and passes when it could only not check something.
