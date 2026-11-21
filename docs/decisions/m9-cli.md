@@ -8,7 +8,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **Decision:** `cloudrop <doctor|setup> --origin <origin> [options]`. `--origin` is required by both commands and
   repeatable; it must be an exact origin (`new URL(value).origin === value`), since it is echoed in the output and
   becomes a CORS rule. Options: `--env-file <path>`, `--jurisdiction <eu|fedramp>`, and for `setup` only `--apply`,
-  `--dry-run` and `--replace`; `--name=value` is accepted beside `--name value`; `-h`, `--help` and `help` print the
+  `--dry-run` and `--replace` (the last only with one of the other two); `--name=value` is accepted beside
+  `--name value`; `-h`, `--help` and `help` print the
   usage. Exit codes: `0` nothing is wrong, `1` a problem was found or a write failed or was refused, `2` a usage error
   (including an `--env-file` that cannot be read). Findings go to stdout, one per line, as a status column (`ok`,
   `PROBLEM`, `NOT CHECKED`, `note`, `dry run`) and a sentence that says what to do; the summary is the last line.
@@ -35,6 +36,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **Why:** the design: "`unknown` ... is reported as 'could not check' with how to check by hand, not as a failure".
   An app's own test token is usually an object token, and `doctor` must still pass in CI for it.
 - **If wrong:** an app that passes its settings in code gets problems for variables it does not use; the guide says so.
+  `doctor` writes nothing, so a read-only token passes it although it cannot upload; the guide says so too (review
+  finding, 2026-11-21).
 - **Status:** in force.
 - **Visible in:** `src/cli/doctor.ts`, `src/cli/settings.ts`, `src/server/bucket-check.ts`.
 
@@ -57,27 +60,39 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **Status:** in force; R2's answer to both writes unmeasured.
 - **Visible in:** `src/storage/s3/bucket-writes.ts`, `src/testing/fake-r2/copy.ts`.
 
-### M9-C4: optional bucket-settings writes on the driver, proven on RustFS only
+### M9-C4: optional bucket-settings writes, kept out of app bundles, proven on RustFS only
 
 - **Decision:** `StorageDriver` gains optional `putBucketCors(rules)` and `putBucketLifecycle(rules)`. Each replaces
   the whole configuration, as S3 does, and refuses an empty list with `INVALID_INPUT` (a lax service would read it as
-  "remove every rule"); what a rule must contain is left to the service. `createS3Driver`, `r2()` and `s3()` implement
-  both (the internal type `S3Driver` says so). The reads keep everything a write needs: `BucketCorsRule` gains `id`
+  "remove every rule"); what a rule must contain is left to the service. Only the internal `createS3DriverWithWrites`
+  implements them, for the command (through `storageFromVariables`) and the contract lanes' `driverWith`; `r2()`, `s3()`
+  and `createS3Driver` do not, so tree-shaking keeps the writes out of every app bundle. The live lane's `driverWith`
+  has no writes either. The reads keep everything a write needs: `BucketCorsRule` gains `id`
   and `maxAgeSeconds` (every field S3 documents), `BucketLifecycleRule` gains `sourceXml`, the rule's XML as the
-  storage sent it, which `putBucketLifecycle` writes back unchanged. The fake R2 implements both writes (refused without
-  `bucketConfig`, as for an object token). The storage contract's two new cases declare the gap
+  storage sent it, which `putBucketLifecycle` writes back unchanged. `putBucketLifecycle` also reads the bucket's
+  `x-amz-transition-default-minimum-object-size` and sends it back: AWS keeps that setting beside the rules and a write
+  without it resets it (none to keep on a bucket without rules, or when the read is refused or not implemented). A read
+  refuses a configuration with CDATA, comments or namespace prefixes (`STORAGE_ERROR`, not retryable), which the tag
+  reader would misread and a write would then spread; an empty self-closing configuration reads as no rules. The fake
+  R2 implements both writes (refused without `bucketConfig`, as for an object token) and, as S3 does, refuses a body
+  without a checksum or with a rule that lacks what S3 requires. The storage contract's two new cases declare the gap
   `bucketSettingsWrites`: Wrangler's local R2 answers `501 NotImplemented` to both (wrangler 4.166.0, measured
   2026-11-21), and the live lane declares it too, because writing would change the owner's test bucket (`AGENTS.md`).
 - **Why:** the design (§2, "Storage layer"). A lifecycle rule has many fields cloudrop does not model (expirations,
   transitions, tag and size filters); writing it from the fields cloudrop reads would drop them, which is exactly the
   loss the merge must never cause. Keeping the rule's own XML is smaller and safer than modelling the whole schema.
+- **Why the writes are kept out of the presets:** measured on the build, they cost `cloudrop (bundled)` 0.68 kB, and
+  with the review's fixes put it at 30.04 kB, over its 30 kB budget, for a call only an admin command makes.
 - **If wrong:** a service that reformats a rule's XML on read still round-trips it (RustFS does, and the contract case
-  checks that an expiration survives two writes). Cost: `cloudrop` 39.19 → 39.98 kB summed, `cloudrop (bundled)`
-  29.13 → 29.76 kB (2.2 %); every other entry unchanged.
-- **Status:** in force. New public, additive types: `putBucketCors`, `putBucketLifecycle`, `BucketCorsRule.id`,
-  `BucketCorsRule.maxAgeSeconds`, `BucketLifecycleRule.sourceXml`.
-- **Visible in:** `src/storage/driver.ts`, `src/storage/s3/bucket-settings.ts`, `src/storage/s3/bucket-writes.ts`,
-  `src/storage/lazy-driver.ts`, `src/testing/storage-contract/bucket-settings.ts`, the three lane files.
+  checks that an expiration survives two writes). An app that wants to write bucket settings from its own code cannot
+  get a driver that does from the package; the methods stay optional on `StorageDriver` for a driver that implements
+  them. Cost of the richer reads: `cloudrop` 39.19 → 39.49 kB summed, `cloudrop (bundled)` 29.13 → 29.36 kB (0.8 %);
+  every other entry unchanged.
+- **Status:** in force. New public, additive types: `StorageDriver.putBucketCors` and `putBucketLifecycle` (optional),
+  `BucketCorsRule.id`, `BucketCorsRule.maxAgeSeconds`, `BucketLifecycleRule.sourceXml`.
+- **Visible in:** `src/storage/driver.ts`, `src/storage/s3-driver.ts`, `src/storage/presets.ts`,
+  `src/storage/s3/bucket-settings.ts`, `src/storage/s3/bucket-writes.ts`, `src/testing/storage-contract/bucket-settings.ts`,
+  the four lane files.
 
 ### M9-C5: the bucket is proven by a listing, not a HEAD
 
@@ -95,17 +110,21 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 ### M9-C6: `setup --apply` merges by rule ID and never writes over rules it could not read
 
 - **Decision:** `setup --apply` reads both configurations first. cloudrop's rules are `cloudrop-uploads` (CORS) and
-  `cloudrop-abort-incomplete` (lifecycle); a rule is cloudrop's only by that ID. The merge replaces cloudrop's rule in
-  place (or appends it) and writes every other rule back as read; it writes nothing for a setting whose result would
-  not change. `cloudrop-uploads` allows exactly the origins given. A CORS rule without an ID that equals cloudrop's
-  counts as cloudrop's, so a service that drops IDs does not get a copy per run. When either read fails, nothing is
+  `cloudrop-abort-incomplete` (lifecycle); a rule is cloudrop's only by that ID. The merge appends cloudrop's rule, or
+  grows it where it stands, and writes every other rule back as read; it writes nothing for a setting whose result
+  would not change. Growing only adds: the given origins, and the methods, headers and exposed headers cloudrop needs
+  (methods and headers compared without case); origins, headers and a max age already on the rule stay, and copies of
+  it are folded into the first. A CORS rule without an ID that already allows everything cloudrop's would counts as
+  cloudrop's, so a service that drops IDs does not get a copy per run. When either read fails, nothing is
   written and the exit code is 1; `--replace` writes cloudrop's rules alone instead, but only when the read was refused
   (`STORAGE_DENIED` or `501`), never after a failure that may pass, such as a timeout. `--dry-run` reads and merges and
   prints what it would add, update and keep, writing nothing; with `--apply` or alone it means the same. Writes run one
   after the other, CORS first.
 - **Why:** the design: "It merges, never replaces ... refuses to write when it cannot read the current rules, unless
   `--replace` says replacing them is intended." A timeout says nothing about whether rules exist, so replacing on it
-  would drop rules the user never meant to lose.
+  would drop rules the user never meant to lose. The first version set `cloudrop-uploads` to exactly the given origins
+  and headers; the review found that a run with fewer origins, or a header the user had added (a checksum header, as
+  `bucket-setup.md` advises), was silently removed, so the rule now only grows.
 - **If wrong:** the rules can change between the read and the write; S3 has no conditional write for them. R2's answer
   to a reader allowed to see the rules is unmeasured, including whether it keeps IDs.
 - **Status:** in force.
@@ -116,8 +135,10 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 - **Decision:** the CORS rule is the one in `docs/guide/bucket-setup.md`: `PUT`, `GET`, `HEAD` from the given origins,
   the headers `content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`, exposing `ETag` and
   `Retry-After`, max age 3600. The lifecycle rule aborts incomplete multipart uploads after 1 day across the bucket
-  (`Filter` with an empty `Prefix`). When another enabled rule already aborts them across the bucket (R2's default
-  7-day rule), the lifecycle configuration is left alone.
+  (`Filter` with an empty `Prefix`). When any enabled rule already aborts them across the bucket (R2's default 7-day
+  rule, or cloudrop's own), the lifecycle configuration is left alone. When `cloudrop-abort-incomplete` exists but no
+  longer does that, `setup` refuses (a `PROBLEM`, nothing written): someone edited it, and rewriting it from fields
+  would drop what they added.
 - **Why:** one rule set, documented once, which `checkBucket` accepts. A second abort rule would change nothing
   `checkBucket` checks, and every write of bucket settings is a risk worth avoiding. One day matches the guide; an
   upload token lasts 24 hours, so no upload can be completed later anyway.
@@ -128,8 +149,9 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
 ### M9-C8: settings from the environment and an env file, and no value ever printed
 
 - **Decision:** variables are read from the environment and, with `--env-file`, from a file of `NAME=value` lines
-  (optional `export`, single or double quotes, `#` comments, one line per value, nothing expanded or run), parsed by the
-  command. A variable set in the environment wins over the file, as with Node's `--env-file`, and a `note` names each
+  parsed by the command as Node's `--env-file` reads them: optional `export`; single quotes, double quotes or backticks
+  taken as written, with `\n` in double quotes a line break; `#` starting a comment in an unquoted value; one line per
+  value, nothing expanded or run. A quote left open is a usage error naming the line, never its content. A variable set in the environment wins over the file, as with Node's `--env-file`, and a `note` names each
   cloudrop variable set in both. A file that cannot be read is reported by its path and error code only. The command
   prints names, never values, the bucket name included: printed commands use `"$CLOUDROP_R2_BUCKET"` and
   `"$CLOUDROP_S3_ENDPOINT"`. The storage driver is built by the presets' own code from those variables
@@ -137,7 +159,8 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   environment is never read behind the injected one.
 - **Why:** the design: "Never print a secret, a key or a presigned URL; name a variable, never its value." The live
   lane already treats the bucket name and account ID as values to redact. Every test of the command checks that no
-  setting's value reached its output.
+  setting's value reached its output, including values that came from an env file. A rule ID read from the bucket is
+  printed with its control characters escaped, so it cannot drive the terminal or split a finding.
 - **If wrong:** a shell without the variables set needs the bucket name typed into the printed command by hand.
 - **Status:** in force. Checked against the live bucket on 2026-11-21: no value of the env file in `doctor`'s or
   `setup --dry-run`'s output.
