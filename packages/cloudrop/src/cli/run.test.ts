@@ -142,9 +142,32 @@ describe("cloudrop usage", () => {
     expect([result.code, result.stdout, result.stderr.slice(0, stderr.length)]).toEqual([2, "", stderr]);
   });
 
-  it.each(["--version", "-v"])("prints the package's version and exits 0 for %s", async (flag) => {
-    const result = await run([flag]);
+  // Wherever an option's name can stand, as help is: the usage lists -v beside -h (M11-R235).
+  it.each([
+    { name: "--version alone", argv: ["--version"] },
+    { name: "-v alone", argv: ["-v"] },
+    { name: "--version after a command", argv: ["doctor", "--version"] },
+    { name: "-v after the command's options", argv: ["setup", "--origin", ORIGIN, "--apply", "-v"] },
+  ])("prints the package's version and exits 0 for $name", async ({ argv }) => {
+    const result = await run(argv);
     expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "1.2.3\n"]);
+  });
+
+  it("reads --env-file -v as a file named -v, not as a call for the version", async () => {
+    const result = await run(["doctor", "--origin", ORIGIN, "--env-file", "-v"]);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      2,
+      "",
+      "Cannot read the --env-file (ENOENT). Check its path.\n",
+    ]);
+  });
+
+  it("prints the usage when both help and the version are asked for", async () => {
+    const result = await run(["doctor", "--version", "--help"]);
+    expect([result.code, result.lines[0]]).toEqual([
+      0,
+      "Usage: npx cloudrop <doctor|setup> --origin <origin> [options]",
+    ]);
   });
 
   // The path is not repeated: text typed after --env-file by mistake may be a setting's value (M11-R115).

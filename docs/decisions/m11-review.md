@@ -1816,7 +1816,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   elsewhere, got success for a run that never happened.
 - **If wrong:** `cloudrop doctor --origin --help`, typed to ask for help, now answers that `"--help"` is not an origin
   (exit 2) and prints the usage after it, as every usage error does.
-- **Status:** in force.
+- **Status:** in force. Since `M11-R234` that answer names the value by its number and does not repeat it; since
+  `M11-R235` `--version` and `-v` follow the same rule.
 - **Visible in:** `src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
 
 ### M11-R175: the lifecycle rule has one name in the guide and the command, and is known by what it does
@@ -2677,3 +2678,17 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Amends `M11-R115` (the command word, and which origins are repeated) and `M11-C3`.
 - **Visible in:** `src/cli/args.ts`, `src/cli/vars.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
   `src/cli/vars.test.ts`, `docs/guide/command.md#settings`.
+
+### M11-R235: `--version` and `-v` work wherever `--help` does
+
+- **Decision:** `--version` or `-v` prints the package's version and exits 0 as the first argument or wherever an
+  option's name can stand, after a command and its options too (`cloudrop doctor --version`). As the value of an
+  option that takes one it is that value (`--env-file -v` reads a file named `-v`). With help asked for as well, the
+  usage is printed.
+- **Why:** the version was read only as the first argument, so `cloudrop doctor --version` answered
+  `Unknown option "--version". The options are listed below.` above a usage that lists `-v, --version` among the
+  options, with exit code 2. The usage was right about what a person expects; the code now does it, by the rule
+  `M11-R174` gave help.
+- **If wrong:** a script that passed `-v` after a command and relied on exit code 2 now gets 0; none is known.
+- **Status:** in force. Extends `M11-R174`.
+- **Visible in:** `src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.

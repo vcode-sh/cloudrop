@@ -11,9 +11,9 @@ npx cloudrop setup  --origin https://app.example.com --dry-run      # shows what
 npx cloudrop setup  --origin https://app.example.com --apply        # adds them, keeping every other rule
 ```
 
-`bunx cloudrop` and `pnpm exec cloudrop` work the same way, and `npx cloudrop --version` prints the package's version.
-`--help` or `-h` prints the usage wherever an option can stand; after an option that takes a value it is that value
-(`--env-file -h` reads a file named `-h`).
+`bunx cloudrop` and `pnpm exec cloudrop` work the same way. `--help` or `-h` prints the usage and `--version` or `-v`
+the package's version, each wherever an option can stand, with or without a command (`npx cloudrop doctor --version`);
+with both, the usage. After an option that takes a value each is that value (`--env-file -h` reads a file named `-h`).
 `--origin` names an origin your pages upload from (the page's, not your API's) and
 is required; repeat it for each origin. An origin is exactly what the browser sends: scheme, host and port, in lower
 case, with no path, not even a trailing `/`, and no `*`. Given `http://localhost:5173/`, the command answers with the

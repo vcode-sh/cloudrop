@@ -126,12 +126,12 @@ function readOptions(options: CommandOptions, args: readonly string[]): string |
 }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
-  // Help wins wherever an option's name can stand, never as an option's value: a file may be named "-h" (M11-R174).
-  if (argv[0] === "help" || splitArgs(argv).some(({ name }) => name === "--help" || name === "-h")) {
-    return { show: "help" };
-  }
+  // Help and the version win wherever an option's name can stand, never as an option's value: a file may be named
+  // "-h" (M11-R174, M11-R235). Help wins over the version.
+  const asked = (...names: string[]) => splitArgs(argv).some(({ name }) => names.includes(name));
+  if (argv[0] === "help" || asked("--help", "-h")) return { show: "help" };
+  if (asked("--version", "-v")) return { show: "version" };
   const [command, ...rest] = argv;
-  if (command === "--version" || command === "-v") return { show: "version" };
   if (command === undefined) return { error: "Name a command: doctor or setup." };
   if (command !== "doctor" && command !== "setup") return { error: unknownCommand(command) };
   const options: CommandOptions = {
