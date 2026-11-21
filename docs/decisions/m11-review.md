@@ -1370,8 +1370,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 
 - **Decision:** `createCloudrop` refuses a `completionLeaseMs` over 2,592,000,000 (30 days) with `INVALID_CONFIG`
   ("completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000."), and
-  `api.sweep` and `api.eraseOwner` refuse a `graceMs` over the same with `INVALID_INPUT` ("graceMs must be at least
-  900000 (15 minutes), …, and at most 2592000000 (30 days)."). The other numbers an app gives were checked and need
+  `api.sweep` and `api.eraseOwner` refuse a `graceMs` over the same with `INVALID_INPUT` ("graceMs must be from 900000
+  (15 minutes, the life of an upload URL) to 2592000000 (30 days)."; one message for both calls since `M11-R68`,
+  where each had its own sentence about the least). The other numbers an app gives were checked and need
   no change: a `quota` answer must be null or a safe integer from 0 (anything else, `NaN`, `Infinity`, a negative or
   a fraction included, refuses the upload and is logged), and the largest safe integer fits Postgres's `bigint`;
   `limit` of `files`, `allFiles` and `sweep` is a whole number from 1 to 1000; a cursor's time is at most the year
@@ -1463,3 +1464,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing: cases only.
 - **Status:** in force.
 - **Visible in:** `src/testing/store-contract/atomicity.ts`, `src/testing/store-contract/list.ts`.
+
+### M11-R68: the sweep refuses a `stale` cursor it cannot continue from
+
+- **Decision:** when a store's `stale` answers a cursor that is neither null nor `<milliseconds>:<id>`
+  (`isStoreCursor`), the sweep handles none of that page's rows, logs "cloudrop: The store's stale answered a cursor
+  that is not <milliseconds>:<id> of its page's last row, or null after the last page." and answers that message as
+  a `SERVER_ERROR` that is not retryable, with `all` and without. To pay for it under the bundled entry's 32 kB
+  ceiling, three things in the same files became one each: `sweepAll` counts every page into one report instead of
+  summing each page's, `api.files`, `api.allFiles` and `api.sweep` read `limit` through one `readLimit`, `owner()`'s
+  answer is checked by `isOwnerOrId` itself, and `graceMs` has one message. `sweep.ts` was at its 250 lines, so the
+  reading of its options moved to `sweep-options.ts`.
+- **Why:** `CloudropStore.stale` documents that format, and the sweep refuses any other cursor a caller passes. A
+  store written by hand that numbered its pages got no word of it: with `all`, the sweep read its own cursor back,
+  found it was not one, and stopped after the first page with `cursor: null` and no error, so each run handled one
+  page of a backlog; without `all`, the caller was handed `expire:page-2` and told on the next call that it was no
+  cursor of an earlier sweep. `api.files` already refuses a page a store answered wrongly (`M10-D11`).
+- **If wrong:** a store whose cursors were another shape and whose backlog never passed one page worked before and
+  fails now, loudly, once a second page exists. The bundled entry is 31,988 bytes, 47 more than before this review's
+  store fixes (31,940) and 12 under the ceiling.
+- **Status:** in force.
+- **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `src/server/owner-files.ts`,
+  `src/server/store-upload.ts`, `src/server/leftovers.ts`, `src/server/sweep-all.test.ts`.

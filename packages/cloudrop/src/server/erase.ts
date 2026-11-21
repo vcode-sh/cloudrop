@@ -90,7 +90,7 @@ function readOptions(given: unknown): Result<{ graceMs: number; signal: AbortSig
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     return fail(invalidInput("signal must be an AbortSignal, such as AbortSignal.timeout(60_000)."));
   }
-  const graceMs = readGrace(options.graceMs, "the time a PUT already under way gets to land after its URL ran out");
+  const graceMs = readGrace(options.graceMs);
   return graceMs.error ? graceMs : ok({ graceMs: graceMs.data, signal, context: options.context });
 }
 

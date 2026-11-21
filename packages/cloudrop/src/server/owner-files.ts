@@ -8,7 +8,6 @@ import type { ServerConfig } from "./config.ts";
 import { type FileFilters, readFilters } from "./files-filters.ts";
 import type { CloudropStore, FileRecord, FileStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
-import { MAX_OWNER_LENGTH } from "./store-upload.ts";
 
 export interface FilesOptions {
   /** The owner, as the route's `owner` callback returned it. */
@@ -37,8 +36,6 @@ export interface FilesPage {
   cursor: string | null;
 }
 
-const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 1000;
 /** The last time an ISO string without a sign names, which is how Postgres is given a time: 9999-12-31T23:59:59.999Z. */
 const LAST_TIME_MS = 253_402_300_799_999;
 /** A cursor that carries its listing's mark: the mark, a dot, then the store's cursor. */
@@ -51,6 +48,9 @@ interface FilesQuery extends FileFilters {
   limit: number;
   cursor: string | null;
 }
+
+/** The longest owner or file id, in characters. */
+export const MAX_OWNER_LENGTH = 255;
 
 /**
  * An owner or a file id: 1 to 255 characters, none of them NUL or a lone surrogate. Postgres text cannot hold U+0000,
@@ -81,6 +81,12 @@ export function isStoreCursor(cursor: string): boolean {
   return match !== null && Number(match[1]) <= LAST_TIME_MS && isOwnerOrId(match[2]);
 }
 
+/** The `limit` of a listing or a sweep: rows per page, a whole number from 1 to 1000, and 100 when left out. */
+export function readLimit(limit: unknown = 100): Result<number> {
+  if (typeof limit === "number" && Number.isInteger(limit) && limit >= 1 && limit <= 1000) return ok(limit);
+  return fail(invalidInput("limit must be a whole number from 1 to 1000."));
+}
+
 /** FNV-1a of the options' JSON, as eight hex digits. */
 function fingerprint(options: readonly unknown[]): string {
   const text = JSON.stringify(options);
@@ -103,7 +109,7 @@ function markOf({ owner, status, route, name, type, order }: Omit<FilesQuery, "l
 
 /** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing than `mark`'s. */
 function readCursor(cursor: unknown, mark: string): Result<string | null> {
-  if (cursor === undefined || cursor === null) return ok(null);
+  if (cursor == null) return ok(null);
   const [, given = "", position = ""] = (typeof cursor === "string" && MARKED_CURSOR.exec(cursor)) || [];
   if (!isStoreCursor(position)) {
     return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));
@@ -125,15 +131,14 @@ function readOptions(
   scope: Pick<FilesQuery, "owner" | "status">,
   all: boolean,
 ): Result<{ query: FilesQuery; mark: string }> {
-  const { limit = DEFAULT_LIMIT } = given;
-  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    return fail(invalidInput(`limit must be a whole number from 1 to ${MAX_LIMIT}.`));
-  }
+  const limit = readLimit(given.limit);
+  if (limit.error) return limit;
   const filters = readFilters(config, given);
   if (filters.error) return filters;
   const mark = markOf({ ...scope, ...filters.data }, all);
   const cursor = readCursor(given.cursor, mark);
-  return cursor.error ? cursor : ok({ query: { ...scope, limit, ...filters.data, cursor: cursor.data }, mark });
+  if (cursor.error) return cursor;
+  return ok({ query: { ...scope, limit: limit.data, ...filters.data, cursor: cursor.data }, mark });
 }
 
 const foldAscii = (text: string): string => text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());

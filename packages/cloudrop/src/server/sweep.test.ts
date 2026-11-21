@@ -308,8 +308,7 @@ describe("api.sweep: paging and failures", () => {
       data: null,
       error: expect.objectContaining({
         code: "INVALID_INPUT",
-        message:
-          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up, and at most 2592000000 (30 days).",
+        message: "graceMs must be from 900000 (15 minutes, the life of an upload URL) to 2592000000 (30 days).",
       }),
     });
     expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.expired).toBe(1);

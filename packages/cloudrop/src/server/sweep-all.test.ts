@@ -97,6 +97,29 @@ describe("api.sweep with all", () => {
     });
   });
 
+  it.for([
+    { name: "with all", options: { all: true, limit: 2 } },
+    { name: "one page at a time", options: { limit: 2 } },
+  ])("says so, $name, when the store's stale answers a cursor that is not <milliseconds>:<id>", async ({ options }) => {
+    // A store written by hand that numbers its pages. The sweep cannot continue from that: with `all` it stopped
+    // after the first page as if every row had been seen, with no error (M11-R68).
+    const { fixture } = await work();
+    const { stale } = fixture.store;
+    fixture.store.stale = async (input) => {
+      const page = await stale(input);
+      return { ...page, cursor: page.cursor && "page-2" };
+    };
+    const problem =
+      "The store's stale answered a cursor that is not <milliseconds>:<id> of its page's last row, or null after the last page.";
+    expect(await fixture.cloudrop.api.sweep(options)).toEqual({
+      data: null,
+      error: expect.objectContaining({ code: "SERVER_ERROR", message: problem, retryable: false }),
+    });
+    expect(fixture.logger.errors.map((logged) => logged.message)).toEqual([`cloudrop: ${problem}`]);
+    // The page was refused before any of its rows was handled.
+    expect((await fixture.store.raw.files()).filter((row) => row.status === "expired")).toEqual([]);
+  });
+
   it.for<{ name: string; options: SweepOptions }>([
     { name: "a signal without all", options: { signal: AbortSignal.abort() } },
     { name: "a signal that is not an AbortSignal", options: { all: true, signal: {} as AbortSignal } },

@@ -3,34 +3,22 @@
 
 import { CloudropError, fail, ok, quotaExceeded, type Result } from "../errors.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
+import { isOwnerOrId, MAX_OWNER_LENGTH } from "./owner-files.ts";
 import { abortContexts, type PluginFile, runOnAbort } from "./plugins.ts";
 import type { OwnerContext } from "./route-context.ts";
 import type { CloudropStore } from "./store.ts";
 import { cancelled, storeCall } from "./store-calls.ts";
 import type { UploadTokenPayload } from "./token.ts";
 
-/** The longest owner, in characters; the file API holds the ids it is given to the same bound. */
-export const MAX_OWNER_LENGTH = 255;
-
 /** The route's owner for this upload: who its files count against. A bad value is the route's bug. */
 export async function readOwner(route: RouteConfig, context: OwnerContext<object, unknown>): Promise<string | null> {
   if (!route.definition.owner) return null;
   const owner: unknown = await route.definition.owner(context);
-  if (owner === null) return null;
-  // The file API takes the same owners (isOwnerOrId): Postgres text cannot hold NUL, and a database stores a lone
-  // surrogate as U+FFFD, which would make one owner of two.
-  if (
-    typeof owner !== "string" ||
-    owner.length < 1 ||
-    owner.length > MAX_OWNER_LENGTH ||
-    owner.includes("\u0000") ||
-    !owner.isWellFormed()
-  ) {
-    throw new TypeError(
-      `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000) or a lone surrogate.`,
-    );
-  }
-  return owner;
+  // The file API takes the same owners, for the same reasons (isOwnerOrId).
+  if (owner === null || isOwnerOrId(owner)) return owner;
+  throw new TypeError(
+    `Route "${route.name}": owner must return null or a string of 1 to ${MAX_OWNER_LENGTH} characters without NUL (U+0000) or a lone surrogate.`,
+  );
 }
 
 const quotaUnavailable = (): CloudropError =>
