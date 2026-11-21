@@ -109,9 +109,10 @@ function inputs(): Uint8Array<ArrayBuffer>[] {
 
 const hex = (input: Uint8Array) => Array.from(input, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
+const { afterVerify } = contentChecks({ deny: ["video/*"] }).server ?? {};
+
 /** The hook's answer for `body` sent as `type`, or the text of what it threw. */
 async function verdict(body: Uint8Array<ArrayBuffer>, type: string): Promise<string> {
-  const { afterVerify } = contentChecks({ deny: ["video/*"] }).server ?? {};
   const context = {
     file: { id: "f", key: "k", name: "n", size: body.length, type, url: null },
     accept: ["*/*"],
@@ -126,6 +127,8 @@ async function verdict(body: Uint8Array<ArrayBuffer>, type: string): Promise<str
   }
 }
 
+// Slower than the lane's other tests by design: each of the two passes below reads more than 20,000 inputs, about
+// 100 ms on an idle machine and up to 350 ms beside other lanes (measured 2026-11-21). The count is the ruling's.
 describe("the sniffer and the content check on bytes no writer made (M11-R130)", () => {
   const made = inputs();
 
