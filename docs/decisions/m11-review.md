@@ -148,9 +148,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Decision:** a failed row of `examples/vite-react` has Dismiss beside Retry (or Reload, for `ACCOUNT_CHANGED`): the
   file's `abort()`, which ends it `aborted`, after which Clear finished removes it. It is the same button as Cancel
   on a running row, with the other label.
-- **Why:** `clear()` keeps a failed file for `retry()` (`M4-B`), and the row offered only Retry, so a file refused for
-  good, such as one over the quota, stayed listed until a reload. The Next example's row already cancels a failed
-  file.
+- **Why:** `clear()` keeps an upload with a failed file for `retry()`, and the row offered only Retry, so a file
+  refused for good, such as one over the quota, stayed listed until a reload. The Next example's row already cancels
+  a failed file.
 - **If wrong:** nothing kept: `abort()` on a failed file gives its ticket up, as the Next example's Cancel does.
 - **Status:** in force.
 - **Visible in:** `examples/vite-react/src/components/upload-row.tsx`, `examples/vite-react/src/app.browser.test.ts`.
@@ -160,8 +160,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Decision:** `examples/next/components/upload/unfinished-uploads.tsx` reads `discarding` from `useResumable` and
   keeps no state of its own for it; the React guide's block for the panel shows that component's code, its
   `discardEach` included.
-- **Why:** the hook has had `discarding` since 0.5.0, the guide showed it, and the example it names still kept its own
-  set, so the page the guide walks through was not the code the guide showed.
+- **Why:** the hook has had `discarding` since 0.2.0 (`M8-L8`), the guide showed it, and the example it names still
+  kept its own set, so the page the guide walks through was not the code the guide showed.
 - **If wrong:** the hook holds an id until the list is read again, which is when the example's own set let go of it.
 - **Status:** in force.
 - **Visible in:** `examples/next/components/upload/unfinished-uploads.tsx`, `docs/guide/react.md#build-your-upload-ui`.
