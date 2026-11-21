@@ -165,6 +165,30 @@ describe("signRequest", () => {
   });
 });
 
+describe("a header value read back from the storage", () => {
+  // HEAD returns a stored header as a byte string, one character per byte, and fetch sends it back the same way. R2
+  // keeps UTF-8 bytes in a content type or disposition another tool wrote, accepts a request signed over those bytes
+  // and answers SignatureDoesNotMatch to one signed over the characters' own UTF-8 (measured 2026-11-21, M11-R25).
+  it("is signed as the bytes fetch sends, not as the UTF-8 of its characters", async () => {
+    // "café" in UTF-8, as Headers.get() returns it.
+    const stored = 'attachment; filename="caf\u00c3\u00a9.txt"';
+    const headers = await signRequest({
+      method: "POST",
+      url: new URL(`${EXAMPLE_URL}?uploads=`),
+      headers: { "content-disposition": stored },
+      credentials: AWS_EXAMPLE,
+      region: "us-east-1",
+      date: EXAMPLE_DATE,
+      payloadHash: EMPTY_SHA256,
+    });
+    // Computed with node:crypto over a canonical request that holds the bytes 63 61 66 c3 a9, not with this signer.
+    expect(headers.authorization).toBe(
+      `${EXAMPLE_CREDENTIAL}SignedHeaders=content-disposition;host;x-amz-content-sha256;x-amz-date, Signature=0cac7d0b4d8e9ef2d9b415269c49c9c3f88edc62c5cb90227d1397f2f44726b1`,
+    );
+    expect(headers["content-disposition"]).toBe(stored);
+  });
+});
+
 describe("signing key reuse", () => {
   const url = "https://account.r2.cloudflarestorage.com/bucket/key.txt";
   const at = "2026-11-15T12:00:00Z";

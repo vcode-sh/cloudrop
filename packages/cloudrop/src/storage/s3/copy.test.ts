@@ -40,9 +40,12 @@ async function putWithForeignTool(
 describe("createS3Driver", () => {
   it("keeps stored headers the driver would not accept as input when it copies in parts", async () => {
     const { fake, driver } = setup();
-    // An underscore in a metadata name fails cloudrop's input rules, but the copy must keep what is stored.
+    // An underscore in a metadata name and UTF-8 bytes in a disposition ("café", as HEAD returns it: one character
+    // per byte) fail cloudrop's input rules, but the copy must keep what is stored.
+    const disposition = 'attachment; filename="caf\u00c3\u00a9.txt"';
     await putWithForeignTool(fake.fetch, "source.bin", offsetBytes(12 * MiB), {
       "content-type": "application/x-test",
+      "content-disposition": disposition,
       "x-amz-meta-legacy_id": "s1",
     });
     // Same bucket, lower single-PUT limit, so a 12 MiB copy takes the multipart path without a 5 GiB fixture.
@@ -58,6 +61,7 @@ describe("createS3Driver", () => {
     expect((await small.copy("source.bin", "copy.bin")).error).toBeNull();
     expect((await driver.head("copy.bin")).data).toMatchObject({
       type: "application/x-test",
+      disposition,
       metadata: { legacy_id: "s1" },
     });
   });

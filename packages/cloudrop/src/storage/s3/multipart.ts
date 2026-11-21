@@ -48,7 +48,10 @@ async function partsPage(
   return ok({ parts: parts.data, next });
 }
 
-/** Not validated: createMultipart checks caller input first; a copy passes headers the storage itself returned. */
+/**
+ * Not validated: createMultipart checks caller input first; a copy passes headers the storage itself returned, which
+ * the signer signs as the bytes they are (M11-R25).
+ */
 export async function startMultipart(
   ctx: S3Context,
   key: string,

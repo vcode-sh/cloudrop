@@ -855,6 +855,23 @@ zeros: `HEAD` answered a bare `401` (no body), and a `ListObjectsV2` `401` with 
 read both as a generic `STORAGE_ERROR` that pointed at the object key; it now reports `STORAGE_DENIED` with the
 credentials to check (`M9-H5`).
 
+### Non-ASCII bytes in stored headers, and a copy in parts
+
+Measured 2026-11-21 on the test bucket for `M11-R25`, with a scratch probe (not committed) that signed raw `PUT`s with
+cloudrop's signer, sent the header value as the UTF-8 bytes of `café` (`63 61 66 c3 a9`), and used the `r2` driver for
+`HEAD` and `copy`, with `maxSinglePutSize` lowered to 5 MiB for the copy in parts.
+
+| Row | Measured |
+|---|---|
+| `PUT` with those bytes in `x-amz-meta-note`, `content-disposition` or `content-type`, signed over the bytes | `200` each: R2 stores non-ASCII header bytes |
+| the same, signed over the UTF-8 of the byte string `Headers.get()` returns (`c3 83 c2 a9`), as cloudrop's signer did | `403 SignatureDoesNotMatch` each |
+| `HEAD` of the stored objects | `content-disposition` and `content-type` come back as the raw bytes (`… 63 61 66 c3 a9 …`); the metadata value comes back in ASCII as the RFC 2047 word `=?utf-8?Q?caf=C3=A9?=` |
+| `copy` in parts of a 5 MiB + 1 KiB object with that disposition, before the fix | `403 SignatureDoesNotMatch` at CreateMultipartUpload, reported as `STORAGE_DENIED`; nothing left behind |
+| the same after the fix (the signer hashes such a value as its bytes) | `200`; `HEAD` of the copy returns the same disposition bytes |
+| a single `copy` of the same object | `200` before and after: CopyObject sends no stored header, and the disposition is kept |
+
+Four runs, each under its own `live-test/cloudrop-<32 hex>/` prefix, each ending with `left objects=0`.
+
 ## Store, sweep and owner files under real latency, 2026-11-21
 
 Measured 2026-11-21 on a second bucket (`vstack-dev`, EEUR, an object read/write token), for `M9-H50` to `M9-H52`.

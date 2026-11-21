@@ -283,3 +283,24 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/xml.ts`, `src/storage/s3/bucket-settings.ts`,
   `src/storage/s3/transport.test.ts`, `src/storage/xml.test.ts`.
+
+### M11-R25: a header value read back from the storage is signed as the bytes it is
+
+- **Decision:** the signer hashes a canonical request that holds a character from U+0080 to U+00FF as one byte per
+  character, not as UTF-8. Every other canonical request is ASCII and is hashed as before. Callers' own header values
+  stay limited to printable ASCII.
+- **Why:** a copy of a source over `maxSinglePutSize` starts a multipart upload with the type, disposition and
+  metadata that `HEAD` returned. `Headers.get()` returns a stored value as a byte string, one character per byte, and
+  fetch sends it back as those bytes; the signer hashed the characters' UTF-8 instead, so the storage verified other
+  bytes than were signed. Measured on R2, 2026-11-21 (`docs/research/r2-spike-findings.md`, "Non-ASCII bytes in stored
+  headers"): R2 stores UTF-8 bytes another tool wrote in `content-type` and `content-disposition` and returns them
+  raw, returns such metadata as an RFC 2047 word in ASCII, and answered the copy in parts `403 SignatureDoesNotMatch`,
+  which cloudrop reported as `STORAGE_DENIED` "Check the access key, its permissions and the bucket name". A single
+  copy was never affected: it sends no stored header. After the fix the same copy answers 200 and the copy's
+  disposition holds the same bytes.
+- **If wrong:** a header value with a character above U+00FF cannot come from `Headers.get()` and fetch refuses to send
+  one, so its signature does not matter. The unit test's expected signature was computed with `node:crypto` over the
+  bytes, not with this signer.
+- **Status:** in force.
+- **Visible in:** `src/storage/sigv4.ts`, `src/storage/sigv4.test.ts`, `src/storage/s3/copy.test.ts`,
+  `docs/research/r2-spike-findings.md`.

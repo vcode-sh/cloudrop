@@ -125,7 +125,13 @@ function canonicalHeaders(url: URL, headers: Record<string, string>): { canonica
 }
 
 async function sign(input: SigningInput, amzDate: string, scope: string, canonicalRequest: string): Promise<string> {
-  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonicalRequest)].join("\n");
+  // A canonical request is ASCII, except for a header value read back from the storage, which a copy in parts sends
+  // again: a byte string, one character per byte, and fetch sends those bytes. The storage verifies what it receives,
+  // so the bytes are hashed, not the characters' UTF-8 (R2 answers SignatureDoesNotMatch to that: M11-R25).
+  const request = /[\x80-\xff]/.test(canonicalRequest)
+    ? Uint8Array.from(canonicalRequest, (char) => char.charCodeAt(0))
+    : canonicalRequest;
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(request)].join("\n");
   const key = await signingKey(input.credentials, amzDate.slice(0, 8), input.region);
   return toHex(await hmac(key, stringToSign));
 }
