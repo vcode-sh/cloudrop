@@ -169,9 +169,13 @@ Rulings for `cloudrop doctor` and `cloudrop setup`, designed in
   setting's value reached its output, including values that came from an env file. A rule ID read from the bucket is
   printed with its control characters escaped, so it cannot drive the terminal or split a finding.
 - **If wrong:** a shell without the variables set needs the bucket name typed into the printed command by hand.
-- **Status:** amended by `M9-H103` (notes for near-miss names) and `M9-H104` (advice for an unreadable file; Node's
-  exit 9). Checked against the live bucket on 2026-11-21: no value of the env file in `doctor`'s or
-  `setup --dry-run`'s output.
+- **Status:** "no value ever printed" is superseded by `M11-R110` and `M11-R177`: the command never prints a secret
+  (the access key ID, the secret access key, the upload token secret), the R2 account ID or the S3 region, and it does
+  print the bucket's name and the S3 endpoint as words of the Wrangler and AWS CLI commands it suggests, in place of
+  `"$CLOUDROP_R2_BUCKET"` and `"$CLOUDROP_S3_ENDPOINT"`. The rest stands, amended by `M9-H103` (notes for near-miss
+  names), `M9-H104` (advice for an unreadable file; Node's exit 9) and `M11-R115` (the path of an unreadable file). The
+  live check of 2026-11-21 (no value of the env file in `doctor`'s or `setup --dry-run`'s output) predates `M11-R110`:
+  `doctor` with a token that reads no rules now prints the bucket's name twice.
 - **Visible in:** `src/cli/settings.ts`, `src/cli/env-file.ts`, `src/storage/presets.ts`, `src/cli/command-fixture.ts`.
 
 ### M9-C9: a separately built bin on `process`, described by hand

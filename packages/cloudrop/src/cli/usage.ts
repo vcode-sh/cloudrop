@@ -32,8 +32,8 @@ Settings come from the environment, as cloudrop reads them, or from the variable
   or S3   CLOUDROP_S3_ENDPOINT, CLOUDROP_S3_REGION, CLOUDROP_S3_BUCKET,
           CLOUDROP_S3_ACCESS_KEY_ID, CLOUDROP_S3_SECRET_ACCESS_KEY
   and     CLOUDROP_SECRET
-The command never prints a key or a secret. The commands it suggests name the bucket and,
-for S3, the endpoint.
+The command never prints a key, a secret, the R2 account ID or the S3 region. The Wrangler
+and AWS CLI commands it suggests name the bucket and, for S3, the endpoint.
 
 Exit codes: 0 nothing is wrong, 1 a problem was found or a write failed, 2 a usage error.
 `;

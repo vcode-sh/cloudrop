@@ -1,5 +1,6 @@
 // What the command makes of its settings: the storage driver, built from them the way the presets build it, and the
-// secret. Every message names a variable, never its value.
+// secret. Every message here names a variable, never its value; the only values the command prints are the bucket's
+// name and the S3 endpoint, in the commands of commands.ts (M11-R177).
 
 import type { FetchLike } from "../storage/driver.ts";
 import { R2_VARIABLES, storageFromVariables } from "../storage/presets.ts";

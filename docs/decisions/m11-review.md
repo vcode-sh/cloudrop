@@ -1840,3 +1840,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   this yet.
 - **Visible in:** `src/server/origins.ts`, `src/server/origins.test.ts`, `src/cli/run.test.ts`,
   `src/cli/commands.test.ts`, `docs/guide/command.md`.
+
+### M11-R177: the command never prints a secret, and says which two values it does print
+
+- **Decision:** the promise is "the command never prints a secret", written the same way wherever it stands: the
+  guide, the usage, the file comments of `src/cli/**` and the status of `M9-C8`. It never prints the access key ID,
+  the secret access key or the upload token secret, and it never prints the R2 account ID or the S3 region either. It
+  prints two setting values, the bucket's name and the S3 endpoint, and only as words of a Wrangler or AWS CLI command
+  it suggests (`wrangler r2 bucket … <bucket>`, `aws s3api … --bucket <bucket> … --endpoint-url <endpoint>`). A
+  Wrangler command names no account, so an R2 run prints no account ID: Wrangler takes the account from its own
+  sign-in. `src/cli/printed-values.test.ts` runs eighteen output paths for R2 and for S3, each setting with a value
+  of its own, and holds for each which values the output contains and that none stands outside those words.
+- **Why:** `M11-R110` made the printed commands runnable by naming the bucket and the endpoint, which reversed
+  `M9-C8`'s "no value ever printed"; the guide still said "The command never prints a setting's value, only the name
+  of its variable", and `M9-C8`'s status still cited a live check from before the change. The fixture's check let
+  anything pass that followed `wrangler r2 bucket` or `aws s3api` on a line, so a secret printed after a command
+  would not have been seen; the new test looks at the exact words.
+- **If wrong:** a bucket name or an S3 endpoint that a team treats as confidential reaches the terminal and a CI log
+  with `doctor` and `setup`; the guide says so. What follows `=` in `--var` is still printed when it is shaped like a
+  variable's name (`M11-C3`), so a value typed there by mistake can be printed: the guide says that too.
+- **Status:** in force. Completes `M11-R110`; supersedes the "no value ever printed" of `M9-C8`.
+- **Visible in:** `src/cli/printed-values.test.ts`, `src/cli/usage.ts`, `src/cli/commands.ts`, `src/cli/settings.ts`,
+  `src/cli/variables.ts`, `src/cli/command-fixture.ts`, `docs/guide/command.md#settings`,
+  `docs/decisions/m9-cli.md` (`M9-C8`), `docs/decisions/m11-command.md` (`M11-C3`).

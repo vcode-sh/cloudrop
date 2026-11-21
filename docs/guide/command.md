@@ -60,11 +60,16 @@ the setting it was probably meant to be, among the settings of the service its n
 `CLOUDROP_R2_REGION` get a note that R2 needs neither. When settings for R2 and S3 are both set, a `note` says that R2
 is checked and names the R2 variables to unset to check S3.
 
-The command never prints a setting's value, only the name of its variable. It does not repeat what you typed in the
-wrong place either, since that may be a value: an argument it does not know is repeated only when it is shaped like an
-option's name (`CLOUDROP_SECRET=...` after the command is named up to its `=`, anything else by its position), an
-origin with a user name or password is refused without being repeated, and an `--env-file` it cannot read is reported
-by its error code, not its path.
+**The command never prints a secret**: not the access key ID, not the secret access key and not the upload token
+secret (`CLOUDROP_SECRET`). It never prints the R2 account ID or the S3 region either. It prints two values, and only
+as words of the Wrangler and AWS CLI commands it suggests: the bucket's name and, for S3, the endpoint. Every other
+line names a variable, never its value. It does not repeat what you typed in the wrong place either, since that may
+be a secret: an argument it does not know is repeated only when it is shaped like an option's name
+(`CLOUDROP_SECRET=...` after the command is named up to its `=`, anything else by its position), an origin with a user
+name or password is refused without being repeated, and an `--env-file` it cannot read is reported by its error code,
+not its path. One thing it cannot tell apart: what follows `=` in `--var` is read as a variable's name and printed as
+one when it is shaped like a name, so a value typed there by mistake, such as a key ID of letters and digits, is
+printed too.
 
 **The commands it prints run as printed**, in the directory you ran it in:
 
@@ -73,8 +78,9 @@ by its error code, not its path.
   POSIX shell, and starts the way you started it: `bunx` under Bun's runner, `pnpm exec` under pnpm's, `npx` otherwise.
   Under PowerShell or `cmd`, check the quoting of an argument with a space or a quote in it.
 - A Wrangler or AWS CLI command names the bucket and, for S3, the endpoint by value: neither is a secret, and a
-  variable from `--env-file` is not set in your shell. While the storage settings are not all set and valid it prints
-  `<bucket>` and `<endpoint>` for you to replace.
+  variable from `--env-file` is not set in your shell. So the output of `doctor` and `setup` can hold those two
+  values, in a CI log too. While the storage settings are not all set and valid it prints `<bucket>` and `<endpoint>`
+  for you to replace. A Wrangler command names no account: Wrangler takes it from its own sign-in.
 - **Wrangler and the AWS CLI sign in on their own**, not with cloudrop's settings: Wrangler with `npx wrangler login` or
   `CLOUDFLARE_API_TOKEN`, the AWS CLI with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_DEFAULT_REGION` (the
   bucket's keys and region) or a profile.

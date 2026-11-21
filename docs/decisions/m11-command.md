@@ -53,7 +53,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a value that happens to be a valid name, such as a hexadecimal account ID starting with a letter, is
   taken as a name and printed in "... is not set". The command cannot tell the two apart; the person typed it on their
   own command line.
-- **Status:** in force.
+- **Status:** in force. The rule it cites is `M11-R177`'s since 0.6.0: the command never prints a secret, and prints
+  the bucket's name and the S3 endpoint in the commands it suggests.
 - **Visible in:** `packages/cloudrop/src/cli/vars.ts`, `src/cli/vars.test.ts` ("a value where the variable's name
   belongs").
 

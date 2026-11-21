@@ -1,5 +1,5 @@
 // Where the command's settings come from: the environment, with the --env-file files under it, as Node's --env-file
-// puts them there (M11-R113). Every message names a variable, never its value.
+// puts them there (M11-R113). Every message here names a variable, never its value.
 
 import type { CommandOptions } from "./args.ts";
 import { parseEnvFile } from "./env-file.ts";

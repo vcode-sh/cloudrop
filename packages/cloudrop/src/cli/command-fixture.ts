@@ -1,6 +1,7 @@
 // Runs the cloudrop command in-process for its tests: an injected environment, files, output streams and a fetch that
-// reaches the fake R2. Every run also checks that no setting's value reached the output. It builds inputs only; every
-// expected value stays in the tests.
+// reaches the fake R2. Every run also checks that no setting's value reached the output outside a Wrangler or AWS CLI
+// command, which may name the bucket and the S3 endpoint; printed-values.test.ts holds which value may stand where
+// (M11-R177). It builds inputs only; every expected value stays in the tests.
 
 import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";

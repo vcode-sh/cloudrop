@@ -46,7 +46,9 @@ export function cloudropCommand(
 
 /**
  * What a Wrangler or AWS CLI command acts on, each as a word of the command: the bucket's name and the S3 endpoint,
- * which are not secrets, once the storage settings are all set and valid, and a placeholder until then.
+ * which are not secrets, once the storage settings are all set and valid, and a placeholder until then. These are the
+ * only setting values the command prints: no key, no secret, and neither the R2 account ID nor the S3 region
+ * (M11-R177).
  */
 export interface Target {
   bucket: string;
