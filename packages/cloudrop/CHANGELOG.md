@@ -19,7 +19,10 @@ fixes stops a rare loss of a finished file.
 - `api.deleteFile` answers `{ id, deleted, cleaned }` and no longer answers an error once the row is deleted.
 - A store you wrote by hand: add `listAll` if you call `api.allFiles`; a `stale` cursor must be `<milliseconds>:<id>`.
 - One optional index for `api.allFiles`: [Upgrading from 0.5](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#upgrading-from-05).
-- Tests that count requests: a retry now sends an `/abort` for the ticket it replaces.
+- Tests that count requests: a retry now sends an `/abort` for the ticket it replaces, and a cancel during `/upload`
+  no longer cuts that request (it answers, and its tickets are given back).
+- Tests that make rows look old to drive `eraseOwner` or the sweep must age `created_at` too: `eraseOwner` counts a
+  file created within the grace before the run as begun during it (`M11-R215`).
 
 ### Added
 
