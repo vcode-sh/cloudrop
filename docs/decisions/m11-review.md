@@ -1159,3 +1159,24 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   as every one, at `/upload` for the eight groups and at `/complete` for the six kinds the bytes show.
 - **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`,
   `docs/guide/plugins.md#options`.
+
+### M11-R135: an ID3 tag agrees with every type of the formats it fronts
+
+- **Decision:** a file that starts with an ID3v2 header is a container (`M11-R133`) of these types: `audio/mpeg`
+  and its aliases `audio/mp3`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg`, `audio/mpeg3`; `audio/mp2`,
+  `audio/x-mp2`; `audio/flac`, `audio/x-flac`; `audio/aac`, `audio/x-aac`, `audio/aacp` and `audio/vnd.dlna.adts`.
+  Its `detected` stays `audio/mpeg`, and a message calls it "a recording with an ID3 tag". An MPEG audio frame
+  without a tag agrees with `audio/mpeg` and the same five aliases.
+- **Why:** the tag agreed with `audio/aac` alone for AAC, so an ID3-tagged `.aac` from Chrome on Windows was a
+  `mismatch` (reproduced). Chromium's `net/base/mime_util.cc` has no entry for the extension in its own tables
+  (`audio/aac` is only in its list of supported audio types), so the platform's type is sent, and Windows registers
+  `.aac` as `audio/vnd.dlna.adts`, a type IANA lists (Microsoft, 2005); uploads from Chrome on Windows are reported
+  with it (mastodon/mastodon#11342, Borewit/music-metadata#654). Firefox's own table
+  (`nsExternalHelperAppService.cpp`) sends `audio/aac`, `audio/mpeg` and `audio/flac`; shared-mime-info adds the
+  aliases `audio/x-aac`, `audio/x-flac`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg` and `audio/x-mp2`, and Chromium
+  lists `audio/mpeg3`. As a container, a tagged FLAC sent as `audio/flac` is no longer refused by
+  `deny: ["audio/mpeg"]`.
+- **If wrong:** an ID3-tagged file sent as an audio type not listed (`audio/x-hx-aac-adts`, a vendor type) is still a
+  `mismatch`, and the message names the type to add here. A tag does not front WAV or AIFF, which carry it in a chunk.
+- **Status:** in force; `src/plugins/content-checks-containers.test.ts`.
+- **Visible in:** `src/plugins/sniff.ts`, `docs/guide/plugins.md`.

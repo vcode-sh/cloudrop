@@ -96,6 +96,43 @@ describe("contentChecks: a container's bytes do not say audio or video (M11-R133
   });
 });
 
+/** An ID3v2.4 header (id3.org ID3v2.4.0 structure §3.1) with a tag of 16 bytes. */
+const ID3 = bytes("ID3", [4, 0, 0, 0, 0, 0, 16], new Array(16).fill(0));
+
+describe("contentChecks: an ID3 tag fronts MP3, AAC and FLAC files alike (M11-R135)", () => {
+  it.for([
+    // Windows gives .aac this type (IANA audio/vnd.dlna.adts), and Chromium has no type of its own for the extension.
+    { name: "an AAC file from Chrome on Windows", type: "audio/vnd.dlna.adts" },
+    { name: "an AAC file from a Linux desktop", type: "audio/x-aac" },
+    { name: "an AAC stream", type: "audio/aacp" },
+    { name: "an MP3 by shared-mime-info's alias", type: "audio/x-mp3" },
+    { name: "an MP3 by Chromium's alias", type: "audio/mpeg3" },
+    { name: "an MP2 file", type: "audio/mp2" },
+  ])("passes $name sent as $type", async ({ type }) => {
+    expect(await contentOutcome({ accept: "audio/*", file: { name: "a", type }, body: ID3 })).toEqual(passed);
+  });
+
+  it("passes a tagged FLAC sent as audio/flac on a route that denies MP3", async () => {
+    const input = {
+      accept: "audio/*",
+      file: { name: "a.flac", type: "audio/flac" },
+      body: ID3,
+      options: { deny: ["audio/mpeg"] },
+    };
+    expect(await contentOutcome(input)).toEqual(passed);
+  });
+
+  it("refuses a tagged file sent as a type no ID3 tag fronts", async () => {
+    const input = { accept: "*/*", file: { name: "a.wav", type: "audio/wav" }, body: ID3 };
+    expect(await contentOutcome(input)).toEqual(
+      refused(
+        "This file is a recording with an ID3 tag, but it was sent as audio/wav. Give it the right extension, or pick another file.",
+        { declared: "audio/wav", detected: "audio/mpeg", reason: "mismatch" },
+      ),
+    );
+  });
+});
+
 describe("contentChecks: a ZIP whose entries name no package (M11-R133)", () => {
   it.for([
     {

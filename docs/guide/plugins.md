@@ -147,8 +147,8 @@ OpenDocument file or an EPUB through. Deny their types too when they must not pa
 
 #### Containers
 
-WebM, Matroska, MP4, 3GP and Ogg files hold audio, video or both, and their first bytes do not say which. Such a file
-is the type it was sent as, when its container can be that type:
+WebM, Matroska, MP4, 3GP and Ogg files hold audio, video or both, and their first bytes do not say which. An ID3 tag
+fronts MP3, AAC and FLAC files alike. Such a file is the type it was sent as, when its container can be that type:
 
 ```ts
 // A voice recorder: MediaRecorder makes audio/webm, and Chrome sends an .m4a file as audio/x-m4a. Both pass.
@@ -181,7 +181,7 @@ The plugin applies to every route. A type that one route takes and another must 
 | AVIF, HEIC, HEIF | `image/avif`, `image/heic`, `image/heif` | ISO BMFF `ftyp` box, major brand `avif`, `heic` and kin, `mif1` | AVIF §9.1; ISO/IEC 23008-12 |
 | MP4, M4A, MOV, 3GP | `video/mp4` (also `audio/mp4`, `audio/x-m4a`), `audio/mp4`, `video/quicktime`, `video/3gpp` (also `audio/3gpp`) | `ftyp` box, major brand `isom`, `mp42`, `M4A `, `qt  `, `3gp4` and kin | ISO/IEC 14496-12 §4.3; mp4ra.org brands |
 | WebM, Matroska | `video/webm` (also `audio/webm`), `video/x-matroska` (also `audio/x-matroska`) | EBML header `1A 45 DF A3` and its DocType | RFC 8794; RFC 9559; WHATWG §6.2.2 |
-| MP3 | `audio/mpeg` | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
+| MP3, and any file an ID3 tag fronts | `audio/mpeg` (an ID3 tag also `audio/aac`, `audio/vnd.dlna.adts`, `audio/flac`, `audio/mp2`) | an ID3v2 header (`ID3`, version 2 to 4, a revision under `FF`, flags with the low four bits clear, a size of four bytes under `80`), or an MPEG audio frame header | ID3v2.4.0 §3.1; ISO/IEC 11172-3; WHATWG §6.2.3 |
 | WAV | `audio/wav` | `RIFF`, 4 bytes, `WAVE` | WHATWG §6.2 |
 | Ogg | `audio/ogg` (also `video/ogg`, `audio/opus`, `application/ogg`) | `OggS` and version 0 | RFC 3533 §6; WHATWG §6.2 |
 | FLAC | `audio/flac` | `fLaC` | RFC 9639 §8 |

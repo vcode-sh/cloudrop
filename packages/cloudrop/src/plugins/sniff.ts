@@ -53,13 +53,25 @@ const SIGNATURES: readonly (readonly [Pattern, Sniffed])[] = [
   [[0xca, 0xfe, 0xba, 0xbf], MAC],
 ];
 
-const MP3 = kind("audio/mpeg", "an MP3 recording", "audio/mp3");
-const ID3 = kind("audio/mpeg", "an MP3 recording", "audio/mp3", "audio/flac", "audio/x-flac", "audio/aac");
+/** MPEG audio's other names: shared-mime-info's aliases of audio/mpeg, and Chromium's (net/base/mime_util.cc). */
+const MPEG = "audio/mp3 audio/x-mp3 audio/x-mpeg audio/x-mpg audio/mpeg3".split(" ");
+const MP3 = kind("audio/mpeg", "an MP3 recording", ...MPEG);
+/**
+ * An ID3v2 tag fronts MP3 and MP2, AAC (ADTS) and FLAC files alike, and its bytes do not say which. AAC goes by
+ * audio/aac (Firefox, shared-mime-info, with the alias audio/x-aac), audio/aacp, and audio/vnd.dlna.adts, the type
+ * Windows gives .aac (IANA registration by Microsoft, 2005) and Chromium, which has none of its own for it, passes on.
+ */
+const ID3 = container(
+  "audio/mpeg",
+  "a recording with an ID3 tag",
+  ...MPEG,
+  ..."audio/mp2 audio/x-mp2 audio/flac audio/x-flac audio/aac audio/x-aac audio/aacp audio/vnd.dlna.adts".split(" "),
+);
 
 /**
- * An ID3v2 tag, which WHATWG §6.2 reads as MP3; FLAC and AAC files carry one too. Its header as id3.org's ID3v2.4.0
- * structure §3.1 detects it: "ID3", a major version (2 to 4 exist) and a revision under FF, flags whose low four bits,
- * undefined in every version, are clear, and a size of four bytes each under 80.
+ * An ID3v2 tag, which WHATWG §6.2 reads as MP3. Its header as id3.org's ID3v2.4.0 structure §3.1 detects it: "ID3", a
+ * major version (2 to 4 exist) and a revision under FF, flags whose low four bits, undefined in every version, are
+ * clear, and a size of four bytes each under 80.
  */
 function sniffId3(bytes: Uint8Array): Sniffed | null {
   if (bytes.length < 10 || !startsWith(bytes, ascii("ID3"))) return null;
