@@ -109,6 +109,23 @@ file API around the store. All of it shipped in 0.2.0 (2026-11-20; `packages/clo
 A copy of files into the origin-private file system, so a resume needs no new pick, stays deferred to a later opt-in
 (`M3-U65`).
 
+### After 0.2.0: what the pilot's upgrade showed (2026-11-21)
+
+The pilot moved to 0.2.0 and replaced its own avatar replacement, deletion cleanup, sweep loop, erasure steps and
+abort plumbing with `replace`, `deleteFile`, `sweep({ all })`, `eraseOwner` and `close()`. Candidates it surfaced,
+none decided:
+
+- **`cloudrop/testing`:** the in-process fake R2 and a store fixture as a public entry, so an app tests its routes,
+  `authorize`, quotas and hooks without a bucket. Today `docs/guide/testing.md` serves only this repository.
+- **A setup and doctor command:** sets the bucket's CORS and lifecycle rules and checks the environment, in plain
+  words (the bucket-setup command recorded under M6, widened).
+- **`api.files` filters:** the pilot kept its own listing for a name search and a join with its profile table.
+- **Who the client uploads for:** the pilot sends the user's id in `headers` so the server refuses an `/upload` sent
+  with another account's cookie after a sign-in in another tab (`M7-P3`'s open window). A documented recipe, or a
+  client option that does it, would spare every signed-in app the same code.
+- **Copy for `CLIENT_CLOSED`** in the React guide's error table, since an upload picked during sign-out shows it.
+- A copy-paste UI stays out (`M4-E1`) unless that ruling is revisited.
+
 ### M6: the plugins
 
 `contentChecks`, `limits`, `images` and `checksums` (base spec §8). `limits()` keeps rate limits and the quotas a store
