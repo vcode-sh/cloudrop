@@ -185,7 +185,7 @@ describe("cloudrop doctor", () => {
   it("says which service it checks when settings for both are set", async () => {
     const result = await doctor({ env: { ...ENV, CLOUDROP_S3_BUCKET: "acme-s3-uploads" }, fetch: bucket(READY).fetch });
     expect(result.lines[1]).toBe(
-      "note         CLOUDROP_R2_* and CLOUDROP_S3_* settings are both set; the command checks R2. Unset the CLOUDROP_R2_* settings to check S3.",
+      "note         Settings for R2 and for S3 are both set; the command checks R2. To check S3, unset CLOUDROP_R2_BUCKET, CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY.",
     );
   });
 

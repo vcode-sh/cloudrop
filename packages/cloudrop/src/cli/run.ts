@@ -32,19 +32,20 @@ export async function runCommand(io: CommandIo): Promise<number> {
     return USAGE_ERROR;
   }
   const { options } = parsed;
-  const read = readVariables(io.env, options.envFile, io.readFile);
+  const read = readVariables(io.env, options, io.readFile);
   if ("error" in read) {
     io.stderr.write(`${read.error}\n`);
     return USAGE_ERROR;
   }
-  const { variables, notes } = read;
+  const { settings, notes } = read;
   const context = { fetch: io.fetch, out: io.stdout };
-  if (options.command === "doctor") return doctor(options, variables, notes, context);
-  if (options.apply || options.dryRun) return applySetup(options, variables, notes, context);
+  if (options.command === "doctor") return doctor(options, settings, notes, context);
+  if (options.apply || options.dryRun) return applySetup(options, settings, notes, context);
   printInstructions(io.stdout, {
     origins: options.origins,
-    service: serviceOf(variables),
+    service: serviceOf(settings),
     jurisdiction: options.jurisdiction,
+    name: settings.name,
   });
   return 0;
 }

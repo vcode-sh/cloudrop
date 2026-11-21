@@ -5,16 +5,17 @@ import type { BucketCheck } from "../server/bucket-check.ts";
 import { checkBucket } from "../server/bucket-check.ts";
 import type { FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
-import type { CommandOptions } from "./args.ts";
-import { reachBucket } from "./bucket-access.ts";
+import { type CommandOptions, sameArguments } from "./args.ts";
+import { type BucketSettings, reachBucket } from "./bucket-access.ts";
 import { aws, wrangler } from "./instructions.ts";
+import type { Settings } from "./names.ts";
 import { count, type Finding, type Output, plural, printFindings } from "./report.ts";
-import { readStorage, type Service, secretFinding, serviceOf, type Variables } from "./settings.ts";
+import { readStorage, secretFinding, serviceOf } from "./settings.ts";
 
 /** How to read a setting by hand, for a check the credentials could not run. */
-function byHand(service: Service, setting: "cors" | "lifecycle", jurisdiction: string | undefined): string {
-  if (service === "R2") return ` By hand: ${wrangler(`${setting} list <bucket>`, jurisdiction)}`;
-  return ` By hand: ${aws(setting === "cors" ? "get-bucket-cors" : "get-bucket-lifecycle-configuration")}`;
+function byHand({ service, jurisdiction, name }: BucketSettings, setting: "cors" | "lifecycle"): string {
+  if (service === "R2") return ` By hand: ${wrangler(`${setting} list <bucket>`, jurisdiction, name)}`;
+  return ` By hand: ${aws(setting === "cors" ? "get-bucket-cors" : "get-bucket-lifecycle-configuration", name)}`;
 }
 
 function ruleFinding(label: string, check: BucketCheck, hint: { fix: string; byHand: string }): Finding {
@@ -23,39 +24,36 @@ function ruleFinding(label: string, check: BucketCheck, hint: { fix: string; byH
   return { status: "problem", text: `${label}: ${check.message}${hint.fix}` };
 }
 
-async function bucketFindings(
-  driver: S3Driver,
-  service: Service,
-  { origins, jurisdiction }: CommandOptions,
-): Promise<Finding[]> {
-  const answered = await reachBucket(driver, service, jurisdiction);
+async function bucketFindings(driver: S3Driver, bucket: BucketSettings, options: CommandOptions): Promise<Finding[]> {
+  const answered = await reachBucket(driver, bucket);
   if (answered.status === "problem") {
     return [answered, { status: "unknown", text: "CORS and lifecycle rules: the bucket did not answer." }];
   }
-  const report = await checkBucket({ storage: driver, routes: new Map(), store: undefined }, origins);
+  const report = await checkBucket({ storage: driver, routes: new Map(), store: undefined }, options.origins);
   if (report.error) return [answered, { status: "problem", text: `Bucket rules: ${report.error.message}` }];
-  const apply = ` Run: cloudrop setup ${origins.map((origin) => `--origin ${origin}`).join(" ")} --apply`;
+  const apply = ` Run: cloudrop setup ${sameArguments(options)} --apply`;
   return [
     answered,
-    ruleFinding("CORS", report.data.cors, { fix: apply, byHand: byHand(service, "cors", jurisdiction) }),
-    ruleFinding("Lifecycle", report.data.lifecycle, { fix: apply, byHand: byHand(service, "lifecycle", jurisdiction) }),
+    ruleFinding("CORS", report.data.cors, { fix: apply, byHand: byHand(bucket, "cors") }),
+    ruleFinding("Lifecycle", report.data.lifecycle, { fix: apply, byHand: byHand(bucket, "lifecycle") }),
   ];
 }
 
 export async function doctor(
   options: CommandOptions,
-  variables: Variables,
+  settings: Settings,
   notes: Finding[],
   { fetch, out }: { fetch: FetchLike; out: Output },
 ): Promise<number> {
-  const service = serviceOf(variables) ?? "storage";
+  const service = serviceOf(settings) ?? "storage";
   out.write(
     `cloudrop doctor: checking ${service} settings, the bucket and its rules for ${options.origins.join(", ")}.\n`,
   );
-  const storage = readStorage(variables, { jurisdiction: options.jurisdiction, fetch });
-  const findings = [...notes, ...storage.findings, secretFinding(variables)];
+  const storage = readStorage(settings, { jurisdiction: options.jurisdiction, fetch });
+  const findings = [...notes, ...storage.findings, secretFinding(settings)];
   if (storage.driver && storage.service) {
-    findings.push(...(await bucketFindings(storage.driver, storage.service, options)));
+    const bucket = { service: storage.service, jurisdiction: options.jurisdiction, name: settings.name };
+    findings.push(...(await bucketFindings(storage.driver, bucket, options)));
   } else {
     findings.push({ status: "unknown", text: "The bucket and its rules: fix the settings above first." });
   }

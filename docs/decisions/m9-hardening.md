@@ -263,7 +263,7 @@ The measurements behind the first range are in
   every setting, `CLOUDROP_R2_ENDPOINT` was answered "Did you mean CLOUDROP_S3_ENDPOINT?", advice that changes nothing.
 - **If wrong:** an app's own `CLOUDROP_*` variable two edits from a setting gets a needless note; notes never change the
   exit code.
-- **Status:** in force; amends `M9-C8`.
+- **Status:** in force; amends `M9-C8`. Amended by `M11-C5` (the names compared with `--var`, the both-services note).
 - **Visible in:** `src/cli/settings.ts`, `src/cli/doctor.test.ts`, `docs/guide/command.md`.
 
 ### M9-H104: an unreadable --env-file says what to do per error; Node's own exit 9 is documented, not worked around

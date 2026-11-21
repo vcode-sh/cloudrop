@@ -5,11 +5,12 @@
 import type { CloudropError, Result } from "../errors.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
-import type { CommandOptions } from "./args.ts";
+import { type CommandOptions, sameArguments } from "./args.ts";
 import { reachBucket } from "./bucket-access.ts";
+import type { Service, Settings } from "./names.ts";
 import { count, type Finding, type Output, plural, printFindings, ruleNames } from "./report.ts";
 import { ABORT_DAYS, corsRule, LIFECYCLE_RULE, type Merged, mergeCors, mergeLifecycle } from "./rules.ts";
-import { readStorage, type Service, type Variables } from "./settings.ts";
+import { readStorage } from "./settings.ts";
 
 /** What setup does to one setting, once its current rules are read and cloudrop's merged in. */
 interface Step {
@@ -151,13 +152,13 @@ const isStep = (step: Step | Finding): step is Step => !isFinding(step);
 
 export async function applySetup(
   options: CommandOptions,
-  variables: Variables,
+  settings: Settings,
   notes: Finding[],
   { fetch, out }: { fetch: FetchLike; out: Output },
 ): Promise<number> {
   const mode = options.dryRun ? "showing what --apply would change" : "adding cloudrop's rules";
   out.write(`cloudrop setup: ${mode} for ${options.origins.join(", ")}.\n`);
-  const storage = readStorage(variables, { jurisdiction: options.jurisdiction, fetch });
+  const storage = readStorage(settings, { jurisdiction: options.jurisdiction, fetch });
   if (!storage.driver || !storage.service) {
     printFindings(out, [...notes, ...storage.findings]);
     out.write("Nothing was written. Fix the settings above, then run the command again.\n");
@@ -167,7 +168,11 @@ export async function applySetup(
   // reads too, and then the bucket is the problem, not its rules (M9-H102).
   const [steps, access] = await Promise.all([
     planBoth(storage.driver, options, storage.service),
-    reachBucket(storage.driver, storage.service, options.jurisdiction),
+    reachBucket(storage.driver, {
+      service: storage.service,
+      jurisdiction: options.jurisdiction,
+      name: settings.name,
+    }),
   ]);
   const refused = steps.filter(isFinding);
   if (refused.length > 0) {
@@ -183,11 +188,10 @@ export async function applySetup(
     out.write("Some rules were not written; see above.\n");
     return 1;
   }
-  const doctorCommand = `cloudrop doctor ${options.origins.map((origin) => `--origin ${origin}`).join(" ")}`;
   out.write(
     options.dryRun
       ? "Dry run: nothing was written. To write, run it with --apply and without --dry-run.\n"
-      : `Done. Check the bucket with ${doctorCommand}; R2 can take up to 30 seconds to apply a change.\n`,
+      : `Done. Check the bucket with cloudrop doctor ${sameArguments(options)}; R2 can take up to 30 seconds to apply a change.\n`,
   );
   return 0;
 }

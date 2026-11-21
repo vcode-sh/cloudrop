@@ -1,10 +1,14 @@
 // The command line of `cloudrop`: two commands, a handful of options, `--name value` or `--name=value`.
 
+import { readVar } from "./vars.ts";
+
 export interface CommandOptions {
   command: "doctor" | "setup";
   /** Exact origins, such as https://app.example.com: checked here, since they are echoed in the output. */
   origins: string[];
   envFile?: string;
+  /** --var: the variable each renamed setting is read from, by the setting's cloudrop name (M11-C1). */
+  vars: Map<string, string>;
   jurisdiction?: "eu" | "fedramp";
   apply: boolean;
   dryRun: boolean;
@@ -25,6 +29,8 @@ Options:
                           Repeat it for each origin. Required.
   --env-file <path>       Also read settings from this file of NAME=value lines. A variable
                           set in the environment wins over the file.
+  --var <SETTING>=<NAME>  Read a setting from a variable of your own, such as
+                          --var CLOUDROP_R2_BUCKET=R2_BUCKET. Repeat it for each setting.
   --jurisdiction <eu|fedramp>
                           The R2 bucket's jurisdiction, when it has one.
   --apply                 setup: write the rules to the bucket, keeping every other rule.
@@ -33,14 +39,19 @@ Options:
                           replaces them.
   -h, --help              Show this help.
 
-Settings come from the environment, as cloudrop reads them: CLOUDROP_R2_* (or CLOUDROP_S3_*)
-and CLOUDROP_SECRET. The command prints the names of settings, never their values.
+Settings come from the environment, as cloudrop reads them, or from the variables --var names:
+  R2      CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_BUCKET, CLOUDROP_R2_ACCESS_KEY_ID,
+          CLOUDROP_R2_SECRET_ACCESS_KEY
+  or S3   CLOUDROP_S3_ENDPOINT, CLOUDROP_S3_REGION, CLOUDROP_S3_BUCKET,
+          CLOUDROP_S3_ACCESS_KEY_ID, CLOUDROP_S3_SECRET_ACCESS_KEY
+  and     CLOUDROP_SECRET
+The command prints the names of variables, never their values.
 
 Exit codes: 0 nothing is wrong, 1 a problem was found or a write failed, 2 a usage error.
 `;
 
 const SETUP_FLAGS = { "--apply": "apply", "--dry-run": "dryRun", "--replace": "replace" } as const;
-const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--jurisdiction"]);
+const VALUE_OPTIONS = new Set(["--origin", "--env-file", "--var", "--jurisdiction"]);
 
 /** What is wrong with an origin, naming the exact origin when the value is a URL that has one (M9-H100). */
 function originProblem(value: string): string | null {
@@ -62,6 +73,7 @@ function setValue(options: CommandOptions, name: string, value: string): string 
     options.envFile = value;
     return null;
   }
+  if (name === "--var") return readVar(options.vars, value);
   if (name === "--jurisdiction") {
     if (value !== "eu" && value !== "fedramp") {
       return '--jurisdiction must be "eu" or "fedramp". Leave it out for a bucket in the default location.';
@@ -125,7 +137,14 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   if (command !== "doctor" && command !== "setup") {
     return { help: false, error: `Unknown command "${command}". Use doctor or setup.` };
   }
-  const options: CommandOptions = { command, origins: [], apply: false, dryRun: false, replace: false };
+  const options: CommandOptions = {
+    command,
+    origins: [],
+    vars: new Map(),
+    apply: false,
+    dryRun: false,
+    replace: false,
+  };
   const error =
     readOptions(options, rest) ??
     (options.replace && !options.apply && !options.dryRun ? "--replace works only with --apply or --dry-run." : null);
@@ -134,3 +153,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   options.origins = [...new Set(options.origins)];
   return { help: false, options };
 }
+
+/** The origins and --var pairs of this run, for a command the output tells the reader to run next (M11-C4). */
+export const sameArguments = ({ origins, vars }: CommandOptions): string =>
+  [
+    ...origins.map((origin) => `--origin ${origin}`),
+    ...[...vars].map(([setting, name]) => `--var ${setting}=${name}`),
+  ].join(" ");

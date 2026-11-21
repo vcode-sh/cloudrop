@@ -7,7 +7,9 @@ permissions cloudrop needs, and what `checkBucket` can and cannot report about a
 
 The [cloudrop command](command.md) does most of this for you: `npx cloudrop setup --origin <origin>` prints these rules
 and commands for your origins, `--apply` adds the rules to the bucket and keeps every other rule, and
-`npx cloudrop doctor --origin <origin>` checks the settings, the bucket and its rules.
+`npx cloudrop doctor --origin <origin>` checks the settings, the bucket and its rules. Both read the `CLOUDROP_*`
+variables; when your app names its settings otherwise, `--var CLOUDROP_R2_BUCKET=R2_BUCKET` reads one from your
+variable ([Your own variable names](command.md#your-own-variable-names)).
 
 The rule lists the origin of the **page** that uploads, not the origin of your API: the browser sends the bytes from
 the page. With the page and the API on different origins, see [Deployment](deployment.md).

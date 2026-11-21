@@ -114,7 +114,11 @@ function preset(build: (read: ReadSetting) => StorageDriver): StorageDriver {
  * A value from a variable fails the same check an option would, but nothing in the app's code passed it, so the message
  * names the variable. Each variable read is tried alone, with stand-ins for the rest, to find the ones at fault.
  */
-function buildFromEnvironment<T>(build: (read: ReadSetting) => T, env = fromEnv): T {
+function buildFromEnvironment<T>(
+  build: (read: ReadSetting) => T,
+  env = fromEnv,
+  name = (variable: string) => variable,
+): T {
   const read: string[] = [];
   try {
     return build((variable) => {
@@ -129,7 +133,7 @@ function buildFromEnvironment<T>(build: (read: ReadSetting) => T, env = fromEnv)
         readSetting(() => build((name, setting) => (name === variable ? env(name) : STAND_INS[setting]))).error,
     );
     if (invalid.length === 0) throw error;
-    throw configError(`${error.message} Environment variables with an invalid value: ${invalid.join(", ")}.`);
+    throw configError(`${error.message} Environment variables with an invalid value: ${invalid.map(name).join(", ")}.`);
   }
 }
 
@@ -223,18 +227,19 @@ export function s3(given?: S3Options): StorageDriver {
 
 /**
  * For the cloudrop command: the preset's driver, with the bucket-settings writes, built from `variables` alone, read as
- * the environment would be, so an invalid value is named by its variable. Never reads the process environment.
+ * the environment would be, so an invalid value is named by its variable: the one `name` gives for it, when the command
+ * reads the setting from another (`--var`, M11-C1). Never reads the process environment.
  */
 export function storageFromVariables(
   service: "R2" | "S3",
   variables: (name: string) => string | undefined,
-  options: { jurisdiction?: "eu" | "fedramp"; fetch?: FetchLike },
+  options: { jurisdiction?: "eu" | "fedramp"; fetch?: FetchLike; name?: (variable: string) => string },
 ): Result<S3Driver> {
   return readSetting(() => {
     const build =
       service === "R2"
         ? buildR2(options, createS3DriverWithWrites)
         : buildS3({ fetch: options.fetch }, createS3DriverWithWrites);
-    return buildFromEnvironment(build, variables);
+    return buildFromEnvironment(build, variables, options.name);
   });
 }

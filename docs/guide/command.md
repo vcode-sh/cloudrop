@@ -31,23 +31,74 @@ S3-compatible service, and `CLOUDROP_SECRET`. When any `CLOUDROP_R2_*` variable 
 - **On Node, a missing `--env-file` stops before the command runs.** Node itself checks every `--env-file` on its
   command line, the command's own included, and exits with code 9 and `node: .env.local: not found` (or
   `invalid format` for a directory). Check the path. Bun runs the command, which reports the file with exit code 2.
+- `--var <SETTING>=<NAME>` reads a setting from a variable of your own, such as
+  `--var CLOUDROP_R2_BUCKET=R2_BUCKET`; repeat it for each setting. See
+  [Your own variable names](#your-own-variable-names).
 - `--jurisdiction eu` (or `fedramp`) selects the endpoint of an R2 bucket in a jurisdiction, as `r2({ jurisdiction })`
   does.
 
 A name that is not a setting but looks like one, such as `CLOUDROP_R2_BUCKT` or `cloudrop_secret`, gets a `note` naming
 the setting it was probably meant to be, among the settings of the service its name names. `CLOUDROP_R2_ENDPOINT` and
 `CLOUDROP_R2_REGION` get a note that R2 needs neither. When settings for R2 and S3 are both set, a `note` says that R2
-is checked.
+is checked and names the R2 variables to unset to check S3.
 
-The command never prints a setting's value, only its name. The commands it prints name the bucket as
+The command never prints a setting's value, only the name of its variable. The commands it prints name the bucket as
 `"$CLOUDROP_R2_BUCKET"` (or `"$CLOUDROP_S3_BUCKET"`), so they work in a shell that has the variable set.
+
+## Your own variable names
+
+An app that already names its settings, say `R2_BUCKET` and `UPLOAD_TOKEN_SECRET`, does not rename them for the
+command. `--var <SETTING>=<NAME>` reads one setting from your variable; repeat it for each setting that has a name of
+your own. `doctor` and `setup` both take it:
+
+```bash
+npx cloudrop doctor --origin https://app.example.com \
+  --var CLOUDROP_R2_ACCOUNT_ID=R2_ACCOUNT_ID \
+  --var CLOUDROP_R2_BUCKET=R2_BUCKET \
+  --var CLOUDROP_R2_ACCESS_KEY_ID=R2_ACCESS_KEY_ID \
+  --var CLOUDROP_R2_SECRET_ACCESS_KEY=R2_SECRET_ACCESS_KEY \
+  --var CLOUDROP_S3_ENDPOINT=STORAGE_S3_ENDPOINT \
+  --var CLOUDROP_SECRET=UPLOAD_TOKEN_SECRET
+```
+
+`SETTING` is one of the ten the command reads: `CLOUDROP_R2_ACCOUNT_ID`, `CLOUDROP_R2_BUCKET`,
+`CLOUDROP_R2_ACCESS_KEY_ID`, `CLOUDROP_R2_SECRET_ACCESS_KEY`, `CLOUDROP_S3_ENDPOINT`, `CLOUDROP_S3_REGION`,
+`CLOUDROP_S3_BUCKET`, `CLOUDROP_S3_ACCESS_KEY_ID`, `CLOUDROP_S3_SECRET_ACCESS_KEY` and `CLOUDROP_SECRET`. `NAME` is the
+name of your variable, made of letters, digits and `_` and not starting with a digit. It is the variable's name, never
+its value.
+
+- **The output names your variable**, never the cloudrop setting it stands for: `R2_BUCKET is not set`,
+  `wrangler r2 bucket cors list "$R2_BUCKET"`. A command the output tells you to run next, such as
+  `cloudrop setup ... --apply`, repeats your `--var` pairs.
+- **A setting with `--var` is read only from your variable**, in the environment and in `--env-file`. When its
+  cloudrop name is set as well, a `note` says that it is not read. A setting without `--var` keeps its cloudrop name.
+- **The service is chosen by your variables**: R2 when a variable of any R2 setting is set, otherwise S3. With the
+  pairs above and `STORAGE_S3_ENDPOINT` set beside the R2 variables, R2 is checked and a `note` names the R2 variables
+  to unset to check S3.
+- **One variable holds one setting.** An app that reads the same variable for either service, such as the bucket from
+  `R2_BUCKET` whether it runs on R2 or on another S3 service, passes the pairs of the service it runs on:
+  `--var CLOUDROP_S3_BUCKET=R2_BUCKET` in place of `--var CLOUDROP_R2_BUCKET=R2_BUCKET`.
+- **Near-miss notes compare your names.** `R2_BUCKT`, or `r2_bucket`, gets "Did you mean R2_BUCKET?" while `R2_BUCKET`
+  is not set: for a name of your own, another case or one slip counts. A variable you name with `--var` never gets
+  such a note, whatever cloudrop name it resembles.
+- **The secret's variable is checked as one secret**: set, and at least 32 characters. When your variable holds
+  several keys, say a comma-separated list your code splits for [rotation](server.md#rotate-the-secret), the command
+  measures the whole text; each key in it is yours to check.
+
+The library itself reads only the cloudrop names. In your code, pass your own to it: `r2({ bucket, accountId,
+accessKeyId, secretAccessKey })`, `s3({ ... })` and `createCloudrop({ secret })`.
+
+A pair that cannot work is a usage error (exit code `2`) that says what to type: a pair without `=`, a `SETTING` the
+command does not read (it names the nearest one, or the right order when the two sides are swapped), a `NAME` that is
+not a variable name, a setting given twice, two settings read from one variable, and a setting read from another
+setting's own cloudrop name.
 
 ## doctor
 
 `doctor` checks, in order:
 
 1. that every storage setting is present and valid, naming the variable to fix;
-2. that `CLOUDROP_SECRET` is set and has at least 32 characters;
+2. that `CLOUDROP_SECRET` (or the variable `--var` gives it) is set and has at least 32 characters;
 3. that the bucket answers and the credentials may list it (a listing, which tells a missing bucket from a missing
    object). When it does not, the finding names the settings to check: the account ID (R2) or the endpoint (S3) when
    the service cannot be reached, the keys, the bucket and `--jurisdiction` when it refuses them, the region (S3) when
@@ -75,7 +126,8 @@ well as a read-write one does. Give the app a token with Object Read & Write
 ([Credentials and permissions](bucket-setup.md#credentials-and-permissions)).
 
 Your code may pass settings to `r2()`, `s3()` or `createCloudrop()` instead of the environment; `doctor` reads only the
-environment and the env file, so it reports those settings as missing.
+environment and the env file, so it reports those settings as missing. When your code reads them from variables with
+other names, name those with [`--var`](#your-own-variable-names).
 
 ## setup
 
@@ -123,7 +175,7 @@ Wrangler's local R2 cannot read or write bucket settings (it answers `501`), and
 | --- | --- |
 | `0` | Nothing is wrong: every check passed or could not run, or `setup` printed, wrote or would write the rules. |
 | `1` | `doctor` found a problem, or `setup` could not read, could not write, or found the settings incomplete. |
-| `2` | A usage error: an unknown command or option, a missing `--origin`, a value that is not an exact origin, `--replace` without `--apply` or `--dry-run`, or an `--env-file` that cannot be read. |
+| `2` | A usage error: an unknown command or option, a missing `--origin`, a value that is not an exact origin, a `--var` pair that cannot work, `--replace` without `--apply` or `--dry-run`, or an `--env-file` that cannot be read. |
 | `9` | Node's own, not the command's: an `--env-file` that does not exist or is a directory (see [Settings](#settings)). |
 
 In CI, `cloudrop doctor` fails the job on a problem and passes when it could only not check something.

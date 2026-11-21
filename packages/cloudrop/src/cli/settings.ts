@@ -2,17 +2,14 @@
 // way the presets build it. Every message names a variable, never its value.
 
 import type { FetchLike } from "../storage/driver.ts";
-import { R2_VARIABLES, S3_VARIABLES, storageFromVariables } from "../storage/presets.ts";
+import { R2_VARIABLES, storageFromVariables } from "../storage/presets.ts";
 import type { S3Driver } from "../storage/s3-driver.ts";
+import type { CommandOptions } from "./args.ts";
 import { parseEnvFile } from "./env-file.ts";
+import { misspelt } from "./misspelt.ts";
+import { listed, renamed, SECRET, SERVICE_SETTINGS, SETTINGS, type Service, type Settings } from "./names.ts";
 import type { Finding } from "./report.ts";
 
-export type Variables = (name: string) => string | undefined;
-export type Service = "R2" | "S3";
-
-const NAMES: Record<Service, string[]> = { R2: Object.values(R2_VARIABLES), S3: Object.values(S3_VARIABLES) };
-const SECRET = "CLOUDROP_SECRET";
-const KNOWN = [...NAMES.R2, ...NAMES.S3, SECRET];
 const MIN_SECRET_LENGTH = 32;
 
 const WHAT_TO_SET: Record<string, string> = {
@@ -50,80 +47,42 @@ function readEnvFile(
 }
 
 /**
- * The environment with an env file under it: a variable set in the environment wins, as with Node's --env-file. Notes
- * name each cloudrop variable set in both, each name that looks like a misspelt setting, and settings of two services.
- * The file is reported by its path and error code only.
+ * The settings, each read from its variable (its cloudrop name, or the one --var gives it) in the environment with an
+ * env file under it: a variable set in the environment wins, as with Node's --env-file. Notes name each variable set in
+ * both, each name that looks like a misspelt one, each cloudrop name --var keeps from being read, and settings of two
+ * services (M11-C5). The file is reported by its path and error code only.
  */
 export function readVariables(
   env: Readonly<Record<string, string | undefined>>,
-  envFile: string | undefined,
+  { envFile, vars }: Pick<CommandOptions, "envFile" | "vars">,
   readFile: (path: string) => string,
-): { variables: Variables; notes: Finding[] } | { error: string } {
+): { settings: Settings; notes: Finding[] } | { error: string } {
   const read = envFile === undefined ? { values: {} } : readEnvFile(envFile, readFile);
   if ("error" in read) return read;
   const file: Record<string, string> = read.values;
-  const variables: Variables = (name) => env[name] || file[name] || undefined;
-  const notes = KNOWN.filter((name) => env[name] && file[name]).map(
-    (name): Finding => ({
-      status: "note",
-      text: `${name} is set in the environment and in ${envFile}; the environment's value is used.`,
-    }),
-  );
-  notes.push(...misspelt([...Object.keys(env), ...Object.keys(file)], variables));
-  if (serviceOf(variables) === "R2" && NAMES.S3.some((name) => variables(name))) {
-    const text =
-      "CLOUDROP_R2_* and CLOUDROP_S3_* settings are both set; the command checks R2. Unset the CLOUDROP_R2_* settings to check S3.";
-    notes.push({ status: "note", text });
+  const variable = (name: string) => env[name] || file[name] || undefined;
+  const name = (setting: string) => vars.get(setting) ?? setting;
+  const value = (setting: string) => variable(name(setting));
+  const note = (text: string): Finding => ({ status: "note", text });
+  const notes = SETTINGS.map(name)
+    .filter((each) => env[each] && file[each])
+    .map((each) => note(`${each} is set in the environment and in ${envFile}; the environment's value is used.`));
+  notes.push(...misspelt([...Object.keys(env), ...Object.keys(file)], (each) => variable(each) !== undefined, name));
+  for (const setting of SETTINGS.filter((each) => name(each) !== each && variable(each))) {
+    notes.push(note(`${setting} is set, but --var reads that setting from ${name(setting)}, so it is not read.`));
   }
-  return { variables, notes };
-}
-
-/** Edit distance between two names. */
-function distance(a: string, b: string): number {
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= a.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= b.length; j++) {
-      const replace = (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1);
-      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, replace);
-    }
-    previous = current;
+  const r2 = SERVICE_SETTINGS.R2.filter(value).map(name);
+  if (r2.length > 0 && SERVICE_SETTINGS.S3.some(value)) {
+    const text = `Settings for R2 and for S3 are both set; the command checks R2. To check S3, unset ${listed(r2)}.`;
+    notes.push(note(text));
   }
-  return previous[b.length] ?? 0;
+  return { settings: { name, value }, notes };
 }
 
-// Settings people bring from S3 to R2, which R2 builds or does not need.
-const NOT_FOR_R2 = new Map([
-  ["CLOUDROP_R2_ENDPOINT", "R2's endpoint is built from CLOUDROP_R2_ACCOUNT_ID."],
-  ["CLOUDROP_R2_REGION", "R2 needs no region."],
-]);
-
-/** The setting that is not set and is the same name in another case, or two edits from it, in the name's service. */
-function meant(upper: string, variables: Variables): string | undefined {
-  // CLOUDROP_R2_ENDPOINT is no misspelt CLOUDROP_S3_ENDPOINT: following that advice would change nothing.
-  const service = upper.startsWith("CLOUDROP_R2_") ? "R2" : upper.startsWith("CLOUDROP_S3_") ? "S3" : undefined;
-  const scored = (service ? NAMES[service] : KNOWN).map((known) => ({ known, score: distance(upper, known) }));
-  const best = scored.sort((a, b) => a.score - b.score)[0];
-  return best && best.score <= 2 && !variables(best.known) ? `Did you mean ${best.known}?` : undefined;
-}
-
-/**
- * A note for each CLOUDROP_* name that is no setting but looks meant as one, such as CLOUDROP_R2_BUCKT: otherwise the
- * only clue is "CLOUDROP_R2_BUCKET is not set" (M9-H103).
- */
-function misspelt(names: readonly string[], variables: Variables): Finding[] {
-  return [...new Set(names)].flatMap((name): Finding[] => {
-    if (!/^cloudrop_/i.test(name) || KNOWN.includes(name)) return [];
-    const upper = name.toUpperCase();
-    const hint = NOT_FOR_R2.get(upper) ?? meant(upper, variables);
-    return hint ? [{ status: "note", text: `${name} is not a cloudrop setting. ${hint}` }] : [];
-  });
-}
-
-/** R2 when any CLOUDROP_R2_* is set, else S3 when any CLOUDROP_S3_* is, else none. */
-export function serviceOf(variables: Variables): Service | undefined {
-  if (NAMES.R2.some((name) => variables(name))) return "R2";
-  return NAMES.S3.some((name) => variables(name)) ? "S3" : undefined;
+/** R2 when any R2 setting is set, else S3 when any S3 setting is, else none. */
+export function serviceOf({ value }: Settings): Service | undefined {
+  if (SERVICE_SETTINGS.R2.some(value)) return "R2";
+  return SERVICE_SETTINGS.S3.some(value) ? "S3" : undefined;
 }
 
 export interface StorageSettings {
@@ -134,43 +93,52 @@ export interface StorageSettings {
 
 /** The driver when every storage setting is present and valid; otherwise a finding for each one that is not. */
 export function readStorage(
-  variables: Variables,
+  settings: Settings,
   options: { jurisdiction?: "eu" | "fedramp"; fetch: FetchLike },
 ): StorageSettings {
-  const service = serviceOf(variables);
+  const { name, value } = settings;
+  const service = serviceOf(settings);
   if (service === undefined) {
-    const text =
-      "No storage settings found. Set CLOUDROP_R2_ACCOUNT_ID, CLOUDROP_R2_BUCKET, CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY for R2, or the CLOUDROP_S3_* settings for another service; --env-file reads them from a file.";
+    const { accountId, bucket, accessKeyId, secretAccessKey } = R2_VARIABLES;
+    const forR2 = listed([accountId, bucket, accessKeyId, secretAccessKey].map(name));
+    const s3 = renamed(name, "S3");
+    const text = `No storage settings found. Set ${forR2} for R2, or ${s3 ? listed(s3) : "the CLOUDROP_S3_* settings"} for another service; --env-file reads them from a file.`;
     return { service, driver: undefined, findings: [{ status: "problem", text }] };
   }
-  const missing = NAMES[service].filter((name) => !variables(name));
+  const missing = SERVICE_SETTINGS[service].filter((setting) => !value(setting));
   if (missing.length > 0) {
     const findings = missing.map(
-      (name): Finding => ({ status: "problem", text: `${name} is not set. Set it to ${WHAT_TO_SET[name]}.` }),
+      (setting): Finding => ({
+        status: "problem",
+        text: `${name(setting)} is not set. Set it to ${WHAT_TO_SET[setting]}.`,
+      }),
     );
     return { service, driver: undefined, findings };
   }
-  const built = storageFromVariables(service, variables, options);
+  // The settings are all set, so the only message of the storage's that names one is about an invalid value.
+  const built = storageFromVariables(service, value, { ...options, name });
   if (built.error) return { service, driver: undefined, findings: [{ status: "problem", text: built.error.message }] };
-  const findings: Finding[] = [
-    { status: "ok", text: `${service} settings are present and valid (CLOUDROP_${service}_*).` },
-  ];
-  return { service, driver: built.data, findings };
+  const read = renamed(name, service)?.join(", ") ?? `CLOUDROP_${service}_*`;
+  return {
+    service,
+    driver: built.data,
+    findings: [{ status: "ok", text: `${service} settings are present and valid (${read}).` }],
+  };
 }
 
-export function secretFinding(variables: Variables): Finding {
-  const secret = variables(SECRET);
+export function secretFinding({ name, value }: Settings): Finding {
+  const secret = value(SECRET);
   if (!secret) {
     return {
       status: "problem",
-      text: `${SECRET} is not set. Generate one with \`openssl rand -base64 32\` and set it, unless your code passes secret to createCloudrop().`,
+      text: `${name(SECRET)} is not set. Generate one with \`openssl rand -base64 32\` and set it, unless your code passes secret to createCloudrop().`,
     };
   }
   if (secret.length < MIN_SECRET_LENGTH) {
     return {
       status: "problem",
-      text: `${SECRET} has fewer than ${MIN_SECRET_LENGTH} characters. Generate one with \`openssl rand -base64 32\`.`,
+      text: `${name(SECRET)} has fewer than ${MIN_SECRET_LENGTH} characters. Generate one with \`openssl rand -base64 32\`.`,
     };
   }
-  return { status: "ok", text: `${SECRET} is set.` };
+  return { status: "ok", text: `${name(SECRET)} is set.` };
 }

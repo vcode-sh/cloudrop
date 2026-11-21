@@ -19,6 +19,42 @@ export const ENV = {
 
 export const ORIGIN = "https://app.example.com";
 
+/** ENV's settings under an app's own names, as --var reads them (M11-C1). */
+export const APP_ENV: Record<
+  "R2_ACCOUNT_ID" | "R2_BUCKET" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "UPLOAD_TOKEN_SECRET",
+  string
+> = {
+  R2_ACCOUNT_ID: ENV.CLOUDROP_R2_ACCOUNT_ID,
+  R2_BUCKET: ENV.CLOUDROP_R2_BUCKET,
+  R2_ACCESS_KEY_ID: ENV.CLOUDROP_R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY: ENV.CLOUDROP_R2_SECRET_ACCESS_KEY,
+  UPLOAD_TOKEN_SECRET: ENV.CLOUDROP_SECRET,
+};
+
+/** Settings for an S3 service under an app's own names. */
+export const APP_S3_ENV: Record<string, string> = {
+  STORAGE_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com",
+  STORAGE_S3_REGION: "us-east-1",
+  STORAGE_S3_BUCKET: "acme-s3-uploads",
+  STORAGE_S3_ACCESS_KEY_ID: "AKIDs3fixture",
+  STORAGE_S3_SECRET_ACCESS_KEY: "s3-secret-fixture-value",
+  UPLOAD_TOKEN_SECRET: ENV.CLOUDROP_SECRET,
+};
+
+/** A --var for every setting the command reads, naming the variables of APP_ENV and APP_S3_ENV. */
+export const APP_VARS: string[] = [
+  "CLOUDROP_R2_ACCOUNT_ID=R2_ACCOUNT_ID",
+  "CLOUDROP_R2_BUCKET=R2_BUCKET",
+  "CLOUDROP_R2_ACCESS_KEY_ID=R2_ACCESS_KEY_ID",
+  "CLOUDROP_R2_SECRET_ACCESS_KEY=R2_SECRET_ACCESS_KEY",
+  "CLOUDROP_S3_ENDPOINT=STORAGE_S3_ENDPOINT",
+  "CLOUDROP_S3_REGION=STORAGE_S3_REGION",
+  "CLOUDROP_S3_BUCKET=STORAGE_S3_BUCKET",
+  "CLOUDROP_S3_ACCESS_KEY_ID=STORAGE_S3_ACCESS_KEY_ID",
+  "CLOUDROP_S3_SECRET_ACCESS_KEY=STORAGE_S3_SECRET_ACCESS_KEY",
+  "CLOUDROP_SECRET=UPLOAD_TOKEN_SECRET",
+].flatMap((pair) => ["--var", pair]);
+
 export interface Bucket {
   fetch: FetchLike;
   /** Bucket-settings writes that reached the bucket, such as "PUT ?cors=". */
@@ -103,4 +139,15 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
   const leaked = values.filter((value) => stdout.includes(value) || stderr.includes(value));
   if (leaked.length > 0) throw new Error(`The command printed a setting's value (${leaked.length} of them).`);
   return { code, stdout, stderr, lines: stdout.split("\n").slice(0, -1) };
+}
+
+/**
+ * Runs the command with APP_VARS, so no setting keeps its cloudrop name, on APP_ENV unless `env` is given. Every such
+ * run also checks that the output names no CLOUDROP_* setting, except in the --var pairs of a command it suggests.
+ */
+export async function runRenamed(argv: string[], options: RunOptions = {}): Promise<RunResult> {
+  const result = await run([...argv, ...APP_VARS], { ...options, env: options.env ?? APP_ENV });
+  const named = result.stdout.replaceAll(/--var \S+/g, "").match(/CLOUDROP_\w+/g);
+  if (named) throw new Error(`The output names settings that --var renamed: ${[...new Set(named)].join(", ")}.`);
+  return result;
 }
