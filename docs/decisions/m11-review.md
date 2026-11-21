@@ -3371,3 +3371,19 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   workspace, so its two constructors were declared by hand and only `uploads.api.sweep` was checked there.
 - **Status:** in force.
 - **Visible in:** `docs/guide/client.md`, `docs/guide/resume.md`, `docs/guide/react.md`, `docs/guide/hono.md`.
+
+### M11-R264: `close()` also waits for an `/upload` whose files were all cancelled one by one
+
+- **Decision:** every ask's runs are counted with the client's unanswered `/abort`s (`launch` in
+  `src/client/launch.ts`), and the run of a file cancelled while its job's `/upload` goes on ends only once the
+  `/abort` of the ticket that arrives for it was answered. `close()`, with or without `abort`, so resolves after that
+  answer and that `/abort`, as `M11-R261` promises for a cancel of the whole ask.
+- **Why:** found by the confirmation review and reproduced on a server with a store and a quota of 1,000 bytes:
+  `start()` of a 600-byte file, then the file's own `abort()` after the server had reserved and before its answer
+  arrived, then `close({ abort: true })`. The job left the client's jobs once its only file had ended, so `close()`
+  resolved at once while the `/upload` was still to answer; the late ticket's `/abort` (`M4-F2`) was sent after
+  `close()` had resolved, which a sign-out that clears the session right after could refuse.
+- **If wrong:** `close()` waits for runs of jobs it no longer stops, at most what `M11-R261` already allows: the
+  `/upload`'s 30 seconds and the `/abort`'s 10.
+- **Status:** in force. Amends `M11-R261` (what `close()` waits for).
+- **Visible in:** `src/client/launch.ts`, `src/client/cancelled-ask.test.ts`.

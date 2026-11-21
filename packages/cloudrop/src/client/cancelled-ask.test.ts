@@ -105,6 +105,26 @@ describe("a cancel while the server has reserved and its /upload answer is on th
     expect({ closedWhileHeld, rows: await page.rows() }).toEqual({ closedWhileHeld: false, rows: ["aborted"] });
   });
 
+  it("close() waits for the job's /upload after its every file was cancelled one by one", async () => {
+    const held = answerHeld(nth("POST /upload", 1));
+    const page = nearQuota(held.fault);
+    const client = page.client();
+    const job = client.start("owned", file());
+    await held.reserved;
+    // The file's own cancel, not the job's: the job's /upload keeps running on the job's signal.
+    job.files[0]?.abort();
+    let closed = false;
+    const closing = client.close({ abort: true }).then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const closedWhileHeld = closed;
+    held.open();
+    await closing;
+
+    expect({ closedWhileHeld, rows: await page.rows() }).toEqual({ closedWhileHeld: false, rows: ["aborted"] });
+  });
+
   it("abort() of a file whose retry asks /upload alone aborts the ticket that ask brings", async () => {
     const refused: Fault = (call) =>
       nth("PUT object", 1)(call) ? errorResponse(400, "BadRequest", "Refused.") : undefined;

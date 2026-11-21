@@ -49,11 +49,12 @@ async function runEntry(
   whole: boolean,
   attempt: number,
 ): Promise<void> {
-  // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else. After a cancel
-  // of the whole ask the answer here is ABORTED, and unlessCancelled aborts the tickets (M11-R261).
+  // Cancelled meanwhile, it ended then (M4-F2): a ticket it was given gets its /abort and nothing else, and the run
+  // ends once that was answered, which close() waits for. After a cancel of the whole ask the answer here is ABORTED,
+  // and unlessCancelled aborts the tickets (M11-R261).
   if (entry.status === "aborted") {
     const late = answer.error ? undefined : answer.data[index];
-    if (late && !(late instanceof CloudropError)) void counted(job.context, job.context.endpoints.abort(late.token));
+    if (late && !(late instanceof CloudropError)) await job.context.endpoints.abort(late.token);
     return;
   }
   // The error is the job's when /upload asked for every file, and the file's own when a retry asked for some (M3-U3).
@@ -163,6 +164,9 @@ export async function launch(
   entries.forEach((entry, index) => {
     entry.run = started.then((answer) => runEntry(job, entry, answer, index, whole, attempt)).finally(job.idle);
   });
+  // Counted with the /aborts: a job whose files were all cancelled one by one leaves the client's jobs while this ask
+  // is still to answer, and close() waits for the tickets it brings to be aborted (M11-R264).
+  void counted(context, Promise.allSettled(entries.map((entry) => entry.run)));
   const { error } = await started;
   return whole ? error : null;
 }
