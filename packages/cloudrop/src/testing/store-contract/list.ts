@@ -54,6 +54,21 @@ export function listCases(suite: StoreSuite): void {
     expect(ids(pending)).toEqual(["f-pending"]);
   });
 
+  it("list orders and pages ids of one instant in byte order, also past U+FFFF", async () => {
+    const { store } = suite;
+    // In a JavaScript string U+1F600 (surrogates D83D DE00) sorts before U+E000; in bytes, after it.
+    const [emoji, privateUse] = ["f-\u{1f600}", "f-\ue000"];
+    await reserveAt("u-1", 1, [newFile(privateUse, 1), newFile(emoji, 1), newFile("f-z", 1)]);
+    const read = (order: "newest" | "oldest", cursor: string | null) =>
+      store.list({ owner: "u-1", statuses: ["pending"], route: null, name: null, type: null, order, limit: 2, cursor });
+    const newest = await read("newest", null);
+    expect(ids(newest)).toEqual([emoji, privateUse]);
+    expect(ids(await read("newest", newest.cursor))).toEqual(["f-z"]);
+    const oldest = await read("oldest", null);
+    expect(ids(oldest)).toEqual(["f-z", privateUse]);
+    expect(ids(await read("oldest", oldest.cursor))).toEqual([emoji]);
+  });
+
   it("list with several statuses answers the rows in any of them, in one newest-first order", async () => {
     const { store } = suite;
     await reserveAt("u-1", 1, [newFile("f-done", 1)]);

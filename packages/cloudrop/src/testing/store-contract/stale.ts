@@ -96,6 +96,17 @@ export function staleCases(suite: StoreSuite): void {
     expect(pages).toEqual([["f-a"], ["f-b"], ["f-c"], ["f-d"]]);
   });
 
+  it("expire orders and pages ids of one deadline in byte order, also past U+FFFF", async () => {
+    const { store } = suite;
+    // In a JavaScript string U+1F600 (surrogates D83D DE00) sorts before U+E000; in bytes, after it.
+    const [emoji, privateUse] = ["f-\u{1f600}", "f-\ue000"];
+    await seed("u-1", [newFile(emoji, 1), newFile(privateUse, 1), newFile("f-z", 1)], at(MINUTE));
+    const first = await store.stale({ kind: "expire", before, claimedBefore, limit: 2, cursor: null });
+    expect(ids(first)).toEqual(["f-z", privateUse]);
+    const second = await store.stale({ kind: "expire", before, claimedBefore, limit: 2, cursor: first.cursor });
+    expect(ids(second)).toEqual([emoji]);
+  });
+
   it("cleanup pages by end time then id, and ends with null", async () => {
     const { store } = suite;
     await seed("u-1", [newFile("f-1", 1), newFile("f-2", 1), newFile("f-3", 1)]);

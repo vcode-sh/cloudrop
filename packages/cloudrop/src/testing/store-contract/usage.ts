@@ -103,4 +103,15 @@ export function usageCases(suite: StoreSuite): void {
     expect(second.owners).toEqual(["owner-c", "owner-d"]);
     expect(await store.owners(second.cursor, 2)).toEqual({ owners: ["owner-e"], cursor: null });
   });
+
+  it("owners pages in byte order: a character past U+FFFF comes after every character before it", async () => {
+    const { store } = suite;
+    // U+1F600 is the surrogates D83D DE00 in a JavaScript string, which sort before U+E000 there; its bytes (F0 …)
+    // sort after U+E000's (EE …), and bytes are what every database compares.
+    const [emoji, privateUse] = ["owner-\u{1f600}", "owner-\ue000"];
+    for (const owner of [emoji, privateUse, "owner-z"]) await seed(owner, [newFile(`file-${owner}`, 1)]);
+    const first = await store.owners(null, 2);
+    expect(first.owners).toEqual(["owner-z", privateUse]);
+    expect(await store.owners(first.cursor, 2)).toEqual({ owners: [emoji], cursor: null });
+  });
 }

@@ -1402,6 +1402,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/server/sweep.ts`, `src/server/owner-files.ts`, `src/server/all-files.ts`,
   `src/server/sweep.test.ts`, `src/server/all-files.test.ts`, `docs/guide/store.md`.
 
+### M11-R65: the memory store orders ids and owners by their bytes
+
+- **Decision:** `memoryStore` compares ids and owners by code point (`byBytes`), which is their order in UTF-8 bytes,
+  in `owners`, `list`, `listAll` and `stale`: the sort, the cursor comparison and the tie on a shared time. The store
+  contract has a case for each with U+E000 beside U+1F600, and `CloudropStore.owners` says "in byte order of owner".
+- **Why:** it sorted with JavaScript's `<`, which compares UTF-16 units and puts a character past U+FFFF (surrogates
+  from D800) before U+E000 to U+FFFF, while Postgres (`COLLATE "C"`), SQLite and D1 compare bytes and put it after.
+  An app's test on the memory store paged such owners in another order than its database. The three cases failed on
+  the memory store and passed on every SQL backend before the change.
+- **If wrong:** nothing a test could rely on: ids are the server's own (ASCII), and the order of owners shows only in
+  the order `api.reconcile()` repairs them.
+- **Status:** in force.
+- **Visible in:** `src/testing/memory-store-reads.ts`, `src/testing/store-contract/usage.ts`,
+  `src/testing/store-contract/list.ts`, `src/testing/store-contract/stale.ts`, `src/server/store.ts`.
+
 ### M11-R66: a page of sweep work is one index range per status
 
 - **Decision:** the SQL store's `stale` reads each status on its own, `status = '…' AND <time> < before`, ordered by

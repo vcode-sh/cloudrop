@@ -228,7 +228,7 @@ export interface CloudropStore<TTx = never> {
    */
   reconcile(owner: string): Promise<boolean>;
   /**
-   * One page of the owners that have counters, in the database's order of owner; `cursor` continues after the
+   * One page of the owners that have counters, in byte order of owner, like ids; `cursor` continues after the
    * previous page (keyset) and is null on the last page.
    */
   owners(cursor: string | null, limit: number): Promise<{ owners: string[]; cursor: string | null }>;
