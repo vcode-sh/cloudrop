@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.4.0 (content checks, onDelete, file filters, the account guard). This file
+Updated 2026-11-21 for 0.5.0 (onDelete hears who deleted a file). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -127,6 +127,10 @@ each now decided:
   copy for `CLIENT_CLOSED`, `ABORTED` and `ACCOUNT_CHANGED`. Every part was reviewed again before release; the fixes
   are `M10-D11` and `M10-K12`.
 - A copy-paste UI stays out (`M4-E1`) unless that ruling is revisited.
+
+- **Released in 0.5.0 (2026-11-21):** `api.deleteFile` and `api.eraseOwner` pass a `context` to `onDelete`, and a
+  replacement's hook gets the replacing request (`M10-D12`): the pilot's move to 0.4.0 found its audit trail needed
+  them.
 
 ### After 0.4.0: candidates, none decided
 

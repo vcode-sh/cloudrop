@@ -6,6 +6,23 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-21
+
+In short: when your app deletes a file, its `onDelete` hook now hears who asked and why, so the audit row can say it.
+
+### Added
+
+- **`api.deleteFile(id, { context })` and `api.eraseOwner(owner, { context })`:** `context` reaches the route's
+  `onDelete` as it is, such as the person or administrator who asked, their reason and their address. A replaced file's
+  `onDelete` gets `request` instead, the `/complete` request of the upload that replaces it. Guide:
+  [onDelete](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#ondelete) (`M10-D12`).
+- Type `DeleteFileOptions`.
+
+### Changed
+
+- `DeleteContext` gains `context` and, for a replacement, `request`; a hand-built `DeleteContext` in a test now passes
+  `context`.
+
 ## 0.4.0 - 2026-11-21
 
 In short: the server can now check what a file really is, not just what the browser says it is
