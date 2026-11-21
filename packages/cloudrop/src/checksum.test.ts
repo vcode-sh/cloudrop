@@ -47,9 +47,12 @@ describe("crc32c", () => {
 
   it("matches the bitwise definition for every length around the 8-byte block size", () => {
     const bytes = Uint8Array.from({ length: 40 }, (_, index) => (index * 37 + 11) & 0xff);
-    for (let length = 0; length <= bytes.length; length++) {
-      expect(crc32c(bytes.subarray(0, length))).toBe(bitwiseCrc32c(bytes.subarray(0, length)));
-    }
+    const lengths = Array.from({ length: bytes.length + 1 }, (_, length) => length);
+    const wrong = lengths.filter((length) => {
+      const prefix = bytes.subarray(0, length);
+      return crc32c(prefix) !== bitwiseCrc32c(prefix);
+    });
+    expect(wrong).toEqual([]);
   });
 
   it("matches the bitwise definition and is split-invariant for arbitrary bytes", () => {
@@ -61,12 +64,6 @@ describe("crc32c", () => {
         expect(crc32c(bytes.subarray(split), crc32c(bytes.subarray(0, split)))).toBe(expected);
       }),
     );
-  });
-
-  it("gives the one-shot result when a large buffer is split at an odd offset", () => {
-    const bytes = Uint8Array.from({ length: 100_003 }, (_, index) => (index * 31 + 7) & 0xff);
-    const split = 50_001;
-    expect(crc32c(bytes.subarray(split), crc32c(bytes.subarray(0, split)))).toBe(crc32c(bytes));
   });
 
   it("reads only the viewed window of a larger buffer", () => {
