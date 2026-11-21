@@ -27,9 +27,19 @@ export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersIn
 /** The signed-in user's id for /upload only, or a function, possibly async, that gives it; null sends none (M10-A). */
 export type Account = string | (() => string | null | undefined | Promise<string | null | undefined>);
 
-/** At most owner()'s 255 characters (MAX_OWNER_LENGTH on the server); a lone surrogate cannot be percent-encoded. */
-export const isAccount = (value: unknown): value is string =>
-  typeof value === "string" && value.length <= 255 && value.isWellFormed();
+/**
+ * The account as the header sends it, percent-encoded (M10-A2), or null when `value` is not one: not a string, over
+ * owner()'s 255 characters (MAX_OWNER_LENGTH on the server), or with a lone surrogate, which encodeURIComponent refuses.
+ * String.isWellFormed would say the same, but is newer than the browsers the client supports (M4-F6).
+ */
+export function encodeAccount(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 255) return null;
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
 
 export interface Endpoints {
   /**
@@ -112,8 +122,9 @@ export function createEndpoints(
   async function accountHeader(signal: AbortSignal): Promise<Record<string, string>> {
     const value = typeof account === "function" ? await Promise.race([account(), rejectOnAbort(signal)]) : account;
     if (value === null || value === undefined) return {};
-    if (!isAccount(value)) throw new TypeError("The account function returned neither a user's id nor null.");
-    return { [ACCOUNT_HEADER]: encodeURIComponent(value) };
+    const encoded = encodeAccount(value);
+    if (encoded === null) throw new TypeError("The account function returned neither a user's id nor null.");
+    return { [ACCOUNT_HEADER]: encoded };
   }
   /**
    * POSTs `body` as JSON and reads the whole answer within `timeoutMs`. Never rejects: no whole answer in time is

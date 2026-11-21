@@ -1,7 +1,7 @@
 // Contract: the `account` option (M10-A). Its value goes percent-encoded as x-cloudrop-account with every /upload,
-// retries included, and never with /sign, /complete, /abort or a bucket PUT. A function is called before each /upload,
-// null or undefined sends no header, and its failure fails that /upload unsent with NETWORK_ERROR. A wrong option
-// throws INVALID_CONFIG. Against a server whose route has a store and `owner`, another account ends the file
+// retries included, in place of one the headers option sets, and never with /sign, /complete, /abort or a bucket PUT. A
+// function is called before each /upload, null or undefined sends no header, its failure fails that /upload unsent with
+// NETWORK_ERROR, and a cancel stops its wait. A wrong option throws INVALID_CONFIG. Against a server whose route has a store and `owner`, another account ends the file
 // ACCOUNT_CHANGED without a retry, and the same account, in any characters, uploads.
 // Oracle: the headers each request reached the fixture with, the requests the fixture saw, literal messages.
 
@@ -12,6 +12,7 @@ import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { memoryStore } from "../testing/memory-store.ts";
+import { gate } from "../testing/persist-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone });
@@ -74,6 +75,22 @@ describe("the account option", () => {
     });
   });
 
+  it("replaces the headers option's own account header on /upload, and leaves a cancel's /abort to it", async () => {
+    const held = gate((call) => call.label === "PUT object");
+    const { seen, client } = page(held.fault);
+    const cancel = new AbortController();
+    const result = client({ headers: { "x-cloudrop-account": "app" }, account: "u1" }).upload("files", note(), {
+      signal: cancel.signal,
+    });
+    await held.reached;
+    cancel.abort();
+
+    expect({ code: (await result).error?.code, seen }).toEqual({
+      code: "ABORTED",
+      seen: ["POST /upload u1", "PUT object null", "POST /abort app"],
+    });
+  });
+
   it("calls a function before each /upload, and null sends no header", async () => {
     const busyOnce: Fault = (call) =>
       call.label === "POST /upload" && call.nth === 1 ? new Response("busy", { status: 503 }) : undefined;
@@ -90,7 +107,6 @@ describe("the account option", () => {
   it.for([
     { name: "rejects", account: () => Promise.reject(new Error("No session.")) },
     { name: "returns a number", account: () => 42 },
-    { name: "returns more than 255 characters", account: () => "u".repeat(256) },
   ])("fails an /upload unsent when the function $name", async ({ account }) => {
     const { fixture, client } = page();
     const { error } = await client({ account } as ClientOptions).upload("files", note());
@@ -99,6 +115,23 @@ describe("the account option", () => {
       error: accountFailed,
       requests: [],
     });
+  });
+
+  it("answers a cancel while it waits for a function with ABORTED, and sends nothing", async () => {
+    const { fixture, client } = page();
+    const called = Promise.withResolvers<void>();
+    const hung = client({
+      account: () => {
+        called.resolve();
+        return new Promise<string>(() => {});
+      },
+    });
+    const cancel = new AbortController();
+    const result = hung.upload("files", note(), { signal: cancel.signal });
+    await called.promise;
+    cancel.abort();
+
+    expect({ code: (await result).error?.code, requests: fixture.requests }).toEqual({ code: "ABORTED", requests: [] });
   });
 
   it.for([

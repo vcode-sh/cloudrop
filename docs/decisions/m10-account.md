@@ -7,10 +7,11 @@ Rulings for the client's `account` option, the server's check and the React guid
 
 - **Decision:** `ClientOptions.account` is a string or a function, possibly async, returning a string, `null` or
   `undefined`. Its value goes with every `/upload`, retries included, as the header `x-cloudrop-account`, and with no
-  other request: not `/sign`, `/complete`, `/abort` or a bucket `PUT`. It is added after the `headers` option's
-  headers, so it replaces an `x-cloudrop-account` among them. A string of more than 255 characters, one that is not
-  well-formed Unicode, or a value that is neither a string nor a function throws `INVALID_CONFIG` when the client is
-  created. The header name is `ACCOUNT_HEADER` in `src/protocol/types.ts`, shared by client and server and not exported.
+  other request: not `/sign`, `/complete`, `/abort` or a bucket `PUT`. When it sends one, it is added after the
+  `headers` option's headers and replaces an `x-cloudrop-account` among them. A string of more than 255 characters, one
+  with a lone surrogate (which `encodeURIComponent` refuses; `String.isWellFormed` is above the client's browser floor,
+  `M4-F6`), or a value that is neither a string nor a function throws `INVALID_CONFIG` when the client is created.
+  The header name is `ACCOUNT_HEADER` in `src/protocol/types.ts`, shared by client and server and not exported.
 - **Why:** the pilot sent the user's id by hand as `x-upload-user` and compared it in `authorize`
   (`vstack/packages/storage/src/upload-policy.ts`). `/upload` is the only request whose owner comes from the session;
   every later request carries the upload token, which names the owner `/upload` saw, so a check there would refuse
@@ -43,7 +44,8 @@ Rulings for the client's `account` option, the server's check and the React guid
   `account` makes a signed-out page refuse an upload that a sign-in in another tab would otherwise give to the new
   user. A function that cannot tell yet (a session still loading) needs a way to opt out per request.
 - **If wrong:** a page that passes `""` while its session hook is still loading refuses uploads of a signed-in user;
-  its fix is to pass `undefined` until it knows.
+  its fix is to pass `undefined` until it knows. A proxy that drops empty header values turns "nobody" into "no
+  check" without a sound.
 - **Status:** in force.
 - **Visible in:** `src/client/endpoints.ts` (`accountHeader`), `docs/guide/client.md`.
 
@@ -67,8 +69,9 @@ Rulings for the client's `account` option, the server's check and the React guid
   the reservation or a storage call: when the route has a store and `owner`, `owner()` answered a string, and the
   request carries the header, a different decoded value refuses the whole request with `ACCOUNT_CHANGED` (HTTP 409,
   not retryable): "The account signed in on this site changed since this page was loaded, so the upload was not
-  started. Reload the page, then upload the file again." Without the header, on a route without `owner`, on a server
-  without a store, or when `owner()` answers `null`, the header is ignored and the upload is checked as before.
+  started. Reload the page, then upload the file again." Without the header, on a route without `owner` (which needs a
+  store, so every route of a server without one), or when `owner()` answers `null`, the header is ignored and the
+  upload is checked as before.
 - **Why:** a refusal of the whole request leaves no file of the page's batch to land on the other account, and it
   comes before anything is reserved, so nothing needs releasing. Ignoring a missing header keeps an older page working
   during a deploy (design §4). The comparison needs an owner a store records; without one the server has no notion of

@@ -465,7 +465,7 @@ where the message alone is not the right thing to show:
 
 | `error.code` | When | What to show |
 | --- | --- | --- |
-| `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close({ abort: true })` at sign-out. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
+| `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close()`, with or without `{ abort: true }`, at sign-out or from `useCloseOtherUsers`. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
 | `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say the file was not uploaded because the account changed. |
 | `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
 

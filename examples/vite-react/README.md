@@ -42,11 +42,12 @@ the same port, so run one at a time.
 
 `src/app.browser.test.ts` runs in the third pass of `bun run test:browser` from the repository root, which starts its
 own RustFS and Postgres containers, applies the API's migrations and lets Playwright start both servers. Each row signs
-up a new user: an avatar uploaded in one PUT and shown from the bucket; three attachments, one in three parts, listed
-by `files.list`, then one deleted; a 51 MiB file refused with `QUOTA_EXCEEDED` at a 50 MB quota before any byte is sent;
-an upload while signed out refused with `UNAUTHORIZED`; an upload after another tab signed in as someone else refused
-with `ACCOUNT_CHANGED` and stored for nobody, until Reload shows the new user; a multipart upload interrupted by a reload and resumed by
-picking the same file, sending only the missing parts; one of two unfinished uploads discarded after a reload, its row
-aborted in the API's database while the other resumes; cloudrop's own preflight answered through the API's global CORS
-middleware; and a multipart form posted to an oRPC procedure from another origin, with the session cookie, refused with
-403 (`CSRF_TOKEN_MISMATCH`). Install the shell once with `bunx playwright install --only-shell chromium`.
+up a new user: an avatar uploaded in one PUT and shown from the bucket; three attachments, one in three parts, listed by
+`files.list`, then one deleted; a 51 MiB file refused with `QUOTA_EXCEEDED` at a 50 MB quota before any byte is sent; an
+upload while signed out refused with `UNAUTHORIZED`; an upload after another tab signed in as someone else refused with
+`ACCOUNT_CHANGED` and stored for nobody, until Reload shows the new user; a multipart upload interrupted by a reload and
+resumed by picking the same file, sending only the missing parts; one of two unfinished uploads discarded after a
+reload, its row aborted in the API's database while the other resumes; cloudrop's own preflight answered through the
+API's global CORS middleware; and a multipart form posted to an oRPC procedure from another origin, with the session
+cookie, refused with 403 (`CSRF_TOKEN_MISMATCH`). Install the shell once with
+`bunx playwright install --only-shell chromium`.

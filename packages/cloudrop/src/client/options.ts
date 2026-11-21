@@ -2,7 +2,7 @@
 // (S17, M3-U41, M3-U42, M3-U79, M8-L5), since it needs a code change, not a retry.
 
 import { configError } from "../errors.ts";
-import { type Account, type ClientFetch, isAccount, type ServerHeaders } from "./endpoints.ts";
+import { type Account, type ClientFetch, encodeAccount, type ServerHeaders } from "./endpoints.ts";
 
 export interface ClientOptions {
   /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */
@@ -70,7 +70,7 @@ function readConnection({ basePath = "/api/cloudrop", headers, account, fetch }:
       'headers must be the headers for the upload server, such as { authorization: "Bearer …" }, or a function that returns them.',
     );
   }
-  if (account !== undefined && typeof account !== "function" && !isAccount(account)) {
+  if (account !== undefined && typeof account !== "function" && encodeAccount(account) === null) {
     throw configError(
       "account must be the signed-in user's id as the route's owner returns it, at most 255 characters, or a function that returns it.",
     );

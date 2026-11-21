@@ -76,7 +76,8 @@ queued in this tab, or retried here, would ask `/upload` with the new session an
 client who this page belongs to, and the server refuses that upload:
 
 ```ts
-const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId }); // the user this page shows
+// account: the user this page shows, as the routes' owner returns it
+const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId });
 ```
 
 - **What is compared.** On a route with a [store](store.md) and `owner`, the server compares `account` with what
@@ -91,8 +92,8 @@ const client = createCloudropClient<typeof cloudrop>({ namespace: userId, accoun
 - **Only `/upload` carries it,** as the `x-cloudrop-account` header, percent-encoded; never `/sign`, `/complete`,
   `/abort` or a bucket `PUT`. The later calls need no check: each carries the upload token, which names the owner
   `/upload` saw.
-- **Ignored without an owner.** On a route without `owner`, on a server without a store, when `owner` returns `null`,
-  and when the client sends no account (an older page during a deploy), the upload is checked as before.
+- **Ignored without an owner.** On a route without `owner`, when `owner` returns `null`, and when the client sends no
+  account (an older page during a deploy), the upload is checked as before.
 - **From a page on another origin,** the header makes the browser send a preflight; the handler allows it for a page on
   a `trustedOrigins` origin. A proxy or framework that answers preflights itself must allow `x-cloudrop-account`.
 

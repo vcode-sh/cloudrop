@@ -6,12 +6,14 @@
 
 import { describe, expect, it } from "vitest";
 import type { UploadResponse } from "../protocol/types.ts";
-import { serverFixture } from "../testing/server-fixture.ts";
+import { MiB } from "../rules.ts";
 import { storeFixture } from "../testing/store-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { allowAnyone, route } from "./route.ts";
 
 const note = { name: "note.txt", size: 5, type: "text/plain" };
+// Over the multipart threshold below, so an accepted file costs a storage call (CreateMultipartUpload).
+const video = { name: "clip.mp4", size: 9 * MiB, type: "video/mp4" };
 const files = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone });
 const accountChanged = {
   code: "ACCOUNT_CHANGED",
@@ -29,13 +31,13 @@ function watcher(calls: string[]): CloudropPlugin {
 function ownedBy(owner: string | null) {
   const plugins: string[] = [];
   const fixture = storeFixture(
-    { owned: route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }, { owner: () => owner }) },
-    { plugins: [watcher(plugins)] },
+    { owned: route({ accept: "*/*", maxSize: "10MB", authorize: allowAnyone }, { owner: () => owner }) },
+    { plugins: [watcher(plugins)], multipartThreshold: 8 * MiB },
   );
   const upload = (account?: string) =>
     fixture.post(
       "upload",
-      { route: "owned", files: [note] },
+      { route: "owned", files: [video] },
       account === undefined ? {} : { "x-cloudrop-account": account },
     );
   return { fixture, plugins, upload };
@@ -46,8 +48,8 @@ const kinds = async (response: Response) => ((await response.json()) as UploadRe
 describe("POST /upload with the account header", () => {
   it.for([
     { name: "another account", owner: "u1", account: "u2" },
-    // %E0%A4%A is not a whole UTF-8 sequence: no client of ours sends it, and it names nobody.
-    { name: "a header that is not percent-encoded text", owner: "u1", account: "%E0%A4%A" },
+    // %E0%A4%A is not a whole UTF-8 sequence, so it names nobody: not even an owner spelled the same.
+    { name: "a header that is not percent-encoded text", owner: "%E0%A4%A", account: "%E0%A4%A" },
     { name: "the empty account of a page where nobody was signed in", owner: "u1", account: "" },
   ])("refuses $name whole, before any plugin, reservation or storage call", async ({ owner, account }) => {
     const { fixture, plugins, upload } = ownedBy(owner);
@@ -76,17 +78,16 @@ describe("POST /upload with the account header", () => {
     const response = await upload(account);
 
     expect({ kinds: await kinds(response), rows: (await fixture.store.raw.files()).length, plugins }).toEqual({
-      kinds: ["single"],
+      kinds: ["multipart"],
       rows: 1,
-      plugins: ["note.txt"],
+      plugins: ["clip.mp4"],
     });
   });
 
-  it.for([
-    { name: "a route with a store but no owner", fixture: () => storeFixture({ files }) },
-    { name: "a server without a store", fixture: () => serverFixture({ files }) },
-  ])("ignores the header on $name", async ({ fixture }) => {
-    const response = await fixture().post("upload", { route: "files", files: [note] }, { "x-cloudrop-account": "u2" });
+  // A route needs a store for owner, so this is also every server without one.
+  it("ignores the header on a route without owner", async () => {
+    const fixture = storeFixture({ files });
+    const response = await fixture.post("upload", { route: "files", files: [note] }, { "x-cloudrop-account": "u2" });
     expect(await kinds(response)).toEqual(["single"]);
   });
 });
