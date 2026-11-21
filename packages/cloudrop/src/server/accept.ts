@@ -1,6 +1,8 @@
 // The `accept` policy (spec §7.4): the declared MIME type must be accepted, and the file name's extension must agree
 // with it. The extension list covers the types upload forms meet; a type outside it is matched by MIME alone.
 
+import { acceptsType } from "./accept-entry.ts";
+
 const EXTENSIONS: Record<string, readonly string[]> = {
   "image/png": ["png"],
   "image/jpeg": ["jpg", "jpeg"],
@@ -48,7 +50,6 @@ const PLAIN_EXTENSION = /^[a-z0-9]{1,16}$/;
 
 // RFC 6838 type and subtype names, lower case, no parameters: this value is signed and stored as the object's type.
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/;
-const ACCEPT_ENTRY = /^(\*\/\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}))$/;
 
 /**
  * The type's essence, lower case: a browser sends "" for a type it does not know, which is stored as
@@ -57,10 +58,6 @@ const ACCEPT_ENTRY = /^(\*\/\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(\*|[a-z0-9][a-z
 export function normalizeType(type: string): string | null {
   const essence = type === "" ? "application/octet-stream" : (type.split(";", 1)[0] ?? "").trim().toLowerCase();
   return MIME_TYPE.test(essence) ? essence : null;
-}
-
-export function isAcceptEntry(entry: string): boolean {
-  return ACCEPT_ENTRY.test(entry);
 }
 
 function extensionOf(name: string): string | null {
@@ -80,10 +77,7 @@ export function matchAccept(
   type: string,
   name: string,
 ): { ext: string } | { problem: string } {
-  const accepted = accept.some(
-    (entry) => entry === "*/*" || entry === type || (entry.endsWith("/*") && type.startsWith(entry.slice(0, -1))),
-  );
-  if (!accepted) return { problem: `This upload does not accept ${type} files.` };
+  if (!acceptsType(accept, type)) return { problem: `This upload does not accept ${type} files.` };
   const ext = extensionOf(name);
   const known = EXTENSIONS[type];
   const plain = ext !== null && PLAIN_EXTENSION.test(ext);

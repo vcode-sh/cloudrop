@@ -3,7 +3,7 @@
 import { configError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { formatBytes } from "../storage/validate.ts";
-import { isAcceptEntry } from "./accept.ts";
+import { isAcceptEntry } from "./accept-entry.ts";
 import type { RouteConfig } from "./config.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { parseSize } from "./size.ts";

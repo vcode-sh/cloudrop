@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAcceptEntry, matchAccept, normalizeType } from "./accept.ts";
+import { matchAccept, normalizeType } from "./accept.ts";
 
 describe("normalizeType", () => {
   it("stores a file the browser could not type as application/octet-stream", () => {
@@ -27,16 +27,6 @@ describe("normalizeType", () => {
     { name: "a wildcard", type: "image/*" },
   ])("rejects a type with $name", ({ type }) => {
     expect(normalizeType(type)).toBeNull();
-  });
-});
-
-describe("isAcceptEntry", () => {
-  it.for(["*/*", "image/*", "image/svg+xml", "application/vnd.ms-excel"])("accepts %s", (entry) => {
-    expect(isAcceptEntry(entry)).toBe(true);
-  });
-
-  it.for(["*", "*/png", "image/", ".png", "IMAGE/PNG", "image/png "])("rejects %j", (entry) => {
-    expect(isAcceptEntry(entry)).toBe(false);
   });
 });
 
