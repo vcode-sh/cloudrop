@@ -40,7 +40,7 @@ interface DrizzleStoreOptions {
  *
  * Usage:
  * ```ts
- * const db = drizzle(new Pool({ connectionString }));
+ * const db = drizzle({ client: new Pool({ connectionString }) });
  * const store = drizzleStore(db, { dialect: "postgres", transaction: true });
  * const avatars = store.route({ accept: "image/*", maxSize: "5MB", authorize }, {
  *   owner: ({ userId }) => userId,

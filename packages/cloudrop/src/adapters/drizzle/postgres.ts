@@ -12,7 +12,7 @@ export interface DrizzlePostgresQueryable {
   execute(query: SQL): PromiseLike<unknown>;
 }
 
-/** A Drizzle Postgres database: `drizzle(pool)` from `drizzle-orm/node-postgres`, `drizzle-orm/postgres-js`, … */
+/** A Drizzle Postgres database: `drizzle({ client: pool })` from `drizzle-orm/node-postgres`, `drizzle-orm/postgres-js`, … */
 export interface DrizzlePostgres extends DrizzlePostgresQueryable {
   transaction<T>(run: (tx: DrizzlePostgresQueryable) => Promise<T>): Promise<T>;
 }
@@ -55,7 +55,7 @@ function isSingleConnection(db: DrizzlePostgres): boolean {
 export function postgresExecutor(db: DrizzlePostgres): TransactionalSqlExecutor<DrizzlePostgresQueryable> {
   if (isSingleConnection(db)) {
     throw configError(
-      "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle(new Pool({ connectionString })), or use postgres.js.",
+      "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle({ client: new Pool({ connectionString }) }), or use postgres.js.",
     );
   }
   return {

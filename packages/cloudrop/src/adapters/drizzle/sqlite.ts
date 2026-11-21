@@ -18,7 +18,8 @@ export interface DrizzleSqliteQueryable {
 }
 
 /**
- * A Drizzle SQLite database over a synchronous driver: `drizzle(new Database(path))` from `drizzle-orm/better-sqlite3`.
+ * A Drizzle SQLite database over a synchronous driver: `drizzle({ client: new Database(path) })` from
+ * `drizzle-orm/better-sqlite3`.
  * `transaction` is not generic here: drizzle-orm 0.45 types its answer as the callback's, 1.0 through a conditional type
  * that refuses async callbacks, and both fit this shape.
  */

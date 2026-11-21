@@ -46,7 +46,7 @@ describe("drizzleStore", () => {
     const client = new pg.Client();
     expect(() => drizzleStore(nodePostgres({ client }), { dialect: "postgres", transaction: true })).toThrow(
       invalidConfig(
-        "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle(new Pool({ connectionString })), or use postgres.js.",
+        "drizzleStore needs a pg Pool, not a single pg Client: a transaction on the one shared connection would take every other request's statements with it. Pass drizzle({ client: new Pool({ connectionString }) }), or use postgres.js.",
       ),
     );
   });
