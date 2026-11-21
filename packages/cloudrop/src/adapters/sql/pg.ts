@@ -12,6 +12,9 @@ export interface PgQueryable {
 /** A client checked out of the pool. */
 export interface PgPoolClient extends PgQueryable {
   release(destroy?: boolean | Error): void;
+  /** node-postgres reports a connection that fails between statements as an `error` event of the client. */
+  on?(event: "error", listener: (error: Error) => void): unknown;
+  removeListener?(event: "error", listener: (error: Error) => void): unknown;
 }
 
 /** A node-postgres `Pool`. Size it for your concurrency; transaction mode holds a client while `onComplete` runs. */
@@ -33,6 +36,13 @@ export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> 
   async function inTransaction<T>(work: (client: PgPoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();
     let broken = false;
+    // A connection that fails while it is checked out but idle, such as while onComplete runs, is an 'error' event of
+    // the client, which the pool listens for only while the client is idle in it: without a listener, Node throws it
+    // and the process stops. The next statement fails with that error, so the listener only marks the client broken.
+    const onError = () => {
+      broken = true;
+    };
+    client.on?.("error", onError);
     try {
       await client.query("BEGIN");
       const result = await work(client);
@@ -45,6 +55,7 @@ export function pgExecutor(pool: PgPool): TransactionalSqlExecutor<PgQueryable> 
       });
       throw error;
     } finally {
+      client.removeListener?.("error", onError);
       client.release(broken);
     }
   }

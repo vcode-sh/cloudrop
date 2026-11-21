@@ -226,6 +226,44 @@ describe("Postgres under lock contention", () => {
     }
   });
 
+  test("node-postgres: a connection that dies while onComplete runs fails the completion and never escapes", async () => {
+    await db.reset();
+    await db.createTables();
+    const pool = new pg.Pool({ connectionString: db.url, max: 1 });
+    // The app handles its idle connections' errors, as node-postgres asks; a client the executor checked out is its own.
+    pool.on("error", () => {});
+    const escaped: unknown[] = [];
+    const recordEscape = (error: unknown) => escaped.push(error);
+    process.on("uncaughtException", recordEscape);
+    try {
+      const store = sqlStore(pgExecutor(pool), { transaction: true });
+      await store.reserve(
+        { owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-1", 10)] },
+        NOW,
+      );
+      const completing = store.transaction(async (tx, inner) => {
+        await inner.claim("f-1", "claim-a", NOW, LEASE);
+        const client = tx as pg.PoolClient;
+        // A client whose 'error' event was thrown may never report its end: wait at most a second for it.
+        const closed = new Promise((resolve) => {
+          client.once("end", resolve);
+          setTimeout(resolve, 1000);
+        });
+        // The connection dies between two statements, while the client waits for onComplete.
+        await db.query("SELECT pg_terminate_backend($1)", [(await client.query(PID)).rows[0]?.pid]);
+        await closed;
+        return inner.complete("f-1", "claim-a", null, NOW);
+      });
+      await expect(completing).rejects.toThrow("not queryable");
+      expect(escaped).toEqual([]);
+      // The claim rolled back with the connection, and the pool's next connection serves the retry.
+      expect(await store.get("f-1")).toMatchObject({ status: "pending", claimedAt: null });
+    } finally {
+      process.off("uncaughtException", recordEscape);
+      await pool.end();
+    }
+  });
+
   test("reconcile waits for a reserve that is still open, then counts it", async () => {
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
     await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-0", 10)] }, NOW);
