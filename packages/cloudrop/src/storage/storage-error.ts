@@ -81,7 +81,30 @@ const RULES: readonly Rule[] = [
     message: "The storage service does not support this request. Use R2 or another backend that implements it.",
   },
   {
-    matches: (status, storageCode) => status >= 500 || status === 408 || storageCode === "OperationAborted",
+    // Never followed: a request is signed for one host. AWS redirects a request sent to another region than the
+    // bucket's, and names this code for one signed for another region (its error list; unmeasured).
+    matches: (status, storageCode) => (status >= 300 && status < 400) || storageCode === "AuthorizationHeaderMalformed",
+    code: "STORAGE_ERROR",
+    message:
+      "The storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings.",
+  },
+  {
+    // R2 and RustFS answer 416 to any range of an empty object and to one that starts past the end (measured).
+    matches: (status) => status === 416,
+    code: "STORAGE_ERROR",
+    message: "The byte range starts at or past the object's end. Ask for a range inside its size.",
+  },
+  {
+    // S3 lets a PutObject be sent again but wants a multipart upload started again: never the same request (M11-R23).
+    matches: (_status, storageCode) => storageCode === "ConditionalRequestConflict",
+    code: "STORAGE_ERROR",
+    message:
+      "Another request changed this key at the same moment. Write the object again, or start a new multipart upload.",
+  },
+  {
+    // AWS sends RequestTimeout with 400, and its SDKs retry it as a transient error.
+    matches: (status, storageCode) =>
+      status >= 500 || status === 408 || storageCode === "OperationAborted" || storageCode === "RequestTimeout",
     code: "STORAGE_ERROR",
     message: "The storage service failed. Retry the request.",
     retryable: true,

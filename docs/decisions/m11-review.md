@@ -184,3 +184,32 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/storage/validate.ts`, `src/storage/s3/bucket-writes.ts`, `src/storage/validate.test.ts`,
   `src/storage/s3-driver.test.ts`, `src/storage/s3/bucket-settings.test.ts`.
+
+### M11-R23: a storage error names the range, the redirect or region, and a lost conditional write
+
+- **Decision:** `storageError` gains three messages and one retry. `416` reads "The byte range starts at or past the
+  object's end. Ask for a range inside its size." Any `3xx`, and the code `AuthorizationHeaderMalformed`, read "The
+  storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings."
+  `ConditionalRequestConflict` reads "Another request changed this key at the same moment. Write the object again, or
+  start a new multipart upload." and is not retryable. `RequestTimeout` is retryable whatever its status. All four keep
+  the code `STORAGE_ERROR`.
+- **Why:** each fell through to "rejected the request (HTTP n). Check the key, size and headers you passed, then
+  retry.", which names nothing the person can change. `416 InvalidRange` is what R2 and RustFS answer to any range of
+  an empty object and to one that starts past the end (`docs/research/r2-spike-findings.md`, "The first 4 KiB of small
+  objects"). AWS answers a request sent to another region's endpoint with `301 PermanentRedirect` and one signed for
+  another region with `400 AuthorizationHeaderMalformed`: the codes `cli/bucket-access.ts` already reads for the
+  command, from AWS's error list, unmeasured here. One message serves both because a bare `301` (AWS to `HEAD`, or any
+  proxy from http to https) cannot be told from a region redirect. On `409`, AWS's "Conditional write behavior" says:
+  "When using conditional writes with `PutObject`, uploads may be retried after receiving a `409 Conflict` error. When
+  using `CompleteMultipartUpload`, the entire multipart upload must be re-initiated"
+  (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html>, read 2026-11-21): `retryable` means
+  the same request may succeed later, which holds for neither as a rule, so the message says what to send instead. On
+  `RequestTimeout`, AWS's SDK reference says "an HTTP 400 with the error code `RequestTimeout` is classified as
+  transient and retried" (<https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html>, read
+  2026-11-21); until now only a `408` was retried, and AWS sends this code with `400`.
+- **If wrong:** a storage service that sends `3xx` for another reason gets a message about the endpoint, which is
+  still the setting to look at. AWS's error-code list page (`API/ErrorResponses.html`) could not be read by the tool
+  used for this review, so `PermanentRedirect` and `AuthorizationHeaderMalformed` rest on the command's earlier reading
+  of it.
+- **Status:** in force.
+- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`, `docs/guide/errors.md`.

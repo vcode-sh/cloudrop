@@ -27,6 +27,14 @@ describe("storageError", () => {
     [502, "", "STORAGE_ERROR", true, undefined],
     [504, "<html><body>Gateway Timeout</body></html>", "STORAGE_ERROR", true, undefined],
     [408, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
+    // AWS sends RequestTimeout with 400, and its SDKs retry it as a transient error.
+    [400, xml("RequestTimeout"), "STORAGE_ERROR", true, "RequestTimeout"],
+    // A PutObject may be sent again, a multipart upload must be started again: not the same request, so not retryable.
+    [409, xml("ConditionalRequestConflict"), "STORAGE_ERROR", false, "ConditionalRequestConflict"],
+    [416, xml("InvalidRange"), "STORAGE_ERROR", false, "InvalidRange"],
+    [301, xml("PermanentRedirect"), "STORAGE_ERROR", false, "PermanentRedirect"],
+    [400, xml("AuthorizationHeaderMalformed"), "STORAGE_ERROR", false, "AuthorizationHeaderMalformed"],
+    [307, xml("TemporaryRedirect"), "STORAGE_ERROR", false, "TemporaryRedirect"],
     [409, xml("OperationAborted"), "STORAGE_ERROR", true, "OperationAborted"],
     [400, xml("InvalidArgument"), "STORAGE_ERROR", false, "InvalidArgument"],
     [400, "<Error><Code></Code></Error>", "STORAGE_ERROR", false, undefined],
@@ -47,28 +55,58 @@ describe("storageError", () => {
     expect(message).not.toContain("InvalidArgument");
   });
 
-  it("points a 401 at the access key ID and secret, not at the request", () => {
-    expect(storageError(401, "").message).toBe(
+  const wrongEndpoint =
+    "The storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings.";
+  it.each([
+    [
+      "a range of an empty object or past the end",
+      416,
+      xml("InvalidRange"),
+      "The byte range starts at or past the object's end. Ask for a range inside its size.",
+    ],
+    ["an endpoint of another region", 301, xml("PermanentRedirect"), wrongEndpoint],
+    ["a signature for another region", 400, xml("AuthorizationHeaderMalformed"), wrongEndpoint],
+    // AWS answers HEAD without a body, and any proxy may redirect (http to https, say).
+    ["a redirect without a code", 301, "", wrongEndpoint],
+    ["a temporary redirect", 307, xml("TemporaryRedirect"), wrongEndpoint],
+    [
+      "a signing clock that is off",
+      403,
+      xml("RequestTimeTooSkewed"),
+      "This server's clock is more than 15 minutes off from the storage service's clock. Sync the clock (NTP), then retry.",
+    ],
+    [
+      "a signed request that expired",
+      403,
+      xml("ExpiredRequest"),
+      "The signed request expired. Sign it again and retry.",
+    ],
+    [
+      "an access key the storage does not know",
+      401,
+      "",
       "The storage service did not accept these credentials. Check the access key ID and the secret access key.",
-    );
-  });
-
-  it("tells the person to fix the clock when the request time is skewed", () => {
-    expect(storageError(403, xml("RequestTimeTooSkewed")).message).toContain("clock");
-  });
-
-  it("tells the person to sign again when the signed request expired", () => {
-    expect(storageError(403, xml("ExpiredRequest")).message).toContain("expired");
-  });
-
-  // Wrangler's local R2 answers ListParts with 501: a retry can never succeed there.
-  it("tells the person a 501 means the storage service lacks the feature, not that it failed", () => {
-    expect(storageError(501, xml("NotImplemented")).message).toBe(
+    ],
+    [
+      "a bucket that does not exist",
+      404,
+      xml("NoSuchBucket"),
+      "The bucket does not exist. Check the bucket name in your configuration.",
+    ],
+    // Wrangler's local R2 answers ListParts with 501: a retry can never succeed there.
+    [
+      "a feature the storage lacks",
+      501,
+      xml("NotImplemented"),
       "The storage service does not support this request. Use R2 or another backend that implements it.",
-    );
-  });
-
-  it("points a missing bucket at the bucket name, not the object key", () => {
-    expect(storageError(404, xml("NoSuchBucket")).message).toContain("bucket name");
+    ],
+    [
+      "a conditional write that lost to another request",
+      409,
+      xml("ConditionalRequestConflict"),
+      "Another request changed this key at the same moment. Write the object again, or start a new multipart upload.",
+    ],
+  ])("says what to change for %s", (_name, status, body, message) => {
+    expect(storageError(status, body).message).toBe(message);
   });
 });
