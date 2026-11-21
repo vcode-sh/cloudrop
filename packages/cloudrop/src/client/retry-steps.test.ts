@@ -57,7 +57,8 @@ async function retried(fault: Fault) {
 // What each step sends for a one-PUT file.
 const SAME_COMPLETE = { sent: ["POST /complete"], key: "first" };
 const SAME_PUT = { sent: ["PUT object", "POST /complete"], key: "first" };
-const NEW = { sent: ["POST /upload", "PUT object", "POST /complete"], key: "new" };
+// The old ticket is given up first (M11-R89).
+const NEW = { sent: ["POST /abort", "POST /upload", "PUT object", "POST /complete"], key: "new" };
 
 beforeEach(() => {
   // Every backoff wait becomes 0 ms.

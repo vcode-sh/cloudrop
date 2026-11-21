@@ -293,6 +293,10 @@ is sent for it.
   it up (`pagehide`). `job.retry()` asks for every file that needs a ticket in one `/upload`. On a new ticket the file
   starts again under a new key, and its `bytes` drop to 0. A file refused for what it is, such as its type, is refused
   again unless the server's rules changed: ask the person for another file instead.
+- Before it asks for a new ticket, a retry gives the old one up with `/abort`, as `abort()` of the failed file would,
+  and waits for the answer (at most 10 seconds): the parts or the object stored under it are removed, and with a
+  [database store](store.md) the bytes it reserved no longer count against the owner's quota when the new `/upload`
+  is checked. A ticket whose `/complete` may have succeeded gets no `/abort`.
 - When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload, whatever the
   page's clock says about the ticket. Once the server has answered that the ticket is over, the next retry asks for a
   new one.

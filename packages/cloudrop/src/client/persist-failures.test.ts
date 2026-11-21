@@ -114,7 +114,8 @@ describe("a retry's new ticket", () => {
       sent: sent(),
       key: outcome?.status === "done" ? outcome.result.file.key : outcome?.error.code,
       stored: setup.db.stored(),
-    }).toEqual({ failed: "NO_SUCH_UPLOAD", sent: THREE_PARTS, key: second?.key, stored: {} });
+      // The first ticket is given up before the new one is asked for (M11-R89).
+    }).toEqual({ failed: "NO_SUCH_UPLOAD", sent: ["POST /abort", ...THREE_PARTS], key: second?.key, stored: {} });
     expect(second?.key).not.toBe(first?.key);
   });
 });

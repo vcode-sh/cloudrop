@@ -2,7 +2,9 @@
 // whose answer cannot change: after /complete refused the file's content and deleted it, the retry asks /upload for a
 // new ticket; after /complete found no object (a proxy answered the PUT for the bucket), it sends the bytes again on
 // the same ticket; and once /complete has answered that a ticket in doubt is over, the next retry leaves it.
-// Oracle: the requests each retry sent and the objects the fake bucket holds.
+// A retry that replaces a ticket gives the old one up first, as abort() of the failed file would (M11-R89), so what it
+// reserved or stored does not stand in the new upload's way.
+// Oracle: the requests each retry sent and the objects and open uploads the fake bucket holds.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type FileOutcome } from "../client.ts";
@@ -10,6 +12,7 @@ import { contentChecks } from "../plugins/content-checks.ts";
 import { MiB } from "../rules.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { clientFixture, type Fault, lostPart, unfinished } from "../testing/client-fixture.ts";
+import { errorResponse } from "../testing/fake-r2/responses.ts";
 import { JPEG } from "../testing/file-samples.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -69,7 +72,7 @@ describe.each(BACKENDS)("retry $name", ({ stored }) => {
     expect({ first: first.error?.code, sent, again: codeOf(answer), objects: await objects() }).toEqual({
       first: "FILE_TYPE_NOT_ALLOWED",
       // The same bytes are refused again: the new upload reached /complete, which no old ticket could.
-      sent: ["POST /upload", "PUT object", "POST /complete"],
+      sent: ["POST /abort", "POST /upload", "PUT object", "POST /complete"],
       again: "FILE_TYPE_NOT_ALLOWED",
       objects: [],
     });
@@ -169,5 +172,53 @@ describe("retry after PARTS_MISSING", () => {
       sent: ["POST /complete", "PUT part 1", "PUT part 2"],
       again: "done",
     });
+  });
+});
+
+describe("retry with a new ticket, after the bucket refused the file", () => {
+  const refusedPut =
+    (label: string): Fault =>
+    (call) =>
+      call.label === label ? errorResponse(400, "BadRequest", "Refused.") : undefined;
+
+  it("frees what the first ticket reserved, so an owner near their quota can retry", async () => {
+    const owned = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone }, { owner: () => "u1" });
+    let failing = true;
+    const fixture = clientFixture(
+      { owned },
+      // 600 of the owner's 1,000 bytes: two reservations of this file never fit together.
+      {
+        store: memoryStore(),
+        quota: () => 1000,
+        fault: (call) => (failing ? refusedPut("PUT object")(call) : undefined),
+      },
+    );
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch, persist: false });
+    const job = client.start("owned", bytes(600));
+    const first = await job.done;
+    failing = false;
+    const before = fixture.requests.length;
+    const outcome = await job.files[0]?.retry();
+
+    expect([first.error?.code, fixture.requests.slice(before), codeOf(outcome)]).toEqual([
+      "UPLOAD_REJECTED",
+      ["POST /abort", "POST /upload", "PUT object", "POST /complete"],
+      "done",
+    ]);
+  });
+
+  it("aborts the first multipart upload, whose first part had landed", async () => {
+    const { fixture, state, client, sentBy } = setup(false, refusedPut("PUT part 2"));
+    const job = client.start("files", bytes(8 * MiB + 5));
+    const first = await job.done;
+    state.failing = false;
+    const { answer, sent } = await sentBy(async () => job.files[0]?.retry());
+
+    expect({
+      first: first.error?.code,
+      firstRequest: sent[0],
+      again: codeOf(answer),
+      openUploads: fixture.server.fake.pendingUploads(),
+    }).toEqual({ first: "UPLOAD_REJECTED", firstRequest: "POST /abort", again: "done", openUploads: 0 });
   });
 });

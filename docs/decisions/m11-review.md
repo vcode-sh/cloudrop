@@ -825,7 +825,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   | `ALREADY_EXISTS` | `/complete`, multipart | The multipart upload is aborted; the row is `rejected` | new |
   | `FILE_TYPE_NOT_ALLOWED` | `/complete` (`contentChecks()`, `M10-K4`) | The object is deleted; the row is `rejected` | new |
   | Any other code, not retryable | `/complete`: a plugin's `afterVerify` refusal (the object is deleted, the row `rejected`) or a replacing route's `onDelete` refusal (`M11-D3`: the object and the pending row are kept) | As named | new |
-  | `UPLOAD_REJECTED` | the bucket: `403` for the signature or after a renewed link, `501`, any other `4xx` | Nothing of this `PUT`; earlier parts stay for the lifecycle rule (`M3-U55`) | new |
+  | `UPLOAD_REJECTED` | the bucket: `403` for the signature or after a renewed link, `501`, any other `4xx` | Nothing of this `PUT`; earlier parts and the pending row stay until the ticket is given up (`M11-R89`) | new |
   | `STORAGE_ERROR`, `RATE_LIMITED`, `NETWORK_ERROR` | the bucket: `5xx`, `408`, `400 RequestTimeout` (`M11-R88`); `429`, `503`; no readable answer | Parts that landed stay | same |
   | `ABORTED`; a done file | a cancel | As the cancel left it | nothing: `retry()` answers the outcome as it is (`M3-U37`) |
   | `INVALID_INPUT`, `CLIENT_CLOSED` | the client, for the arguments of `start()` or a closed client | The job has no files | nothing: `retry()` answers the refusal |
@@ -842,10 +842,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   and then only a new ticket can store the file; the codes that leave the ticket good are few and named. A
   `PARTS_MISSING` whose list a proxy dropped looped the same way and now sends every part.
 - **If wrong:** a replacing route whose `onDelete` refuses at `/complete` keeps the object and the pending row, and the
-  retry sends the file again under a new key instead of `/complete` alone; the first object and row go at the sweep. A
-  person who retries a file refused for its content sends it again to be refused again: the client cannot know whether
-  the server's rules changed, and `/upload`'s own refusals are asked again the same way. A stateless server keeps a
-  single-`PUT` object whose ticket was replaced (`M3-U55`).
+  retry sends the file again under a new key instead of `/complete` alone; the first object and row go with the
+  `/abort` of `M11-R89`. A person who retries a file refused for its content sends it again to be refused again: the
+  client cannot know whether the server's rules changed, and `/upload`'s own refusals are asked again the same way.
 - **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on.
 - **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
   `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
@@ -1006,4 +1005,28 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   to share is this one: the S3 code `RequestTimeout`, whatever its status, is a retryable `STORAGE_ERROR`.
 - **Visible in:** `src/client/bucket.ts`, `src/client/bucket.test.ts`, `src/client/retry-steps.test.ts`,
   `docs/guide/errors.md`.
+
+### M11-R89: a retry gives the ticket it replaces up before it asks for a new one
+
+- **Decision:** when `retry()` replaces a ticket the file still holds, it first gives that ticket up as `abort()` of
+  the failed file would (`drop`): one `/abort`, the record deleted, the lock let go once the server answered. The new
+  `/upload` waits for that answer, at most the `/abort`'s 10 seconds, whatever it is; `job.retry()` waits for the
+  `/abort` of every file it replaces a ticket for, then sends its one `/upload`. A ticket a `/complete` may have
+  finished gets no `/abort`, as `abort()` gives it none (`M3-S14`), and one the page already gave up gets no second.
+- **Why:** reproduced while filling the table of `M11-R80`: with a store and a quota of 1,000 bytes, a 600-byte file
+  whose `PUT` the bucket refused failed with `UPLOAD_REJECTED`, and every `retry()` was answered `QUOTA_EXCEEDED`,
+  because the first ticket's row was still pending and its bytes still counted (`reserved_bytes` counts pending rows
+  until the sweep ends them). `M3-U55` sent no `/abort` for a replaced ticket because "little is left to free"; with a
+  store the reservation is left, and without one a stored single-`PUT` object and landed parts are. The same `/abort`
+  removes the object and the pending row a refusing `onDelete` leaves (`M11-R80`). Waiting for the answer is what makes
+  it work: an `/upload` that raced the `/abort` would still be counted against the old row.
+- **If wrong:** a retry that needs a new ticket takes one more round trip. When the `/abort` does not arrive although
+  the `/upload` then does, the old row stays pending and a file larger than the owner's free quota is refused
+  `QUOTA_EXCEEDED` until the sweep ends that row; `api.sweep` is the remedy, as before. A plugin's `onAbort` hears of
+  a ticket the server had already ended a second time, as after `abort()` of such a file. A resumed upload that starts
+  over (`M3-U74`) still sends no `/abort` for its old ticket: its probe answered that the upload is gone, and the one
+  case with a pending row left, parts missing in the ticket's last 15 minutes, ends with the sweep.
+- **Status:** in force. Supersedes `M3-U55` for `retry()`.
+- **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
+  `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
 

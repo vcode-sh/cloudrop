@@ -176,7 +176,8 @@ describe("retry with a new ticket", () => {
       first: row.code,
       // A new upload has stored nothing: its bytes start from 0 (M3-U36).
       bytes: [8 * MiB, 0],
-      sent: ["POST /complete", "POST /upload", "PUT part 1", "PUT part 2"],
+      // The /abort gives the first ticket up, so its part and its reservation do not stay behind (M11-R89).
+      sent: ["POST /abort", "POST /complete", "POST /upload", "PUT part 1", "PUT part 2"],
       newKey: true,
     });
   });
@@ -276,10 +277,12 @@ describe("a subscriber that retries during job.retry() (M3-U59)", () => {
   }
 
   it.each([
-    { name: "same ticket", refusal: storageDown, upload: [] },
+    { name: "same ticket", refusal: storageDown, aborts: [], upload: [] },
     {
       name: "new ticket",
       refusal: () => errorResponse(403, "SignatureDoesNotMatch", "Signature mismatch."),
+      // One /abort for each first ticket, given up before the one /upload (M11-R89).
+      aborts: ["POST /abort", "POST /abort"],
       upload: ["POST /upload"],
     },
   ])("runs each file once when the listener retries every failed file: $name", async (row) => {
@@ -293,7 +296,7 @@ describe("a subscriber that retries during job.retry() (M3-U59)", () => {
     const { error } = await job.retry();
     expect({ error, sent: sent().sort(), stored: await stored() }).toEqual({
       error: null,
-      sent: ["POST /complete", "POST /complete", ...row.upload, "PUT object", "PUT object"],
+      sent: [...row.aborts, "POST /complete", "POST /complete", ...row.upload, "PUT object", "PUT object"],
       stored: 2,
     });
   });

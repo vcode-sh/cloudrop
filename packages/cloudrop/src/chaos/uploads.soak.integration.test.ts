@@ -193,8 +193,8 @@ test(`retry() with the faults off finishes every file a seeded faulty run failed
 
   expect(second.error).toBeNull();
   const keys = doneKeys(await expectOutcomes(files, second));
-  // A file with a kept upload finished on that ticket (M3-U31); one refused at /upload never had an upload. So M3-U55
-  // leaves nothing, and no upload is left open at all.
+  // A file with a kept upload finished on that ticket (M11-R80); one refused at /upload never had an upload; and one
+  // whose ticket the retry replaced gave it up first (M11-R89). So no upload is left open at all.
   await chaos.expectNoUploadsLeft();
   expect((await chaos.objectsLeft()).toSorted()).toEqual(keys.toSorted());
   console.info(

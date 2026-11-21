@@ -65,7 +65,8 @@ describe("retry() in a ticket's last 15 minutes (M9-H3)", () => {
     const { issued, ...result } = await retryInLastMinutes("PUT part 2", storageDown);
     expect(result).toEqual({
       first: "STORAGE_ERROR",
-      sent: ["POST /complete", "POST /upload", "PUT part 1", "PUT part 2", "PUT part 3"],
+      // The /abort gives the first ticket up, whose part 1 had landed (M11-R89).
+      sent: ["POST /abort", "POST /complete", "POST /upload", "PUT part 1", "PUT part 2", "PUT part 3"],
       key: issued[1],
     });
   });

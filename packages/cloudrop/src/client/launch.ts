@@ -32,7 +32,7 @@ function newRequestKey(): string {
  */
 async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
   if (!refusal.retryable || attempt === MAX_ATTEMPTS) return settle(entry, "failed", withFile(refusal, entry));
-  await launch(job, [entry], attempt + 1, retryDelay(attempt, retryAfterOf(refusal)));
+  await launch(job, [entry], { first: attempt + 1, waitMs: retryDelay(attempt, retryAfterOf(refusal)) });
   return entry.run;
 }
 
@@ -96,13 +96,12 @@ function askAlone<T>(
  * With `first`, the attempt of the budget it starts at, it asks for its one file alone, on that file's own signals
  * (M3-U92), after `waitMs`: a cancel stops the request and the waits, a pause ends a wait and holds the file, and
  * resume() asks at once with the attempt count kept. `first` above 1 is a re-ask after a refusal, so never the whole
- * job, whose /upload has answered.
+ * job, whose /upload has answered. `after`: what the first ask waits for, a retry's /abort of the tickets it replaces.
  */
 export async function launch(
   job: Job,
   entries: readonly Entry[],
-  first?: number,
-  waitMs = 0,
+  { first, waitMs = 0, after }: { first?: number; waitMs?: number; after?: Promise<unknown> } = {},
 ): Promise<CloudropError | null> {
   const { context, args } = job;
   const files = entries.map((entry) => entry.file);
@@ -114,7 +113,9 @@ export async function launch(
   const key = newRequestKey();
   const ask = (at: number) => {
     attempt = at;
-    return context.endpoints.start(args.route, files, args.metadata, key, signal);
+    const start = () => context.endpoints.start(args.route, files, args.metadata, key, signal);
+    // Without `after` the request leaves in this step, as before.
+    return after ? after.then(start) : start();
   };
   const started = (own ? askAlone(job, own, ask, () => attempt + 1, waitMs) : withRetry(ask, signal)).then((answer) =>
     answer.error && signal.aborted ? fail(aborted()) : answer,

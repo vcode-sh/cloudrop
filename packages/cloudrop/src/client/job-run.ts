@@ -115,11 +115,12 @@ export function forgetTicket(context: UploadContext, entry: Entry): void {
  * Resolves once the file has settled.
  */
 async function startOver(job: Job, entry: Entry): Promise<void> {
-  // No /abort for the old ticket, as for a retry's new ticket (M3-U55): the bucket's lifecycle rule frees its parts.
+  // No /abort for the old ticket, whose upload the probe found gone (M3-U55, M3-U74): the bucket's lifecycle rule frees
+  // what is left of it. A retry's replaced ticket gets one (M11-R89).
   forgetTicket(job.context, entry);
   entry.status = "queued";
   entry.changed(true);
-  await launch(job, [entry], 1);
+  await launch(job, [entry], { first: 1 });
   await entry.run;
 }
 

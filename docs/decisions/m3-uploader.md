@@ -849,7 +849,8 @@ All are in force. `M3-U29` to `M3-U38` rule `retry()` and the failed-file rule, 
   leave little to free: a dropped ticket was aborted already, the server ignores an expired one, and after
   `INVALID_TOKEN`, `UPLOAD_REJECTED` or `VERIFICATION_FAILED` nothing under the old ticket can be reused.
 - **If wrong:** parts landed under an old multipart ticket wait for the bucket's lifecycle rule.
-- **Status:** in force (`4f1887a`).
+- **Status:** superseded for `retry()` by `M11-R89`: the replaced ticket gets its `/abort` first, unless a `/complete`
+  may have finished it. Still in force for a resumed upload that starts over (`M3-U74`).
 - **Visible in:** `client/retry-file.ts` (`requeue`).
 
 ### M3-U56: `retry()` resolves once every file it waits for has settled

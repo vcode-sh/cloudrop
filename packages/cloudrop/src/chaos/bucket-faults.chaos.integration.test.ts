@@ -92,7 +92,7 @@ test("row 6: a single PUT answered 500 on all 6 attempts fails with a retryable 
   expect(await chaos.objectsLeft()).toEqual([]);
 });
 
-test("row 7: a part refused 403 SignatureDoesNotMatch fails at once; retry() takes a new ticket and leaves the first upload open", async () => {
+test("row 7: a part refused 403 SignatureDoesNotMatch fails at once; retry() gives the first upload up and takes a new ticket", async () => {
   const file = chaosFile(MULTIPART_FILE_SIZE);
   chaos.proxy.set([{ match: PART_1, fault: answer(403, BAD_SIGNATURE) }]);
   const job = chaos.client().start("files", [file]);
@@ -113,21 +113,19 @@ test("row 7: a part refused 403 SignatureDoesNotMatch fails at once; retry() tak
   chaos.proxy.clearLog();
   const retried = await job.files[0]?.retry();
 
-  // UPLOAD_REJECTED needs a new ticket (M3-U31): a new upload under a new key, every part sent again.
+  // UPLOAD_REJECTED needs a new ticket (M11-R80): a new upload under a new key, every part sent again, once the old
+  // ticket's /abort was answered (M11-R89).
   expect(retried?.status).toBe("done");
   const key = retried?.status === "done" ? retried.result.file.key : "";
   expect([key.startsWith(chaos.prefix), key === first[0]?.key]).toEqual([true, false]);
   await chaos.expectStored(key, file);
-  expect(chaos.appRequests().slice(1)).toEqual(["POST /upload 200", "POST /complete 200"]);
+  expect(chaos.appRequests().slice(1)).toEqual(["POST /abort 200", "POST /upload 200", "POST /complete 200"]);
   const again = chaos.bucketRequests();
-  expect(again.slice(1, 4).toSorted()).toEqual(["PUT part 1 200", "PUT part 2 200", "PUT part 3 200"]);
-  expect([again[0], ...again.slice(4)]).toEqual([
-    "CreateMultipartUpload 200",
-    "ListParts 200",
-    "CompleteMultipartUpload 200",
-  ]);
-  // No /abort for the old ticket (M3-U55): its upload is left to the bucket's lifecycle rule (audit C3).
-  expect(await chaos.uploadsLeft()).toEqual(first);
+  // The old ticket's /abort comes first: the server aborts its upload and finds no object of it.
+  expect(again.slice(0, 3)).toEqual(["AbortMultipartUpload 204", "HeadObject 404", "CreateMultipartUpload 200"]);
+  expect(again.slice(3, 6).toSorted()).toEqual(["PUT part 1 200", "PUT part 2 200", "PUT part 3 200"]);
+  expect(again.slice(6)).toEqual(["ListParts 200", "CompleteMultipartUpload 200"]);
+  expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
 test.each([
