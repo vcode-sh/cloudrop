@@ -2692,3 +2692,18 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a script that passed `-v` after a command and relied on exit code 2 now gets 0; none is known.
 - **Status:** in force. Extends `M11-R174`.
 - **Visible in:** `src/cli/args.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
+
+### M11-R236: `setup` and the bucket check judge a lifecycle rule by one predicate
+
+- **Decision:** `abortsEverywhere` lives in `src/server/bucket-check.ts`, and `mergeLifecycle` (`src/cli/rules.ts`)
+  imports it; the command's own copy is gone. A rule counts when it is enabled, aborts incomplete multipart uploads
+  and has no prefix. `src/cli/setup.test.ts` has the case the command lacked: beside a rule that aborts uploads only
+  under `tmp/`, `setup --apply` adds `cloudrop-abort-incomplete`.
+- **Why:** the two copies said the same thing, and only the check's was tested. With `rule.prefix === ""` taken out
+  of the command's copy all 870 tests of `src/cli` and of the check passed: `setup` would have left a bucket whose
+  only abort rule covers one prefix as it was and reported "already aborts incomplete multipart uploads", while
+  `doctor` reported the problem `setup` then could not fix. The new test fails on that fault, and with the one
+  predicate the check's own test fails on it too.
+- **If wrong:** none; behaviour is unchanged.
+- **Status:** in force.
+- **Visible in:** `src/server/bucket-check.ts`, `src/cli/rules.ts`, `src/cli/setup.test.ts`.

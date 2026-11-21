@@ -162,6 +162,19 @@ describe("cloudrop setup --apply", () => {
     );
   });
 
+  // A rule that aborts uploads under a prefix leaves the rest of the bucket's uploads stored: it covers nothing here.
+  it("adds its lifecycle rule beside one that aborts uploads only under a prefix", async () => {
+    const underTmp =
+      "<ID>abort-tmp</ID><Filter><Prefix>tmp/</Prefix></Filter><Status>Enabled</Status><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload>";
+    const lifecycle = `<LifecycleConfiguration><Rule>${underTmp}</Rule></LifecycleConfiguration>`;
+    const storage = bucket({ cors: FOREIGN.cors, lifecycle });
+    await run(apply(), { fetch: storage.fetch });
+    expect(fields(await storage.lifecycle())).toEqual([
+      { id: "abort-tmp", enabled: true, prefix: "tmp/", abortIncompleteMultipartUploadDays: 7 },
+      abortRule,
+    ]);
+  });
+
   it("writes nothing when the rules already match", async () => {
     const storage = bucket(FOREIGN);
     await run(apply(), { fetch: storage.fetch });

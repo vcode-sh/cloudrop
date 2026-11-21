@@ -2,6 +2,7 @@
 // cloudrop's ID; every other rule is kept exactly as read, and in its order (M9-C6). The storage service answers a
 // request with the first CORS rule that matches it, so where cloudrop's rule stands is part of the merge (M11-R171).
 
+import { abortsEverywhere } from "../server/bucket-check.ts";
 import {
   answeringRule,
   answers,
@@ -171,9 +172,6 @@ export function mergeCors(current: readonly BucketCorsRule[], ours: BucketCorsRu
   }
   return { ...placed, change: "update", kept, added, merged: others.length > 0 ? others.length + 1 : undefined };
 }
-
-const abortsEverywhere = (rule: BucketLifecycleRule): boolean =>
-  rule.enabled && rule.prefix === "" && rule.abortIncompleteMultipartUploadDays !== undefined;
 
 /**
  * Adds cloudrop's rule unless any rule already aborts incomplete uploads across the bucket (M9-C7). A rule with

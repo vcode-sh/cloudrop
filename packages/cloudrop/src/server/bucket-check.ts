@@ -83,11 +83,15 @@ function corsCheck(rules: readonly BucketCorsRule[], origins: readonly string[])
     : { status: "ok", message: `${browsers} and read ${RETRY_AFTER}.` };
 }
 
+/**
+ * Whether the rule aborts incomplete multipart uploads across the bucket: enabled, and under no prefix. One under a
+ * prefix leaves every other upload's parts stored. The check and `cloudrop setup` both judge a rule by this.
+ */
+export const abortsEverywhere = (rule: BucketLifecycleRule): boolean =>
+  rule.enabled && rule.prefix === "" && rule.abortIncompleteMultipartUploadDays !== undefined;
+
 function lifecycleCheck(rules: readonly BucketLifecycleRule[], hasStore: boolean, isR2: boolean): BucketCheck {
-  const rule = rules.find(
-    (candidate) =>
-      candidate.enabled && candidate.prefix === "" && candidate.abortIncompleteMultipartUploadDays !== undefined,
-  );
+  const rule = rules.find(abortsEverywhere);
   if (rule) {
     const days = rule.abortIncompleteMultipartUploadDays;
     return {
