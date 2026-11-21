@@ -923,3 +923,22 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/arguments.ts`, `src/client/resume.ts`, `src/client/discard.ts`,
   `src/client/arguments.test.ts`.
 
+### M11-R85: a ticket from `/upload` passes the check a saved record passes
+
+- **Decision:** `isPartPlan(size, partSize, partCount)` in `src/client/answers.ts` is the one check of a multipart
+  plan, for a ticket `/upload` answers and for a record read back from IndexedDB: parts of 5 MiB to 5 GiB, at most
+  10,000 of them, and exactly the count the file's size and the part size give. A ticket outside it makes the whole
+  `/upload` answer unreadable (`SERVER_ERROR`, "the upload server sent an answer this client cannot read"), as a wrong
+  part count already did (`M3-S7`); a record outside it is deleted, as before. A signed part's number must lie in 1 to
+  the part count, as before.
+- **Why:** reproduced: a ticket with `partSize: 1` and one part per byte passed, because only the count was compared
+  with the file, and the client then listed every part number (16,777,221 for a 16 MiB file) before the first `PUT`.
+  A saved record was already capped at 10,000 parts (`records.ts`); the live answer, which also crosses proxies and
+  cloudrop versions, was not. The three limits are those of every S3-compatible storage (`R2_RULES`, `S3_RULES`), and
+  the server's planner never goes below 8 MiB, so no ticket of a cloudrop server is refused.
+- **If wrong:** a custom `StorageDriver` whose rules allow parts under 5 MiB or more than 10,000 parts would have its
+  multipart tickets refused by the client; the planner starts at 8 MiB and doubles, so that needs a file over
+  10,000 times the driver's largest part.
+- **Status:** in force.
+- **Visible in:** `src/client/answers.ts`, `src/client/records.ts`, `src/client/endpoints.test.ts`.
+

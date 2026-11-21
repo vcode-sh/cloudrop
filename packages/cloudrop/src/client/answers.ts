@@ -21,6 +21,23 @@ const isTime = (value: unknown): value is string => isString(value) && !Number.i
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const isCount = (value: unknown): value is number => isSafeInteger(value) && value > 0;
 
+// What every S3-compatible storage takes (rules.ts), checked without knowing which one the server uses: parts of 5 MiB
+// to 5 GiB, the last one excepted, and at most 10,000 of them.
+const MIN_PART_SIZE = 5 * 1024 * 1024;
+const MAX_PART_SIZE = 5 * 1024 ** 3;
+const MAX_PARTS = 10_000;
+
+/**
+ * Whether `partCount` parts of `partSize` bytes are how a file of `size` bytes is cut, within what a bucket takes. A
+ * ticket from /upload and a record read back from the browser's store pass the same check (M11-R85): a plan outside it
+ * would have the client list millions of parts, or cut the file as no cloudrop server does.
+ */
+export const isPartPlan = (size: number, partSize: number, partCount: number): boolean =>
+  partSize >= MIN_PART_SIZE &&
+  partSize <= MAX_PART_SIZE &&
+  partCount <= MAX_PARTS &&
+  partCount === countParts(size, partSize);
+
 function isSignedRequest(value: unknown): value is SignedRequest {
   return (
     isPlainObject(value) &&
@@ -58,7 +75,7 @@ function isMultipart(value: unknown, size: number): value is MultipartTicket {
     isCount(partSize) &&
     isCount(partCount) &&
     // The plan in the token decides (S7): a client that would cut the file differently must stop here.
-    partCount === countParts(size, partSize) &&
+    isPartPlan(size, partSize, partCount) &&
     Array.isArray(parts) &&
     parts.every((part) => isSignedPart(part, (partNumber) => partNumber >= 1 && partNumber <= partCount))
   );

@@ -3,7 +3,7 @@
 // report a failure as STORAGE_ERROR, never with the browser's own text.
 
 import { fail, ok, type Result } from "../errors.ts";
-import { countParts } from "../part-size.ts";
+import { isPartPlan } from "./answers.ts";
 import { storageUnavailable } from "./failures.ts";
 
 /** One multipart upload as IndexedDB keeps it: never a presigned URL, an ETag or a part list (spec §3.1). */
@@ -174,14 +174,12 @@ export function createRecords(enabled: boolean, now: () => number = () => Date.n
 
   /**
    * Whether `value`, stored under `id`, is a record this client can use. One that expired, has another shape, or a
-   * part count its size and part size do not give (as answers.ts checks a live ticket, audit M2) or above the 10,000
-   * parts S3 and R2 allow (Infinity from a part size of 0 included: final review M1), is deleted.
+   * plan a live ticket would be refused for (isPartPlan: audit M2, final review M1, M11-R85), is deleted.
    */
   const usable = (store: IDBObjectStore, id: IDBValidKey, value: unknown): value is UploadRecord => {
     if (
       isRecord(value) &&
-      value.partCount <= 10_000 &&
-      value.partCount === countParts(value.size, value.partSize) &&
+      isPartPlan(value.size, value.partSize, value.partCount) &&
       !expiresSoon(value.expiresAt, now())
     ) {
       return true;

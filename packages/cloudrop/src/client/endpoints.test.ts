@@ -156,17 +156,56 @@ describe("start", () => {
     expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
   });
 
-  it("refuses a multipart ticket whose part count disagrees with the file", async () => {
-    // Another cloudrop version could cut the file differently: uploading its byte ranges would corrupt the file (S7).
-    const { endpoints } = setup({
-      fault: async ({ init, forward }) => {
-        const answer = await (await forward(init)).json();
-        answer.files[0].partCount = 3;
-        return Response.json(answer);
+  describe("a multipart ticket's plan (S7, M11-R85)", () => {
+    const signed = { url: "https://bucket.example/key", headers: {}, expiresAt: "2030-01-01T00:00:00.000Z" };
+    /** The answer of /upload for a file of `size` bytes, with the plan and signed part numbers of `row`. */
+    async function started(row: { size: number; partSize: number; partCount: number; signs?: number[] }) {
+      const ticket = {
+        kind: "multipart",
+        id: "01HXYZ",
+        key: "01HXYZ.bin",
+        token: "token",
+        expiresAt: signed.expiresAt,
+        partSize: row.partSize,
+        partCount: row.partCount,
+        parts: (row.signs ?? [1]).map((partNumber) => ({ partNumber, ...signed })),
+      };
+      const { endpoints } = setup({ fault: () => Response.json({ files: [ticket] }) });
+      // A size no test could hold in memory: the client reads only `size` before the first PUT.
+      const file = Object.defineProperty(new File([], "video.bin"), "size", { value: row.size });
+      const { data, error } = await endpoints.start("files", [file], undefined, KEY, live());
+      return error ? error.code : data[0] instanceof CloudropError ? data[0].code : "accepted";
+    }
+
+    it.each([
+      {
+        name: "10,000 parts of 5 MiB, the most and the smallest",
+        size: 52_428_800_000,
+        partSize: 5_242_880,
+        partCount: 10_000,
       },
+      { name: "parts of 5 GiB, the largest", size: 5_368_709_121, partSize: 5_368_709_120, partCount: 2 },
+    ])("accepts $name", async (row) => {
+      expect(await started(row)).toBe("accepted");
     });
-    const result = await endpoints.start("files", [twoParts], undefined, KEY, live());
-    expect(errorOf(result)).toEqual({ code: "SERVER_ERROR", message: unreadable(200), retryable: false });
+
+    it.each([
+      // Another cloudrop version could cut the file differently: uploading its byte ranges would corrupt the file.
+      {
+        name: "a part count the file and the part size do not give",
+        size: 8 * MiB + 5,
+        partSize: 8 * MiB,
+        partCount: 3,
+      },
+      { name: "one part per byte", size: 8 * MiB + 5, partSize: 1, partCount: 8 * MiB + 5 },
+      { name: "10,001 parts", size: 52_428_800_001, partSize: 5_242_880, partCount: 10_001 },
+      { name: "parts one byte under 5 MiB", size: 8 * MiB + 5, partSize: 5_242_879, partCount: 2 },
+      { name: "parts one byte over 5 GiB", size: 5_368_709_122, partSize: 5_368_709_121, partCount: 2 },
+      { name: "a URL for part 3 of 2", size: 8 * MiB + 5, partSize: 8 * MiB, partCount: 2, signs: [1, 3] },
+      { name: "a URL for part 0", size: 8 * MiB + 5, partSize: 8 * MiB, partCount: 2, signs: [0] },
+    ])("refuses $name", async (row) => {
+      expect(await started(row)).toBe("SERVER_ERROR");
+    });
   });
 
   it("reports an unreachable server", async () => {
