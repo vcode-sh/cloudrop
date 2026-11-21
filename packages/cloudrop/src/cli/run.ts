@@ -6,8 +6,9 @@ import { parseArgs, USAGE } from "./args.ts";
 import { doctor } from "./doctor.ts";
 import { printInstructions } from "./instructions.ts";
 import type { Output } from "./report.ts";
-import { readVariables, serviceOf } from "./settings.ts";
+import { serviceOf } from "./settings.ts";
 import { applySetup } from "./setup.ts";
+import { readVariables } from "./variables.ts";
 
 export interface CommandIo {
   argv: readonly string[];

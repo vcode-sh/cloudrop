@@ -6,7 +6,8 @@ export interface CommandOptions {
   command: "doctor" | "setup";
   /** Exact origins, such as https://app.example.com: checked here, since they are echoed in the output. */
   origins: string[];
-  envFile?: string;
+  /** Every --env-file, in the order given: a later file's value replaces an earlier one's. */
+  envFiles: string[];
   /** --var: the variable each renamed setting is read from, by the setting's cloudrop name (M11-C1). */
   vars: Map<string, string>;
   jurisdiction?: "eu" | "fedramp";
@@ -28,7 +29,8 @@ Options:
   --origin <origin>       An origin your pages upload from, such as https://app.example.com.
                           Repeat it for each origin. Required.
   --env-file <path>       Also read settings from this file of NAME=value lines. A variable
-                          set in the environment wins over the file.
+                          set in the environment wins over the file. Repeat it for each
+                          file: a later file wins over an earlier one.
   --var <SETTING>=<NAME>  Read a setting from a variable of your own, such as
                           --var CLOUDROP_R2_BUCKET=R2_BUCKET. Repeat it for each setting.
   --jurisdiction <eu|fedramp>
@@ -70,7 +72,7 @@ function originProblem(value: string): string | null {
 /** Sets one option that takes a value; returns what is wrong with it, if anything. */
 function setValue(options: CommandOptions, name: string, value: string): string | null {
   if (name === "--env-file") {
-    options.envFile = value;
+    options.envFiles.push(value);
     return null;
   }
   if (name === "--var") return readVar(options.vars, value);
@@ -140,6 +142,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   const options: CommandOptions = {
     command,
     origins: [],
+    envFiles: [],
     vars: new Map(),
     apply: false,
     dryRun: false,

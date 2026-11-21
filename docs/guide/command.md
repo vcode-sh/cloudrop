@@ -23,11 +23,18 @@ The command reads the same variables as the library: `CLOUDROP_R2_ACCOUNT_ID`, `
 `CLOUDROP_R2_ACCESS_KEY_ID` and `CLOUDROP_R2_SECRET_ACCESS_KEY` for R2, or the `CLOUDROP_S3_*` variables for another
 S3-compatible service, and `CLOUDROP_SECRET`. When any `CLOUDROP_R2_*` variable is set it checks R2, otherwise S3.
 
-- `--env-file <path>` also reads a file of `NAME=value` lines, such as `.env.local`, the way Node's `--env-file` does:
-  `export` in front of a name is allowed, a value in single quotes, double quotes or backticks is taken as written
-  and may run over several lines (`\n` in double quotes is a line break), and in an unquoted value `#` starts a
-  comment, so quote a value that contains one. Nothing in the file is run or expanded. A variable set in the environment
-  wins over the file, as with Node, and the command says so for each cloudrop variable set in both.
+- `--env-file <path>` also reads a file of `NAME=value` lines, such as `.env.local`, exactly as Node's `--env-file`
+  does: `export` and a space in front of a name are allowed, a value in single quotes, double quotes or backticks is
+  taken as written and may run over several lines (`\n` in double quotes is a line break), and in an unquoted value
+  `#` starts a comment, so quote a value that contains one. Nothing in the file is run or expanded. Repeat it for each
+  file: a later file's value replaces an earlier one's.
+- **The environment wins over every file**, as with Node, and the command says so for each cloudrop variable set in
+  both. That holds for a variable set to nothing (`CLOUDROP_SECRET=`) too: Node keeps it empty, cloudrop reads an
+  empty variable as not set, and the command reports it that way, with a `note` naming the file whose value it hides.
+- **It is Node's reading, not another loader's.** The command carries Node's parser, and dotenv, Bun or Next.js may
+  read an unusual file differently. A byte order mark at the start of the file becomes part of the first name, so that
+  variable is not set (a `note` says so: save the file without the mark); after `export` only a space counts, not a
+  tab; a carriage return alone ends no line; and `NAME=` followed by spaces alone takes the next line as its value.
 - **On Node, a missing `--env-file` stops before the command runs.** Node itself checks every `--env-file` on its
   command line, the command's own included, and exits with code 9 and `node: .env.local: not found` (or
   `invalid format` for a directory). Check the path. Bun runs the command, which reports the file with exit code 2.

@@ -608,3 +608,50 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. `src/server/store-delete-race.test.ts` ("an onDelete that throws after a deletion won fails
   /complete, which a retry finishes"), in both modes.
 - **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.
+
+### M11-R112: `--env-file` is read by Node's own parser, ported step for step
+
+- **Decision:** `parseEnvFile` (`src/cli/env-file.ts`) is a port of `Dotenv::ParseContent` in Node's
+  `src/node_dotenv.cc` (the `v24.x` branch, read 2026-11-21), not a line pattern of the command's own. It keeps Node's
+  reading where another dotenv reader may differ: a byte order mark stays in the first name, so the variable the file
+  means is not set; only a space after `export` is taken off (`export<tab>A=1` sets `export<tab>A`); a carriage return
+  is removed and ends no line; a name may hold a space; `A=` followed by spaces alone takes the next line as its value;
+  a no-break space is not trimmed. A file that starts with a byte order mark before a variable gets a `note` naming
+  the variable Node does not set. The test compares each of these with `util.parseEnv` of the Node that runs it.
+- **Why:** the guide said the file is read "the way Node's `--env-file` does", and the review found four files the two
+  read differently, each in the direction that hides a problem: `doctor` answered `ok … is set` for a variable an app
+  started with `node --env-file` never gets. A differential run of 300,000 random files of the characters that matter
+  (quotes, `#`, `=`, `export`, CR, LF, tab, a byte order mark) against `util.parseEnv` on Node 24.22.2 found no
+  difference; that run is not in the suite, the table of the named cases is.
+- **If wrong:** an app that loads the file with dotenv, Bun or Next.js may get a variable Node does not, and `doctor`
+  then reports it as not set; the guide says whose reading it is. A later Node that changes its parser turns the table
+  test red on that Node, which is the signal to port the change.
+- **Status:** in force. Amends `M9-C8`.
+- **Visible in:** `src/cli/env-file.ts`, `src/cli/env-file.test.ts`, `src/cli/variables.ts`,
+  `docs/guide/command.md#settings`.
+
+### M11-R113: every `--env-file` is read, a later one winning, and an empty variable in the environment wins too
+
+- **Decision:** `--env-file` may be repeated; every file is read in the order given and a later file's value replaces
+  an earlier one's. A variable the environment has wins over every file, even when it is set to nothing: the setting
+  then reads as not set, with a `note` that names the variable and the file whose value it hides. The note for a
+  variable set in both names the file its value came from.
+- **Why:** measured on Node 24.22.2: `node --env-file=a.env --env-file=b.env` sets what both files hold and `b.env`'s
+  value where both name a variable; `A= node --env-file=a.env` leaves `A` empty. The command read only the last file,
+  silently, and took the file's value over an empty variable, so it reported `ok … is set` for a setting the library
+  (`fromEnv`: an empty variable is unset) would not find.
+- **If wrong:** none known; a project that passed `--env-file` twice and relied on the first being ignored now gets
+  its variables too.
+- **Status:** in force.
+- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/cli/variables.test.ts`,
+  `docs/guide/command.md#settings`.
+
+### M11-R117: a variable is read as an own property
+
+- **Decision:** the command reads the environment with `Object.hasOwn` and an env file's variables from a `Map`.
+- **Why:** `--var CLOUDROP_SECRET=__proto__` with nothing set printed `ok __proto__ is set.`, and `constructor` and
+  `toString` printed "is set in the environment and in undefined": a plain lookup finds what every object inherits.
+  All three are names a shell can set, so `--var` accepts them.
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/cli/variables.ts`, `src/cli/env-file.ts`, `src/cli/variables.test.ts`.
