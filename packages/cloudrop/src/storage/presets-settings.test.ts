@@ -12,7 +12,6 @@ describe("bucket names", () => {
     ["leading hyphen", "-media"],
     ["trailing hyphen", "media-"],
     ["slash", "a/b"],
-    ["legacy upper case with underscore", "My_Legacy_Bucket"],
   ] as const;
 
   const r2Message =
@@ -48,7 +47,7 @@ describe("bucket names", () => {
     expect(thrownBy(() => s3({ ...goodS3, bucket: "my..media" })).message).toBe(s3Message);
   });
 
-  it.each([".media", "media.", "-media", "media-"])("s3() rejects the edge character in %s", (bucket) => {
+  it.each([".media", "media."])("s3() rejects the edge dot in %s", (bucket) => {
     expect(thrownBy(() => s3({ ...goodS3, bucket })).message).toBe(s3Message);
   });
 

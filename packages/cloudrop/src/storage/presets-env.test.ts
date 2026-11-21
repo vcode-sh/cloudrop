@@ -100,7 +100,9 @@ describe("storage presets and the environment", () => {
 
   it("names no variable when the invalid value was passed as an option", () => {
     stubR2Env({ ACCOUNT_ID: ACCOUNT, ACCESS_KEY_ID: "key", SECRET_ACCESS_KEY: "secret" });
-    expect(thrownBy(() => r2({ bucket: "Media" })).message).not.toContain("Environment variables");
+    expect(thrownBy(() => r2({ bucket: "Media" })).message).toBe(
+      "The R2 bucket name must be 3 to 63 characters: lowercase letters, digits and hyphens, starting and ending with a letter or digit. Copy the exact name from your R2 bucket list.",
+    );
   });
 
   it("reads the environment again until the settings are complete, then keeps them", async () => {

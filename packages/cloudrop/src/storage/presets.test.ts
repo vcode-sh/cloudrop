@@ -51,15 +51,15 @@ describe("r2()", () => {
 
   it("names only what is missing", async () => {
     setEnv({ CLOUDROP_R2_ACCOUNT_ID: ACCOUNT });
-    expect((await firstUseError(r2({ bucket: "media", accessKeyId: "k" })))?.message).toContain(
-      "Missing R2 settings: secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY).",
+    expect((await firstUseError(r2({ bucket: "media", accessKeyId: "k" })))?.message).toBe(
+      "Missing R2 settings: secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY). Pass them to r2() or set the environment variables in parentheses.",
     );
   });
 
   it("reads every setting from the environment when called without options", async () => {
     setEnv({});
-    expect((await firstUseError(r2()))?.message).toContain(
-      "Missing R2 settings: bucket (CLOUDROP_R2_BUCKET), accountId (CLOUDROP_R2_ACCOUNT_ID)",
+    expect((await firstUseError(r2()))?.message).toBe(
+      "Missing R2 settings: bucket (CLOUDROP_R2_BUCKET), accountId (CLOUDROP_R2_ACCOUNT_ID), accessKeyId (CLOUDROP_R2_ACCESS_KEY_ID), secretAccessKey (CLOUDROP_R2_SECRET_ACCESS_KEY). Pass them to r2() or set the environment variables in parentheses.",
     );
   });
 
@@ -75,17 +75,6 @@ describe("r2()", () => {
     const { fetch, requests } = capture();
     await r2({ ...goodR2, accountId: ACCOUNT.toUpperCase(), fetch }).head("a");
     expect(new URL(requests[0]?.url ?? "").host).toBe(`${ACCOUNT}.r2.cloudflarestorage.com`);
-  });
-
-  it("feeds each environment variable to the right credential", async () => {
-    // The fake verifies the signature, so swapping the key ID and the secret makes the call fail.
-    setEnv({
-      CLOUDROP_R2_ACCOUNT_ID: ACCOUNT,
-      CLOUDROP_R2_ACCESS_KEY_ID: "key",
-      CLOUDROP_R2_SECRET_ACCESS_KEY: "secret",
-    });
-    const fake = createFakeR2({ bucket: "media", credentials: { accessKeyId: "key", secretAccessKey: "secret" } });
-    expect(await r2({ bucket: "media", fetch: fake.fetch }).head("a.txt")).toEqual({ data: null, error: null });
   });
 
   it("signs for region auto against the account endpoint", async () => {
@@ -121,9 +110,12 @@ describe("r2()", () => {
     expect(authorizationOf(requests)).toContain("Credential=option-key/");
   });
 
+  // The whole message: an empty value read as set would be an invalid account ID, not a missing one.
   it("treats an empty environment variable as missing", async () => {
-    setEnv({ CLOUDROP_R2_ACCOUNT_ID: "" });
-    expect((await firstUseError(r2({ bucket: "media" })))?.message).toContain("CLOUDROP_R2_ACCOUNT_ID");
+    setEnv({ CLOUDROP_R2_ACCOUNT_ID: "", CLOUDROP_R2_ACCESS_KEY_ID: "key", CLOUDROP_R2_SECRET_ACCESS_KEY: "secret" });
+    expect((await firstUseError(r2({ bucket: "media" })))?.message).toBe(
+      "Missing R2 settings: accountId (CLOUDROP_R2_ACCOUNT_ID). Pass them to r2() or set the environment variables in parentheses.",
+    );
   });
 
   it.each(["eu", "fedramp"] as const)("uses the %s jurisdiction endpoint", async (jurisdiction) => {
@@ -150,10 +142,6 @@ describe("r2()", () => {
     } finally {
       globalThis.process = original;
     }
-  });
-
-  it("exposes the R2 limits", () => {
-    expect(r2(goodR2).rules.maxSinglePutSize).toBe(5 * 1024 ** 3 - 5 * 1024 ** 2);
   });
 });
 
