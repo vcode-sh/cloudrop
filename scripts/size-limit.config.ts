@@ -62,7 +62,7 @@ export default [
   // Bundled and minified, what a Workers app ships for the server: every export, without the doc comments and messages
   // of the unminified files the summed budget counts (M4-F14). Measured 2026-11-17: 22.36 kB before M5, 27.19 kB
   // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.37 kB after /abort's
-  // `keep` (M3-U94), 29.55 kB at 0.3.0 and 30.77 kB after onDelete and the file filters, when the ceiling went from 30
+  // `keep` (M3-U94), 29.55 kB at 0.3.0 and 30.76 kB after onDelete and the file filters, when the ceiling went from 30
   // to 32 kB (M10-D10).
   {
     name: "cloudrop (bundled)",

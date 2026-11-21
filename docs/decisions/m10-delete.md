@@ -93,7 +93,9 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   `deadlock_timeout`. Run first, the app's locks come before cloudrop's in every path and the two take turns (the case
   passes). The first version ran a replacing completion's `onDelete` after `store.complete`, with the replaced row
   already locked, which the review showed deadlocks against a `deleteFile` of that file when `onDelete` writes a row
-  keyed by the file (the guide's own pointer example); listing first gives every path one order.
+  keyed by the file (the guide's own pointer example); listing first gives every path one order. The second case in
+  `drizzle-handler.db.integration.test.ts` pins it: with the hook moved back after `store.complete` it fails after the
+  1 s `deadlock_timeout`, on both drivers.
 - **If wrong:** a replacing completion that races another completion or a deletion of the owner's files on the route
   is answered with a retry more often than before; each retry lists again.
 - **Status:** in force.
@@ -127,7 +129,8 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   try again." `api.eraseOwner` counts the file in `failed` (and in `waiting`, as it is still completed), goes on with
   the next file and reports `done: false`. A replacing `/complete` answers the retryable `SERVER_ERROR` a throw in
   `onComplete` gives ("The file was uploaded, but the server could not finish processing it. Try again in a moment."),
-  and the client's retry runs the hooks again.
+  and the client's retry runs the hooks again. The exception is a hook that threw after another deletion took the file
+  (`M10-D5`): the file is gone, and `deleteFile` answers as for a file already deleted, `eraseOwner` counts it nowhere.
 - **Why:** each caller already has a way to report a file it could not handle: `deleteFile` an error, `eraseOwner`
   its counters, `/complete` the unfinished answer. Retryable, as the hook's own failure is often a database or network
   blip; the message names the route and points at the log, never the thrown error, which may hold anything.
@@ -157,13 +160,13 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
 ### M10-D10: the bundled server budget goes from 30 to 32 kB (for owner confirmation)
 
 - **Decision:** `scripts/size-limit.config.ts` raises the "cloudrop (bundled)" ceiling from 30 kB to 32 kB. Measured
-  gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.77 kB (+4.1%), `cloudrop` summed 39.76 → 41.63 kB (+4.7%),
+  gzip, 0.3.0 → this change: `cloudrop` bundled 29.55 → 30.76 kB (+4.1%), `cloudrop` summed 39.76 → 41.64 kB (+4.7%),
   `adapters/sql` 11.86 → 12.17 kB, `adapters/drizzle` 13.58 → 13.89 kB, `adapters/prisma` 11.33 → 11.65 kB,
   `cloudrop/testing` 13.18 → 13.35 kB; `cloudrop/client`, `cloudrop/react`, `cloudrop/next` and `cloudrop/node`
   unchanged. Every other ceiling stays.
 - **Why:** `M4-F24` set the ceilings with a wide margin for the store and plugins, and 0.3.0 left 0.45 kB of it on the
   bundled server. `onDelete` (its transaction and lease paths, and the replacing completion's) and the filters with
-  their checks and messages add 1.22 kB; none of it is dead weight an app could drop, as every export ships in this
+  their checks and messages add 1.21 kB; none of it is dead weight an app could drop, as every export ships in this
   budget. No entry grew by 5% or more.
 - **If wrong:** the owner sets another ceiling; nothing depends on this number.
 - **Status:** in force until the owner confirms or changes it.

@@ -233,6 +233,48 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
   });
 
+  // A replacing completion runs onDelete before it records the completion, so it too takes the app's row before the
+  // replaced file's. Run after the record, it would hold that file while waiting for the row deleteFile's onDelete holds.
+  test("a replacement and a deleteFile of the previous file take turns on the app's row of that file", async () => {
+    const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
+    const held = gate();
+    const avatars = store.route(
+      { accept: "*/*", maxSize: "1GB", replace: true, authorize: () => ({ userId: "u1" }) },
+      {
+        owner: ({ userId }) => userId,
+        onComplete: async ({ tx, userId, file }) => {
+          await tx.insert(appUploads).values({ fileId: file.id, owner: userId });
+        },
+        onDelete: async ({ tx, file, reason }) => {
+          await tx.delete(appUploads).where(eq(appUploads.fileId, file.id));
+          if (reason === "deleted") await held.pass();
+        },
+      },
+    );
+    const fixture = serverFixture({ avatars }, { store });
+    const upload = async () => {
+      const ticket = await fixture.single("avatars", TEXT);
+      await fixture.send(ticket.put, hello);
+      return ticket;
+    };
+    const previous = await upload();
+    expect((await complete(fixture, previous.token)).status).toBe(200);
+    const next = await upload();
+    // deleteFile holds the previous file's app row inside onDelete while the replacement's onDelete waits for it.
+    const deleting = fixture.cloudrop.api.deleteFile(previous.id);
+    await held.arrived;
+    const replacing = complete(fixture, next.token);
+    await lockWaiter();
+    held.open();
+    expect(await deleting).toEqual({ data: { id: previous.id }, error: null });
+    // The replacement found its file deleted by then: it rolls back and asks for a retry, which completes.
+    expect((await replacing).body.error).toEqual({ code: "SERVER_ERROR", message: RETRY, retryable: true });
+    expect((await complete(fixture, next.token)).status).toBe(200);
+    expect(fixture.logger.errors).toEqual([]);
+    expect(await db.query("SELECT file_id FROM app_uploads")).toEqual([{ file_id: next.id }]);
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+  });
+
   test("onDelete's writes through tx commit with the deletion, and a throw rolls them back and keeps the file", async () => {
     const store = drizzleStore(driver.db(), { dialect: "postgres", transaction: true });
     let failing = true;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complete } from "../testing/complete-fixture.ts";
-import { type MemoryTx, memoryStore } from "../testing/memory-store.ts";
+import { type MemoryStore, type MemoryTx, memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, leaseStore, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import { route, routeFor } from "./route.ts";
 import type { DeleteContext } from "./store.ts";
@@ -30,8 +30,19 @@ interface Seen {
  * `tx` when it has one, and throws while `failing` is set, or with `unique` for a file it already ran for (as an
  * audit insert keyed by the file would). `pause` stops the next call until the test opens it.
  */
-function deleting(mode: Mode, options: { replace?: boolean } = {}) {
+function deleting(mode: Mode, options: { replace?: boolean; inherited?: boolean } = {}) {
   const memory = memoryStore();
+  // A store whose methods live on its prototype and whose transaction reads `this`, as a class's would.
+  const backing: MemoryStore = options.inherited
+    ? Object.create(memory, {
+        transaction: {
+          value(this: unknown, run: Parameters<MemoryStore["transaction"]>[0]) {
+            if (this !== backing) throw new TypeError("Cannot read private member #pool from an object");
+            return memory.transaction(run);
+          },
+        },
+      })
+    : memory;
   const seen: Seen[] = [];
   const state = { failing: false, unique: false, pause: undefined as (() => Promise<void>) | undefined };
   const onDelete = async ({ file, owner, reason, tx }: DeleteContext & { tx?: MemoryTx }) => {
@@ -47,8 +58,8 @@ function deleting(mode: Mode, options: { replace?: boolean } = {}) {
   const policy = { accept: "*/*", maxSize: 1024, replace: options.replace, authorize: () => ({ userId: "u1" }) };
   const callbacks = { owner: ({ userId }: { userId: string }) => userId, onDelete };
   const files =
-    mode === "transaction" ? routeFor<{ tx: MemoryTx }>(memory)(policy, callbacks) : route(policy, callbacks);
-  const fixture = storeFixture({ files }, { store: mode === "transaction" ? memory : leaseStore(memory) });
+    mode === "transaction" ? routeFor<{ tx: MemoryTx }>(backing)(policy, callbacks) : route(policy, callbacks);
+  const fixture = storeFixture({ files }, { store: mode === "transaction" ? backing : leaseStore(memory) });
   const upload = async () => {
     const ticket = await fixture.single("files", TEXT);
     await fixture.send(ticket.put, hello);
@@ -102,6 +113,13 @@ describe("onDelete with api.deleteFile", () => {
     state.failing = false;
     expect((await api.deleteFile(ticket.id)).error).toBeNull();
     expect([await status(ticket.id), await stored(ticket.key)]).toEqual(["deleted", false]);
+  });
+
+  it("transaction: works on a store whose methods are inherited, as a class's are", async () => {
+    const { fixture, memory, uploaded, status } = deleting("transaction", { inherited: true });
+    const ticket = await uploaded();
+    expect(await fixture.cloudrop.api.deleteFile(ticket.id)).toEqual({ data: { id: ticket.id }, error: null });
+    expect([await status(ticket.id), memory.appRows()]).toEqual(["deleted", [`deleted ${ticket.id}`]]);
   });
 
   it("transaction: two deletions at once commit onDelete's writes once", async () => {

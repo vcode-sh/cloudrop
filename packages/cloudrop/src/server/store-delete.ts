@@ -1,7 +1,7 @@
 // A route's onDelete (M10-D4): run for each completed file that api.deleteFile, a replacing /complete or
-// api.eraseOwner deletes. It always runs before cloudrop locks the file, so the app's own locks come first, as in
-// onComplete. With a transaction it runs inside the deletion's, exactly once; without one, before the deletion is
-// recorded, at least once, as onComplete runs under a lease.
+// api.eraseOwner deletes. It runs before cloudrop locks the file, so the app's own locks come first, as in onComplete;
+// only a lease-mode replacement's late arrival runs after (M10-D6). With a transaction it runs inside the deletion's,
+// exactly once; without one, before the deletion is recorded, at least once, as onComplete runs under a lease.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
@@ -62,9 +62,9 @@ async function afterThrow(config: ServerConfig, store: Store, id: string, route:
  */
 async function deleteInTransaction(
   config: ServerConfig,
-  store: Store & Required<Pick<Store, "transaction">>,
-  id: string,
-  reason: DeleteReason,
+  store: Store,
+  transaction: NonNullable<Store["transaction"]>,
+  { id, reason }: { id: string; reason: DeleteReason },
 ): Promise<Result<Transition>> {
   let answer: Result<Transition> = fail(storeUnavailable());
   let threw: string | undefined;
@@ -76,7 +76,7 @@ async function deleteInTransaction(
     throw new Error("cloudrop: rolled back the deletion.");
   };
   try {
-    await store.transaction(async (tx, scoped) => {
+    await transaction(async (tx, scoped) => {
       const row = await scoped.get(id);
       const route = hookedRoute(config, row);
       if (route && row && !(await runOnDelete(config, route, { file: row, reason }, { tx }))) {
@@ -109,7 +109,8 @@ export async function deleteCompleted(
   const end = () =>
     storeCall(config.logger, `delete file ${id}`, () => store.end(id, "completed", "deleted", new Date()));
   if (![...config.routes.values()].some((route) => route.definition.onDelete)) return end();
-  if (store.transaction) return deleteInTransaction(config, { ...store, transaction: store.transaction }, id, reason);
+  // Bound, as a store written as a class reads its own fields in transaction.
+  if (store.transaction) return deleteInTransaction(config, store, store.transaction.bind(store), { id, reason });
   const row = await storeCall(config.logger, `get file ${id}`, () => store.get(id));
   if (row.error) return row;
   const route = hookedRoute(config, row.data);
