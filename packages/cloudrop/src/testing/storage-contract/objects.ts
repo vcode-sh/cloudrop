@@ -26,6 +26,18 @@ export function objectCases(suite: ContractSuite): void {
     expect(text((await driver.getRange(k, 6, 4095)).data)).toBe("world");
   });
 
+  // The content sniff never asks for either (it reads nothing of an empty file); a caller of api.getRange can.
+  it("answers a range of an empty object, or one that starts at the object's end, as an error naming the range", async () => {
+    const { driver } = suite;
+    expect((await driver.put(key("empty.bin"), "")).error).toBeNull();
+    expect((await driver.put(key("five.bin"), "hello")).error).toBeNull();
+    const refused = [await driver.getRange(key("empty.bin"), 0, 0), await driver.getRange(key("five.bin"), 5, 9)];
+    expect(refused.map((result) => [result.error?.status, result.error?.message])).toEqual([
+      [416, "The byte range starts at or past the object's end. Ask for a range inside its size."],
+      [416, "The byte range starts at or past the object's end. Ask for a range inside its size."],
+    ]);
+  });
+
   it("reports the stored size of an object R2 would compress", async () => {
     const { driver } = suite;
     const k = key("notes.md");

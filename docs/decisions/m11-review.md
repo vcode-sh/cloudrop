@@ -194,9 +194,10 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   start a new multipart upload." and is not retryable. `RequestTimeout` is retryable whatever its status. All four keep
   the code `STORAGE_ERROR`.
 - **Why:** each fell through to "rejected the request (HTTP n). Check the key, size and headers you passed, then
-  retry.", which names nothing the person can change. `416 InvalidRange` is what R2 and RustFS answer to any range of
-  an empty object and to one that starts past the end (`docs/research/r2-spike-findings.md`, "The first 4 KiB of small
-  objects"). AWS answers a request sent to another region's endpoint with `301 PermanentRedirect` and one signed for
+  retry.", which names nothing the person can change. `416 InvalidRange` is what R2 answers to any range of an
+  empty object (`docs/research/r2-spike-findings.md`, "The first 4 KiB of small objects"); a contract case now asks
+  for such a range and for one that starts at the object's end, and R2, RustFS, Wrangler's local R2 and the fake all
+  answered `416` to both on 2026-11-21. AWS answers a request sent to another region's endpoint with `301 PermanentRedirect` and one signed for
   another region with `400 AuthorizationHeaderMalformed`: the codes `cli/bucket-access.ts` already reads for the
   command, from AWS's error list, unmeasured here. One message serves both because a bare `301` (AWS to `HEAD`, or any
   proxy from http to https) cannot be told from a region redirect. On `409`, AWS's "Conditional write behavior" says:
@@ -212,7 +213,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   used for this review, so `PermanentRedirect` and `AuthorizationHeaderMalformed` rest on the command's earlier reading
   of it.
 - **Status:** in force.
-- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`, `docs/guide/errors.md`.
+- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`,
+  `src/testing/storage-contract/objects.ts`, `docs/guide/errors.md`.
 
 ### M11-R20: a 200 that is not S3's answer is an error, never an empty result
 
