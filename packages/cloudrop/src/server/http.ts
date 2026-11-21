@@ -198,9 +198,13 @@ export async function readJson(request: Request): Promise<Result<unknown>> {
   } catch {
     return fail(invalidInput("The request body could not be read. Send the request again."));
   }
-  const bytes = await new Blob(chunks).arrayBuffer();
   try {
-    return ok(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+    // Decoded chunk by chunk, not joined through a Blob: jsdom 26's Blob has no arrayBuffer() (M11-R2). The last call
+    // refuses a body that ends inside a character.
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = "";
+    for (const chunk of chunks) text += decoder.decode(chunk, { stream: true });
+    return ok(JSON.parse(text + decoder.decode()));
   } catch {
     return fail(invalidInput("The request body is not valid JSON. Send a JSON object."));
   }

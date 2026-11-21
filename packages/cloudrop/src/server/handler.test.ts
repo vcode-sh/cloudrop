@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { outcome, request, setup, uploadBody } from "../testing/handler-fixture.ts";
 import { createCloudrop } from "./cloudrop.ts";
 
@@ -84,6 +84,43 @@ describe("cloudrop.handler routing and request checks", () => {
       request("/api/cloudrop/upload", { headers: { "content-type": "application/json; charset=utf-8" } }),
     );
     expect(response.status).toBe(200);
+  });
+});
+
+describe("cloudrop.handler request body", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const encoder = new TextEncoder();
+  const inChunks = (...chunks: Uint8Array[]) =>
+    request("/api/cloudrop/upload", { body: new Blob(chunks as BlobPart[]).stream(), duplex: "half" } as RequestInit & {
+      headers?: Record<string, string>;
+    });
+
+  // jsdom 26, Vitest's jsdom environment until jsdom 27, has a Blob without arrayBuffer() (M11-R2).
+  it("reads the body where the environment's Blob has no arrayBuffer()", async () => {
+    const body = request("/api/cloudrop/upload");
+    vi.stubGlobal("Blob", class Blob {});
+
+    expect((await setup().cloudrop.handler(body)).status).toBe(200);
+  });
+
+  it("reads a character whose bytes arrive in two chunks", async () => {
+    const [start = "", end = ""] = JSON.stringify({ ...uploadBody, pad: "é" }).split("é");
+    const [first = 0, second = 0] = encoder.encode("é");
+    const body = inChunks(
+      new Uint8Array([...encoder.encode(start), first]),
+      new Uint8Array([second, ...encoder.encode(end)]),
+    );
+
+    expect((await setup().cloudrop.handler(body)).status).toBe(200);
+  });
+
+  // Without the last byte of "é" the text before it is whole JSON: only a decoder that checks the end refuses it.
+  it("answers a body that ends inside a character with 400 INVALID_INPUT", async () => {
+    const body = inChunks(encoder.encode(JSON.stringify(uploadBody)), new Uint8Array([0xc3]));
+
+    expect(await outcome(await setup().cloudrop.handler(body))).toEqual({ status: 400, code: "INVALID_INPUT" });
   });
 });
 
