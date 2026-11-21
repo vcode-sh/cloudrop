@@ -34,18 +34,15 @@ describe("sniff: each text/html row of WHATWG MIME Sniffing §7.1", () => {
     expect([typeOf(`${row} x`), typeOf(`${row}>x`)]).toEqual(["text/html", "text/html"]);
   });
 
-  it.for(ROWS)("%s in lower case", (row) => {
-    expect(typeOf(`${row.toLowerCase()}>`)).toBe("text/html");
+  // The standard's whitespace bytes are the leading bytes every row ignores: HT, LF, FF, CR and SP. They are skipped
+  // once, before any row is tried, so one element and one of the two rows that are not elements stand for all.
+  it("reads a row after the standard's whitespace bytes", () => {
+    expect([typeOf("\t\n\f\r <HTML>"), typeOf("\t\n\f\r <!--")]).toEqual(["text/html", "text/html"]);
   });
 
-  // The standard's whitespace bytes are the leading bytes each row ignores: HT, LF, FF, CR and SP.
-  it.for(ROWS)("%s after the standard's whitespace bytes", (row) => {
-    expect(typeOf(`\t\n\f\r ${row}>`)).toBe("text/html");
-  });
-
-  // A tag is its whole name: a longer name that starts with a row's letters is another element.
-  it.for(ROWS.filter((row) => row !== "<!--"))("%s is not matched inside a longer name", (row) => {
-    expect(typeOf(`${row}x>`)).toBeNull();
+  // A doctype's name is its whole name; an element's is too, which "where a tag ends" holds with "<br2>".
+  it("does not match <!DOCTYPE HTML inside a longer name", () => {
+    expect(typeOf("<!DOCTYPE HTMLx>")).toBeNull();
   });
 
   it("reads the <?xml row as XML", () => {

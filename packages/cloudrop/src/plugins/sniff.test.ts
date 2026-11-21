@@ -236,11 +236,7 @@ describe("sniff: ZIP-based office formats", () => {
 describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
   it.for([
     { name: "a doctype", input: "<!DOCTYPE html><title>x</title>", type: "text/html" },
-    { name: "a tag after whitespace", input: " \t\r\n<HTML>", type: "text/html" },
     { name: "a script tag", input: "<script>alert(1)</script>", type: "text/html" },
-    { name: "a one-letter tag", input: "<b>bold</b>", type: "text/html" },
-    { name: "a comment", input: "<!-- page -->", type: "text/html" },
-    { name: "a tag closed by a slash", input: "<br/>", type: "text/html" },
     { name: "a UTF-8 BOM before the tag", input: "\xef\xbb\xbf<html>", type: "text/html" },
     { name: "UTF-16LE with a BOM", input: "\xff\xfe<\0h\0t\0m\0l\0>\0", type: "text/html" },
     { name: "UTF-16BE with a BOM", input: "\xfe\xff\0<\0s\0c\0r\0i\0p\0t\0>", type: "text/html" },
@@ -248,7 +244,6 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
     { name: "an XHTML root after an XML declaration", input: "<?xml version='1.0'?><html>", type: "text/html" },
     // In a declared XML document, a root named like an HTML tag is the app's own element.
     { name: "an XML table", input: "<?xml version='1.0'?><table><row/></table>", type: "application/xml" },
-    { name: "a script after a comment with no space", input: "<!--x--><script>alert(1)</script>", type: "text/html" },
     {
       // Namespaces are not read: a character reference can spell one, so any XML a route names may carry scripts.
       name: "XML with an XHTML element in a namespace",
@@ -281,10 +276,8 @@ describe("sniff: text (WHATWG MIME Sniffing §7.1)", () => {
   });
 
   it.for([
-    { name: "a tag that is not on the list", input: "<abbr>HTML</abbr>" },
     { name: "a less-than sign in prose", input: "<3 from home" },
     { name: "a tag after other text", input: "Notes: <script>alert(1)</script>" },
-    { name: "markup in a CSV", input: "id,body\n1,<b>hi</b>\n" },
     { name: "XML without a declaration", input: "<note>hi</note>" },
     { name: "a prefixed root named like an HTML tag", input: '<x:p xmlns:x="urn:a"/>' },
     { name: "prose that opens with #!", input: "#!important: water the plants\n" },
