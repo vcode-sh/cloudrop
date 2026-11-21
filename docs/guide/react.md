@@ -252,8 +252,10 @@ factory read its list again, such as a badge that counts every route's uploads. 
 
 The module-level factory of [Set up](#set-up) suits an app without accounts. An app where users sign in needs a client
 per user, created with the user's id as its `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client
-for everyone would list one user's unfinished uploads to the next user of the browser. Create each user's client and
-hooks once, provide them in a context keyed by the user, and close the other users' clients when the user changes:
+for everyone would list one user's unfinished uploads to the next user of the browser. The same id as its
+[`account`](client.md#guard-against-a-changed-account) lets the server refuse an upload that a sign-in in another tab
+would make someone else's. Create each user's client and hooks once, provide them in a context keyed by the user, and
+close the other users' clients when the user changes:
 
 ```tsx
 // lib/upload.ts
@@ -264,7 +266,8 @@ import { createContext, useContext, useEffect } from "react";
 import type { cloudrop } from "./cloudrop"; // a type import
 
 function createUploads(userId: string) {
-  const client = createCloudropClient<typeof cloudrop>({ namespace: userId });
+  // account: what the routes' owner returns for this user ("" signed out); the server compares the two at /upload.
+  const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId });
   return { client, ...createUploadHooks<typeof cloudrop>({ client }) };
 }
 export type Uploads = ReturnType<typeof createUploads>;
@@ -324,7 +327,9 @@ async function signOut() {
   this tab sees it when its session hook does, and `useCloseOtherUsers` then closes the last user's client. Its uploads
   stop without an `/abort`, as when a tab closes, so each unfinished multipart upload keeps its record, and that user
   resumes it on their next sign-in. The cookie changed earlier, when the other tab signed in: an `/upload` this tab
-  sent in between, for a queued file or a retry, went with the new user's session, and that file became that user's.
+  sends in between, for a queued file or a retry, goes with the new user's session. On a route with a store and
+  `owner`, `account` makes the server refuse it with `ACCOUNT_CHANGED` (see [Errors to show](#errors-to-show)), so
+  the file never becomes the other user's; on a route without `owner`, nothing tells the two users apart.
 - **After `close()`** every `upload()` and `resume()` of the hooks resolves `CLIENT_CLOSED` without a request.
   `useResumable()` and `forget()` keep working. The first `close()` decides: a later one, with or without options,
   changes nothing. A sign-out that fails leaves the page on a closed client, so reload then, as the example's
@@ -451,6 +456,32 @@ deletes the records alone and suits sign-out.
 None of this depends on shadcn, Tailwind or Tabler. Radix, Base UI, MUI, Chakra, plain CSS, any icon set: the hooks
 give data and functions, and the UI is yours. Why there is no registry: `M4-E1` in
 [m4-dx.md](../decisions/m4-dx.md).
+
+## Errors to show
+
+A failed file's `error.message` is written for the person at the page: it says what happened and what to do next, and
+never carries a URL, a token or what the bucket answered. Show it whole, beside the file. Branch on `error.code` only
+where the message alone is not the right thing to show:
+
+| `error.code` | When | What to show |
+| --- | --- | --- |
+| `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close({ abort: true })` at sign-out. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
+| `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say the file was not uploaded because the account changed. |
+| `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
+
+```tsx
+function FileError({ error }: { error: CloudropError | null }) {
+  if (!error || error.code === "ABORTED" || error.code === "CLIENT_CLOSED") return null;
+  return (
+    <p role="alert">
+      {error.message}
+      {error.code === "ACCOUNT_CHANGED" && <button type="button" onClick={() => location.reload()}>Reload</button>}
+    </p>
+  );
+}
+```
+
+Every other code and what it means: [Errors](errors.md).
 
 ## What the hooks return
 
