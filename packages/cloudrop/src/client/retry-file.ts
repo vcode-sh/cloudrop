@@ -3,13 +3,14 @@
 // by every file of one job.retry() that needs one, after the tickets it replaces were given up (M11-R89).
 
 import type { CloudropError } from "../errors.ts";
+import { discard } from "./discard.ts";
 import type { Entry } from "./entry.ts";
 import { drop } from "./file-run.ts";
 import { allSettled, forgetTicket, type Job } from "./job-run.ts";
 import { launch } from "./launch.ts";
 import { retryStep } from "./retry-step.ts";
 import type { FileOutcome } from "./types.ts";
-import { canSign } from "./upload.ts";
+import { canSign, type Upload, type UploadContext } from "./upload.ts";
 
 /**
  * Whether a retry of the failed `entry` asks /upload for a new ticket, decided when it is called (M3-U30): always
@@ -42,16 +43,27 @@ function unland({ error, landed }: Entry): void {
 }
 
 /**
- * Queues a failed file again without telling the page. A new ticket starts from no parts and no bytes (M3-U36); the
- * speed starts from 0 when the file sends again, as on every start. The ticket it replaces is given up as abort() of
- * the failed file would give it up (M11-R89): its /abort, which the new /upload waits for, is added to `given`. One a
- * /complete may have finished is left alone, as abort() leaves it.
+ * Gives up the ticket of `upload`, which a retry replaces, as abort() of the failed file would (M11-R89): resolves once
+ * the server was told. A ticket pagehide kept for a resume (giveUp, M4-F1) holds its record and no lock, so it is
+ * discarded as discard() of its listing would: under its lock, so never while another tab resumes it, and never an
+ * object that landed (M11-R91). Any other ticket the page gave up had its /abort, and gets no second (M3-U33).
  */
-function requeue(job: Job, entry: Entry, fresh: boolean, given: Promise<void>[]): void {
+function giveUpReplaced(context: UploadContext, upload: Upload): Promise<unknown> | undefined {
+  if (!upload.dropped) return drop(context, upload);
+  return upload.ticket.kind === "multipart" && context.records.enabled ? discard(context, upload.ticket) : undefined;
+}
+
+/**
+ * Queues a failed file again without telling the page. A new ticket starts from no parts and no bytes (M3-U36); the
+ * speed starts from 0 when the file sends again, as on every start. The ticket it replaces is given up first: what the
+ * new /upload waits for is added to `given`. One a /complete may have finished is left alone, as abort() leaves it.
+ */
+function requeue(job: Job, entry: Entry, fresh: boolean, given: Promise<unknown>[]): void {
   const { upload, error } = entry;
   job.context.leftovers.release(entry);
   if (fresh) {
-    if (upload && !upload.dropped && !upload.mayBeComplete) given.push(drop(job.context, upload));
+    const told = upload && !upload.mayBeComplete ? giveUpReplaced(job.context, upload) : undefined;
+    if (told) given.push(told);
     forgetTicket(job.context, entry);
   } else if (upload) {
     // The same ticket repairs from round 0 again (M3-U50).
@@ -76,7 +88,7 @@ export interface Retried {
 export async function retryFiles(job: Job, entries: readonly Entry[]): Promise<Retried> {
   const failed = entries.filter((entry) => entry.status === "failed");
   const fresh = failed.filter(needsTicket);
-  const given: Promise<void>[] = [];
+  const given: Promise<unknown>[] = [];
   for (const entry of failed) requeue(job, entry, fresh.includes(entry), given);
   // One publish once every file is queued (M3-U59): a listener that retries then finds none failed and only waits. One
   // that pauses or cancels a file leaves it to its run below, which ends a cancelled one as job.abort() would.

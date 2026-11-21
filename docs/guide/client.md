@@ -296,7 +296,9 @@ is sent for it.
 - Before it asks for a new ticket, a retry gives the old one up with `/abort`, as `abort()` of the failed file would,
   and waits for the answer (at most 10 seconds): the parts or the object stored under it are removed, and with a
   [database store](store.md) the bytes it reserved no longer count against the owner's quota when the new `/upload`
-  is checked. A ticket whose `/complete` may have succeeded gets no `/abort`.
+  is checked. A ticket whose `/complete` may have succeeded gets no `/abort`. A multipart ticket the page gave up at
+  `pagehide` and kept for a [resume](resume.md) is discarded the same way, as `discard()` of its upload would, unless
+  another tab resumes it meanwhile.
 - When a `/complete` may have succeeded, a retry sends `/complete` again first, never a second upload, whatever the
   page's clock says about the ticket. Once the server has answered that the ticket is over, the next retry asks for a
   new one.

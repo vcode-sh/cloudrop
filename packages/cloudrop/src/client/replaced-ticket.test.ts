@@ -2,7 +2,8 @@
 // its records and locks. Wherever the client asks /upload for a ticket that replaces one it held, the old ticket is
 // given up first, so the bytes its pending row reserved no longer have the new /upload refused until the sweep. A
 // resumed upload that starts over (M3-U74) sends its /abort as a retry that replaces a ticket does (M11-R89), and
-// never for a ticket a /complete may have finished.
+// never for a ticket a /complete may have finished. A retry after pagehide kept the ticket for a resume (M4-F1)
+// discards that upload first, under its lock, so never while another tab resumes it (M11-R91).
 // Oracle: the requests the fixture saw, the file's outcome, and the rows read straight from the store.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,10 +13,12 @@ import { clientFixture, type Fault, type FaultCall } from "../testing/client-fix
 import { fakeIndexedDb } from "../testing/fake-indexeddb.ts";
 import { fakeLocks } from "../testing/fake-locks.ts";
 import { memoryStore } from "../testing/memory-store.ts";
+import { pageEvents } from "../testing/page-events.ts";
 import {
   FOUR_PARTS,
   fourParts,
   gate,
+  lockOf,
   partThree,
   reloaded,
   serverError,
@@ -126,6 +129,55 @@ describe("a resumed upload that starts over after a /complete that may have fini
     expect({ sent: setup.sent(), outcome: codeOf(data?.files[0]) }).toEqual({
       sent: ["POST /complete", "POST /complete", "POST /upload", ...WHOLE_FILE],
       outcome: "done",
+    });
+  });
+});
+
+describe("a retry after pagehide kept the failed file's ticket for a resume (M11-R91)", () => {
+  /** Part 3 got no answer on any attempt, then the page hid: the record stays and the lock is let go (M4-F1). */
+  async function hiddenThenRestored() {
+    const events = pageEvents();
+    let offline = true;
+    const page = ownedPage((call) => (offline && call.label === "PUT part 3" ? unreachable() : undefined));
+    const job = page.client().start("owned", fourParts());
+    await job.done;
+    await page.saved();
+    events.fire("pagehide");
+    await page.db.settled();
+    offline = false;
+    return { ...page, job, sent: page.from() };
+  }
+
+  it("discards the kept upload first, so its bytes no longer count against the quota", async () => {
+    const page = await hiddenThenRestored();
+    const outcome = await page.job.files[0]?.retry();
+    await page.db.settled();
+
+    expect({
+      sent: page.sent(),
+      outcome: codeOf(outcome),
+      rows: await page.rows(),
+      records: page.db.stored(),
+    }).toEqual({
+      sent: ["POST /abort", "POST /upload", ...WHOLE_FILE],
+      outcome: "done",
+      rows: ["aborted", "completed"],
+      records: {},
+    });
+  });
+
+  it("leaves the kept upload alone while another tab resumes it", async () => {
+    const page = await hiddenThenRestored();
+    const [id] = Object.keys(page.db.stored());
+    page.locks.holdElsewhere(lockOf(id));
+    const outcome = await page.job.files[0]?.retry();
+    await page.db.settled();
+
+    expect({ sent: page.sent(), outcome: codeOf(outcome), records: Object.keys(page.db.stored()) }).toEqual({
+      // The other tab's upload still holds the owner's bytes.
+      sent: ["POST /upload"],
+      outcome: "QUOTA_EXCEEDED",
+      records: [id],
     });
   });
 });

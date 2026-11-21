@@ -271,7 +271,7 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     });
   });
 
-  it("a retry after a back-forward cache restore leaves the given-up record, which another tab may hold", async () => {
+  it("a retry after a back-forward cache restore discards the given-up upload, which no other tab holds (M11-R91)", async () => {
     const page = pageEvents();
     let failing = true;
     const setup = persistFixture({
@@ -282,6 +282,7 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     page.fire("pagehide");
     await setup.drained();
     failing = false;
+    const sent = setup.from();
     const { data } = await job.retry();
     await setup.drained();
     const [first, second] = setup.issued;
@@ -289,8 +290,9 @@ describe("the record and the lock go when the page gives the ticket up", () => {
     expect({
       status: data?.files[0]?.status,
       fresh: second?.id !== first?.id,
-      stored: Object.keys(setup.db.stored()),
-    }).toEqual({ status: "done", fresh: true, stored: [first?.id] });
+      told: sent().slice(0, 2),
+      stored: setup.db.stored(),
+    }).toEqual({ status: "done", fresh: true, told: ["POST /abort", "POST /upload"], stored: {} });
   });
 
   it("abort() of a failed file that a /complete may have finished lets both go without an /abort", async () => {

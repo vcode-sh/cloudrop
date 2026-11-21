@@ -1589,3 +1589,25 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force. Supersedes `M3-U55` for the start over, and the last sentence of `M11-R89`'s "If wrong".
 - **Visible in:** `src/client/job-run.ts` (`startOver`), `src/client/replaced-ticket.test.ts`,
   `src/client/resume.test.ts`, `src/client/resume-job.test.ts`, `docs/guide/resume.md` ("The server is asked first").
+
+### M11-R91: a retry discards the upload `pagehide` kept for a resume
+
+- **Decision:** when `retry()` replaces a multipart ticket the page gave up without `/abort` (`pagehide` on a failed
+  file of a client that keeps records, `M4-F1`), it first discards that upload as `discard()` of its listing would
+  (`M3-U93`, `M3-U94`): under the upload's Web Lock, `/abort` with the record's token and `keep`, then the record
+  deleted and the lock let go. The new `/upload` waits for it. Nothing is sent when another tab holds the lock, or
+  when the record is gone (finished, discarded or expired); a ticket whose `/abort` was already sent gets no second.
+- **Why:** reproduced with a store and a quota of the file's size plus 1,000 bytes: a four-part file failed with
+  `NETWORK_ERROR`, the page hid and came back from the back-forward cache, and every `retry()` was answered
+  `QUOTA_EXCEEDED`, because the kept upload's row was still pending. The retry also left that upload listed by
+  `resumable()` beside the file it had just stored under a new key. `M4-F1` kept the record because "another tab may
+  resume and complete the upload, and an `/abort` with a live token would then delete the finished object": the lock
+  rules the first out, the record's absence shows a finished upload, and `keep` makes the `/abort` unable to delete an
+  object that landed. So the hazard `M4-F1` named does not apply to an `/abort` sent this way.
+- **If wrong:** while another tab resumes the kept upload, this page's retry still asks for a new ticket and sends the
+  file a second time, as before; an owner without room for both is refused `QUOTA_EXCEEDED` until the other tab ends.
+  A retry of such a file reads the browser's records once more. `abort()` of a file given up at `pagehide` still sends
+  nothing (`M4-F1`): it asks no `/upload`.
+- **Status:** in force. Amends `M4-F1`: "a later `retry()`'s new ticket leaves its record in place" no longer holds.
+- **Visible in:** `src/client/retry-file.ts` (`giveUpReplaced`), `src/client/replaced-ticket.test.ts`,
+  `src/client/persist.test.ts`, `docs/guide/client.md` ("Retry"), `docs/guide/resume.md` ("When a record is deleted").

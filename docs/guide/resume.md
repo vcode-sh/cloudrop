@@ -123,7 +123,8 @@ the metadata can be read from it.
 ## When a record is deleted
 
 - when its file ends done or is cancelled, also `abort()` of a failed file of `start()` that still holds its ticket;
-- when a new ticket replaces it (except the record of a ticket `pagehide` already gave up, which another tab may hold);
+- when a new ticket replaces it. A retry discards the upload of a ticket `pagehide` already gave up too, as
+  [`discard()`](#discard-one-upload) would, unless another tab holds it;
 - when its file fails for a reason the same ticket can never fix (the bucket or the server refused it, or the ticket
   expired), with the `/abort` that gives the ticket up;
 - when it is found expired, by `resumable()`, `resume()` or the next save (a minute early, so a listed upload has time
