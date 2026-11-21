@@ -94,8 +94,8 @@ with a stable `file.id`. What it cannot do without a record of its own:
     runs `onComplete` beside the first run, whose record is then refused;
   - `onComplete` throws: the claim is handed back at once, so the retry runs it without waiting.
 
-  `completionLeaseMs` is a `createCloudrop` option, 300000 (5 minutes) by default: set it above your slowest
-  `onComplete`. Keep `onComplete` idempotent in this mode: write with `INSERT … ON CONFLICT`, as the example's
+  `completionLeaseMs` is a `createCloudrop` option, 300000 (5 minutes) by default and from 1 second to 30 days: set
+  it above your slowest `onComplete`. Keep `onComplete` idempotent in this mode: write with `INSERT … ON CONFLICT`, as the example's
   `recordUpload` does.
 - **Retries are answered from the row.** A `/complete` of a completed file answers the stored result with no storage
   call and no hook, also after the token expired. So does a file deleted with `api.deleteFile`: its answer still names
@@ -902,7 +902,7 @@ run is in `deleted`, and again in `cleaned` or `waiting` once its key was checke
 **Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards. A URL works for
 15 minutes and never past the upload's token, so the last `PUT` can start 15 minutes after the upload stopped being
 unfinished (it completed, or ended), or at the token's deadline if that comes first; a key is checked for the last
-time `graceMs` after that (default 1 hour, at least 15 minutes), the time a `PUT` already under way gets to land. Files
+time `graceMs` after that (default 1 hour, from 15 minutes to 30 days), the time a `PUT` already under way gets to land. Files
 completed or ended longer ago than that are proven in the first run; a recent one makes the first run answer
 `waiting`, and a run 1 hour 15 minutes later `done`. Run it again until it reports `done`: it is idempotent, and two
 runs at once are safe.
@@ -1016,7 +1016,7 @@ failed, reported, cursor }`; pass `cursor` back to continue. It runs two passes:
   than `graceMs` after its end. Until then each sweep checks its key again.
 
 `graceMs` (default 1 hour) must be at least 15 minutes, the life of an upload URL, so no new `PUT` can start once a
-row may be cleaned up. A failing row is logged, counted in `failed` and left for the next sweep; the rows after it are
+row may be cleaned up, and at most 30 days. A failing row is logged, counted in `failed` and left for the next sweep; the rows after it are
 still swept. Two sweeps at once are safe, and so is a sweep racing a `/complete`: the sweep takes the row before it
 deletes anything. Each sweep counts in `cleaned` the rows it marked, so two at once may both count the same row.
 

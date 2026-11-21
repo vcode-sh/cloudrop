@@ -381,6 +381,7 @@ describe("cloudrop.api.eraseOwner", () => {
   it.for([
     { name: "an empty owner", owner: "", options: undefined },
     { name: "a grace under 15 minutes", owner: "u1", options: { graceMs: 899_999 } },
+    { name: "a grace over 30 days", owner: "u1", options: { graceMs: 2_592_000_001 } },
     { name: "a signal that is not an AbortSignal", owner: "u1", options: { signal: {} as AbortSignal } },
     { name: "options that are not an object", owner: "u1", options: "now" as never },
   ])("refuses $name with INVALID_INPUT", async ({ owner, options }) => {

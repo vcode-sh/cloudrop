@@ -24,10 +24,10 @@ export interface SweepOptions {
   cursor?: string;
   /**
    * How long past its token's deadline an unfinished upload, and past its end an ended one, is left alone. At least
-   * 900000 (15 minutes, the life of an upload URL), so no new PUT can start once a row may be cleaned up. A PUT already
-   * under way that lands after its row was cleaned is left in the bucket. Default 3600000 (1 hour). The sweep takes
-   * each row before it deletes anything, so a completion that started in time is never harmed; the grace keeps a slow
-   * one from being refused.
+   * 900000 (15 minutes, the life of an upload URL), so no new PUT can start once a row may be cleaned up, and at most
+   * 2592000000 (30 days). A PUT already under way that lands after its row was cleaned is left in the bucket. Default
+   * 3600000 (1 hour). The sweep takes each row before it deletes anything, so a completion that started in time is
+   * never harmed; the grace keeps a slow one from being refused.
    */
   graceMs?: number;
 }

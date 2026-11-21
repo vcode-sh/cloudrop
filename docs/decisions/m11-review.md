@@ -1366,6 +1366,30 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/store/sql/tables.ts`, `src/store/sql/executor.ts`, `src/store/sql/store.test.ts`,
   `src/store/sql/tables.db.integration.test.ts`, `src/testing/store-contract/transaction.ts`, `docs/guide/store.md`.
 
+### M11-R63: `completionLeaseMs` and `graceMs` are at most 30 days
+
+- **Decision:** `createCloudrop` refuses a `completionLeaseMs` over 2,592,000,000 (30 days) with `INVALID_CONFIG`
+  ("completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000."), and
+  `api.sweep` and `api.eraseOwner` refuse a `graceMs` over the same with `INVALID_INPUT` ("graceMs must be at least
+  900000 (15 minutes), …, and at most 2592000000 (30 days)."). The other numbers an app gives were checked and need
+  no change: a `quota` answer must be null or a safe integer from 0 (anything else, `NaN`, `Infinity`, a negative or
+  a fraction included, refuses the upload and is logged), and the largest safe integer fits Postgres's `bigint`;
+  `limit` of `files`, `allFiles` and `sweep` is a whole number from 1 to 1000; a cursor's time is at most the year
+  9999 (`isStoreCursor`); `all` is a boolean and `signal` an `AbortSignal`.
+- **Why:** both had only a lower bound, and the claim and the sweep subtract them from the current time. With
+  `Number.MAX_SAFE_INTEGER` the result is no date at all and `toISOString` throws `RangeError: Invalid time value`;
+  with `1e14` it is a year before 1, which Postgres refuses as a time. Either way every `/complete` or every sweep
+  failed, long after the option was set. 30 days is far beyond any completion or upload (a token lives 24 hours, a
+  URL 15 minutes) and keeps every computed time inside what Postgres and JavaScript hold. A day, the token's life,
+  was tried for the lease first and is too short: a lease longer than the deadline plus the grace is how an app keeps
+  the sweep from ending a slow completion, which `sweep.test.ts` covers with 26 hours.
+- **If wrong:** an app that set either above 30 days now fails at construction or at the call, naming the bound,
+  where before it ran with a value that only postponed cleanup.
+- **Status:** in force.
+- **Visible in:** `src/server/store-config.ts`, `src/server/leftovers.ts`, `src/server/sweep.ts`,
+  `src/server/erase.ts`, `src/server/store-config.test.ts`, `src/server/sweep.test.ts`, `src/server/erase.test.ts`,
+  `docs/guide/store.md`.
+
 ### M11-R66: a page of sweep work is one index range per status
 
 - **Decision:** the SQL store's `stale` reads each status on its own, `status = '…' AND <time> < before`, ordered by

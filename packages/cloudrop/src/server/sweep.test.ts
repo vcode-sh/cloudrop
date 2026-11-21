@@ -306,16 +306,35 @@ describe("api.sweep: paging and failures", () => {
       error: expect.objectContaining({
         code: "INVALID_INPUT",
         message:
-          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up.",
+          "graceMs must be at least 900000 (15 minutes), the life of an upload URL, so no upload can start after a row's deadline once it may be cleaned up, and at most 2592000000 (30 days).",
       }),
     });
     expect((await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.expired).toBe(1);
     expect((await statuses(fixture))[ticket.id]?.[0]).toBe("expired");
   });
 
+  it("takes the longest lease and the longest grace, 30 days each", async () => {
+    const fixture = storeFixture({ owned }, { completionLeaseMs: 2_592_000_000 });
+    await fixture.single("owned", TEXT);
+    // 31 days on, the upload is a day past its deadline and the 30 days of grace.
+    vi.setSystemTime(at(31 * 24 * HOUR + 1));
+    expect((await fixture.cloudrop.api.sweep({ graceMs: 2_592_000_000 })).data).toEqual({
+      expired: 1,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      cursor: null,
+    });
+  });
+
   it.for([
     { name: "a limit of 0", options: { limit: 0 } },
     { name: "a limit over 1000", options: { limit: 1001 } },
+    { name: "a limit that is not a whole number", options: { limit: 1.5 } },
+    // The sweep subtracts the grace from the time: one this long gave a date no database stores (M11-R63).
+    { name: "a grace of the largest safe integer", options: { graceMs: Number.MAX_SAFE_INTEGER } },
+    { name: "a grace one millisecond over 30 days", options: { graceMs: 2_592_000_001 } },
+    { name: "a grace that is not a number", options: { graceMs: Number.POSITIVE_INFINITY } },
     { name: "a cursor it did not issue", options: { cursor: "garbage" } },
     { name: "an expire cursor whose position was edited", options: { cursor: "expire:not-a-cursor" } },
     { name: "a cleanup cursor without the row's id", options: { cursor: "cleanup:1763380800000:" } },

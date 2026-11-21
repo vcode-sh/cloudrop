@@ -25,7 +25,7 @@ export interface StoreOptions {
   quota?: Quota;
   /**
    * With a store: how long a `/complete` may hold a file while `onComplete` runs before another request may take it
-   * over. Make it longer than your slowest `onComplete`. Default 300000 (5 minutes).
+   * over. Make it longer than your slowest `onComplete`. Default 300000 (5 minutes), at most 2592000000 (30 days).
    */
   completionLeaseMs?: number;
 }
@@ -37,6 +37,11 @@ export interface StoreConfig {
 }
 
 const DEFAULT_LEASE_MS = 300_000;
+/**
+ * 30 days, far beyond any completion. The claim and the sweep subtract the lease from the time, and the result must
+ * stay a date every database stores.
+ */
+const MAX_LEASE_MS = 2_592_000_000;
 const STORE_METHODS = [
   "reserve",
   "attach",
@@ -123,8 +128,10 @@ export function readStoreConfig(options: StoreOptions, routes: readonly RouteCon
     throw configError("quota must be a function from an owner to their limit in bytes, or null for no limit.");
   }
   const leaseMs = completionLeaseMs ?? DEFAULT_LEASE_MS;
-  if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000) {
-    throw configError("completionLeaseMs must be a whole number of milliseconds of at least 1000, such as 300000.");
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > MAX_LEASE_MS) {
+    throw configError(
+      `completionLeaseMs must be a whole number of milliseconds from 1000 to ${MAX_LEASE_MS} (30 days), such as 300000.`,
+    );
   }
   checkRoutes(routes, store);
   return { store, quota, completionLeaseMs: leaseMs };

@@ -14,7 +14,7 @@ import { deleteCompleted } from "./store-delete.ts";
 export interface EraseOptions {
   /**
    * How long a PUT already under way gets to land after its URL ran out, before the key is checked for the last time:
-   * at least 900000 (15 minutes). Default 3600000 (1 hour).
+   * at least 900000 (15 minutes), at most 2592000000 (30 days). Default 3600000 (1 hour).
    */
   graceMs?: number;
   /** Stops the run before the next file; the report then says done: false. */

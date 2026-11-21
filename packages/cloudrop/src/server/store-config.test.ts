@@ -42,7 +42,28 @@ describe("createCloudrop with a store: configuration errors", () => {
     {
       name: "a lease of 0",
       make: create({ store, completionLeaseMs: 0 }),
-      message: "completionLeaseMs must be a whole number of milliseconds of at least 1000, such as 300000.",
+      message:
+        "completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000.",
+    },
+    // The claim and the sweep subtract the lease from the time: a lease this long gave a date no database stores, and
+    // every /complete and sweep threw "Invalid time value" (M11-R63).
+    {
+      name: "a lease of the largest safe integer",
+      make: create({ store, completionLeaseMs: Number.MAX_SAFE_INTEGER }),
+      message:
+        "completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000.",
+    },
+    {
+      name: "a lease one millisecond over 30 days",
+      make: create({ store, completionLeaseMs: 2_592_000_001 }),
+      message:
+        "completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000.",
+    },
+    {
+      name: "a lease that is not a number",
+      make: create({ store, completionLeaseMs: Number.NaN }),
+      message:
+        "completionLeaseMs must be a whole number of milliseconds from 1000 to 2592000000 (30 days), such as 300000.",
     },
     {
       name: "a route with owner and no store",

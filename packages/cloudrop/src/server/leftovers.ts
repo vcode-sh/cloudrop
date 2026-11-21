@@ -18,11 +18,20 @@ const URL_LIFETIME_MS = URL_LIFETIME_SECONDS * 1000;
  */
 export const MIN_GRACE_MS: number = URL_LIFETIME_MS;
 
-/** A `graceMs` option of at least 15 minutes, `what` naming what it is for; the default when left out. */
+/** 30 days, far beyond any upload: the sweep subtracts the grace from the time, which must stay a date a database stores. */
+const MAX_GRACE_MS = 2_592_000_000;
+
+/** A `graceMs` option from 15 minutes to 30 days, `what` naming what the least is for; the default when left out. */
 export function readGrace(graceMs: unknown, what: string): Result<number> {
   const value = graceMs ?? DEFAULT_GRACE_MS;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= MIN_GRACE_MS) return ok(value);
-  return fail(invalidInput(`graceMs must be at least ${MIN_GRACE_MS} (15 minutes), ${what}.`));
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= MIN_GRACE_MS && value <= MAX_GRACE_MS) {
+    return ok(value);
+  }
+  return fail(
+    invalidInput(
+      `graceMs must be at least ${MIN_GRACE_MS} (15 minutes), ${what}, and at most ${MAX_GRACE_MS} (30 days).`,
+    ),
+  );
 }
 
 /**
