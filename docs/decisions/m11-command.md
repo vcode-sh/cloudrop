@@ -39,8 +39,10 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** the pilot reads its bucket and keys from the same `R2_*` variables whether it runs on R2 or on another
   S3 service, and cannot say so in one command line: it passes the R2 pairs or the S3 pairs
   (`--var CLOUDROP_S3_BUCKET=R2_BUCKET`) by the service it runs on. The guide shows this.
-- **Status:** in force.
-- **Visible in:** `packages/cloudrop/src/cli/vars.ts`, `src/cli/vars.test.ts`, `src/cli/args.ts` (`USAGE`),
+- **Status:** in force. One reason it gives no longer holds: since `M11-R110` no printed command reads the bucket as
+  `"$NAME"`; a `NAME` stays a shell name because the messages print it and the person sets it in a shell. Amended by
+  `M11-R234`: what stands before `=` is repeated only as a setting's name, misspelt or starting with `CLOUDROP_`.
+- **Visible in:** `packages/cloudrop/src/cli/vars.ts`, `src/cli/vars.test.ts`, `src/cli/usage.ts`,
   `docs/guide/command.md`.
 
 ### M11-C3: what follows `=` is echoed only when it is a variable's name
@@ -55,7 +57,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   taken as a name and printed in "... is not set". The command cannot tell the two apart; the person typed it on their
   own command line.
 - **Status:** in force. The rule it cites is `M11-R177`'s since 0.6.0: the command never prints a secret, and prints
-  the bucket's name and the S3 endpoint in the commands it suggests.
+  the bucket's name and the S3 endpoint in the commands it suggests. Amended by `M11-R234`: a name-shaped word before
+  `=` is no longer repeated unless it is a setting's name, misspelt or starting with `CLOUDROP_`.
 - **Visible in:** `packages/cloudrop/src/cli/vars.ts`, `src/cli/vars.test.ts` ("a value where the variable's name
   belongs").
 
@@ -72,11 +75,11 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   command that reads `"$CLOUDROP_R2_BUCKET"` expands to nothing in the app's shell. A suggested command without the
   pairs would report "No storage settings found".
 - **If wrong:** the suggested commands grow long with many pairs; they stay copyable.
-- **Status:** in force. The suggested commands still leave out `--env-file` and `--jurisdiction`, as before this change.
-  Its `"$NAME"` form in a printed command is superseded by `M11-R110`: the command names the bucket and the endpoint
-  themselves.
+- **Status:** in force for the messages. Two parts are superseded by `M11-R110`: a suggested cloudrop command now
+  repeats `--env-file` and `--jurisdiction` as well as the `--var` pairs, starts with the runner (`npx cloudrop …`),
+  and a printed Wrangler or AWS CLI command names the bucket and the endpoint themselves, never `"$NAME"`.
 - **Visible in:** `packages/cloudrop/src/cli/settings.ts`, `src/cli/bucket-access.ts`, `src/cli/instructions.ts`,
-  `src/cli/doctor.ts`, `src/cli/setup.ts`, `src/cli/args.ts` (`sameArguments`), `src/cli/command-fixture.ts`
+  `src/cli/doctor.ts`, `src/cli/setup.ts`, `src/cli/commands.ts` (`cloudropCommand`), `src/cli/command-fixture.ts`
   (`runRenamed`), `src/cli/names.test.ts`.
 
 ### M11-C5: the notes work on the names in use
@@ -99,7 +102,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   notes never change the exit code. Without `--var`, a name one edit from a setting but without the `CLOUDROP_` prefix
   (`CLOUDROPSECRET`) now gets a note too.
 - **Status:** in force; amends `M9-H103` (the names compared, and the wording of the both-services note).
-- **Visible in:** `packages/cloudrop/src/cli/misspelt.ts`, `src/cli/misspelt.test.ts`, `src/cli/settings.ts`
+- **Visible in:** `packages/cloudrop/src/cli/misspelt.ts`, `src/cli/misspelt.test.ts`, `src/cli/variables.ts`
   (`readVariables`), `src/cli/names.test.ts`, `src/cli/doctor.test.ts`.
 
 ### M11-C6: the secret's variable is checked as one secret

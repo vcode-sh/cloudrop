@@ -16,7 +16,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   of two calls at once exactly one answers `deleted: true`. `cleaned` says whether a `PUT` with one of the file's URLs
   can still put the object back: within 1 hour 15 minutes of the completion it is false on every call.
 - **If wrong:** a caller that needs the row reads `api.file(id)`; the two fields are derived from it.
-- **Status:** in force.
+- **Status:** in force. `NOT_FOUND` has one more case since `M11-R150`: a file whose completion is recorded while the
+  call runs, which stays completed and is deleted by a second call.
 - **Visible in:** `src/server/store-api.ts`, `src/index.ts`, `src/server/store-api.test.ts`,
   `docs/guide/store.md#what-deletefile-answers`.
 

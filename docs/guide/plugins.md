@@ -253,4 +253,6 @@ without `<?xml` may reach either, so the check reads its doctype both ways and t
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An
   empty file is not read: R2 answers any range of an empty object with `416` (measured 2026-11-21).
 
-Rulings and their reasons: [M10-K](../decisions/m10-content.md).
+Rulings and their reasons: [M10-K](../decisions/m10-content.md) for the checks, [M11-K](../decisions/m11-content.md)
+for what a refusal carries, and the entries of the review before 0.6.0 that changed what is detected
+([M11-R](../decisions/m11-review.md): `M11-R130` to `M11-R137`, `M11-R211`, `M11-R212`, `M11-R220`, `M11-R221`).

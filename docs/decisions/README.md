@@ -62,9 +62,9 @@ Reading older text:
 ## Authority
 
 The code, the design spec (`docs/superpowers/specs/2026-11-15-cloudrop-design.md`) and these entries are the authority.
-The M1 and M2 plans (`2026-11-15-*.md`) and the M2 audit are history: they record what was intended before execution and
-stay unchanged as evidence (`M2-X9`). The M3 plan is active until M3 is executed and is revised in place. Where a plan
-disagrees with an entry here, the entry and the code win.
+The M1, M2 and M3 plans (`2026-11-15-*.md`, `2026-11-16-m3-*.md`, `2026-11-17-m3-chaos.md`) and their audits are
+history: they record what was intended before execution and stay unchanged as evidence (`M2-X9`). M3 is executed, so
+no plan is active. Where a plan disagrees with an entry here, the entry and the code win.
 
 ## Statuses
 

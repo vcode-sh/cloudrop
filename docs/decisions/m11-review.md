@@ -322,7 +322,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** multipart uploads and presigned URLs were not measured for either behaviour, so an upload still belongs
   to its key exactly as written until it completes, and a presigned URL of an unknown key still fails its signature.
   A test that relied on the fake keeping both forms of one key as two objects now sees one.
-- **Status:** in force.
+- **Status:** in force. `testBucket.object(key)` answers the form last written since `M11-R209`.
 - **Visible in:** `src/testing/fake-r2.ts`, `src/testing/fake-r2/bucket.ts`, `src/testing/fake-r2/objects.ts`,
   `src/testing/fake-r2/signature.ts`, `src/testing/fake-r2.test.ts`, `src/testing/fake-r2/signature.test.ts`.
 
@@ -612,7 +612,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   the sweep from ending a slow completion, which `sweep.test.ts` covers with 26 hours.
 - **If wrong:** an app that set either above 30 days now fails at construction or at the call, naming the bound,
   where before it ran with a value that only postponed cleanup.
-- **Status:** in force.
+- **Status:** in force. `docs/guide/errors.md` gives `graceMs` both bounds since `M11-R233`.
 - **Visible in:** `src/server/store-config.ts`, `src/server/leftovers.ts`, `src/server/sweep.ts`,
   `src/server/erase.ts`, `src/server/store-config.test.ts`, `src/server/sweep.test.ts`, `src/server/erase.test.ts`,
   `docs/guide/store.md`.
@@ -1319,7 +1319,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a driver built by hand with `rules: { ...R2_RULES }` gets the neutral words on R2. A storage service
   that answers a listing of a missing bucket with a bare `404` is told "something else may be answering", and the
   finding still names the endpoint to check.
-- **Status:** in force. Extends `M9-H101`.
+- **Status:** in force. Extends `M9-H101`. A bucket that does not exist has the command's own sentence, with its
+  variable and the jurisdiction, since `M11-R237`.
 - **Visible in:** `src/cli/bucket-access.ts`, `src/server/bucket-check.ts`, `src/cli/setup.ts`,
   `src/cli/doctor.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#doctor`.
 
@@ -1633,7 +1634,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   wait for a row whose committed version is `pending`, so the test holds the read until the completion has committed.
 - **If wrong:** a caller that deletes a file in the moment it completes gets `NOT_FOUND` where 0.5.0 deleted it; it
   calls again, and the hook then runs.
-- **Status:** in force. Each test was seen failing on the code before the fix.
+- **Status:** in force. Each test was seen failing on the code before the fix. The guides name that `NOT_FOUND`:
+  `docs/guide/store.md` since `M11-R214`, `docs/guide/errors.md` since `M11-R233`.
 - **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete-race.test.ts`,
   `src/adapters/drizzle-handler.db.integration.test.ts`, `src/testing/delete-fixture.ts` (`state.read`).
 
@@ -1878,7 +1880,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   with `doctor` and `setup`; the guide says so. What follows `=` in `--var` is still printed when it is shaped like a
   variable's name (`M11-C3`), so a value typed there by mistake can be printed: the guide says that too.
 - **Status:** in force. Completes `M11-R110`; supersedes the "no value ever printed" of `M9-C8`. The fixture itself
-  checks every printed command word for word since `M11-R208`.
+  checks every printed command word for word since `M11-R208`. What the command repeats of a person's own arguments is
+  narrower since `M11-R234`.
 - **Visible in:** `src/cli/printed-values.test.ts`, `src/cli/usage.ts`, `src/cli/commands.ts`, `src/cli/settings.ts`,
   `src/cli/variables.ts`, `src/cli/command-fixture.ts`, `docs/guide/command.md#settings`,
   `docs/decisions/m9-cli.md` (`M9-C8`), `docs/decisions/m11-command.md` (`M11-C3`).
@@ -2729,3 +2732,30 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   answers such a bucket otherwise (a refusal), that path already carries the same hint.
 - **Status:** in force. Extends `M9-H101` and `M11-R116`.
 - **Visible in:** `src/cli/bucket-access.ts`, `src/cli/doctor.test.ts`, `src/cli/variables.test.ts`.
+
+### M11-R238: records that 0.6.0 left behind say what is true today
+
+- **Decision:** eight records were corrected, none of them a rule.
+  - `docs/decisions/m11-command.md`: `M11-C2`, `M11-C4` and `M11-C5` name the files that hold the code today
+    (`src/cli/usage.ts`, `cloudropCommand` in `src/cli/commands.ts`, `readVariables` in `src/cli/variables.ts`), and
+    their status lines say what `M11-R110` changed: no printed command reads `"$NAME"`, and a suggested command
+    repeats `--env-file` and `--jurisdiction` too.
+  - `docs/superpowers/plans/README.md`: the listing across owners and the bucket-setup command are no longer
+    candidates (`api.allFiles`, `cloudrop setup`), and the bundled server's size is the one measured today.
+  - `docs/decisions/README.md`: the M3 plans are history; no plan is active.
+  - `scripts/size-limit.config.ts`: each comment carries the size measured on 2026-11-21 with `bun run
+    package:check`: cloudrop 46.79 kB, next 0.83 kB, node 2.35 kB, sql 13.11 kB, drizzle 14.85 kB, prisma 12.59 kB,
+    testing 14.17 kB, plugins 6.27 kB, the bundled server 34.51 kB, the client 13.48 kB, react 2.26 kB.
+  - `AGENTS.md`: the web-platform rule names its second exception, the command's bin, which uses Node's `process` and
+    reads `--env-file` through `process.getBuiltinModule("node:fs")` (`M9-C9`).
+  - `docs/guide/plugins.md`: its last line links `M11-K` and the review entries that changed what is detected.
+  - Status lines: every one of the 157 `M11` entries was read. Five lacked a pointer to the entry that changed or
+    completed them and have it now: `M11-D1` (`M11-R150`), `M11-R26` (`M11-R209`), `M11-R63` (`M11-R233`),
+    `M11-R150` (`M11-R214`, `M11-R233`), and those this round changed (`M11-R41`, `M11-R111`, `M11-R115`, `M11-R116`,
+    `M11-R171`, `M11-R174`, `M11-R177`, `M11-C2`, `M11-C3`).
+- **Why:** each sent a reader to a file, a size or a plan that is no longer there. `M11-R213` did this pass once; the
+  entries after it, and the files it did not cover, had drifted again.
+- **If wrong:** the sizes were measured on this branch before the other fixes of the final review merged; the
+  release's own measurement may differ by a few hundredths of a kB.
+- **Status:** in force. Continues `M11-R213`.
+- **Visible in:** the files named above.

@@ -143,16 +143,17 @@ each now decided:
 - The pilot can adopt 0.4.0: `account` instead of its `x-upload-user` header, `onDelete` for its audit trail, the
   `api.files` filters for its search, and `contentChecks()`.
 - The remaining plugins: `limits()`, `images()`, `checksums()`; quarantine and virus scanning.
-- "Attach on submit" (an upload kept pending until the form that holds it is saved), a server-side upload with a row,
-  and a listing across owners (it needs another index).
-- The store paths behind their own entry (`M5-T69`), now that the bundled server is 31.2 of 32 kB (`M10-D10`).
+- "Attach on submit" (an upload kept pending until the form that holds it is saved) and a server-side upload with a
+  row. The listing across owners that stood here is built for 0.6.0: `api.allFiles`, with its index (`M11-L`).
+- The store paths behind their own entry (`M5-T69`): the bundled server measured 34.51 kB on 2026-11-21, under a
+  ceiling of 36 kB that is provisional until the owner sets it (`M10-D10`, `M11-R100`).
 
 ### M6: the plugins
 
 `contentChecks` shipped in 0.4.0; `limits`, `images` and `checksums` remain (base spec §8). `limits()` keeps rate limits and the quotas a store
 does not count; a storage quota is the store's `quota` (M5). Still recorded from the product-fit review of
-2026-11-17: a bucket-setup command for R2 and S3-compatible services, a React Native client with background transfer,
-per-route `Cache-Control`, batches over 100 files.
+2026-11-17: a React Native client with background transfer, per-route `Cache-Control`, batches over 100 files. Its
+bucket-setup command shipped as `cloudrop setup` (`M9-C`, extended by `M11-C` and `M11-R`).
 
 ### After M5 (from its tasks' concerns)
 
