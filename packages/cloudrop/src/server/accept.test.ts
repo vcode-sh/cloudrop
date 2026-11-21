@@ -59,8 +59,13 @@ describe("matchAccept", () => {
     expect(matchAccept(["image/png"], "image/png", "photo.")).toEqual({ ext: ".png" });
   });
 
-  it("refuses a contradictory extension hidden by trailing dots", () => {
-    expect(matchAccept(["image/png"], "image/png", "payload.html..")).toEqual({
+  // Windows drops the dots and spaces a name ends with when it makes the file, so that is the name's extension.
+  it("reads the extension of a name that ends in a space", () => {
+    expect(matchAccept(["text/plain"], "text/plain", "a.txt ")).toEqual({ ext: ".txt" });
+  });
+
+  it("refuses a contradictory extension hidden by trailing dots and spaces", () => {
+    expect(matchAccept(["image/png"], "image/png", "payload.html. .")).toEqual({
       problem: "The file name ends in .html, which does not match its type image/png. Rename the file or pick another.",
     });
   });

@@ -61,8 +61,9 @@ export function normalizeType(type: string): string | null {
 }
 
 function extensionOf(name: string): string | null {
-  // Downloads may lose trailing dots, so they cannot hide a contradictory extension.
-  const trimmed = name.replace(/\.+$/, "");
+  // Windows drops the dots and spaces a name ends with when it makes the file (Microsoft, Naming Files, Paths, and
+  // Namespaces), so they are no part of the extension and cannot hide a contradictory one (M11-R258).
+  const trimmed = name.replace(/[. ]+$/, "");
   const dot = trimmed.lastIndexOf(".");
   // ".env" is a name without an extension, not an extension without a name.
   return dot > 0 ? trimmed.slice(dot + 1).toLowerCase() : null;

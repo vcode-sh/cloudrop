@@ -2474,7 +2474,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   anyway. `deny: ["image/svg+xml"]` does not see an SVG whose doctype outlasts the read on a route that names another
   XML type; the guide's Limits say so.
 - **Status:** in force; the 7 kB ceiling is provisional until the owner confirms it. Amends `M11-R211` (the doctype
-  pattern). `src/plugins/sniff-text.test.ts` has each bypass with each quote, a comment and a processing instruction,
+  pattern). `M11-R258` extends ruling 2 to a root hidden behind what follows the doctype, and ruling 1 to a
+  processing instruction. `src/plugins/sniff-text.test.ts` has each bypass with each quote, a comment and a processing instruction,
   each kind of doctype that outlasts the read, and both parsers' readings; `src/plugins/sniff-fuzz.test.ts` builds
   2,000 doctypes from the grammar's productions and finds the root after each.
 - **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `src/plugins/sniff-fuzz.test.ts`,
@@ -3293,3 +3294,45 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `src/plugins/content-checks-containers.test.ts`, `src/plugins/sniff-text.test.ts`,
   `src/storage/s3/bucket-settings.test.ts`, `src/storage/storage-error.test.ts`, `docs/guide/plugins.md`,
   `docs/research/r2-spike-findings.md`.
+
+### M11-R258: a document's root that the read does not reach, `<?` as an HTML parser reads it, and a name that ends in a space
+
+- **Decision:**
+  1. **One rule for a root the 4 KiB read does not reach.** Text that has shown a doctype is a document. When the
+     text ends before its root, in the doctype (`M11-R220`), in the blanks, the comment or the processing
+     instruction after it, or in the first characters of a comment or of the root's own tag (`<!-`, `<sv`), it is
+     `application/xml`, unless the HTML reading found a root or the text opens as a web
+     page (`<!--`, `<!DOCTYPE html`: `M10-K12`, `M11-R131`). Text that opens with a processing instruction and shows
+     no doctype is not known to be a document: one still open where the text ends, or one that is all the text
+     holds, shows no type.
+  2. **A processing instruction is read both ways when there is no `<?xml`.** An XML parser ends it at `?>`; an
+     HTML parser reads `<?` as the start of a bogus comment and ends it at the first `>` (HTML Standard §13.2.5.6,
+     tag open state: "unexpected-question-mark-instead-of-tag-name … Reconsume in the bogus comment state";
+     §13.2.5.41, bogus comment state: `>` emits the comment). The root either reading finds decides, as for a
+     doctype (`M11-R220`).
+  3. **A file name's extension is read after the dots and spaces the name ends with.** `"a.txt "` sent as
+     `text/plain` is accepted with the key extension `.txt`; `"payload.html. ."` sent as `image/png` is refused as
+     `.html`. The name itself is kept as sent.
+- **Why:** reproduced: `<!DOCTYPE svg><!--` + 5,000 blanks + `--><svg onload=…>`, `<!DOCTYPE svg>` + 5,000 blanks +
+  `<svg…>` and the same with `<?p …?>` each showed no type in the 4,096 bytes the plugin reads, while a doctype
+  still open there read as XML and a comment at the start as a web page: three answers to one question. And
+  `<?p a><script>alert(1)</script> ?><y>` showed no type, though a browser that gets it as a web page runs the
+  script. The rule stops at the doctype because of PHP: source files open with `<?php` and, by PHP's own
+  convention, never close it, so "an open processing instruction is XML" would refuse every PHP file over 4 KiB
+  that 0.5.0 took, and one that closes its tag where the file ends as well. A name ending in a space was refused
+  "The file name's extension does not match its type text/plain", which is not true of `a.txt`: Windows drops the
+  dots and spaces a name ends with when it makes the file (Microsoft, "Naming Files, Paths, and Namespaces": "Do not
+  end a file or directory name with a space or a period"; Chromium's `net/base/filename_util_internal.cc`: "Handle
+  CreateFile() stripping trailing dots and spaces on filenames"), which is why trailing dots were already dropped
+  before the extension was read. macOS and Linux keep such a name; there its extension names no type, so reading
+  it as Windows does refuses nothing those systems would open.
+- **If wrong:** a file that is nothing but a doctype and blanks or a comment (`<!DOCTYPE x>` and a line break) now
+  reads as XML where it showed no type. `<!DOCTYPE svg>` followed by a comment that runs past the read is refused
+  as XML when sent as a non-XML type, where it passed as sent. A root hidden behind an opening processing
+  instruction longer than 4 KiB (`<?p ` + blanks + `?><svg…>`) still shows no type: the guide's Limits say so. PHP
+  source whose first `>` is directly followed by one of the fifteen tags or `<svg` (`<?php // a -> <b>x</b>`;
+  `<?php echo $a ?>` is not such a case) is refused as the web page an HTML parser makes of it. `<!x>` and `</x>`,
+  which an HTML parser also skips, are not read: only what `M11-R131` names as the prolog, and `<?`.
+- **Status:** in force; extends `M11-R220`.
+- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `src/server/accept.ts`,
+  `src/server/accept.test.ts`, `docs/guide/plugins.md` (the recognition table, Limits).

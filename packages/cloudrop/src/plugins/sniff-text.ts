@@ -49,10 +49,10 @@ const HTML_ROOTS: ReadonlySet<string> = new Set(
   "html head script iframe h1 div font table a style title b body br p hta:application".split(" "),
 );
 /**
- * What may come before an XML document's root element (XML 1.0 §2.8): whitespace, processing instructions, comments,
- * and a doctype, of which this matches the opening; `doctypeEnd` reads the rest.
+ * What may come before a document's root element (XML 1.0 §2.8): whitespace, comments, and the opening of a doctype or
+ * of a processing instruction, whose ends `doctypeEnd` and `rootElement` find.
  */
-const PROLOG_ITEM = /[\t\n\f\r ]+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|(<!doctype)/iy;
+const PROLOG_ITEM = /[\t\n\f\r ]+|<!--[\s\S]*?-->|(<!doctype)|<\?/iy;
 /**
  * One part of a doctype: a quoted literal (XML 1.0 §2.3), a comment (§2.5) or a processing instruction (§2.6), whose
  * text may hold any character, or one character outside them. One that opens and never closes matches nothing, so the
@@ -65,6 +65,8 @@ const DOCTYPE_PART = /"[^"]*"|'[^']*'|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|[^"'<]|<(?!
  * rest of its whitespace bytes. "<a,b>" and "<a@b.com>" are not tags (M11-R131).
  */
 const START_TAG = /<((?:[\w.-]+:)?[A-Za-z_][\w.-]*)(?=[\t\n\f\r />])/y;
+/** What is left of a prolog the read cut: nothing, a comment, or the first characters of a comment or a tag. */
+const CUT = /^(?:<!--|<!-?$|<[\w.:-]*$|$)/;
 /** The standard's whitespace bytes (§3), which every row of its table ignores before the pattern. */
 const LEADING = /^[\t\n\f\r ]+/;
 
@@ -101,22 +103,40 @@ function doctypeEnd(text: string, at: number): number {
 }
 
 /**
+ * Where the prolog item PROLOG_ITEM just matched ends, 0 when it is still open where the text ends. `html` reads it as
+ * an HTML parser does: a doctype ends at its first ">", inside quotes too (HTML Standard §13.2.5, the DOCTYPE states),
+ * and so does "<?", which opens a bogus comment there (§13.2.5.6, §13.2.5.41).
+ */
+function itemEnd(text: string, item: RegExpExecArray, html: boolean): number {
+  const at = PROLOG_ITEM.lastIndex;
+  if (item[1] && !html) return doctypeEnd(text, at);
+  if (!item[1] && item[0] !== "<?") return at;
+  const close = html ? ">" : "?>";
+  const end = text.indexOf(close, at);
+  return end < 0 ? 0 : end + close.length;
+}
+
+/**
  * The name of the document's root element in lower case, "" when what follows the prolog is not a start tag, and null
- * when a doctype is still open where the text ends. `html` reads a doctype as an HTML parser does, to its first ">"
- * (HTML Standard §13.2.5, the DOCTYPE states: each of them ends the doctype there, inside quotes too).
+ * when the text ends before the root of a document: one that has shown a doctype, and ends in it, in the blanks, the
+ * comment or the processing instruction after it, or in the first characters of the root's tag (M11-R220, M11-R258). Text that opens with a processing instruction
+ * and shows no doctype is not known to be a document: PHP source opens with "<?php" and need never close it.
  */
 function rootElement(text: string, html: boolean): string | null {
   let at = 0;
+  let doctype = false;
   for (;;) {
     PROLOG_ITEM.lastIndex = at;
     const item = PROLOG_ITEM.exec(text);
     if (!item) break;
-    at = PROLOG_ITEM.lastIndex;
-    if (item[1]) at = html ? text.indexOf(">", at) + 1 : doctypeEnd(text, at);
-    if (!at) return null;
+    doctype ||= !!item[1];
+    at = itemEnd(text, item, html);
+    if (!at) return doctype ? null : "";
   }
   START_TAG.lastIndex = at;
-  return START_TAG.exec(text)?.[1]?.toLowerCase() ?? "";
+  const root = START_TAG.exec(text)?.[1]?.toLowerCase() ?? "";
+  // No tag, and nothing after the prolog but a comment that never ends or the start of one or of a tag's name.
+  return doctype && !root && CUT.test(text.slice(at)) ? null : root;
 }
 
 /** Whether `bytes` start with a byte order mark: such a file is text, whatever bytes follow. */
@@ -145,6 +165,6 @@ export function sniffText(bytes: Uint8Array): Sniffed | null {
   if (roots.some((name) => name?.split(":").at(-1) === "svg")) return SVG;
   const page = roots.some((name) => name === "html" || (!xml && HTML_ROOTS.has(name ?? "")));
   if (page || HTML_START.test(text)) return HTML;
-  // A doctype still open where the read ends hides the root of a document only an XML parser reads on.
+  // A prolog still open where the read ends hides the root of a document only an XML parser reads on.
   return xml || root === null ? XML : null;
 }

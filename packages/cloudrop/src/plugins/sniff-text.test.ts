@@ -42,7 +42,7 @@ describe("sniff: each text/html row of WHATWG MIME Sniffing §7.1", () => {
 
   // A doctype's name is its whole name; an element's is too, which "where a tag ends" holds with "<br2>".
   it("does not match <!DOCTYPE HTML inside a longer name", () => {
-    expect(typeOf("<!DOCTYPE HTMLx>")).toBeNull();
+    expect(typeOf("<!DOCTYPE HTMLx><y>")).toBeNull();
   });
 
   it("reads the <?xml row as XML", () => {
@@ -186,5 +186,48 @@ describe("sniff: the root element behind a doctype an XML parser reads to its en
 
   it("still reads an HTML doctype that does not end as a web page", () => {
     expect(typeOf('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN')).toBe("text/html");
+  });
+});
+
+// One rule for a root the 4 KiB read does not reach (M11-R258): text that has shown a doctype is a document, and one
+// whose prolog is still going where the read ends is XML, as with a doctype that is itself still open (M11-R220).
+describe("sniff: a document whose root lies past the read (M11-R258)", () => {
+  const svg = "<svg onload=alert(1)>";
+  const blanks = " ".repeat(5000);
+
+  it.for([
+    { name: "a comment that outlasts the read", input: `<!DOCTYPE svg><!--${blanks}-->${svg}` },
+    { name: "blanks that outlast the read", input: `<!DOCTYPE svg>${blanks}${svg}` },
+    { name: "a processing instruction that outlasts the read", input: `<!DOCTYPE svg><?p ${blanks}?>${svg}` },
+    // The read ends three characters into what comes next: where it falls decides nothing.
+    { name: "a comment whose opening the read cuts", input: `<!DOCTYPE svg>${" ".repeat(4079)}<!--x-->${svg}` },
+    { name: "a root whose name the read cuts", input: `<!DOCTYPE svg>${" ".repeat(4079)}${svg}` },
+  ])("reads a doctype followed by $name as XML", ({ input }) => {
+    expect(typeOf(input.slice(0, 4096))).toBe("application/xml");
+  });
+
+  // Text that opens with a processing instruction and shows no doctype is not known to be a document: PHP source
+  // opens with "<?php" and, by PHP's own convention, never closes it.
+  it.for([
+    {
+      name: "an opening processing instruction that outlasts the read",
+      input: `<?php\n${"$total += $row->price;\n".repeat(200)}`,
+    },
+    { name: "one that closes where the file ends", input: "<?php echo 1; ?>\n" },
+  ])("shows no type for PHP source: $name", ({ input }) => {
+    expect(typeOf(input.slice(0, 4096))).toBeNull();
+  });
+});
+
+// HTML Standard §13.2.5.6 (tag open state) and §13.2.5.41 (bogus comment state): an HTML parser reads "<?" as the
+// start of a comment that ends at the first ">", so a browser that gets the file as a web page runs what follows.
+describe("sniff: a processing instruction as an HTML parser reads it (M11-R258)", () => {
+  it("finds a script behind the first > of a processing instruction", () => {
+    expect(typeOf("<?p a><script>alert(1)</script> ?><y>")).toBe("text/html");
+  });
+
+  // The comment an HTML parser makes of it ends at the comparison; code follows, and the tag further on is no root.
+  it("shows no type for PHP source that compares with > and prints a tag further on", () => {
+    expect(typeOf('<?php if ($a > 0) { echo "<b>x</b>"; }')).toBeNull();
   });
 });
