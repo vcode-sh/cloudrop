@@ -1866,7 +1866,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a bucket name or an S3 endpoint that a team treats as confidential reaches the terminal and a CI log
   with `doctor` and `setup`; the guide says so. What follows `=` in `--var` is still printed when it is shaped like a
   variable's name (`M11-C3`), so a value typed there by mistake can be printed: the guide says that too.
-- **Status:** in force. Completes `M11-R110`; supersedes the "no value ever printed" of `M9-C8`.
+- **Status:** in force. Completes `M11-R110`; supersedes the "no value ever printed" of `M9-C8`. The fixture itself
+  checks every printed command word for word since `M11-R208`.
 - **Visible in:** `src/cli/printed-values.test.ts`, `src/cli/usage.ts`, `src/cli/commands.ts`, `src/cli/settings.ts`,
   `src/cli/variables.ts`, `src/cli/command-fixture.ts`, `docs/guide/command.md#settings`,
   `docs/decisions/m9-cli.md` (`M9-C8`), `docs/decisions/m11-command.md` (`M11-C3`).
@@ -2251,3 +2252,32 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** nothing: the table is prose, and `src/server/origins.test.ts` holds the rule.
 - **Status:** in force. Completes `M11-R176`.
 - **Visible in:** `docs/guide/server.md` ("What an origin is").
+
+### M11-R208: the command's test fixture reads every printed Wrangler and AWS CLI command word for word
+
+- **Decision:** every run of the command in a test (`run` in `src/cli/command-fixture.ts`) reads back each Wrangler
+  and AWS CLI command in its output (`src/cli/printed-commands.ts`) and fails the test unless the command is plain
+  POSIX shell words (plain text, single quotes and `\'`, as `commands.ts` quotes; no `$`, backtick, redirect, `;`,
+  double quote or open quote) and, word for word, one of eight calls: `wrangler r2 bucket cors list|set <bucket>
+  [--file cors.json]`, `lifecycle list <bucket>`, `lifecycle add <bucket> cloudrop-abort-incomplete
+  --abort-multipart-days 1`, and `aws s3api get-bucket-cors`, `put-bucket-cors … --cors-configuration
+  file://cors-s3.json`, `get-bucket-lifecycle-configuration` and `put-bucket-lifecycle-configuration …
+  --lifecycle-configuration file://lifecycle.json`, each with `--bucket` and `--endpoint-url`. The bucket and the
+  endpoint must be the run's own values or the placeholders, and a Wrangler command carries `--jurisdiction` exactly
+  when the run named one. A checked command is then taken out, and the rest of the output is searched for every
+  setting's value as before.
+- **Why:** the fixture cut everything after `wrangler r2 bucket` or `aws s3api` off each line before it looked for
+  setting values, so a wrong flag, a wrong file name, another bucket or a secret printed after a command passed every
+  test; only `printed-values.test.ts` looked at the words, for the bucket and the endpoint. The calls are written in
+  the checker apart from `instructions.ts` and `doctor.ts`, from the tools themselves: `wrangler r2 bucket … --help`
+  of Wrangler 4.166 (`--file`, `--abort-multipart-days`, `-J/--jurisdiction`, the positional rule name), and the four
+  `s3api` calls with their arguments accepted by aws-cli 2.39.3 against an endpoint that refuses the connection, which
+  rejects an unknown option before it connects (both run 2026-11-21). Fault probes: `--path` for `--file` in
+  `instructions.ts` failed 12 tests of the command, and `--endpoint` for `--endpoint-url` in `commands.ts` failed 11;
+  both passed before.
+- **If wrong:** a new command the output suggests needs its call in the checker, or every test that prints it fails:
+  that is the point. A Wrangler command printed without its runner is not read as a command; its bucket name is then
+  found by the search for setting values. The checker knows a bucket's and an endpoint's variable by its name ending
+  in `BUCKET` or `ENDPOINT`, which holds for cloudrop's names and for the names the tests rename them to.
+- **Status:** in force. Completes `M11-R177`.
+- **Visible in:** `src/cli/printed-commands.ts`, `src/cli/printed-commands.test.ts`, `src/cli/command-fixture.ts`.

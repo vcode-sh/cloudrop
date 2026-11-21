@@ -1,13 +1,15 @@
 // Runs the cloudrop command in-process for its tests: an injected environment, files, output streams and a fetch that
-// reaches the fake R2. Every run also checks that no setting's value reached the output outside a Wrangler or AWS CLI
-// command, which may name the bucket and the S3 endpoint; printed-values.test.ts holds which value may stand where
-// (M11-R177). It builds inputs only; every expected value stays in the tests.
+// reaches the fake R2. Every run also checks each Wrangler or AWS CLI command it printed, word for word
+// (printed-commands.ts, M11-R208), and that no setting's value reached the output outside those commands, which may
+// name the bucket and the S3 endpoint; printed-values.test.ts holds which value may stand where (M11-R177). It builds
+// inputs only; every expected value stays in the tests.
 
 import { R2_RULES } from "../rules.ts";
 import type { BucketCorsRule, BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
 import { createS3Driver } from "../storage/s3-driver.ts";
 import { createFakeR2 } from "../testing/fake-r2.ts";
 import { parseEnvFile } from "./env-file.ts";
+import { withoutCommands } from "./printed-commands.ts";
 import { runCommand } from "./run.ts";
 
 export const ENV = {
@@ -171,13 +173,22 @@ export async function run(argv: string[], { env = ENV, fetch, files = {} }: RunO
     },
   });
   const texts = Object.values(files).filter((file) => typeof file === "string");
-  const fromFiles = texts.flatMap((text) => [...parseEnvFile(text).values()]);
-  const values = [...Object.values(ENV), ...Object.values(env), ...fromFiles].filter(
-    (value): value is string => typeof value === "string" && value !== "",
+  const settings = [...Object.entries(env), ...texts.flatMap((text) => [...parseEnvFile(text)])].filter(
+    (setting): setting is [string, string] => typeof setting[1] === "string" && setting[1] !== "",
   );
-  // A Wrangler or AWS CLI command names the bucket and the endpoint, which are not secrets (M11-R110): everything
-  // outside those commands is checked for them too.
-  const checked = `${stdout}\n${stderr}`.replaceAll(/\b(wrangler r2 bucket|aws s3api) .*$/gm, "");
+  const values = [...Object.values(ENV), ...settings.map(([, value]) => value)];
+  // The variables of a bucket and of an endpoint end with these words under cloudrop's names and under an app's.
+  const valuesOf = (ending: string) => settings.filter(([name]) => name.endsWith(ending)).map(([, value]) => value);
+  // Given as `--jurisdiction eu` or `--jurisdiction=eu`.
+  const flag = argv.findIndex((word) => word.split("=")[0] === "--jurisdiction");
+  const jurisdiction = flag < 0 ? undefined : (argv[flag]?.split("=")[1] ?? argv[flag + 1]);
+  // A Wrangler or AWS CLI command names the bucket and the endpoint, which are not secrets (M11-R110). Each printed
+  // command is checked word for word and taken out (M11-R208); everything else is checked for every value.
+  const checked = withoutCommands(`${stdout}\n${stderr}`, {
+    buckets: valuesOf("BUCKET"),
+    endpoints: valuesOf("ENDPOINT"),
+    jurisdiction,
+  });
   const leaked = values.filter((value) => prints(checked, value));
   if (leaked.length > 0) throw new Error(`The command printed a setting's value (${leaked.length} of them).`);
   return { code, stdout, stderr, lines: stdout.split("\n").slice(0, -1) };
