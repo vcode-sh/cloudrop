@@ -48,4 +48,15 @@ const testing = {
   ],
 } satisfies UserConfig;
 
-export default defineConfig([library, testing]);
+// The cloudrop bin, built on its own so that the code it shares with the library stays inside the library's files (no
+// shared chunk changes their size) and the bin needs no chunk. No types: nothing imports it (M9-C9).
+const cli = {
+  entry: { cli: "src/cli.ts" },
+  format: "esm",
+  platform: "neutral",
+  dts: false,
+  clean: false,
+  outputOptions: { comments: { legal: true, annotation: false, jsdoc: false } },
+} satisfies UserConfig;
+
+export default defineConfig([library, testing, cli]);

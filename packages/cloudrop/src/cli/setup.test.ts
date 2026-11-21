@@ -1,0 +1,211 @@
+import { describe, expect, it } from "vitest";
+import type { BucketLifecycleRule, FetchLike } from "../storage/driver.ts";
+import { bucket, ENV, ORIGIN, run } from "./command-fixture.ts";
+
+// Rules the bucket's owner made: setup must keep them as they are.
+const PUBLIC_READS =
+  "<CORSRule><ID>public-reads</ID><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod></CORSRule>";
+const EXPIRE_LOGS =
+  "<ID>expire-logs</ID><Filter><And><Prefix>logs/</Prefix><Tag><Key>tier</Key><Value>cold</Value></Tag></And></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration>";
+const FOREIGN = {
+  cors: `<CORSConfiguration>${PUBLIC_READS}</CORSConfiguration>`,
+  lifecycle: `<LifecycleConfiguration><Rule>${EXPIRE_LOGS}</Rule></LifecycleConfiguration>`,
+};
+
+const publicReads = {
+  id: "public-reads",
+  allowedOrigins: ["*"],
+  allowedMethods: ["GET", "HEAD"],
+  allowedHeaders: [],
+  exposeHeaders: [],
+};
+const uploadsFor = (...origins: string[]) => ({
+  id: "cloudrop-uploads",
+  allowedOrigins: origins,
+  allowedMethods: ["PUT", "GET", "HEAD"],
+  allowedHeaders: ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"],
+  exposeHeaders: ["ETag", "Retry-After"],
+  maxAgeSeconds: 3600,
+});
+const abortRule = { id: "cloudrop-abort-incomplete", enabled: true, prefix: "", abortIncompleteMultipartUploadDays: 1 };
+const fields = (rules: BucketLifecycleRule[] | null) => rules?.map(({ sourceXml: _, ...rule }) => rule);
+
+const apply = (...extra: string[]) => ["setup", "--origin", ORIGIN, "--apply", ...extra];
+
+describe("cloudrop setup without --apply", () => {
+  it("prints both rules in R2 and S3 formats and the commands for both services when no settings name one", async () => {
+    const result = await run(["setup", "--origin", ORIGIN], { env: {} });
+    expect(result.code).toBe(0);
+    const r2Rule = {
+      id: "cloudrop-uploads",
+      allowed: {
+        origins: [ORIGIN],
+        methods: ["PUT", "GET", "HEAD"],
+        headers: ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"],
+      },
+      exposeHeaders: ["ETag", "Retry-After"],
+      maxAgeSeconds: 3600,
+    };
+    expect(result.stdout).toContain(JSON.stringify({ rules: [r2Rule] }, null, 2));
+    const { id: _, ...s3Fields } = uploadsFor(ORIGIN);
+    expect(result.stdout).toContain(
+      JSON.stringify(
+        {
+          CORSRules: [
+            {
+              ID: "cloudrop-uploads",
+              AllowedOrigins: s3Fields.allowedOrigins,
+              AllowedMethods: s3Fields.allowedMethods,
+              AllowedHeaders: s3Fields.allowedHeaders,
+              ExposeHeaders: s3Fields.exposeHeaders,
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    expect(result.lines).toEqual(
+      expect.arrayContaining([
+        '  wrangler r2 bucket cors set "$CLOUDROP_R2_BUCKET" --file cors.json',
+        '  wrangler r2 bucket lifecycle add "$CLOUDROP_R2_BUCKET" cloudrop-abort-incomplete --abort-multipart-days 1',
+        '  aws s3api put-bucket-cors --bucket "$CLOUDROP_S3_BUCKET" --cors-configuration file://cors-s3.json --endpoint-url "$CLOUDROP_S3_ENDPOINT"',
+      ]),
+    );
+  });
+
+  it("prints only R2's commands for R2 settings, with the jurisdiction", async () => {
+    const result = await run(["setup", "--origin", ORIGIN, "--jurisdiction", "eu"]);
+    expect(result.lines).toContain('  wrangler r2 bucket cors list "$CLOUDROP_R2_BUCKET" --jurisdiction eu');
+    expect(result.lines).not.toContain("Commands for S3-compatible services:");
+  });
+});
+
+describe("cloudrop setup --apply", () => {
+  it("adds cloudrop's rules and keeps a foreign CORS rule and a foreign lifecycle rule", async () => {
+    const storage = bucket(FOREIGN);
+    const result = await run(apply(), { fetch: storage.fetch });
+    expect(result.code).toBe(0);
+    expect(await storage.cors()).toEqual([publicReads, uploadsFor(ORIGIN)]);
+    const lifecycle = await storage.lifecycle();
+    expect(fields(lifecycle)).toEqual([{ id: "expire-logs", enabled: true, prefix: "logs/" }, abortRule]);
+    expect(lifecycle?.[0]?.sourceXml).toBe(EXPIRE_LOGS);
+    expect(result.lines.slice(1, 3)).toEqual([
+      `ok           CORS: added rule "cloudrop-uploads" for ${ORIGIN} and kept 1 other rule ("public-reads").`,
+      'ok           Lifecycle: added rule "cloudrop-abort-incomplete" (aborts incomplete multipart uploads after 1 day, whole bucket) and kept 1 other rule ("expire-logs").',
+    ]);
+  });
+
+  it("updates its own rule in place for new origins and keeps the others around it", async () => {
+    const ours = `<CORSRule><ID>cloudrop-uploads</ID><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod></CORSRule>`;
+    const storage = bucket({
+      cors: `<CORSConfiguration>${ours}${PUBLIC_READS}</CORSConfiguration>`,
+      lifecycle: FOREIGN.lifecycle,
+    });
+    const local = "http://localhost:5173";
+    const result = await run(["setup", "--origin", ORIGIN, "--origin", local, "--apply"], { fetch: storage.fetch });
+    expect(result.code).toBe(0);
+    expect(await storage.cors()).toEqual([uploadsFor(ORIGIN, local), publicReads]);
+  });
+
+  it("leaves lifecycle rules alone when another rule already aborts uploads across the bucket", async () => {
+    const r2Default =
+      "<LifecycleConfiguration><Rule><ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>";
+    const storage = bucket({ cors: FOREIGN.cors, lifecycle: r2Default });
+    const result = await run(apply(), { fetch: storage.fetch });
+    expect(storage.writes).toEqual(["PUT ?cors="]);
+    expect(result.lines[2]).toBe(
+      'ok           Lifecycle: rule "Default Multipart Abort Rule" already aborts incomplete multipart uploads after 7 days; nothing to change.',
+    );
+  });
+
+  it("writes nothing when the rules already match", async () => {
+    const storage = bucket(FOREIGN);
+    await run(apply(), { fetch: storage.fetch });
+    const again = await run(apply(), { fetch: storage.fetch });
+    expect([again.code, storage.writes]).toEqual([0, ["PUT ?cors=", "PUT ?lifecycle="]]);
+  });
+
+  it("refuses to write anything when the current rules cannot be read", async () => {
+    // An object token: reads and writes are both refused, so only the refusal of the read can be seen.
+    const storage = bucket();
+    const result = await run(apply(), { fetch: storage.fetch });
+    expect([result.code, storage.writes]).toEqual([1, []]);
+    expect(result.lines[1]).toBe(
+      "PROBLEM      CORS: could not read the current rules: The storage service refused the request. Check the access key, its permissions and the bucket name. A write replaces every rule, so none was written. Use credentials that may read and change bucket settings, or pass --replace to replace the rules with cloudrop's alone.",
+    );
+    expect(result.lines.at(-1)).toBe("Nothing was written.");
+  });
+
+  it("with --replace, writes cloudrop's rules alone when the current rules cannot be read", async () => {
+    const storage = bucket(FOREIGN);
+    // The bucket refuses reads of its settings but accepts writes.
+    const readsRefused: FetchLike = (input, init) => {
+      const request = new Request(input, init);
+      const { search } = new URL(request.url);
+      const isSettingsRead = request.method === "GET" && (search === "?cors=" || search === "?lifecycle=");
+      return isSettingsRead
+        ? Promise.resolve(new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 }))
+        : storage.fetch(request);
+    };
+    const result = await run(apply("--replace"), { fetch: readsRefused });
+    expect(result.code).toBe(0);
+    expect(await storage.cors()).toEqual([uploadsFor(ORIGIN)]);
+    expect(fields(await storage.lifecycle())).toEqual([abortRule]);
+  });
+
+  it("with --replace, still refuses when the read failed for a reason that may pass", async () => {
+    const storage = bucket(FOREIGN);
+    const readsFail: FetchLike = (input, init) =>
+      (init?.method ?? "GET") === "GET"
+        ? Promise.resolve(new Response("<Error><Code>InternalError</Code></Error>", { status: 500 }))
+        : storage.fetch(input, init);
+    const result = await run(apply("--replace"), { fetch: readsFail });
+    expect([result.code, storage.writes]).toEqual([1, []]);
+    expect(result.lines[1]).toBe(
+      "PROBLEM      CORS: could not read the current rules: The storage service failed. Retry the request. A write replaces every rule, so none was written. --replace applies only when the rules may not be read, and this failure may pass: run the command again.",
+    );
+  });
+
+  it("counts a rule equal to cloudrop's as cloudrop's when the bucket reports no IDs, so a second run adds no copy", async () => {
+    const twin = `<CORSRule><AllowedOrigin>${ORIGIN}</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>content-type</AllowedHeader><AllowedHeader>content-disposition</AllowedHeader><AllowedHeader>if-none-match</AllowedHeader><AllowedHeader>x-amz-meta-cloudrop-id</AllowedHeader><ExposeHeader>ETag</ExposeHeader><ExposeHeader>Retry-After</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule>`;
+    const storage = bucket({ cors: `<CORSConfiguration>${twin}</CORSConfiguration>`, lifecycle: FOREIGN.lifecycle });
+    const result = await run(apply(), { fetch: storage.fetch });
+    expect(storage.writes).toEqual(["PUT ?lifecycle="]);
+    expect(result.lines[1]).toBe(
+      "ok           CORS: a rule without an ID is the same as cloudrop's; nothing to change.",
+    );
+  });
+
+  it("with --dry-run, shows the merged result and writes nothing", async () => {
+    const storage = bucket(FOREIGN);
+    const result = await run(apply("--dry-run"), { fetch: storage.fetch });
+    expect([result.code, storage.writes]).toEqual([0, []]);
+    expect(result.lines.slice(1)).toEqual([
+      `dry run      CORS: would add rule "cloudrop-uploads" for ${ORIGIN} and keep 1 other rule ("public-reads").`,
+      'dry run      Lifecycle: would add rule "cloudrop-abort-incomplete" (aborts incomplete multipart uploads after 1 day, whole bucket) and keep 1 other rule ("expire-logs").',
+      "Dry run: nothing was written. Run the same command without --dry-run to write.",
+    ]);
+  });
+
+  it("reports a failed write and exits 1", async () => {
+    const storage = bucket(FOREIGN);
+    const writesFail: FetchLike = (input, init) =>
+      init?.method === "PUT"
+        ? Promise.resolve(new Response("<Error><Code>InternalError</Code></Error>", { status: 500 }))
+        : storage.fetch(input, init);
+    const result = await run(apply(), { fetch: writesFail });
+    expect(result.code).toBe(1);
+    expect(result.lines[1]).toBe("PROBLEM      CORS: the write failed. The storage service failed. Retry the request.");
+    expect(result.lines.at(-1)).toBe("Some rules were not written; see above.");
+  });
+
+  it("checks the settings before reaching the bucket", async () => {
+    const result = await run(apply(), { env: { ...ENV, CLOUDROP_R2_SECRET_ACCESS_KEY: undefined } });
+    expect(result.code).toBe(1);
+    expect(result.lines).toContain(
+      "PROBLEM      CLOUDROP_R2_SECRET_ACCESS_KEY is not set. Set it to the secret access key of an R2 API token.",
+    );
+  });
+});

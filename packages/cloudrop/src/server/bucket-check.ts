@@ -97,7 +97,10 @@ function settingCheck<T>(read: Result<T>, setting: string, check: (rules: T) => 
 }
 
 /** `origins` must be exact origins: the caller checks them, since they are echoed in the report. */
-export async function checkBucket(config: ServerConfig, origins: readonly string[]): Promise<Result<BucketReport>> {
+export async function checkBucket(
+  config: Pick<ServerConfig, "storage" | "routes" | "store">,
+  origins: readonly string[],
+): Promise<Result<BucketReport>> {
   const { storage } = config;
   const [corsRules, lifecycleRules] = await Promise.all([storage.getBucketCors(), storage.getBucketLifecycle()]);
   const cors = settingCheck(corsRules, "CORS rules", (rules) => corsCheck(rules, origins));
