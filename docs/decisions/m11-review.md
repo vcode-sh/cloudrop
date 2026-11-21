@@ -1,6 +1,7 @@
 # M11-R: the review of every area before 0.6.0
 
-Findings of the area-by-area review and what was done with each, designed in `docs/superpowers/specs/2026-11-21-0.6.0-design.md`.
+Findings of the area-by-area review and what was done with each, designed in
+`docs/superpowers/specs/2026-11-21-0.6.0-design.md`.
 Each entry: Decision, Why, If wrong, Status, Visible in.
 
 ### M11-R1: `testClient` gives the handler the headers it sent, in Node, happy-dom and jsdom
@@ -166,56 +167,6 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `examples/next/components/upload/unfinished-uploads.tsx`, `docs/guide/react.md#build-your-upload-ui`.
 
-### M11-R24: a value of the wrong type from JavaScript answers INVALID_INPUT, in the checksum and in bucket rules
-
-- **Decision:** `checksumProblem` checks that `checksumCrc32c` is a string before it tests its pattern, and
-  `putBucketCors` and `putBucketLifecycle` check each rule's shape before writing XML: a CORS rule is an object whose
-  four lists are lists of text; a lifecycle rule is an object with `sourceXml` as text, or with `prefix` as text and
-  `abortIncompleteMultipartUploadDays` as a whole number from 1. Anything else answers `INVALID_INPUT` naming the shape.
-  What a valid rule may contain beyond that is still left to the service.
-- **Why:** a pattern tests a list or an object as its text, so `checksumCrc32c: ["4waSgw=="]` passed the check on
-  `put`, `presignPut` and `presignPart` and the signer then threw `TypeError: value.trim is not a function`;
-  `putBucketCors([null])`, `putBucketCors([{}])` and `putBucketLifecycle([null])` threw `TypeError` too. A public call
-  answers a Result and never throws. A lifecycle rule without a prefix was written with the prefix `undefined`, as
-  text, which a service accepts as a rule for keys that start with those nine letters. Every other validator in
-  `validate.ts` already checked the type; a table test now passes each one numbers, lists, objects, `null` and booleans.
-- **If wrong:** a caller who passed a `String` object as a checksum, or a lifecycle rule with neither `sourceXml` nor
-  days, gets `INVALID_INPUT` where the first worked by accident and the second was refused by the service.
-- **Status:** in force.
-- **Visible in:** `src/storage/validate.ts`, `src/storage/s3/bucket-writes.ts`, `src/storage/validate.test.ts`,
-  `src/storage/s3-driver.test.ts`, `src/storage/s3/bucket-settings.test.ts`.
-
-### M11-R23: a storage error names the range, the redirect or region, and a lost conditional write
-
-- **Decision:** `storageError` gains three messages and one retry. `416` reads "The byte range starts at or past the
-  object's end. Ask for a range inside its size." Any `3xx`, and the code `AuthorizationHeaderMalformed`, read "The
-  storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings."
-  `ConditionalRequestConflict` reads "Another request changed this key at the same moment. Write the object again, or
-  start a new multipart upload." and is not retryable. `RequestTimeout` is retryable whatever its status. All four keep
-  the code `STORAGE_ERROR`.
-- **Why:** each fell through to "rejected the request (HTTP n). Check the key, size and headers you passed, then
-  retry.", which names nothing the person can change. `416 InvalidRange` is what R2 answers to any range of an
-  empty object (`docs/research/r2-spike-findings.md`, "The first 4 KiB of small objects"); a contract case now asks
-  for such a range and for one that starts at the object's end, and R2, RustFS, Wrangler's local R2 and the fake all
-  answered `416` to both on 2026-11-21. AWS answers a request sent to another region's endpoint with `301 PermanentRedirect` and one signed for
-  another region with `400 AuthorizationHeaderMalformed`: the codes `cli/bucket-access.ts` already reads for the
-  command, from AWS's error list, unmeasured here. One message serves both because a bare `301` (AWS to `HEAD`, or any
-  proxy from http to https) cannot be told from a region redirect. On `409`, AWS's "Conditional write behavior" says:
-  "When using conditional writes with `PutObject`, uploads may be retried after receiving a `409 Conflict` error. When
-  using `CompleteMultipartUpload`, the entire multipart upload must be re-initiated"
-  (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html>, read 2026-11-21): `retryable` means
-  the same request may succeed later, which holds for neither as a rule, so the message says what to send instead. On
-  `RequestTimeout`, AWS's SDK reference says "an HTTP 400 with the error code `RequestTimeout` is classified as
-  transient and retried" (<https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html>, read
-  2026-11-21); until now only a `408` was retried, and AWS sends this code with `400`.
-- **If wrong:** a storage service that sends `3xx` for another reason gets a message about the endpoint, which is
-  still the setting to look at. AWS's error-code list page (`API/ErrorResponses.html`) could not be read by the tool
-  used for this review, so `PermanentRedirect` and `AuthorizationHeaderMalformed` rest on the command's earlier reading
-  of it.
-- **Status:** in force.
-- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`,
-  `src/testing/storage-contract/objects.ts`, `docs/guide/errors.md`.
-
 ### M11-R20: a 200 that is not S3's answer is an error, never an empty result
 
 - **Decision:** `list` requires a `<ListBucketResult` element and `listParts` a `<ListPartsResult` element, and answer
@@ -286,6 +237,56 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/storage/s3/transport.ts`, `src/storage/xml.ts`, `src/storage/s3/bucket-settings.ts`,
   `src/storage/s3/transport.test.ts`, `src/storage/xml.test.ts`.
 
+### M11-R23: a storage error names the range, the redirect or region, and a lost conditional write
+
+- **Decision:** `storageError` gains three messages and one retry. `416` reads "The byte range starts at or past the
+  object's end. Ask for a range inside its size." Any `3xx`, and the code `AuthorizationHeaderMalformed`, read "The
+  storage endpoint redirected the request, or the bucket is in another region. Check the endpoint and region settings."
+  `ConditionalRequestConflict` reads "Another request changed this key at the same moment. Write the object again, or
+  start a new multipart upload." and is not retryable. `RequestTimeout` is retryable whatever its status. All four keep
+  the code `STORAGE_ERROR`.
+- **Why:** each fell through to "rejected the request (HTTP n). Check the key, size and headers you passed, then
+  retry.", which names nothing the person can change. `416 InvalidRange` is what R2 answers to any range of an
+  empty object (`docs/research/r2-spike-findings.md`, "The first 4 KiB of small objects"); a contract case now asks
+  for such a range and for one that starts at the object's end, and R2, RustFS, Wrangler's local R2 and the fake all
+  answered `416` to both on 2026-11-21. AWS answers a request sent to another region's endpoint with `301 PermanentRedirect` and one signed for
+  another region with `400 AuthorizationHeaderMalformed`: the codes `cli/bucket-access.ts` already reads for the
+  command, from AWS's error list, unmeasured here. One message serves both because a bare `301` (AWS to `HEAD`, or any
+  proxy from http to https) cannot be told from a region redirect. On `409`, AWS's "Conditional write behavior" says:
+  "When using conditional writes with `PutObject`, uploads may be retried after receiving a `409 Conflict` error. When
+  using `CompleteMultipartUpload`, the entire multipart upload must be re-initiated"
+  (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html>, read 2026-11-21): `retryable` means
+  the same request may succeed later, which holds for neither as a rule, so the message says what to send instead. On
+  `RequestTimeout`, AWS's SDK reference says "an HTTP 400 with the error code `RequestTimeout` is classified as
+  transient and retried" (<https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html>, read
+  2026-11-21); until now only a `408` was retried, and AWS sends this code with `400`.
+- **If wrong:** a storage service that sends `3xx` for another reason gets a message about the endpoint, which is
+  still the setting to look at. AWS's error-code list page (`API/ErrorResponses.html`) could not be read by the tool
+  used for this review, so `PermanentRedirect` and `AuthorizationHeaderMalformed` rest on the command's earlier reading
+  of it.
+- **Status:** in force.
+- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`,
+  `src/testing/storage-contract/objects.ts`, `docs/guide/errors.md`.
+
+### M11-R24: a value of the wrong type from JavaScript answers INVALID_INPUT, in the checksum and in bucket rules
+
+- **Decision:** `checksumProblem` checks that `checksumCrc32c` is a string before it tests its pattern, and
+  `putBucketCors` and `putBucketLifecycle` check each rule's shape before writing XML: a CORS rule is an object whose
+  four lists are lists of text; a lifecycle rule is an object with `sourceXml` as text, or with `prefix` as text and
+  `abortIncompleteMultipartUploadDays` as a whole number from 1. Anything else answers `INVALID_INPUT` naming the shape.
+  What a valid rule may contain beyond that is still left to the service.
+- **Why:** a pattern tests a list or an object as its text, so `checksumCrc32c: ["4waSgw=="]` passed the check on
+  `put`, `presignPut` and `presignPart` and the signer then threw `TypeError: value.trim is not a function`;
+  `putBucketCors([null])`, `putBucketCors([{}])` and `putBucketLifecycle([null])` threw `TypeError` too. A public call
+  answers a Result and never throws. A lifecycle rule without a prefix was written with the prefix `undefined`, as
+  text, which a service accepts as a rule for keys that start with those nine letters. Every other validator in
+  `validate.ts` already checked the type; a table test now passes each one numbers, lists, objects, `null` and booleans.
+- **If wrong:** a caller who passed a `String` object as a checksum, or a lifecycle rule with neither `sourceXml` nor
+  days, gets `INVALID_INPUT` where the first worked by accident and the second was refused by the service.
+- **Status:** in force.
+- **Visible in:** `src/storage/validate.ts`, `src/storage/s3/bucket-writes.ts`, `src/storage/validate.test.ts`,
+  `src/storage/s3-driver.test.ts`, `src/storage/s3/bucket-settings.test.ts`.
+
 ### M11-R25: a header value read back from the storage is signed as the bytes it is
 
 - **Decision:** the signer hashes a canonical request that holds a character from U+0080 to U+00FF as one byte per
@@ -324,18 +325,6 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/testing/fake-r2.ts`, `src/testing/fake-r2/bucket.ts`, `src/testing/fake-r2/objects.ts`,
   `src/testing/fake-r2/signature.ts`, `src/testing/fake-r2.test.ts`, `src/testing/fake-r2/signature.test.ts`.
-
-### M11-R100: the bundled server budget is provisional until the owner sets it
-
-- **Decision:** `scripts/size-limit.config.ts` holds the "cloudrop (bundled)" ceiling at 36 kB while 0.6.0 is built.
-  The owner sets the final number before the release, from the size measured once every fix is merged.
-- **Why:** the ceiling was 32 kB (`M10-D10`) with 0.68 kB of room. `api.deleteFile`'s answer and `onDelete` refusals,
-  the `content` field, `api.allFiles` and the review's fixes (bounded response bodies, refused web-page answers,
-  redirects never followed) each add honest code that every server needs; measured 32.47 kB with the storage fixes
-  merged. Cutting a fix to fit a budget would trade correctness for a number nothing depends on.
-- **If wrong:** the owner sets another ceiling, or asks for the store paths behind their own entry (`M5-T69`).
-- **Status:** provisional.
-- **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M11-R40: `trustedOrigins` and `checkBucket` refuse a pattern, in the command's words
 
@@ -513,776 +502,6 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `docs/research/r2-spike-findings.md` ("setup writes on R2, 2026-11-21") measured them once by hand.
 - **Status:** in force.
 - **Visible in:** `src/storage/s3-driver.r2.integration.test.ts`, `src/testing/storage-contract/bucket-settings.ts`.
-
-### M11-R150: a deletion never ends a file it did not read as completed
-
-- **Decision:** `deleteCompleted`, with a transaction and under a lease, answers a row that was not `completed` when it
-  read it from that read, as `end` answers a row it does not change, and never calls `end` for it. `api.deleteFile` of
-  an upload whose `/complete` is recorded a moment later answers `NOT_FOUND`, and the file stays completed, with its
-  object and its `onDelete` still to run; a row already `deleted` answers `deleted: false` as before. The other
-  callers were checked and hold: `eraseOwner` deletes only rows it listed as `completed`, each read again by the same
-  code; a replacement whose listing misses a file that completes before the record rolls back with a transaction
-  (`replacedAsListed`) and runs the late hook under a lease (`afterReplacing`); and a server without any `onDelete`
-  calls `end` alone (`M10-D8`), where there is no hook to miss.
-- **Why:** the hook is chosen from the row as read. A `pending` or `completing` row chose none, and `end(completed →
-  deleted)` then matched the row a completion had recorded in between: the file was deleted with no `onDelete`, so no
-  audit row was written and no pointer cleared. Seen on the memory store in both modes and on Postgres 18 through
-  Drizzle on both drivers (`deleteFile` answered `deleted: true`, the row `deleted`, the hook never run). On Postgres
-  the window is between the deletion's `SELECT` and its `UPDATE`: an `UPDATE … WHERE status = 'completed'` does not
-  wait for a row whose committed version is `pending`, so the test holds the read until the completion has committed.
-- **If wrong:** a caller that deletes a file in the moment it completes gets `NOT_FOUND` where 0.5.0 deleted it; it
-  calls again, and the hook then runs.
-- **Status:** in force. Each test was seen failing on the code before the fix.
-- **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete-race.test.ts`,
-  `src/adapters/drizzle-handler.db.integration.test.ts`, `src/testing/delete-fixture.ts` (`state.read`).
-
-### M11-R151: the tests of deletion and erasure fail when their branch is removed
-
-- **Decision:** Every branch of `src/server/erase.ts` and `src/server/store-delete.ts` was removed or inverted in turn
-  (95 one-line mutations) with the unit lane run on each, and tests were added or sharpened until each mutation a
-  caller can see fails one. In `eraseOwner`: the last read of the live statuses (an `/upload` reserved before the run
-  and recorded during it), both signal checks inside a run (between two files of a page, and between two pages, with
-  no store call after the abort), the signal check before the run (an unfinished upload stays unrevoked), every page
-  read, the `graceMs` a caller passes, `rejected` and `expired` rows, a row marked cleaned too early, a row that
-  cannot be marked cleaned, the store's error for a failed revocation, listing or last read, and options that are not
-  an object. In deletions: a failed read before the hook and after a throw, the log line of a failed deletion, the row
-  a late replacement's hook sees, and what a replacement lists (only its own route, nothing without an owner, every
-  page, nothing on a route without `onDelete`, and the store's error when the listing fails).
-- **Why:** the review removed the last live read and both mid-run signal checks and every test stayed green. The cause
-  was the frozen test clock: every file was created at the very millisecond the run started, so the check for an
-  upload that started during the run answered for the reads it was meant to back up. The same clock hid two more: the
-  live statuses read together (`M8-A5`) and `done` needing no failure. Those tests now move the clock before the run.
-- **If wrong:** three mutations change nothing a caller can see and are left without a test: marking a row cleaned
-  that is marked already (`store.cleaned` ignores it), and treating a route without `onDelete` as hooked in
-  `hookedRoute` and in `afterReplacing` (the missing hook is not called). Each only saves a call.
-- **Status:** in force.
-- **Visible in:** `src/server/erase.test.ts`, `src/server/store-delete.test.ts`,
-  `src/server/store-delete-race.test.ts`, `src/server/store-delete-replace.test.ts`.
-
-### M11-R152: `EraseReport` says what each counter leaves in the bucket
-
-- **Decision:** The guide's table for `api.eraseOwner` and the JSDoc of `EraseReport` say, per counter, what is in the
-  bucket after the run. `revoked` and `deleted` files have their objects removed later in the same run, where each
-  counts a second time, in `cleaned`, `waiting` or `failed`. `refused` files, and files whose `onDelete` threw
-  (`failed`), are still completed with their objects. `waiting` is two kinds: files still live, whose objects are
-  still there (a completed file its hook kept, a completion under way, an upload started during the run), and ended
-  uploads whose object this run removed but whose URLs, or the grace after them, have not run out. No behaviour
-  changed.
-- **Why:** both texts said of `waiting` that what the files had stored was removed. That holds only for the ended
-  ones: a refused file, a completion under way and an upload begun during the run keep their objects, so an operator
-  reading `waiting: 1` after an erasure request could believe the bucket was empty of that owner.
-- **If wrong:** none known; the counters themselves are as `M8-A5` and `M11-D4` set them.
-- **Status:** in force.
-- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
-
-### M11-R153: an erasure needs the sweep for a completion its server never finished
-
-- **Decision:** `api.eraseOwner` still never ends a `completing` row. One left by a server that died in `/complete`
-  counts in `waiting` on every run, with its object kept, until the sweep ends it as `failed`: past its lease and
-  `graceMs` past its token's deadline, 25 hours after its `/upload` with the defaults. The next run then removes the
-  object and can report `done`. The guide says so under "It needs the sweep", and `EraseReport.done` names it.
-- **Why:** the other choice was to let `eraseOwner` end such a row itself. It would gain no time, since the row may be
-  taken over by a `/complete` until its token's deadline either way. It would need the sweep's rule a second time: the
-  rule lives in each store's `stale` statement, which reads every owner's rows, so `eraseOwner` could share it only by
-  sweeping everyone or by restating it. And it would end a stuck completion without the sweep's `reported` list, the
-  one place an app learns that its `onComplete` may have recorded a file that never completed. Every store app is
-  already told to run the sweep on a schedule, so the safe change before a release is the sentence, not a second path
-  that ends rows.
-- **If wrong:** an app that erases owners and runs no sweep sees `waiting: 1, done: false` for ever for such an owner;
-  the guide names the cause and the cure. A per-owner `stale` would let `eraseOwner` share the rule later.
-- **Status:** in force. `src/server/erase.test.ts` ("waits for the sweep to end a completion its server never
-  finished…") holds the times at the millisecond: not ended at 25 hours, ended one millisecond later.
-- **Visible in:** `docs/guide/store.md#erase-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.
-
-### M11-R154: a replacement whose `onDelete` threw for a lost race asks its client to retry
-
-- **Decision:** The guide scopes the lost-race sentence: when `onDelete` throws because another deletion took the file
-  first, `api.deleteFile` answers as for a file already deleted and `api.eraseOwner` counts the file nowhere
-  (`M10-D7`), but a replacing `/complete` answers the retryable `SERVER_ERROR` of any throw, its new file stays
-  `pending`, and the client's retry, which finds nothing left to replace, completes. The behaviour is as it was.
-- **Why:** the sentence read as if every caller answered "already deleted". A replacement cannot: it has run
-  `onComplete` and holds a claim or a transaction, and whether the file it meant to replace is gone decides nothing
-  about its own completion, which the retry settles by listing again (`M10-D5`). Reading the row again there would
-  add a store call to gain an answer the retry gives anyway.
-- **If wrong:** a client sees one more retry of `/complete` in that race than a second read would cost.
-- **Status:** in force. `src/server/store-delete-race.test.ts` ("an onDelete that throws after a deletion won fails
-  /complete, which a retry finishes"), in both modes.
-- **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.
-
-### M11-R110: every command the output prints is complete, quoted and runnable as printed
-
-- **Decision:** one module (`src/cli/commands.ts`) builds every printed command.
-  - A cloudrop command the output tells the reader to run next repeats the run's `--origin`, `--env-file`, `--var`
-    and `--jurisdiction`, each as one word of a POSIX shell (plain text as it is, anything else in single quotes), ends
-    its line, and starts with the runner that started the command: `bunx` or `pnpm exec` when
-    `npm_config_user_agent` starts with `bun/` or `pnpm/`, `npx` otherwise. The usage line says the same. The dry
-    run's last line and the plain `setup`'s last paragraph print the `--apply` command instead of describing it.
-  - A Wrangler command starts with the runner too (`npx wrangler …`), as Cloudflare's documentation writes it.
-  - A Wrangler or AWS CLI command names the bucket and the S3 endpoint by value, once the storage settings are all
-    set and valid, and `<bucket>` and `<endpoint>` until then, with a sentence that says to replace them. Beside the
-    commands the output says that each tool signs in on its own, with the variables that do it.
-- **Why:** each printed command failed when pasted. After `doctor --origin X --env-file e2e.env` the suggested
-  `cloudrop setup --origin X --apply` answered "No storage settings found"; without `--jurisdiction` it targeted the
-  default endpoint; a bare `cloudrop` is `command not found` in a project that installed the package; and
-  `--origin 'https://a.example$(id)'`, which the URL parser takes as an origin, was printed as shell text. After
-  `--env-file`, `"$CLOUDROP_R2_BUCKET"` was empty in the reader's shell. The runner is measured (2026-11-21):
-  `npx` and `npm run` set `npm/11…`, `bunx` and `bun run` set `bun/1.4.4 …` and start the bin with Node, `pnpm exec`
-  sets `pnpm/12…`, and a direct start sets nothing. The test splits each printed command with a real `sh` and reads
-  it back through `parseArgs`.
-- **If wrong:** a bucket name and an S3 endpoint are printed, which `M9-C8` kept out of the output; neither grants
-  access, and both are printed only after the presets' own checks accepted them (an endpoint with a user name or
-  password is refused there). The quoting is POSIX: in PowerShell a word with a single quote, and in `cmd` any quoted
-  word, needs requoting, which the guide says. Yarn's runner is not detected and gets `npx`.
-- **Status:** in force. Supersedes the `"$NAME"` form of `M9-C8` and `M11-C4`; `M11-C4`'s rule that messages name the
-  app's variable stands.
-- **Visible in:** `src/cli/commands.ts`, `src/cli/commands.test.ts`, `src/cli/doctor.ts`, `src/cli/setup.ts`,
-  `src/cli/instructions.ts`, `src/cli/usage.ts`, `src/cli/run.ts`, `docs/guide/command.md#settings`,
-  `docs/guide/bucket-setup.md`.
-
-### M11-R111: one origin rule for the server and the command, and `ws:`, `wss:` and `ftp:` are no page's origin
-
-- **Decision:** the command reads `--origin` with `originProblem` of `src/server/origins.ts`, the function
-  `trustedOrigins` and `api.checkBucket` use, and prints its message as it is; the command's own copy of the rule is
-  gone. That rule now refuses a URL whose scheme is `ws`, `wss` or `ftp`: "is not a page's origin: a page is loaded over
-  http or https, or over an app's own scheme."
-- **Why:** the command's copy predated `M11-R41`, so `--origin capacitor://localhost`, `tauri://localhost` and
-  `chrome-extension://<id>` exited 2 with "Write it as scheme://host[:port]", which is how they are written, and an app
-  the server accepted could not have its bucket checked or set up. The same copy, and the server's rule, took
-  `ws://a.example` and `ftp://a.example`: the URL standard lists six special schemes (`ftp`, `file`, `http`, `https`,
-  `ws`, `wss`, <https://url.spec.whatwg.org/#special-scheme>) and its origin algorithm returns a tuple origin for all
-  but `file` (<https://url.spec.whatwg.org/#origin>), but a document is fetched over `http` and `https` alone, so no
-  page sends such an `Origin`. A CORS rule written for one allows nobody.
-- **If wrong:** an app whose shell really sends `ws://…` or `ftp://…` as its origin is refused at start-up
-  (`INVALID_CONFIG`) and by the command (exit 2); none is known. The command's messages lose "with its own --origin"
-  and gain "in lowercase", the server's wording.
-- **Status:** in force. Extends `M11-R41`.
-- **Visible in:** `src/server/origins.ts`, `src/server/config.test.ts`, `src/cli/args.ts`, `src/cli/run.test.ts`,
-  `docs/guide/command.md`, `docs/guide/server.md#what-an-origin-is`.
-
-### M11-R112: `--env-file` is read by Node's own parser, ported step for step
-
-- **Decision:** `parseEnvFile` (`src/cli/env-file.ts`) is a port of `Dotenv::ParseContent` in Node's
-  `src/node_dotenv.cc` (the `v24.x` branch, read 2026-11-21), not a line pattern of the command's own. It keeps Node's
-  reading where another dotenv reader may differ: a byte order mark stays in the first name, so the variable the file
-  means is not set; only a space after `export` is taken off (`export<tab>A=1` sets `export<tab>A`); a carriage return
-  is removed and ends no line; a name may hold a space; `A=` followed by spaces alone takes the next line as its value;
-  a no-break space is not trimmed. A file that starts with a byte order mark before a variable gets a `note` naming
-  the variable Node does not set. The test compares each of these with `util.parseEnv` of the Node that runs it.
-- **Why:** the guide said the file is read "the way Node's `--env-file` does", and the review found four files the two
-  read differently, each in the direction that hides a problem: `doctor` answered `ok … is set` for a variable an app
-  started with `node --env-file` never gets. A differential run of 300,000 random files of the characters that matter
-  (quotes, `#`, `=`, `export`, CR, LF, tab, a byte order mark) against `util.parseEnv` on Node 24.22.2 found no
-  difference; that run is not in the suite, the table of the named cases is.
-- **If wrong:** an app that loads the file with dotenv, Bun or Next.js may get a variable Node does not, and `doctor`
-  then reports it as not set; the guide says whose reading it is. A later Node that changes its parser turns the table
-  test red on that Node, which is the signal to port the change.
-- **Status:** in force. Amends `M9-C8`.
-- **Visible in:** `src/cli/env-file.ts`, `src/cli/env-file.test.ts`, `src/cli/variables.ts`,
-  `docs/guide/command.md#settings`.
-
-### M11-R113: every `--env-file` is read, a later one winning, and an empty variable in the environment wins too
-
-- **Decision:** `--env-file` may be repeated; every file is read in the order given and a later file's value replaces
-  an earlier one's. A variable the environment has wins over every file, even when it is set to nothing: the setting
-  then reads as not set, with a `note` that names the variable and the file whose value it hides. The note for a
-  variable set in both names the file its value came from.
-- **Why:** measured on Node 24.22.2: `node --env-file=a.env --env-file=b.env` sets what both files hold and `b.env`'s
-  value where both name a variable; `A= node --env-file=a.env` leaves `A` empty. The command read only the last file,
-  silently, and took the file's value over an empty variable, so it reported `ok … is set` for a setting the library
-  (`fromEnv`: an empty variable is unset) would not find.
-- **If wrong:** none known; a project that passed `--env-file` twice and relied on the first being ignored now gets
-  its variables too.
-- **Status:** in force.
-- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/cli/variables.test.ts`,
-  `docs/guide/command.md#settings`.
-
-### M11-R114: `--replace` never stands in for a bucket that refuses the credentials
-
-- **Decision:** `setup --apply` and `--dry-run` report the listing's failure whenever a read of the rules failed,
-  with `--replace` as without it, in the same sentence (`Bucket: The storage service refused these credentials…`),
-  and write nothing.
-- **Why:** with `--replace` a refused read became a planned replace before the listing was looked at. With a wrong
-  secret key every request is refused, so `--dry-run --replace` exited 0 with "would replace every rule" and
-  `--apply --replace` printed two "the write failed" lines that named no variable (run against a local server,
-  2026-11-21). `M9-H102` had ruled that the listing tells wrong credentials from an object token; the `--replace`
-  path skipped it.
-- **If wrong:** credentials that may write bucket settings but may neither read them nor list objects can no longer
-  replace the rules with this command; none is known, and the S3 API writes still work by hand.
-- **Status:** in force. Completes `M9-H102`.
-- **Visible in:** `src/cli/setup.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#setup`.
-
-### M11-R115: the command and the origin rule repeat nothing that may be a secret
-
-- **Decision:** an argument the command does not know is repeated only when it is shaped like an option's name
-  (`--force`, up to its `=`) or a command's (letters and hyphens, at most 20). `NAME=value` after the command is named
-  by `NAME` when that is one of the ten settings ("CLOUDROP_SECRET is given as an argument…"), and any other argument
-  by its position ("Argument 4 is not an option…"). An `--env-file` that cannot be read is reported by its error code
-  alone, and by its number when there are several; a path is printed only once it was read as a file. `originProblem`
-  (the server's `trustedOrigins` and `checkBucket`, and `--origin`) does not repeat a value with an `@` in it: "An
-  origin holds no user name or password, so this one is not repeated here. Use https://app.example.com…". The tests'
-  leak check now covers values under 8 characters as whole words.
-- **Why:** the output goes to terminals, CI logs and, for the server's `INVALID_CONFIG`, application logs.
-  `doctor --origin X CLOUDROP_SECRET=<value>` printed the value in `Unknown option "…"`, `--env-file <value>` printed
-  it in `Cannot read <value> (ENOENT)`, and `--origin https://KEY:pw@host` and `trustedOrigins` printed the password.
-  The old leak check skipped values under 8 characters, so a short password was never looked for.
-- **If wrong:** an honest typo that is not shaped like a name (`doctor orig1n …`) is named by its position, which is
-  less direct. A word of letters typed as the command (`cloudrop hunter`) is still repeated. On Node a missing
-  `--env-file` never reaches the command: Node exits 9 and prints the path itself (`M9-H104`).
-- **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`.
-- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
-  `src/cli/command-fixture.ts`, `src/server/bucket-check.test.ts`, `docs/guide/command.md#settings`.
-
-### M11-R116: a sentence about the bucket is true for the answer and for the service
-
-- **Decision:** the listing that proves the bucket (`M9-C5`) reads two answers as not a storage service's: a `404`
-  that names no missing bucket ("The endpoint answered the listing with HTTP 404, but not as a storage service does…")
-  and a redirect (for S3 the storage's own sentence with the endpoint and region variables; for R2 "The endpoint
-  redirected the request (HTTP 302), and a signed request is not sent on", since R2 has no region setting), each with
-  the endpoint's variable. `api.checkBucket` words its "may not read" and "add a lifecycle rule" messages for R2 only
-  when the storage's `rules` are the `r2()` preset's own object, and names no service otherwise. `setup --apply` says
-  "R2 can take up to 30 seconds" only on R2.
-- **Why:** a listing names no object, yet a bare `404` from a proxy printed "The object does not exist. Check the
-  key."; and an S3 run printed "R2 object tokens cannot", "admin read token or in the dashboard", "R2 creates a 7-day
-  rule by default" and R2's half minute. The review's third case, a redirect reported as "Could not reach the storage
-  service", did not reproduce on this commit: the driver already answers "The storage endpoint redirected the
-  request…" (run on Node 24 and Bun 1.4 against a local server), so only its wording for R2 changed.
-- **If wrong:** a driver built by hand with `rules: { ...R2_RULES }` gets the neutral words on R2. A storage service
-  that answers a listing of a missing bucket with a bare `404` is told "something else may be answering", and the
-  finding still names the endpoint to check.
-- **Status:** in force. Extends `M9-H101`.
-- **Visible in:** `src/cli/bucket-access.ts`, `src/server/bucket-check.ts`, `src/cli/setup.ts`,
-  `src/cli/doctor.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#doctor`.
-
-### M11-R117: a variable is read as an own property
-
-- **Decision:** the command reads the environment with `Object.hasOwn` and an env file's variables from a `Map`.
-- **Why:** `--var CLOUDROP_SECRET=__proto__` with nothing set printed `ok __proto__ is set.`, and `constructor` and
-  `toString` printed "is set in the environment and in undefined": a plain lookup finds what every object inherits.
-  All three are names a shell can set, so `--var` accepts them.
-- **If wrong:** none known.
-- **Status:** in force.
-- **Visible in:** `src/cli/variables.ts`, `src/cli/env-file.ts`, `src/cli/variables.test.ts`.
-
-### M11-R118: `--jurisdiction` is for R2 alone, and is given once
-
-- **Decision:** `--jurisdiction` with settings that select S3 is a usage error (exit 2) that names the S3 variables
-  found; a second `--jurisdiction` is a usage error too.
-- **Why:** with S3 settings the option changed nothing and said nothing, and of two the last won silently. Either
-  hides a mistake about which bucket is being checked or written.
-- **If wrong:** a script that passes `--jurisdiction` for every environment, S3 ones included, now exits 2 there.
-- **Status:** in force.
-- **Visible in:** `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md#settings`.
-
-### M11-R119: `cloudrop --version` prints the package's version
-
-- **Decision:** `--version` and `-v`, as the first argument, print the version and exit 0. `src/cli.ts` imports
-  `package.json` with `{ type: "json" }`; the build keeps the one string (`var version = "…"`), not the manifest.
-- **Why:** `cloudrop --version` answered `Unknown command "--version"`, and a bug report needs the number. A build-time
-  constant would have left the source bin, which the tests run under Node and Bun, without one.
-- **If wrong:** a bundler that stops tree-shaking a JSON import would put the whole manifest into `dist/cli.js`, about
-  3 kB; nothing imports that file.
-- **Status:** in force.
-- **Visible in:** `src/cli.ts`, `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
-
-### M11-R120: the package check runs the built bin on Node and Bun
-
-- **Decision:** `scripts/check-package.sh` (part of `bun run verify`) checks `dist/cli.js` itself: its first line is
-  `#!/usr/bin/env node`, it is executable in the packed tarball, `--version` prints the version of `package.json`,
-  `--help` prints the usage and `doctor` without `--origin` exits 2, on Node and, when `bun` is on `PATH`, on Bun.
-- **Why:** every test of the command ran the source (`runCommand`, or `src/cli.ts` under each runtime). A build that
-  dropped the shebang, lost the version or broke the entry would have been published green. Each message was seen to
-  fire by breaking the built file by hand (a wrong version, a wrong exit code).
-- **If wrong:** none known; the check adds four starts of a runtime, about half a second, to the package check.
-- **Status:** in force.
-- **Visible in:** `scripts/check-package.sh`.
-
-### M11-R80: `retry()` follows one table of what each failure leaves of the ticket
-
-- **Decision:** `retryStep(error)` in `src/client/retry-step.ts` is the one place that says what a failure leaves of
-  its upload's ticket, and `retry()`, `giveUp` and `discard()` read it. It answers `resend` for `NOT_UPLOADED` and
-  `PARTS_MISSING`; `same` for every retryable error and for `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`,
-  `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND`, `SERVER_ERROR` and `STORAGE_ERROR`;
-  `new` for every other error, a code this client does not know included. It replaces the list `NEEDS_NEW_TICKET`
-  (`M3-U31`), whose default was the same ticket. `retry()` decides in this order: no ticket, or one the page gave up
-  (`M3-U33`): a new ticket. `new`: a new ticket. A `/complete` in doubt (`M3-U30`): `/complete` alone. A ticket that
-  expired, or cannot sign what is still to send (`M9-H3`): a new ticket. Otherwise the same ticket; for `resend`, the
-  parts the answer named are sent again first, and every part when it named none.
-
-  | Answer | From | What it leaves: object, multipart upload, row | `retry()` |
-  | --- | --- | --- | --- |
-  | Any refusal or no answer: `UNAUTHORIZED`, `FORBIDDEN`, `UNKNOWN_ROUTE`, `INVALID_METADATA`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `ACCOUNT_CHANGED`, `QUOTA_EXCEEDED`, `INVALID_INPUT`, `UPLOAD_EXPIRED` (the row was revoked meanwhile), `STORAGE_ERROR`, `RATE_LIMITED`, `SERVER_ERROR`, `NETWORK_ERROR`, the handler's refusals below | `/upload` | Nothing: the file has no ticket. What `/upload` reserved for a refused file it released. An answer lost on the way leaves rows and multipart uploads nobody holds, for the sweep and the lifecycle rule | new: `/upload` is asked again, since its answer depends on the session, the quota and the server's rules of that moment |
-  | `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND` | the handler, before it reads the token, at `/sign` and `/complete`; `INVALID_INPUT` also for a part list `/sign` refuses | Everything as it was | same: the request was turned away, not the upload; it passes once the proxy, `basePath` or `trustedOrigins` is fixed |
-  | `SERVER_ERROR`, retryable (a hook threw, the store failed, another request is completing, a setting is missing) or not (the handler caught a throw); an answer that is not cloudrop's | `/sign`, `/complete` | Everything as it was; after `/complete` the file may be complete | same; after `/complete`, `/complete` alone |
-  | `STORAGE_ERROR`, retryable or not; `RATE_LIMITED` | `/sign`, `/complete` | Everything as it was. A refusal whose delete failed keeps the object, and the next `/complete` discards it | same |
-  | `NETWORK_ERROR` | the client: no answer, or the `headers` function failed | Everything as it was; a `/complete` that left the page may have completed the file (`M11-R82`) | same; `/complete` alone when in doubt |
-  | `INVALID_TOKEN` | `/sign`, `/complete` | Everything as it was; the token is not this server's | new |
-  | `UPLOAD_EXPIRED` | `/sign` (expired, in its last 15 minutes, or its row is not pending), `/complete` (expired, or its row was ended or is gone) | Stateless: the object or parts stay. Store: the row is ended, or the sweep ends it | new |
-  | `UNKNOWN_ROUTE` | `/sign`, `/complete` | Everything as it was; a deploy removed the token's route | new, which `/upload` refuses while the job's route is gone |
-  | `NOT_UPLOADED` | `/complete`, single `PUT` | No object under the key; the row stays pending | resend: the `PUT`, then `/complete` |
-  | `PARTS_MISSING` | `/complete`, multipart | The upload is open; the row stays pending | resend: the named parts, then `/complete` (after the two repair rounds of `M3-S13`) |
-  | `VERIFICATION_FAILED` | `/complete` | The object is deleted, or is another writer's and kept; the row is `rejected` | new |
-  | `NO_SUCH_UPLOAD` | `/complete`; the bucket (`404 NoSuchUpload`, `M9-H4`) | The multipart upload is gone and no object of it is stored | new |
-  | `ALREADY_EXISTS` | `/complete`, multipart | The multipart upload is aborted; the row is `rejected` | new |
-  | `FILE_TYPE_NOT_ALLOWED` | `/complete` (`contentChecks()`, `M10-K4`) | The object is deleted; the row is `rejected` | new |
-  | Any other code, not retryable | `/complete`: a plugin's `afterVerify` refusal (the object is deleted, the row `rejected`) or a replacing route's `onDelete` refusal (`M11-D3`: the object and the pending row are kept) | As named | new |
-  | `UPLOAD_REJECTED` | the bucket: `403` for the signature or after a renewed link, `501`, any other `4xx` | Nothing of this `PUT`; earlier parts and the pending row stay until the ticket is given up (`M11-R89`) | new |
-  | `STORAGE_ERROR`, `RATE_LIMITED`, `NETWORK_ERROR` | the bucket: `5xx`, `408`, `400 RequestTimeout` (`M11-R88`); `429`, `503`; no readable answer | Parts that landed stay | same |
-  | `ABORTED`; a done file | a cancel | As the cancel left it | nothing: `retry()` answers the outcome as it is (`M3-U37`) |
-  | `INVALID_INPUT`, `CLIENT_CLOSED` | the client, for the arguments of `start()` or a closed client | The job has no files | nothing: `retry()` answers the refusal |
-  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `STORAGE_ERROR` | `resume()`'s checks | The record is as it was | the checks run again (`M3-U90`) |
-
-  `INVALID_CONFIG` is thrown, and `STORAGE_UNREACHABLE`, `STORAGE_DENIED`, `INVALID_PART` and `CHECKSUM_MISMATCH` never
-  leave the server (`storageFailure`); one a hook returns follows its `retryable`.
-- **Why:** two dead ends, both reproduced. After `contentChecks()` refused a file at `/complete` the server had deleted
-  the object, and `retry()` sent `/complete` with the old ticket for ever: `NOT_UPLOADED` without a store,
-  `UPLOAD_EXPIRED` with one, although `M10-K4` said a retry asks for a new ticket. After a proxy answered a single `PUT`
-  for the bucket, `/complete` answered `NOT_UPLOADED`, part 1 stayed counted as landed, and every `retry()` sent only
-  `/complete`. Both came from the same default: a code missing from a list kept the ticket. The default is now the
-  other way round, because a refusal for good that the client cannot place is most often the server ending the upload,
-  and then only a new ticket can store the file; the codes that leave the ticket good are few and named. A
-  `PARTS_MISSING` whose list a proxy dropped looped the same way and now sends every part.
-- **If wrong:** a replacing route whose `onDelete` refuses at `/complete` keeps the object and the pending row, and the
-  retry sends the file again under a new key instead of `/complete` alone; the first object and row go with the
-  `/abort` of `M11-R89`. A person who retries a file refused for its content sends it again to be refused again: the
-  client cannot know whether the server's rules changed, and `/upload`'s own refusals are asked again the same way.
-- **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on. Its
-  table is amended by `M11-R92` (first row: a retry frees the rows a lost answer left) and by `M11-R200`
-  (`NO_SUCH_UPLOAD`: with a store the row is `rejected`).
-- **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
-  `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
-  `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Retry").
-
-### M11-R81: a `/complete` in doubt ends with the server's word
-
-- **Decision:** an answer of `/complete` that says the ticket is over (`new` in `M11-R80`) outranks the doubt of an
-  earlier `/complete`: the next `retry()` asks `/upload` for a new ticket. `NOT_UPLOADED` clears the doubt, as
-  `PARTS_MISSING` and `NO_SUCH_UPLOAD` do, so that retry sends the file again and a cancel sends `/abort`. The first
-  retry after a doubt still sends `/complete` alone, whatever the clock says (`M3-U30`), and a cancel still sends no
-  `/abort` for a ticket whose doubt was never cleared.
-- **Why:** `M3-U30` accepted that a file in doubt whose ticket expired "can never be confirmed done by `retry()`", so
-  every later `retry()` sent a `/complete` that could only answer `UPLOAD_EXPIRED`. The same held for a doubt followed
-  by `NOT_UPLOADED`, `VERIFICATION_FAILED` or a content refusal. Once the server has answered, the old ticket can settle
-  nothing more, and the message already tells the person to start again; `retry()` now does that. With a store the
-  answer proves no completion was recorded: a completed row is replayed, also after expiry.
-- **If wrong:** without a store, a `/complete` that finished unheard, followed by an expiry and a retry, stores the
-  file twice and runs `onComplete` twice, as the person's own new upload would. `NOT_UPLOADED` after a completion that
-  finished unheard means the app deleted the object since; the retry stores it again under the same key.
-- **Status:** in force. Amends `M3-U30`'s "If wrong". Amended by `M11-R201`: the answer that says the ticket is over
-  also ends the doubt for a cancel, which then sends `/abort` with `keep`.
-- **Visible in:** `src/client/retry-file.ts` (`needsTicket`), `src/client/upload.ts` (`complete`),
-  `src/client/retry-dead-ends.test.ts`.
-
-### M11-R82: only a `/complete` that left the page may have finished the file
-
-- **Decision:** the errors of a request the client gave up before sending it (the `headers` or `account` function
-  threw, rejected, gave nothing usable or did not answer within the request's time) are marked as unsent
-  (`wasSent` in `src/client/failures.ts`), and a `/complete` that failed that way leaves no doubt. Their code stays
-  `NETWORK_ERROR`, retryable.
-- **Why:** reproduced: with a `headers` function that failed for every `/complete`, `upload()` kept the stored object
-  for good and `abort()` after `start()` sent no `/abort`, because any `NETWORK_ERROR` of `/complete` counted as "may
-  have finished". Nothing was sent, so nothing can have finished. Every other failure of `send()` is built after
-  `fetch` was called and still counts: a browser does not say whether a failed request left. `account` runs for
-  `/upload` only, where no decision reads the mark.
-- **If wrong:** none known. A custom `fetch` that rejects before sending is still counted as sent, which keeps the file.
-- **Status:** in force.
-- **Visible in:** `src/client/failures.ts` (`wasSent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
-  (`complete`), `src/client/upload-abort.test.ts`.
-
-### M11-R83: without `crypto.getRandomValues`, the `/upload` key comes from `Math.random`
-
-- **Decision:** `newRequestKey` (`src/client/launch.ts`) fills its 16 bytes with `crypto.getRandomValues` when the
-  runtime has it and with `Math.random` otherwise; the key keeps its shape, 32 hex digits.
-- **Why:** reproduced: without a global `crypto.getRandomValues`, which React Native's Hermes lacks unless the app adds
-  a polyfill (`M8-Q8` names it as a target), the key threw inside `launch`, `job.done` rejected with a `TypeError` and
-  the file stayed `queued`, though `done` promises never to reject. The key is an idempotency key, not a secret: the
-  server only compares it with the keys of the same owner's pending rows, and supersedes nothing else by it
-  (`M5-T105`), so a guessed key gives a caller nothing they could not send themselves. It only has to differ from that
-  owner's other asks of the last 24 hours, which sixteen draws from an engine's generator do. The client's other two
-  uses were checked: `crypto.randomUUID` is not called, and `crypto.subtle` (`fingerprint.ts`) runs only where records
-  are kept, which needs Web Locks and so a secure context; without it `fingerprintOf` rejects, the record is not saved,
-  `isSameFile` answers false, and the upload goes on (measured in the unit lane, 2026-11-21).
-- **If wrong:** a runtime whose `Math.random` repeats a sequence across sessions of one owner within a day could give
-  two asks one key, and with a store the later ask would end the earlier one's pending rows: that upload then fails
-  with `UPLOAD_EXPIRED` and `retry()` starts it again.
-- **Status:** in force.
-- **Visible in:** `src/client/launch.ts`, `src/client/launch.test.ts`.
-
-### M11-R84: a hostile argument is `INVALID_INPUT`, never a throw
-
-- **Decision:** `start()`, `upload()`, `resume()`, `discard()` and `forget()` read what the caller passed through
-  `tryRead` (`src/client/arguments.ts`), so a getter or a proxy that throws is answered as `INVALID_INPUT`: "An
-  argument threw an error while it was read. Pass plain values: a route name, File objects and options." for
-  `start()` and `upload()`, each other call's own message otherwise. A list of files is read entry by entry and refused
-  at the first that is no `File`, before anything is copied.
-- **Why:** reproduced: `upload("files", { length: Infinity })` and `start("files", { length: 2 ** 32 })` threw
-  `RangeError: Invalid array length` out of the call, and `{ length: 2 ** 32 - 1 }` ran `Array.from` out of memory
-  (the test worker died with it), because the list was copied before it was checked. A `length` getter that threw
-  left `upload()` twice, once from the check and once from telling a list from a file. Public calls return
-  `{ data, error }`; a `RangeError` from inside the library says nothing a caller can act on.
-- **If wrong:** none known. A list with a hole is refused as before, with the message for a list that holds something
-  other than files.
-- **Status:** in force.
-- **Visible in:** `src/client/arguments.ts`, `src/client/resume.ts`, `src/client/discard.ts`,
-  `src/client/arguments.test.ts`.
-
-### M11-R85: a ticket from `/upload` passes the check a saved record passes
-
-- **Decision:** `isPartPlan(size, partSize, partCount)` in `src/client/answers.ts` is the one check of a multipart
-  plan, for a ticket `/upload` answers and for a record read back from IndexedDB: parts of 5 MiB to 5 GiB, at most
-  10,000 of them, and exactly the count the file's size and the part size give. A ticket outside it makes the whole
-  `/upload` answer unreadable (`SERVER_ERROR`, "the upload server sent an answer this client cannot read"), as a wrong
-  part count already did (`M3-S7`); a record outside it is deleted, as before. A signed part's number must lie in 1 to
-  the part count, as before.
-- **Why:** reproduced: a ticket with `partSize: 1` and one part per byte passed, because only the count was compared
-  with the file, and the client then listed every part number (16,777,221 for a 16 MiB file) before the first `PUT`.
-  A saved record was already capped at 10,000 parts (`records.ts`); the live answer, which also crosses proxies and
-  cloudrop versions, was not. The three limits are those of every S3-compatible storage (`R2_RULES`, `S3_RULES`), and
-  the server's planner never goes below 8 MiB, so no ticket of a cloudrop server is refused.
-- **If wrong:** a custom `StorageDriver` whose rules allow parts under 5 MiB or more than 10,000 parts would have its
-  multipart tickets refused by the client; the planner starts at 8 MiB and doubles, so that needs a file over
-  10,000 times the driver's largest part.
-- **Status:** in force.
-- **Visible in:** `src/client/answers.ts`, `src/client/records.ts`, `src/client/endpoints.test.ts`.
-
-### M11-R86: a cancel during `/complete` waits for the answer, and the documentation says so
-
-- **Decision:** the behaviour of `M3-S14` and `M4-F4` stays: a cancel does not cut off a `/complete` in flight. The
-  file stays `completing` until that request answers, at most 120 seconds (`COMPLETE_TIMEOUT_MS`, one attempt; no
-  further attempt starts after a cancel), and ends `done` with its result when the server completed it and `aborted`
-  otherwise; `done` of an aborted file then waits for its `/abort`, at most 10 seconds. The JSDoc of
-  `FileHandle.abort`, `UploadJob.abort` and `UploadOptions.signal` and the guide's "Cancel" now say this.
-- **Why:** confirmed by test: `abort()` during `/complete` left the file `completing`, and a completion that succeeded
-  ended it `done`, while the JSDoc said the file "ends aborted at once" and that the signal's result "is ABORTED". The
-  behaviour is right: when the server answered success the object is stored and `onComplete` ran, so reporting
-  `ABORTED` would hide a file the app has recorded, and cutting the request off would leave the page not knowing which
-  it was. Only the sentences were wrong.
-- **If wrong:** an app that treats a cancel as "the file does not exist" must delete a file that ends `done` after a
-  cancel; the guide says so.
-- **Status:** in force.
-- **Visible in:** `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel"),
-  `src/client/cancel-completing.test.ts`.
-
-### M11-R87: `/abort` uses keepalive only within a byte budget
-
-- **Decision:** each client counts the bytes of its request bodies in flight with `keepalive` and sends an `/abort`
-  with it only while they stay within 56 KiB (`KEEPALIVE_BUDGET_BYTES`, `src/client/keepalive.ts`); an `/abort` beyond
-  that goes as an ordinary request. A body counts from its `fetch` until its answer was read or the request failed.
-  `discard()` still sends without keepalive (`M3-U95`).
-- **Why:** measured in Chromium 159.0.8154.6 (Playwright's headless shell) on 2026-11-21 with
-  `spikes/keepalive/measure.mjs`, two runs with the same numbers. The cap is 65,536 bytes of keepalive bodies in
-  flight together, and a request beyond it is refused before it reaches the network (`TypeError: Failed to fetch`, no
-  network event): of 230 POSTs of 285 bytes sent in one tick, 1 was refused; of 160 of 420 bytes, 4; of 500 of 420
-  bytes, 344; of ten of 12,288 bytes, a token at its largest, 5. One body of 65,536 bytes passed and one of 65,537 was
-  refused. The bytes come back once the answers are read, and stay counted while an answer is left unread. The same
-  230 and 500 requests all passed without keepalive, and all passed sent as the client now sends them. Before this,
-  `close({ abort: true })` and `job.abort()` over that many files left the last tickets unaborted with nothing said:
-  an `/abort`'s failure is not reported. 56 KiB leaves 8 KiB of the cap for the page's own beacons.
-- **If wrong:** on `pagehide` the `/abort`s beyond the budget are ordinary requests the browser may drop, so those
-  uploads wait for the lifecycle rule, the sweep or the ticket's expiry, as all of them beyond the cap did before. Two
-  clients of one page count apart and can pass the cap together; a page whose own keepalive requests hold more than
-  8 KiB can too. A failed network (`net::ERR_NETWORK_CHANGED` while Docker networks came and went) fails requests the
-  same way to the page, which the script reports apart.
-- **Status:** in force. Firefox and Safari were not measured; the Fetch standard sets the same 64 KiB.
-- **Visible in:** `src/client/keepalive.ts`, `src/client/endpoints.ts` (`send`),
-  `src/client/endpoints-keepalive.test.ts`, `spikes/keepalive/measure.mjs`,
-  `docs/guide/client.md` ("Close the client").
-
-### M11-R88: the client retries S3's `400 RequestTimeout`
-
-- **Decision:** a bucket answer whose S3 code is `RequestTimeout` is retried within the part's attempts and, when
-  they run out, fails the file with the retryable `STORAGE_ERROR` "The storage service failed. Try again in a
-  moment.", as a `408` does; `retry()` then keeps the ticket and the parts that landed (`M11-R80`). It was
-  `UPLOAD_REJECTED`, not retryable, which made the person start the whole file again.
-- **Why:** AWS documents the case as transient: "an HTTP 400 with the error code `RequestTimeout` is classified as
-  transient and retried", listed with `InternalError` under the transient errors of every SDK
-  (https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html, read 2026-11-21). S3's error list
-  (https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html) names it as the answer to a socket not read
-  from or written to within the timeout period, with status 400; that page did not load its table for this review, so
-  the status comes from the SDK guide's sentence. A browser on a stalling link is exactly who gets it, and the same
-  bytes sent again pass. R2 was not measured: `docs/research/r2-spike-findings.md` has no stalled body, only uploads
-  that took 11 to 13 s and still answered `200`; the client gives a stalled `PUT` up itself after 30 s (`M3-U27`), so
-  R2's own answer rarely reaches it. The rule is by S3 code, whatever the status, so it holds for both.
-- **If wrong:** a storage service that answers `RequestTimeout` for a request it will never take costs five more
-  attempts before the file fails, with a retryable error instead of `UPLOAD_REJECTED`.
-- **Status:** in force. The server's driver (`src/storage/storage-error.ts`) is settled apart in this review; the rule
-  to share is this one: the S3 code `RequestTimeout`, whatever its status, is a retryable `STORAGE_ERROR`.
-- **Visible in:** `src/client/bucket.ts`, `src/client/bucket.test.ts`, `src/client/retry-steps.test.ts`,
-  `docs/guide/errors.md`.
-
-### M11-R89: a retry gives the ticket it replaces up before it asks for a new one
-
-- **Decision:** when `retry()` replaces a ticket the file still holds, it first gives that ticket up as `abort()` of
-  the failed file would (`drop`): one `/abort`, the record deleted, the lock let go once the server answered. The new
-  `/upload` waits for that answer, at most the `/abort`'s 10 seconds, whatever it is; `job.retry()` waits for the
-  `/abort` of every file it replaces a ticket for, then sends its one `/upload`. A ticket a `/complete` may have
-  finished gets no `/abort`, as `abort()` gives it none (`M3-S14`), and one the page already gave up gets no second.
-- **Why:** reproduced while filling the table of `M11-R80`: with a store and a quota of 1,000 bytes, a 600-byte file
-  whose `PUT` the bucket refused failed with `UPLOAD_REJECTED`, and every `retry()` was answered `QUOTA_EXCEEDED`,
-  because the first ticket's row was still pending and its bytes still counted (`reserved_bytes` counts pending rows
-  until the sweep ends them). `M3-U55` sent no `/abort` for a replaced ticket because "little is left to free"; with a
-  store the reservation is left, and without one a stored single-`PUT` object and landed parts are. The same `/abort`
-  removes the object and the pending row a refusing `onDelete` leaves (`M11-R80`). Waiting for the answer is what makes
-  it work: an `/upload` that raced the `/abort` would still be counted against the old row.
-- **If wrong:** a retry that needs a new ticket takes one more round trip. When the `/abort` does not arrive although
-  the `/upload` then does, the old row stays pending and a file larger than the owner's free quota is refused
-  `QUOTA_EXCEEDED` until the sweep ends that row; `api.sweep` is the remedy, as before. A plugin's `onAbort` hears of
-  a ticket the server had already ended a second time, as after `abort()` of such a file. A resumed upload that starts
-  over (`M3-U74`) still sends no `/abort` for its old ticket: its probe answered that the upload is gone, and the one
-  case with a pending row left, parts missing in the ticket's last 15 minutes, ends with the sweep.
-- **Status:** in force. Supersedes `M3-U55` for `retry()`. The last sentence of its "If wrong" is superseded by
-  `M11-R90`: a resumed upload that starts over sends its `/abort` too. Amended by `M11-R201`: a ticket a `/complete`
-  may have finished gets its `/abort`, with `keep`, once the server has answered that it is over.
-- **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
-  `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
-
-### M11-R130: a name read from a file is never looked up on a plain object
-
-- **Decision:** the EBML DocType table is a `Map`, as the ISO BMFF brand table already was, so a DocType of
-  `constructor`, `toString` or `__proto__` is no type. Every lookup in `src/plugins/**` whose key comes from the file
-  is a `Map`, a `Set`, a list or a pattern. `src/plugins/sniff-fuzz.test.ts` runs more than 20,000 inputs (each
-  signature's start before random bytes, cut at every length up to 64, and each sample with one byte changed) through
-  `sniff` and through `afterVerify`, and both must answer: a type or none, a pass or a refusal.
-- **Why:** `DOC_TYPES["constructor"]` answered `Object`'s constructor, which `checkContent` then read as a detection
-  and threw a `TypeError`. An `afterVerify` that throws keeps the object and answers a retryable `500`, so a 20-byte
-  file made every `/complete` of it fail for ever, with an error logged each time (review finding G4, reproduced).
-  `sniff` is not wrapped in a `try`: a caught bug would pass the file as sent, which is the wrong answer to hide.
-- **If wrong:** a later table keyed by file content and written as an object literal brings it back; the fuzz inputs
-  include DocTypes named like inherited members, and a new format adds its start to `PREFIXES`.
-- **Status:** in force.
-- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.test.ts`, `src/plugins/sniff-fuzz.test.ts`.
-
-### M11-R131: a tag is its whole name, and `<!--` is a web page before any byte
-
-- **Decision:** text reads as `text/html` when, after the standard's whitespace bytes (`09 0A 0C 0D 20`), it starts
-  with a row of the table in WHATWG MIME Sniffing §7.1 (Living Standard, 19 October 2026, commit `ba4b3c3`): one of
-  the sixteen tags in any case before a tag-terminating byte (space or `>`), or `<!--`. Three choices go past the
-  table, each on purpose: (1) a tag also ends at the standard's other whitespace bytes and at `/` (`<br/>`,
-  `<div` then a line feed), as `M10-K1` ruled; (2) one of the fifteen elements is also found as the unprefixed root
-  after comments or a doctype in a document without `<?xml`, as before; (3) `<!--` needs no byte after it. Nothing
-  else ends a name, so `<a,b>`, `<a@b.com>`, `<b|c>` and `<br2>` are not tags. Leading whitespace is the standard's
-  five bytes only: a vertical tab or a no-break space is content.
-- **Why:** the root element's name was read without looking at what ended it, so `<a,b> denotes the inner product`,
-  `<a@b.com> wrote:` and `<b|c>` were refused as web pages (review finding G6, reproduced). The finding also says the
-  standard matches a bare `<!--`; its current text does not (`3C 21 2D 2D TT`, mask `FF FF FF FF FF`: "followed by a
-  tag-terminating byte", the same in the published page, the commit snapshot and `mimesniff.bs`). Browsers do:
-  Chromium's `kSniffableTags` (`net/base/mime_sniffer.cc`) matches `<!--` as a prefix, and Firefox's
-  `nsUnknownDecoder` does behind `network.mimesniff.non_standard_html_comment`, which is `true` in
-  `StaticPrefList.yaml` ("differs from the mimesniff standard but matches Chrome"). `<!--x-->hello<script>` is
-  therefore a page in both, and showed no type here (reproduced). Chromium matches every tag as a bare prefix
-  (`<address` as `<a`); that is not followed, since it would refuse `<abbr>` and `<price>`, and Firefox and the
-  standard agree on the terminator.
-- **If wrong:** text that opens with `<!--` and is not HTML or SVG (a Markdown file, an XML file without a
-  declaration) is refused as a web page whether or not a space follows; the guide's Limits say so. A page whose first
-  tag ends at a byte outside space, tab, line break, `/` and `>` is not detected, as in both browsers' own tables.
-- **Status:** in force; `src/plugins/sniff-text.test.ts` has every row of the table, in both cases, before each
-  terminator, after the whitespace bytes, and inside a longer name.
-- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `docs/guide/plugins.md`.
-
-### M11-R132: the entry walk goes past a streamed ZIP entry
-
-- **Decision:** when a local file header has bit 3 of the general purpose flag set, the next entry is the first local
-  file header in the bytes read that follows a data descriptor whose compressed size equals the distance from the
-  entry's data: 12 bytes back without the descriptor's signature, 16 with it. The same four bytes anywhere else are
-  the entry's data. An Office file is then found by its `word/`, `xl/` or `ppt/` entry as before, whichever of
-  `[Content_Types].xml`, `_rels/.rels` or `docProps/` comes first. ZIP64 descriptors (8-byte sizes) are not read: a
-  writer uses them for entries of 4 GiB, which do not fit in the 4 KiB read. What a ZIP that names no package answers
-  when it was sent as an Office type is `M11-R133`.
-- **Why:** the walk stopped at the first entry with bit 3, so such a file read as a plain ZIP (review finding G3,
-  reproduced with files built as these writers build them). PKWARE APPNOTE 6.3.10 §4.4.4 defines bit 3 (crc-32 and
-  sizes zero in the local header, the values in a data descriptor after the data), §4.3.9 the descriptor and §4.3.9.3
-  that its signature `PK 07 08` is optional. Writers that set it for every deflated entry, read from their sources:
-  Java's `ZipOutputStream.putNextEntry` (`e.flag = 8` when size, compressed size or crc is not preset) with `writeEXT`;
-  Apache Commons Compress `ZipArchiveOutputStream.usesDataDescriptor` (deflated, and the output is not a
-  `RandomAccessOutputStream`), which Apache POI's `ZipPackage.saveImpl(OutputStream)` wraps its stream in, writing
-  `[Content_Types].xml` first; Node's archiver (`compress-commons`, `useDataDescriptor(true)` for streamed sources).
-  The compressed size is what makes a header the next entry: a stored archive inside an entry holds headers too.
-- **If wrong:** an entry's data that holds a local file header 12 or 16 bytes after four bytes spelling its own offset
-  is read as the next entry (one chance in 2^32 for random data); the worst outcome is a ZIP read as an Office file,
-  which any ZIP with a `word/` entry already is. An Office file whose first Office entry starts past the first 4 KiB
-  still reads as a ZIP.
-- **Status:** in force; `src/plugins/sniff-zip.test.ts` (each first entry, with and without the signature, a header
-  inside an entry's data, a descriptor of another size, an Office folder past 4 KiB). Amended by `M11-R212`: ZIP64
-  descriptors are read, since writers use them for small entries too.
-- **Visible in:** `src/plugins/sniff-containers.ts`, `src/testing/file-samples.ts`, `docs/guide/plugins.md`.
-
-### M11-R133: a container is the type it was sent as, when it can be that type
-
-- **Decision:** a detection is marked a container when its first bytes do not say which of its types the file is:
-  ISO BMFF with a general brand (`isom`, `iso2` to `iso9`, `mp41`, `mp42`, `avc1`, `dash`, `M4V `, `f4v `: `video/mp4`,
-  `audio/mp4`, `audio/x-m4a`, `video/x-m4v`), 3GPP and 3GPP2 (`video/` and `audio/`), WebM and Matroska (`video/` and
-  `audio/`), Ogg (`audio/ogg`, `audio/opus`, `video/ogg`, `application/ogg`), and a ZIP whose entries name no package
-  (`application/zip`; sent as an Office Open XML, `application/vnd.ms-*`, OpenDocument or `+zip` type, that type).
-  For a container, `deny`, `allow` and the default refusals judge each type it can be, among them the type it was
-  sent as: it is refused only when all of them are, with `reason: "refused"` and the container's first type as
-  `detected`. Sent as one of its types, which `/upload` already judged, it therefore passes. Sent untyped, nobody said
-  which type it is: it is refused when any type it can be is refused, and otherwise passes when the route accepts one
-  of them; the route's own entries count among the types a ZIP or an Office file can be. Sent as a type it cannot be, it is a `mismatch` as before. A ZIP still does not contradict any other
-  `application/` or `model/` type (`M10-K1`), but is judged as `application/zip` there. Every other detection is one
-  type, judged as before; RIFF needs no rule, since its form type (`WAVE`, `WEBP`) says what the file is. The names
-  in messages no longer claim a kind the bytes do not show: "a WebM file", "an MP4 file", "a 3GP file", "a Matroska
-  file", "an Ogg file".
-- **Why:** `deny` and the refused list were matched against the sniffer's first type, a video type for WebM and for
-  the MP4 brands above. On a route with `accept: "audio/*"` and the guide's own `deny: ["video/*"]`, a recording sent
-  as `audio/webm` (what `MediaRecorder` makes) was refused "This file is a WebM video", an `audio/x-m4a` with major
-  brand `mp42` "an MP4 video", and an Ogg video sent as `video/ogg` under `deny: ["audio/*"]` "an Ogg recording"
-  (review finding G2, reproduced). The same held for ZIP: a Word file whose `word/` entry starts past 4 KiB was
-  refused by `deny: ["application/zip"]` and, sent untyped, was not accepted by a route that takes Word files (G3).
-- **If wrong:** what `deny` cannot promise. `deny: ["video/*"]` refuses a file sent as a video type and a file
-  whose bytes show a video-only format; a video in a WebM, MP4, 3GP, Matroska or Ogg file sent as that container's
-  audio type passes. `deny: ["application/zip"]` does not refuse a plain ZIP sent as an Office, OpenDocument or
-  `+zip` type; a ZIP with an empty `word/` entry passed there already. Telling audio from video takes a parser per container
-  (track boxes, EBML tracks, Ogg codec headers), which is the scanning work the design leaves for later.
-- **Status:** in force; amends `M11-K2`: `detected` is still the sniffer's first type, and a container sent as one of
-  its own types is never refused on it.
-- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/bytes.ts`, `src/plugins/sniff-containers.ts`,
-  `src/plugins/sniff.ts`, `src/plugins/content-checks-containers.test.ts`, `docs/guide/plugins.md#containers`.
-
-### M11-R134: `allow` lets a kind through by any of its names, at both hooks
-
-- **Decision:** the refused kinds that go by several names are groups: web page (`text/html`,
-  `application/xhtml+xml`), Windows or DOS program (five names), Linux program (three), macOS program (two), `#!`
-  script (the four shell types and `application/x-perl`, `application/x-ruby`, `application/x-php`), JavaScript
-  (WHATWG's sixteen), Windows installer (two), the unknown types (two). The groups of detected kinds are the
-  sniffer's own `agrees` lists, so the two cannot drift apart. A type is let through when `allow` matches the type or
-  any name of its group. At `/complete`, content is let through when `allow` matches any type that content can be
-  here: its group, and the type it was sent as when the content agrees with that type. `deny` still wins, the route's
-  `accept` still applies, and content sent as a type it does not agree with is still a `mismatch`. What is refused by
-  default does not change: `application/x-perl`, `-ruby` and `-php` are names a script is allowed by, not types
-  refused at `/upload`.
-- **Why:** `allow` was matched against one type at a time, the declared one at `/upload` and the sniffer's at
-  `/complete`, so it had to name both (review finding G5, each reproduced). With `allow: ["text/x-shellscript"]`, a
-  script sent as `application/x-sh` or `text/x-sh` was refused at `/upload`, though the guide said it passes; with
-  `allow: ["application/x-msdownload"]` a program passed `/upload` and was refused at `/complete` as
-  `application/vnd.microsoft.portable-executable`; `allow: ["application/xhtml+xml"]` refused real XHTML as
-  `text/html`; `allow: ["application/rss+xml"]` refused a feed as `application/xml` on a route that did not name it.
-  An operator knows the type their users' browsers send, not the sniffer's name for it.
-- **If wrong:** allowing one name allows its whole group: `allow: ["application/xhtml+xml"]` also lets `text/html`
-  through a route that accepts it, and `allow: ["application/x-perl"]` every `#!` script. Each group is one risk
-  (a page that runs script, a program for one system), so there is nothing to tell apart; an app that must can leave
-  the other names out of the route's `accept`, or `deny` them.
-- **Status:** in force; `src/plugins/content-checks-allow.test.ts` allows each kind by each of its names and sends it
-  as every one, at `/upload` for the eight groups and at `/complete` for the six kinds the bytes show.
-- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`,
-  `docs/guide/plugins.md#options`.
-
-### M11-R135: an ID3 tag agrees with every type of the formats it fronts
-
-- **Decision:** a file that starts with an ID3v2 header is a container (`M11-R133`) of these types: `audio/mpeg`
-  and its aliases `audio/mp3`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg`, `audio/mpeg3`; `audio/mp2`,
-  `audio/x-mp2`; `audio/flac`, `audio/x-flac`; `audio/aac`, `audio/x-aac`, `audio/aacp` and `audio/vnd.dlna.adts`.
-  Its `detected` stays `audio/mpeg`, and a message calls it "a recording with an ID3 tag". An MPEG audio frame
-  without a tag agrees with `audio/mpeg` and the same five aliases.
-- **Why:** the tag agreed with `audio/aac` alone for AAC, so an ID3-tagged `.aac` from Chrome on Windows was a
-  `mismatch` (reproduced). Chromium's `net/base/mime_util.cc` has no entry for the extension in its own tables
-  (`audio/aac` is only in its list of supported audio types), so the platform's type is sent, and Windows registers
-  `.aac` as `audio/vnd.dlna.adts`, a type IANA lists (Microsoft, 2005); uploads from Chrome on Windows are reported
-  with it (mastodon/mastodon#11342, Borewit/music-metadata#654). Firefox's own table
-  (`nsExternalHelperAppService.cpp`) sends `audio/aac`, `audio/mpeg` and `audio/flac`; shared-mime-info adds the
-  aliases `audio/x-aac`, `audio/x-flac`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg` and `audio/x-mp2`, and Chromium
-  lists `audio/mpeg3`. As a container, a tagged FLAC sent as `audio/flac` is no longer refused by
-  `deny: ["audio/mpeg"]`.
-- **If wrong:** an ID3-tagged file sent as an audio type not listed (`audio/x-hx-aac-adts`, a vendor type) is still a
-  `mismatch`, and the message names the type to add here. A tag does not front WAV or AIFF, which carry it in a chunk.
-- **Status:** in force; `src/plugins/content-checks-containers.test.ts`.
-- **Visible in:** `src/plugins/sniff.ts`, `docs/guide/plugins.md`.
-
-### M11-R136: what shows no signature is named, and four things that passed are now detected
-
-- **Decision:**
-  - **MP3 without a tag** is read by the whole of WHATWG MIME Sniffing §6.2.3: a Layer III frame header (`FF`, the
-    sync bits, layer bits `01`, a bit rate index under 15, a sample rate index under 3) and a second one where the
-    first frame ends. The frame's length is bit rate times 144 (72 for MPEG-2 and 2.5) over the sample rate, plus the
-    padding bit. One header alone is no longer MP3; Layer I and II and the free bit rate are not detected.
-  - **A script** is found by its `#!` line also behind a UTF-8 or UTF-16 byte order mark and behind the whitespace
-    bytes text is read after (blank lines, spaces).
-  - **An OLE compound file** (`D0 CF 11 E0 A1 B1 1A E1`) is detected as `application/x-ole-storage`, "an old Office
-    document or a Windows installer": a container (`M11-R133`) that can be `application/x-msi` or
-    `application/x-ms-installer`, and contradicts no `application/` type. Sent as an `application/` type it passes as
-    that type; sent untyped it is refused, since one of the types it can be is; sent as another top-level type it is
-    a `mismatch`. `allow` of an installer type takes it untyped.
-  - **Sent untyped, a container is refused when any type it can be is refused** (not only when all are, as for a
-    typed one): nobody said which it is. This also makes `deny: ["video/*"]` refuse an untyped WebM.
-  - **An HTML application** is a web page: `application/hta` is a name of that kind (`M11-R134`), and
-    `<hta:application` as the root element reads as `text/html`.
-  - **HTML or XML sent as `application/vnd.ms-excel` or `application/msword`** is still refused as a web page or
-    XML, but no longer contradicts those types, so `allow: ["application/vnd.ms-excel"]` lets it through.
-  - The guide's Limits name what still passes undetected: `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, `.url`, `.lnk`, a DOS
-    `.com`, an HTA that starts with no listed tag, and an installer sent as an old Office type.
-- **Why:** review finding G9 probed each of these. The comment on the MP3 rule said the standard "reads none from
-  fewer" than four bytes and stopped there, so `FF FF 00 00`, a Layer I header with the free bit rate, read as MP3
-  and contradicted whatever the file was sent as (reproduced). The standard's steps go on to parse the frame and
-  match a second header; its prose has slips (`and` for `or` in the sync test, `s - length`, the two rate tables'
-  names and the scale test the other way round from the code), so the arithmetic follows Firefox's `toolkit/components/mediasniffer/mp3sniff.c`, which the steps
-  were written from. `execve` does not run a file whose `#!` is not at byte 0, but POSIX.1-2024 (Shell Command
-  Language §2.9.1.4) has the shell run it as a shell script on `ENOEXEC`, and `sh file` does the same. An untyped
-  `.msi` passed every route that takes `application/octet-stream`; MS-CFB §2.2 gives the signature, which old Word and
-  Excel files share, so only the untyped case and the installer types can be refused. Web applications export HTML
-  tables as `.xls`, and there was no way to take them: allowing `text/html` left a `mismatch`.
-- **If wrong:** an untyped compound file that is a document (a `.doc` from a system with no type for it) is refused
-  and must be sent typed. A real MP3 shorter than one frame and a header, in free format, or whose first frame is
-  followed by junk shows no type and passes as sent; a browser does not sniff it either. Other compound-file formats
-  sent under a non-`application/` type are a `mismatch`. `.lnk` has a signature (the 20 bytes shared-mime-info matches for
-  `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected: it is left out to keep the entry inside its 6 kB, and belongs with the next format added.
-- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
-  `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
-- **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`, `src/plugins/content-checks.ts`,
-  `docs/guide/plugins.md#limits`, `docs/decisions/m10-content.md` (two sentences corrected).
-
-### M11-R137: `content` is checked before it is sent, and dropped whole when it is not a refusal's
-
-- **Decision:** `errorBody` sends `content` only when `declared` is a string, `detected` is a string or absent, both
-  are at most 255 characters (RFC 6838 §4.2: 127 each for the type and the subtype), and `reason` is `"mismatch"`,
-  `"refused"` or `"not-accepted"`. Any other value sends no `content` at all; the code, message and `retryable` are
-  sent as before. `CloudropError`'s constructor is left as it is: it still keeps what it was given, for the server's
-  own log.
-- **Why:** `M11-K3` copied the three fields without looking at them, so a JavaScript plugin that built
-  `content: { declared: { key, name }, … }` put a key and a file name on the wire, and one with a reason of its own
-  sent it (review finding G7, reproduced with seven shapes). The client drops such a `content` (`M11-K4`), but the
-  bytes had left the server, which is the rule `M11-K3` exists for. Dropping the whole field, not the bad value,
-  keeps `content` a thing that is either complete or absent, as the client reads it.
-- **If wrong:** a plugin's own fourth reason is no longer sent; no client could read it (`M11-K4`). The two types are
-  not checked as MIME types: text of that length names no key that `/upload` can sign, but a plugin can still put
-  other short text there, as it can in `message`.
-- **Status:** in force; amends `M11-K3`'s "a plugin that sets a value outside the three reasons sends it".
-- **Visible in:** `src/server/http.ts`, `src/server/handler-failures.test.ts`.
-
-### M11-R138: a refusal claims the row, so it also ends one a stopped request left `completing`
-
-- **Decision:** with a store, a refusal at `/complete` (an `afterVerify` refusal, a failed verification) first calls
-  `claim` with a claim of its own, as a completion does, and then ends the row it holds with
-  `end("completing", "rejected")`; only then is the object deleted and `onAbort` run. `claim` takes a `pending` row
-  and a `completing` one whose claim is older than `completionLeaseMs`, and answers `busy` for a live claim, the
-  stored answer for a completed row and `UPLOAD_EXPIRED` for an ended or missing one, each answered as before.
-- **Why:** the refusal ended the row with `end("pending", "rejected")`, which changes nothing on a `completing` row.
-  A request that claimed the row and then stopped (a crash, a deploy) left it `completing`; once its lease ran out,
-  `/complete` verified the file again, was refused again, could not end the row and answered "Another request is
-  completing this upload" with `Retry-After: 2`, on every retry until the sweep ended the row as `failed`, keeping
-  the refused object (review finding G8, reproduced in lease and transaction mode). The claim rules already say who
-  may take such a row (`M5-T19`: a claim is live through exactly the lease, and one millisecond later the row can be
-  taken; `M5-T27`: a live claim is busy), so the refusal uses them instead of a rule of its own: a completion that is
-  really in flight holds a live claim and is not touched.
-- **If wrong:** a refusal now costs two store calls, not one. A request that stops between its claim and its `end`
-  leaves the row `completing`, and the next `/complete` after the lease refuses and ends it. An `onComplete` that
-  runs longer than the lease can lose its row to a refusal, as it could already lose it to a second completion
-  (`M5-T27`); `completionLeaseMs` is the setting for both. `FileCalls.end` takes `"completing"` as well as
-  `"pending"`; the store's own `end` always did.
-- **Status:** in force; `src/server/store-complete-refuse.test.ts` (busy at the lease's last millisecond, rejected
-  one later, in both modes), and `store-complete.test.ts` still holds a refusal off a completion in flight.
-- **Visible in:** `src/server/store-complete.ts`, `src/server/store-calls.ts`.
-
-### M11-R139: a refused preflight leaves the same log line as a refused POST
-
-- **Decision:** an `OPTIONS` request from an origin that is neither the server's own nor in `trustedOrigins` calls
-  the origin hint before it is answered `403`, as a refused `POST` does. The hint is unchanged: one warning per exact
-  origin, for at most 16 origins per handler, and never for a value that is not an exact origin. A preflight and the
-  `POST` of one origin share that one warning.
-- **Why:** a page on another origin posts `application/json`, which is not a CORS-safelisted type, so its browser
-  sends a preflight first and, refused, never sends the `POST`. The hint was called for the `POST` alone, so a
-  cross-origin page missing from `trustedOrigins` failed with a CORS error in its console and not one line in the
-  server's log (review finding, reproduced).
-- **If wrong:** none known; the limit of 16 origins keeps a flood of preflights out of the log as it does for posts.
-- **Status:** in force.
-- **Visible in:** `src/server/handler.ts`, `src/server/handler-origin-hint.test.ts`.
 
 ### M11-R60: an owner or a file id with a lone surrogate is refused
 
@@ -1559,6 +778,245 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/decisions/m11-listing.md` (`M11-L5`).
 
+### M11-R80: `retry()` follows one table of what each failure leaves of the ticket
+
+- **Decision:** `retryStep(error)` in `src/client/retry-step.ts` is the one place that says what a failure leaves of
+  its upload's ticket, and `retry()`, `giveUp` and `discard()` read it. It answers `resend` for `NOT_UPLOADED` and
+  `PARTS_MISSING`; `same` for every retryable error and for `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`,
+  `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND`, `SERVER_ERROR` and `STORAGE_ERROR`;
+  `new` for every other error, a code this client does not know included. It replaces the list `NEEDS_NEW_TICKET`
+  (`M3-U31`), whose default was the same ticket. `retry()` decides in this order: no ticket, or one the page gave up
+  (`M3-U33`): a new ticket. `new`: a new ticket. A `/complete` in doubt (`M3-U30`): `/complete` alone. A ticket that
+  expired, or cannot sign what is still to send (`M9-H3`): a new ticket. Otherwise the same ticket; for `resend`, the
+  parts the answer named are sent again first, and every part when it named none.
+
+  | Answer | From | What it leaves: object, multipart upload, row | `retry()` |
+  | --- | --- | --- | --- |
+  | Any refusal or no answer: `UNAUTHORIZED`, `FORBIDDEN`, `UNKNOWN_ROUTE`, `INVALID_METADATA`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `ACCOUNT_CHANGED`, `QUOTA_EXCEEDED`, `INVALID_INPUT`, `UPLOAD_EXPIRED` (the row was revoked meanwhile), `STORAGE_ERROR`, `RATE_LIMITED`, `SERVER_ERROR`, `NETWORK_ERROR`, the handler's refusals below | `/upload` | Nothing: the file has no ticket. What `/upload` reserved for a refused file it released. An answer lost on the way leaves rows and multipart uploads nobody holds, for the sweep and the lifecycle rule | new: `/upload` is asked again, since its answer depends on the session, the quota and the server's rules of that moment |
+  | `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND` | the handler, before it reads the token, at `/sign` and `/complete`; `INVALID_INPUT` also for a part list `/sign` refuses | Everything as it was | same: the request was turned away, not the upload; it passes once the proxy, `basePath` or `trustedOrigins` is fixed |
+  | `SERVER_ERROR`, retryable (a hook threw, the store failed, another request is completing, a setting is missing) or not (the handler caught a throw); an answer that is not cloudrop's | `/sign`, `/complete` | Everything as it was; after `/complete` the file may be complete | same; after `/complete`, `/complete` alone |
+  | `STORAGE_ERROR`, retryable or not; `RATE_LIMITED` | `/sign`, `/complete` | Everything as it was. A refusal whose delete failed keeps the object, and the next `/complete` discards it | same |
+  | `NETWORK_ERROR` | the client: no answer, or the `headers` function failed | Everything as it was; a `/complete` that left the page may have completed the file (`M11-R82`) | same; `/complete` alone when in doubt |
+  | `INVALID_TOKEN` | `/sign`, `/complete` | Everything as it was; the token is not this server's | new |
+  | `UPLOAD_EXPIRED` | `/sign` (expired, in its last 15 minutes, or its row is not pending), `/complete` (expired, or its row was ended or is gone) | Stateless: the object or parts stay. Store: the row is ended, or the sweep ends it | new |
+  | `UNKNOWN_ROUTE` | `/sign`, `/complete` | Everything as it was; a deploy removed the token's route | new, which `/upload` refuses while the job's route is gone |
+  | `NOT_UPLOADED` | `/complete`, single `PUT` | No object under the key; the row stays pending | resend: the `PUT`, then `/complete` |
+  | `PARTS_MISSING` | `/complete`, multipart | The upload is open; the row stays pending | resend: the named parts, then `/complete` (after the two repair rounds of `M3-S13`) |
+  | `VERIFICATION_FAILED` | `/complete` | The object is deleted, or is another writer's and kept; the row is `rejected` | new |
+  | `NO_SUCH_UPLOAD` | `/complete`; the bucket (`404 NoSuchUpload`, `M9-H4`) | The multipart upload is gone and no object of it is stored | new |
+  | `ALREADY_EXISTS` | `/complete`, multipart | The multipart upload is aborted; the row is `rejected` | new |
+  | `FILE_TYPE_NOT_ALLOWED` | `/complete` (`contentChecks()`, `M10-K4`) | The object is deleted; the row is `rejected` | new |
+  | Any other code, not retryable | `/complete`: a plugin's `afterVerify` refusal (the object is deleted, the row `rejected`) or a replacing route's `onDelete` refusal (`M11-D3`: the object and the pending row are kept) | As named | new |
+  | `UPLOAD_REJECTED` | the bucket: `403` for the signature or after a renewed link, `501`, any other `4xx` | Nothing of this `PUT`; earlier parts and the pending row stay until the ticket is given up (`M11-R89`) | new |
+  | `STORAGE_ERROR`, `RATE_LIMITED`, `NETWORK_ERROR` | the bucket: `5xx`, `408`, `400 RequestTimeout` (`M11-R88`); `429`, `503`; no readable answer | Parts that landed stay | same |
+  | `ABORTED`; a done file | a cancel | As the cancel left it | nothing: `retry()` answers the outcome as it is (`M3-U37`) |
+  | `INVALID_INPUT`, `CLIENT_CLOSED` | the client, for the arguments of `start()` or a closed client | The job has no files | nothing: `retry()` answers the refusal |
+  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `STORAGE_ERROR` | `resume()`'s checks | The record is as it was | the checks run again (`M3-U90`) |
+
+  `INVALID_CONFIG` is thrown, and `STORAGE_UNREACHABLE`, `STORAGE_DENIED`, `INVALID_PART` and `CHECKSUM_MISMATCH` never
+  leave the server (`storageFailure`); one a hook returns follows its `retryable`.
+- **Why:** two dead ends, both reproduced. After `contentChecks()` refused a file at `/complete` the server had deleted
+  the object, and `retry()` sent `/complete` with the old ticket for ever: `NOT_UPLOADED` without a store,
+  `UPLOAD_EXPIRED` with one, although `M10-K4` said a retry asks for a new ticket. After a proxy answered a single `PUT`
+  for the bucket, `/complete` answered `NOT_UPLOADED`, part 1 stayed counted as landed, and every `retry()` sent only
+  `/complete`. Both came from the same default: a code missing from a list kept the ticket. The default is now the
+  other way round, because a refusal for good that the client cannot place is most often the server ending the upload,
+  and then only a new ticket can store the file; the codes that leave the ticket good are few and named. A
+  `PARTS_MISSING` whose list a proxy dropped looped the same way and now sends every part.
+- **If wrong:** a replacing route whose `onDelete` refuses at `/complete` keeps the object and the pending row, and the
+  retry sends the file again under a new key instead of `/complete` alone; the first object and row go with the
+  `/abort` of `M11-R89`. A person who retries a file refused for its content sends it again to be refused again: the
+  client cannot know whether the server's rules changed, and `/upload`'s own refusals are asked again the same way.
+- **Status:** in force. Supersedes the list of `M3-U31`; `M10-K4`'s sentence about `retry()` is true from here on. Its
+  table is amended by `M11-R92` (first row: a retry frees the rows a lost answer left) and by `M11-R200`
+  (`NO_SUCH_UPLOAD`: with a store the row is `rejected`).
+- **Visible in:** `src/client/retry-step.ts`, `src/client/retry-file.ts` (`needsTicket`, `requeue`),
+  `src/client/file-run.ts` (`giveUp`), `src/client/discard.ts`, `src/client/retry-steps.test.ts` (one row per answer),
+  `src/client/retry-dead-ends.test.ts`, `docs/guide/client.md` ("Retry").
+
+### M11-R81: a `/complete` in doubt ends with the server's word
+
+- **Decision:** an answer of `/complete` that says the ticket is over (`new` in `M11-R80`) outranks the doubt of an
+  earlier `/complete`: the next `retry()` asks `/upload` for a new ticket. `NOT_UPLOADED` clears the doubt, as
+  `PARTS_MISSING` and `NO_SUCH_UPLOAD` do, so that retry sends the file again and a cancel sends `/abort`. The first
+  retry after a doubt still sends `/complete` alone, whatever the clock says (`M3-U30`), and a cancel still sends no
+  `/abort` for a ticket whose doubt was never cleared.
+- **Why:** `M3-U30` accepted that a file in doubt whose ticket expired "can never be confirmed done by `retry()`", so
+  every later `retry()` sent a `/complete` that could only answer `UPLOAD_EXPIRED`. The same held for a doubt followed
+  by `NOT_UPLOADED`, `VERIFICATION_FAILED` or a content refusal. Once the server has answered, the old ticket can settle
+  nothing more, and the message already tells the person to start again; `retry()` now does that. With a store the
+  answer proves no completion was recorded: a completed row is replayed, also after expiry.
+- **If wrong:** without a store, a `/complete` that finished unheard, followed by an expiry and a retry, stores the
+  file twice and runs `onComplete` twice, as the person's own new upload would. `NOT_UPLOADED` after a completion that
+  finished unheard means the app deleted the object since; the retry stores it again under the same key.
+- **Status:** in force. Amends `M3-U30`'s "If wrong". Amended by `M11-R201`: the answer that says the ticket is over
+  also ends the doubt for a cancel, which then sends `/abort` with `keep`.
+- **Visible in:** `src/client/retry-file.ts` (`needsTicket`), `src/client/upload.ts` (`complete`),
+  `src/client/retry-dead-ends.test.ts`.
+
+### M11-R82: only a `/complete` that left the page may have finished the file
+
+- **Decision:** the errors of a request the client gave up before sending it (the `headers` or `account` function
+  threw, rejected, gave nothing usable or did not answer within the request's time) are marked as unsent
+  (`wasSent` in `src/client/failures.ts`), and a `/complete` that failed that way leaves no doubt. Their code stays
+  `NETWORK_ERROR`, retryable.
+- **Why:** reproduced: with a `headers` function that failed for every `/complete`, `upload()` kept the stored object
+  for good and `abort()` after `start()` sent no `/abort`, because any `NETWORK_ERROR` of `/complete` counted as "may
+  have finished". Nothing was sent, so nothing can have finished. Every other failure of `send()` is built after
+  `fetch` was called and still counts: a browser does not say whether a failed request left. `account` runs for
+  `/upload` only, where no decision reads the mark.
+- **If wrong:** none known. A custom `fetch` that rejects before sending is still counted as sent, which keeps the file.
+- **Status:** in force.
+- **Visible in:** `src/client/failures.ts` (`wasSent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
+  (`complete`), `src/client/upload-abort.test.ts`.
+
+### M11-R83: without `crypto.getRandomValues`, the `/upload` key comes from `Math.random`
+
+- **Decision:** `newRequestKey` (`src/client/launch.ts`) fills its 16 bytes with `crypto.getRandomValues` when the
+  runtime has it and with `Math.random` otherwise; the key keeps its shape, 32 hex digits.
+- **Why:** reproduced: without a global `crypto.getRandomValues`, which React Native's Hermes lacks unless the app adds
+  a polyfill (`M8-Q8` names it as a target), the key threw inside `launch`, `job.done` rejected with a `TypeError` and
+  the file stayed `queued`, though `done` promises never to reject. The key is an idempotency key, not a secret: the
+  server only compares it with the keys of the same owner's pending rows, and supersedes nothing else by it
+  (`M5-T105`), so a guessed key gives a caller nothing they could not send themselves. It only has to differ from that
+  owner's other asks of the last 24 hours, which sixteen draws from an engine's generator do. The client's other two
+  uses were checked: `crypto.randomUUID` is not called, and `crypto.subtle` (`fingerprint.ts`) runs only where records
+  are kept, which needs Web Locks and so a secure context; without it `fingerprintOf` rejects, the record is not saved,
+  `isSameFile` answers false, and the upload goes on (measured in the unit lane, 2026-11-21).
+- **If wrong:** a runtime whose `Math.random` repeats a sequence across sessions of one owner within a day could give
+  two asks one key, and with a store the later ask would end the earlier one's pending rows: that upload then fails
+  with `UPLOAD_EXPIRED` and `retry()` starts it again.
+- **Status:** in force.
+- **Visible in:** `src/client/launch.ts`, `src/client/launch.test.ts`.
+
+### M11-R84: a hostile argument is `INVALID_INPUT`, never a throw
+
+- **Decision:** `start()`, `upload()`, `resume()`, `discard()` and `forget()` read what the caller passed through
+  `tryRead` (`src/client/arguments.ts`), so a getter or a proxy that throws is answered as `INVALID_INPUT`: "An
+  argument threw an error while it was read. Pass plain values: a route name, File objects and options." for
+  `start()` and `upload()`, each other call's own message otherwise. A list of files is read entry by entry and refused
+  at the first that is no `File`, before anything is copied.
+- **Why:** reproduced: `upload("files", { length: Infinity })` and `start("files", { length: 2 ** 32 })` threw
+  `RangeError: Invalid array length` out of the call, and `{ length: 2 ** 32 - 1 }` ran `Array.from` out of memory
+  (the test worker died with it), because the list was copied before it was checked. A `length` getter that threw
+  left `upload()` twice, once from the check and once from telling a list from a file. Public calls return
+  `{ data, error }`; a `RangeError` from inside the library says nothing a caller can act on.
+- **If wrong:** none known. A list with a hole is refused as before, with the message for a list that holds something
+  other than files.
+- **Status:** in force.
+- **Visible in:** `src/client/arguments.ts`, `src/client/resume.ts`, `src/client/discard.ts`,
+  `src/client/arguments.test.ts`.
+
+### M11-R85: a ticket from `/upload` passes the check a saved record passes
+
+- **Decision:** `isPartPlan(size, partSize, partCount)` in `src/client/answers.ts` is the one check of a multipart
+  plan, for a ticket `/upload` answers and for a record read back from IndexedDB: parts of 5 MiB to 5 GiB, at most
+  10,000 of them, and exactly the count the file's size and the part size give. A ticket outside it makes the whole
+  `/upload` answer unreadable (`SERVER_ERROR`, "the upload server sent an answer this client cannot read"), as a wrong
+  part count already did (`M3-S7`); a record outside it is deleted, as before. A signed part's number must lie in 1 to
+  the part count, as before.
+- **Why:** reproduced: a ticket with `partSize: 1` and one part per byte passed, because only the count was compared
+  with the file, and the client then listed every part number (16,777,221 for a 16 MiB file) before the first `PUT`.
+  A saved record was already capped at 10,000 parts (`records.ts`); the live answer, which also crosses proxies and
+  cloudrop versions, was not. The three limits are those of every S3-compatible storage (`R2_RULES`, `S3_RULES`), and
+  the server's planner never goes below 8 MiB, so no ticket of a cloudrop server is refused.
+- **If wrong:** a custom `StorageDriver` whose rules allow parts under 5 MiB or more than 10,000 parts would have its
+  multipart tickets refused by the client; the planner starts at 8 MiB and doubles, so that needs a file over
+  10,000 times the driver's largest part.
+- **Status:** in force.
+- **Visible in:** `src/client/answers.ts`, `src/client/records.ts`, `src/client/endpoints.test.ts`.
+
+### M11-R86: a cancel during `/complete` waits for the answer, and the documentation says so
+
+- **Decision:** the behaviour of `M3-S14` and `M4-F4` stays: a cancel does not cut off a `/complete` in flight. The
+  file stays `completing` until that request answers, at most 120 seconds (`COMPLETE_TIMEOUT_MS`, one attempt; no
+  further attempt starts after a cancel), and ends `done` with its result when the server completed it and `aborted`
+  otherwise; `done` of an aborted file then waits for its `/abort`, at most 10 seconds. The JSDoc of
+  `FileHandle.abort`, `UploadJob.abort` and `UploadOptions.signal` and the guide's "Cancel" now say this.
+- **Why:** confirmed by test: `abort()` during `/complete` left the file `completing`, and a completion that succeeded
+  ended it `done`, while the JSDoc said the file "ends aborted at once" and that the signal's result "is ABORTED". The
+  behaviour is right: when the server answered success the object is stored and `onComplete` ran, so reporting
+  `ABORTED` would hide a file the app has recorded, and cutting the request off would leave the page not knowing which
+  it was. Only the sentences were wrong.
+- **If wrong:** an app that treats a cancel as "the file does not exist" must delete a file that ends `done` after a
+  cancel; the guide says so.
+- **Status:** in force.
+- **Visible in:** `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel"),
+  `src/client/cancel-completing.test.ts`.
+
+### M11-R87: `/abort` uses keepalive only within a byte budget
+
+- **Decision:** each client counts the bytes of its request bodies in flight with `keepalive` and sends an `/abort`
+  with it only while they stay within 56 KiB (`KEEPALIVE_BUDGET_BYTES`, `src/client/keepalive.ts`); an `/abort` beyond
+  that goes as an ordinary request. A body counts from its `fetch` until its answer was read or the request failed.
+  `discard()` still sends without keepalive (`M3-U95`).
+- **Why:** measured in Chromium 159.0.8154.6 (Playwright's headless shell) on 2026-11-21 with
+  `spikes/keepalive/measure.mjs`, two runs with the same numbers. The cap is 65,536 bytes of keepalive bodies in
+  flight together, and a request beyond it is refused before it reaches the network (`TypeError: Failed to fetch`, no
+  network event): of 230 POSTs of 285 bytes sent in one tick, 1 was refused; of 160 of 420 bytes, 4; of 500 of 420
+  bytes, 344; of ten of 12,288 bytes, a token at its largest, 5. One body of 65,536 bytes passed and one of 65,537 was
+  refused. The bytes come back once the answers are read, and stay counted while an answer is left unread. The same
+  230 and 500 requests all passed without keepalive, and all passed sent as the client now sends them. Before this,
+  `close({ abort: true })` and `job.abort()` over that many files left the last tickets unaborted with nothing said:
+  an `/abort`'s failure is not reported. 56 KiB leaves 8 KiB of the cap for the page's own beacons.
+- **If wrong:** on `pagehide` the `/abort`s beyond the budget are ordinary requests the browser may drop, so those
+  uploads wait for the lifecycle rule, the sweep or the ticket's expiry, as all of them beyond the cap did before. Two
+  clients of one page count apart and can pass the cap together; a page whose own keepalive requests hold more than
+  8 KiB can too. A failed network (`net::ERR_NETWORK_CHANGED` while Docker networks came and went) fails requests the
+  same way to the page, which the script reports apart.
+- **Status:** in force. Firefox and Safari were not measured; the Fetch standard sets the same 64 KiB.
+- **Visible in:** `src/client/keepalive.ts`, `src/client/endpoints.ts` (`send`),
+  `src/client/endpoints-keepalive.test.ts`, `spikes/keepalive/measure.mjs`,
+  `docs/guide/client.md` ("Close the client").
+
+### M11-R88: the client retries S3's `400 RequestTimeout`
+
+- **Decision:** a bucket answer whose S3 code is `RequestTimeout` is retried within the part's attempts and, when
+  they run out, fails the file with the retryable `STORAGE_ERROR` "The storage service failed. Try again in a
+  moment.", as a `408` does; `retry()` then keeps the ticket and the parts that landed (`M11-R80`). It was
+  `UPLOAD_REJECTED`, not retryable, which made the person start the whole file again.
+- **Why:** AWS documents the case as transient: "an HTTP 400 with the error code `RequestTimeout` is classified as
+  transient and retried", listed with `InternalError` under the transient errors of every SDK
+  (https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html, read 2026-11-21). S3's error list
+  (https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html) names it as the answer to a socket not read
+  from or written to within the timeout period, with status 400; that page did not load its table for this review, so
+  the status comes from the SDK guide's sentence. A browser on a stalling link is exactly who gets it, and the same
+  bytes sent again pass. R2 was not measured: `docs/research/r2-spike-findings.md` has no stalled body, only uploads
+  that took 11 to 13 s and still answered `200`; the client gives a stalled `PUT` up itself after 30 s (`M3-U27`), so
+  R2's own answer rarely reaches it. The rule is by S3 code, whatever the status, so it holds for both.
+- **If wrong:** a storage service that answers `RequestTimeout` for a request it will never take costs five more
+  attempts before the file fails, with a retryable error instead of `UPLOAD_REJECTED`.
+- **Status:** in force. The server's driver (`src/storage/storage-error.ts`) is settled apart in this review; the rule
+  to share is this one: the S3 code `RequestTimeout`, whatever its status, is a retryable `STORAGE_ERROR`.
+- **Visible in:** `src/client/bucket.ts`, `src/client/bucket.test.ts`, `src/client/retry-steps.test.ts`,
+  `docs/guide/errors.md`.
+
+### M11-R89: a retry gives the ticket it replaces up before it asks for a new one
+
+- **Decision:** when `retry()` replaces a ticket the file still holds, it first gives that ticket up as `abort()` of
+  the failed file would (`drop`): one `/abort`, the record deleted, the lock let go once the server answered. The new
+  `/upload` waits for that answer, at most the `/abort`'s 10 seconds, whatever it is; `job.retry()` waits for the
+  `/abort` of every file it replaces a ticket for, then sends its one `/upload`. A ticket a `/complete` may have
+  finished gets no `/abort`, as `abort()` gives it none (`M3-S14`), and one the page already gave up gets no second.
+- **Why:** reproduced while filling the table of `M11-R80`: with a store and a quota of 1,000 bytes, a 600-byte file
+  whose `PUT` the bucket refused failed with `UPLOAD_REJECTED`, and every `retry()` was answered `QUOTA_EXCEEDED`,
+  because the first ticket's row was still pending and its bytes still counted (`reserved_bytes` counts pending rows
+  until the sweep ends them). `M3-U55` sent no `/abort` for a replaced ticket because "little is left to free"; with a
+  store the reservation is left, and without one a stored single-`PUT` object and landed parts are. The same `/abort`
+  removes the object and the pending row a refusing `onDelete` leaves (`M11-R80`). Waiting for the answer is what makes
+  it work: an `/upload` that raced the `/abort` would still be counted against the old row.
+- **If wrong:** a retry that needs a new ticket takes one more round trip. When the `/abort` does not arrive although
+  the `/upload` then does, the old row stays pending and a file larger than the owner's free quota is refused
+  `QUOTA_EXCEEDED` until the sweep ends that row; `api.sweep` is the remedy, as before. A plugin's `onAbort` hears of
+  a ticket the server had already ended a second time, as after `abort()` of such a file. A resumed upload that starts
+  over (`M3-U74`) still sends no `/abort` for its old ticket: its probe answered that the upload is gone, and the one
+  case with a pending row left, parts missing in the ticket's last 15 minutes, ends with the sweep.
+- **Status:** in force. Supersedes `M3-U55` for `retry()`. The last sentence of its "If wrong" is superseded by
+  `M11-R90`: a resumed upload that starts over sends its `/abort` too. Amended by `M11-R201`: a ticket a `/complete`
+  may have finished gets its `/abort`, with `keep`, once the server has answered that it is over.
+- **Visible in:** `src/client/retry-file.ts` (`requeue`, `retryFiles`), `src/client/launch.ts` (`after`),
+  `src/client/retry-dead-ends.test.ts`, `src/client/retry-file.test.ts`, `docs/guide/client.md` ("Retry").
+
 ### M11-R90: a resumed upload that starts over gives its old ticket up first
 
 - **Decision:** a resumed upload that starts over (`startOver` in `src/client/job-run.ts`, `M3-U74`) gives the old
@@ -1704,6 +1162,549 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `docs/guide/errors.md` ("Upload endpoint errors", "Client errors"), `docs/guide/client.md`
   ("Retry").
+
+### M11-R100: the bundled server budget is provisional until the owner sets it
+
+- **Decision:** `scripts/size-limit.config.ts` holds the "cloudrop (bundled)" ceiling at 36 kB while 0.6.0 is built.
+  The owner sets the final number before the release, from the size measured once every fix is merged.
+- **Why:** the ceiling was 32 kB (`M10-D10`) with 0.68 kB of room. `api.deleteFile`'s answer and `onDelete` refusals,
+  the `content` field, `api.allFiles` and the review's fixes (bounded response bodies, refused web-page answers,
+  redirects never followed) each add honest code that every server needs; measured 32.47 kB with the storage fixes
+  merged. Cutting a fix to fit a budget would trade correctness for a number nothing depends on.
+- **If wrong:** the owner sets another ceiling, or asks for the store paths behind their own entry (`M5-T69`).
+- **Status:** provisional.
+- **Visible in:** `scripts/size-limit.config.ts`.
+
+### M11-R110: every command the output prints is complete, quoted and runnable as printed
+
+- **Decision:** one module (`src/cli/commands.ts`) builds every printed command.
+  - A cloudrop command the output tells the reader to run next repeats the run's `--origin`, `--env-file`, `--var`
+    and `--jurisdiction`, each as one word of a POSIX shell (plain text as it is, anything else in single quotes), ends
+    its line, and starts with the runner that started the command: `bunx` or `pnpm exec` when
+    `npm_config_user_agent` starts with `bun/` or `pnpm/`, `npx` otherwise. The usage line says the same. The dry
+    run's last line and the plain `setup`'s last paragraph print the `--apply` command instead of describing it.
+  - A Wrangler command starts with the runner too (`npx wrangler …`), as Cloudflare's documentation writes it.
+  - A Wrangler or AWS CLI command names the bucket and the S3 endpoint by value, once the storage settings are all
+    set and valid, and `<bucket>` and `<endpoint>` until then, with a sentence that says to replace them. Beside the
+    commands the output says that each tool signs in on its own, with the variables that do it.
+- **Why:** each printed command failed when pasted. After `doctor --origin X --env-file e2e.env` the suggested
+  `cloudrop setup --origin X --apply` answered "No storage settings found"; without `--jurisdiction` it targeted the
+  default endpoint; a bare `cloudrop` is `command not found` in a project that installed the package; and
+  `--origin 'https://a.example$(id)'`, which the URL parser takes as an origin, was printed as shell text. After
+  `--env-file`, `"$CLOUDROP_R2_BUCKET"` was empty in the reader's shell. The runner is measured (2026-11-21):
+  `npx` and `npm run` set `npm/11…`, `bunx` and `bun run` set `bun/1.4.4 …` and start the bin with Node, `pnpm exec`
+  sets `pnpm/12…`, and a direct start sets nothing. The test splits each printed command with a real `sh` and reads
+  it back through `parseArgs`.
+- **If wrong:** a bucket name and an S3 endpoint are printed, which `M9-C8` kept out of the output; neither grants
+  access, and both are printed only after the presets' own checks accepted them (an endpoint with a user name or
+  password is refused there). The quoting is POSIX: in PowerShell a word with a single quote, and in `cmd` any quoted
+  word, needs requoting, which the guide says. Yarn's runner is not detected and gets `npx`.
+- **Status:** in force. Supersedes the `"$NAME"` form of `M9-C8` and `M11-C4`; `M11-C4`'s rule that messages name the
+  app's variable stands.
+- **Visible in:** `src/cli/commands.ts`, `src/cli/commands.test.ts`, `src/cli/doctor.ts`, `src/cli/setup.ts`,
+  `src/cli/instructions.ts`, `src/cli/usage.ts`, `src/cli/run.ts`, `docs/guide/command.md#settings`,
+  `docs/guide/bucket-setup.md`.
+
+### M11-R111: one origin rule for the server and the command, and `ws:`, `wss:` and `ftp:` are no page's origin
+
+- **Decision:** the command reads `--origin` with `originProblem` of `src/server/origins.ts`, the function
+  `trustedOrigins` and `api.checkBucket` use, and prints its message as it is; the command's own copy of the rule is
+  gone. That rule now refuses a URL whose scheme is `ws`, `wss` or `ftp`: "is not a page's origin: a page is loaded over
+  http or https, or over an app's own scheme."
+- **Why:** the command's copy predated `M11-R41`, so `--origin capacitor://localhost`, `tauri://localhost` and
+  `chrome-extension://<id>` exited 2 with "Write it as scheme://host[:port]", which is how they are written, and an app
+  the server accepted could not have its bucket checked or set up. The same copy, and the server's rule, took
+  `ws://a.example` and `ftp://a.example`: the URL standard lists six special schemes (`ftp`, `file`, `http`, `https`,
+  `ws`, `wss`, <https://url.spec.whatwg.org/#special-scheme>) and its origin algorithm returns a tuple origin for all
+  but `file` (<https://url.spec.whatwg.org/#origin>), but a document is fetched over `http` and `https` alone, so no
+  page sends such an `Origin`. A CORS rule written for one allows nobody.
+- **If wrong:** an app whose shell really sends `ws://…` or `ftp://…` as its origin is refused at start-up
+  (`INVALID_CONFIG`) and by the command (exit 2); none is known. The command's messages lose "with its own --origin"
+  and gain "in lowercase", the server's wording.
+- **Status:** in force. Extends `M11-R41`.
+- **Visible in:** `src/server/origins.ts`, `src/server/config.test.ts`, `src/cli/args.ts`, `src/cli/run.test.ts`,
+  `docs/guide/command.md`, `docs/guide/server.md#what-an-origin-is`.
+
+### M11-R112: `--env-file` is read by Node's own parser, ported step for step
+
+- **Decision:** `parseEnvFile` (`src/cli/env-file.ts`) is a port of `Dotenv::ParseContent` in Node's
+  `src/node_dotenv.cc` (the `v24.x` branch, read 2026-11-21), not a line pattern of the command's own. It keeps Node's
+  reading where another dotenv reader may differ: a byte order mark stays in the first name, so the variable the file
+  means is not set; only a space after `export` is taken off (`export<tab>A=1` sets `export<tab>A`); a carriage return
+  is removed and ends no line; a name may hold a space; `A=` followed by spaces alone takes the next line as its value;
+  a no-break space is not trimmed. A file that starts with a byte order mark before a variable gets a `note` naming
+  the variable Node does not set. The test compares each of these with `util.parseEnv` of the Node that runs it.
+- **Why:** the guide said the file is read "the way Node's `--env-file` does", and the review found four files the two
+  read differently, each in the direction that hides a problem: `doctor` answered `ok … is set` for a variable an app
+  started with `node --env-file` never gets. A differential run of 300,000 random files of the characters that matter
+  (quotes, `#`, `=`, `export`, CR, LF, tab, a byte order mark) against `util.parseEnv` on Node 24.22.2 found no
+  difference; that run is not in the suite, the table of the named cases is.
+- **If wrong:** an app that loads the file with dotenv, Bun or Next.js may get a variable Node does not, and `doctor`
+  then reports it as not set; the guide says whose reading it is. A later Node that changes its parser turns the table
+  test red on that Node, which is the signal to port the change.
+- **Status:** in force. Amends `M9-C8`.
+- **Visible in:** `src/cli/env-file.ts`, `src/cli/env-file.test.ts`, `src/cli/variables.ts`,
+  `docs/guide/command.md#settings`.
+
+### M11-R113: every `--env-file` is read, a later one winning, and an empty variable in the environment wins too
+
+- **Decision:** `--env-file` may be repeated; every file is read in the order given and a later file's value replaces
+  an earlier one's. A variable the environment has wins over every file, even when it is set to nothing: the setting
+  then reads as not set, with a `note` that names the variable and the file whose value it hides. The note for a
+  variable set in both names the file its value came from.
+- **Why:** measured on Node 24.22.2: `node --env-file=a.env --env-file=b.env` sets what both files hold and `b.env`'s
+  value where both name a variable; `A= node --env-file=a.env` leaves `A` empty. The command read only the last file,
+  silently, and took the file's value over an empty variable, so it reported `ok … is set` for a setting the library
+  (`fromEnv`: an empty variable is unset) would not find.
+- **If wrong:** none known; a project that passed `--env-file` twice and relied on the first being ignored now gets
+  its variables too.
+- **Status:** in force.
+- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/cli/variables.test.ts`,
+  `docs/guide/command.md#settings`.
+
+### M11-R114: `--replace` never stands in for a bucket that refuses the credentials
+
+- **Decision:** `setup --apply` and `--dry-run` report the listing's failure whenever a read of the rules failed,
+  with `--replace` as without it, in the same sentence (`Bucket: The storage service refused these credentials…`),
+  and write nothing.
+- **Why:** with `--replace` a refused read became a planned replace before the listing was looked at. With a wrong
+  secret key every request is refused, so `--dry-run --replace` exited 0 with "would replace every rule" and
+  `--apply --replace` printed two "the write failed" lines that named no variable (run against a local server,
+  2026-11-21). `M9-H102` had ruled that the listing tells wrong credentials from an object token; the `--replace`
+  path skipped it.
+- **If wrong:** credentials that may write bucket settings but may neither read them nor list objects can no longer
+  replace the rules with this command; none is known, and the S3 API writes still work by hand.
+- **Status:** in force. Completes `M9-H102`.
+- **Visible in:** `src/cli/setup.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#setup`.
+
+### M11-R115: the command and the origin rule repeat nothing that may be a secret
+
+- **Decision:** an argument the command does not know is repeated only when it is shaped like an option's name
+  (`--force`, up to its `=`) or a command's (letters and hyphens, at most 20). `NAME=value` after the command is named
+  by `NAME` when that is one of the ten settings ("CLOUDROP_SECRET is given as an argument…"), and any other argument
+  by its position ("Argument 4 is not an option…"). An `--env-file` that cannot be read is reported by its error code
+  alone, and by its number when there are several; a path is printed only once it was read as a file. `originProblem`
+  (the server's `trustedOrigins` and `checkBucket`, and `--origin`) does not repeat a value with an `@` in it: "An
+  origin holds no user name or password, so this one is not repeated here. Use https://app.example.com…". The tests'
+  leak check now covers values under 8 characters as whole words.
+- **Why:** the output goes to terminals, CI logs and, for the server's `INVALID_CONFIG`, application logs.
+  `doctor --origin X CLOUDROP_SECRET=<value>` printed the value in `Unknown option "…"`, `--env-file <value>` printed
+  it in `Cannot read <value> (ENOENT)`, and `--origin https://KEY:pw@host` and `trustedOrigins` printed the password.
+  The old leak check skipped values under 8 characters, so a short password was never looked for.
+- **If wrong:** an honest typo that is not shaped like a name (`doctor orig1n …`) is named by its position, which is
+  less direct. A word of letters typed as the command (`cloudrop hunter`) is still repeated. On Node a missing
+  `--env-file` never reaches the command: Node exits 9 and prints the path itself (`M9-H104`).
+- **Status:** in force. Amends `M9-C8` (the path of an unreadable file) and `M9-H100`.
+- **Visible in:** `src/cli/args.ts`, `src/cli/variables.ts`, `src/server/origins.ts`, `src/cli/run.test.ts`,
+  `src/cli/command-fixture.ts`, `src/server/bucket-check.test.ts`, `docs/guide/command.md#settings`.
+
+### M11-R116: a sentence about the bucket is true for the answer and for the service
+
+- **Decision:** the listing that proves the bucket (`M9-C5`) reads two answers as not a storage service's: a `404`
+  that names no missing bucket ("The endpoint answered the listing with HTTP 404, but not as a storage service does…")
+  and a redirect (for S3 the storage's own sentence with the endpoint and region variables; for R2 "The endpoint
+  redirected the request (HTTP 302), and a signed request is not sent on", since R2 has no region setting), each with
+  the endpoint's variable. `api.checkBucket` words its "may not read" and "add a lifecycle rule" messages for R2 only
+  when the storage's `rules` are the `r2()` preset's own object, and names no service otherwise. `setup --apply` says
+  "R2 can take up to 30 seconds" only on R2.
+- **Why:** a listing names no object, yet a bare `404` from a proxy printed "The object does not exist. Check the
+  key."; and an S3 run printed "R2 object tokens cannot", "admin read token or in the dashboard", "R2 creates a 7-day
+  rule by default" and R2's half minute. The review's third case, a redirect reported as "Could not reach the storage
+  service", did not reproduce on this commit: the driver already answers "The storage endpoint redirected the
+  request…" (run on Node 24 and Bun 1.4 against a local server), so only its wording for R2 changed.
+- **If wrong:** a driver built by hand with `rules: { ...R2_RULES }` gets the neutral words on R2. A storage service
+  that answers a listing of a missing bucket with a bare `404` is told "something else may be answering", and the
+  finding still names the endpoint to check.
+- **Status:** in force. Extends `M9-H101`.
+- **Visible in:** `src/cli/bucket-access.ts`, `src/server/bucket-check.ts`, `src/cli/setup.ts`,
+  `src/cli/doctor.test.ts`, `src/cli/setup.test.ts`, `docs/guide/command.md#doctor`.
+
+### M11-R117: a variable is read as an own property
+
+- **Decision:** the command reads the environment with `Object.hasOwn` and an env file's variables from a `Map`.
+- **Why:** `--var CLOUDROP_SECRET=__proto__` with nothing set printed `ok __proto__ is set.`, and `constructor` and
+  `toString` printed "is set in the environment and in undefined": a plain lookup finds what every object inherits.
+  All three are names a shell can set, so `--var` accepts them.
+- **If wrong:** none known.
+- **Status:** in force.
+- **Visible in:** `src/cli/variables.ts`, `src/cli/env-file.ts`, `src/cli/variables.test.ts`.
+
+### M11-R118: `--jurisdiction` is for R2 alone, and is given once
+
+- **Decision:** `--jurisdiction` with settings that select S3 is a usage error (exit 2) that names the S3 variables
+  found; a second `--jurisdiction` is a usage error too.
+- **Why:** with S3 settings the option changed nothing and said nothing, and of two the last won silently. Either
+  hides a mistake about which bucket is being checked or written.
+- **If wrong:** a script that passes `--jurisdiction` for every environment, S3 ones included, now exits 2 there.
+- **Status:** in force.
+- **Visible in:** `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md#settings`.
+
+### M11-R119: `cloudrop --version` prints the package's version
+
+- **Decision:** `--version` and `-v`, as the first argument, print the version and exit 0. `src/cli.ts` imports
+  `package.json` with `{ type: "json" }`; the build keeps the one string (`var version = "…"`), not the manifest.
+- **Why:** `cloudrop --version` answered `Unknown command "--version"`, and a bug report needs the number. A build-time
+  constant would have left the source bin, which the tests run under Node and Bun, without one.
+- **If wrong:** a bundler that stops tree-shaking a JSON import would put the whole manifest into `dist/cli.js`, about
+  3 kB; nothing imports that file.
+- **Status:** in force.
+- **Visible in:** `src/cli.ts`, `src/cli/args.ts`, `src/cli/run.ts`, `src/cli/run.test.ts`, `docs/guide/command.md`.
+
+### M11-R120: the package check runs the built bin on Node and Bun
+
+- **Decision:** `scripts/check-package.sh` (part of `bun run verify`) checks `dist/cli.js` itself: its first line is
+  `#!/usr/bin/env node`, it is executable in the packed tarball, `--version` prints the version of `package.json`,
+  `--help` prints the usage and `doctor` without `--origin` exits 2, on Node and, when `bun` is on `PATH`, on Bun.
+- **Why:** every test of the command ran the source (`runCommand`, or `src/cli.ts` under each runtime). A build that
+  dropped the shebang, lost the version or broke the entry would have been published green. Each message was seen to
+  fire by breaking the built file by hand (a wrong version, a wrong exit code).
+- **If wrong:** none known; the check adds four starts of a runtime, about half a second, to the package check.
+- **Status:** in force.
+- **Visible in:** `scripts/check-package.sh`.
+
+### M11-R130: a name read from a file is never looked up on a plain object
+
+- **Decision:** the EBML DocType table is a `Map`, as the ISO BMFF brand table already was, so a DocType of
+  `constructor`, `toString` or `__proto__` is no type. Every lookup in `src/plugins/**` whose key comes from the file
+  is a `Map`, a `Set`, a list or a pattern. `src/plugins/sniff-fuzz.test.ts` runs more than 20,000 inputs (each
+  signature's start before random bytes, cut at every length up to 64, and each sample with one byte changed) through
+  `sniff` and through `afterVerify`, and both must answer: a type or none, a pass or a refusal.
+- **Why:** `DOC_TYPES["constructor"]` answered `Object`'s constructor, which `checkContent` then read as a detection
+  and threw a `TypeError`. An `afterVerify` that throws keeps the object and answers a retryable `500`, so a 20-byte
+  file made every `/complete` of it fail for ever, with an error logged each time (review finding G4, reproduced).
+  `sniff` is not wrapped in a `try`: a caught bug would pass the file as sent, which is the wrong answer to hide.
+- **If wrong:** a later table keyed by file content and written as an object literal brings it back; the fuzz inputs
+  include DocTypes named like inherited members, and a new format adds its start to `PREFIXES`.
+- **Status:** in force.
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/plugins/sniff.test.ts`, `src/plugins/sniff-fuzz.test.ts`.
+
+### M11-R131: a tag is its whole name, and `<!--` is a web page before any byte
+
+- **Decision:** text reads as `text/html` when, after the standard's whitespace bytes (`09 0A 0C 0D 20`), it starts
+  with a row of the table in WHATWG MIME Sniffing §7.1 (Living Standard, 19 October 2026, commit `ba4b3c3`): one of
+  the sixteen tags in any case before a tag-terminating byte (space or `>`), or `<!--`. Three choices go past the
+  table, each on purpose: (1) a tag also ends at the standard's other whitespace bytes and at `/` (`<br/>`,
+  `<div` then a line feed), as `M10-K1` ruled; (2) one of the fifteen elements is also found as the unprefixed root
+  after comments or a doctype in a document without `<?xml`, as before; (3) `<!--` needs no byte after it. Nothing
+  else ends a name, so `<a,b>`, `<a@b.com>`, `<b|c>` and `<br2>` are not tags. Leading whitespace is the standard's
+  five bytes only: a vertical tab or a no-break space is content.
+- **Why:** the root element's name was read without looking at what ended it, so `<a,b> denotes the inner product`,
+  `<a@b.com> wrote:` and `<b|c>` were refused as web pages (review finding G6, reproduced). The finding also says the
+  standard matches a bare `<!--`; its current text does not (`3C 21 2D 2D TT`, mask `FF FF FF FF FF`: "followed by a
+  tag-terminating byte", the same in the published page, the commit snapshot and `mimesniff.bs`). Browsers do:
+  Chromium's `kSniffableTags` (`net/base/mime_sniffer.cc`) matches `<!--` as a prefix, and Firefox's
+  `nsUnknownDecoder` does behind `network.mimesniff.non_standard_html_comment`, which is `true` in
+  `StaticPrefList.yaml` ("differs from the mimesniff standard but matches Chrome"). `<!--x-->hello<script>` is
+  therefore a page in both, and showed no type here (reproduced). Chromium matches every tag as a bare prefix
+  (`<address` as `<a`); that is not followed, since it would refuse `<abbr>` and `<price>`, and Firefox and the
+  standard agree on the terminator.
+- **If wrong:** text that opens with `<!--` and is not HTML or SVG (a Markdown file, an XML file without a
+  declaration) is refused as a web page whether or not a space follows; the guide's Limits say so. A page whose first
+  tag ends at a byte outside space, tab, line break, `/` and `>` is not detected, as in both browsers' own tables.
+- **Status:** in force; `src/plugins/sniff-text.test.ts` has every row of the table, in both cases, before each
+  terminator, after the whitespace bytes, and inside a longer name.
+- **Visible in:** `src/plugins/sniff-text.ts`, `src/plugins/sniff-text.test.ts`, `docs/guide/plugins.md`.
+
+### M11-R132: the entry walk goes past a streamed ZIP entry
+
+- **Decision:** when a local file header has bit 3 of the general purpose flag set, the next entry is the first local
+  file header in the bytes read that follows a data descriptor whose compressed size equals the distance from the
+  entry's data: 12 bytes back without the descriptor's signature, 16 with it. The same four bytes anywhere else are
+  the entry's data. An Office file is then found by its `word/`, `xl/` or `ppt/` entry as before, whichever of
+  `[Content_Types].xml`, `_rels/.rels` or `docProps/` comes first. ZIP64 descriptors (8-byte sizes) are not read: a
+  writer uses them for entries of 4 GiB, which do not fit in the 4 KiB read. What a ZIP that names no package answers
+  when it was sent as an Office type is `M11-R133`.
+- **Why:** the walk stopped at the first entry with bit 3, so such a file read as a plain ZIP (review finding G3,
+  reproduced with files built as these writers build them). PKWARE APPNOTE 6.3.10 §4.4.4 defines bit 3 (crc-32 and
+  sizes zero in the local header, the values in a data descriptor after the data), §4.3.9 the descriptor and §4.3.9.3
+  that its signature `PK 07 08` is optional. Writers that set it for every deflated entry, read from their sources:
+  Java's `ZipOutputStream.putNextEntry` (`e.flag = 8` when size, compressed size or crc is not preset) with `writeEXT`;
+  Apache Commons Compress `ZipArchiveOutputStream.usesDataDescriptor` (deflated, and the output is not a
+  `RandomAccessOutputStream`), which Apache POI's `ZipPackage.saveImpl(OutputStream)` wraps its stream in, writing
+  `[Content_Types].xml` first; Node's archiver (`compress-commons`, `useDataDescriptor(true)` for streamed sources).
+  The compressed size is what makes a header the next entry: a stored archive inside an entry holds headers too.
+- **If wrong:** an entry's data that holds a local file header 12 or 16 bytes after four bytes spelling its own offset
+  is read as the next entry (one chance in 2^32 for random data); the worst outcome is a ZIP read as an Office file,
+  which any ZIP with a `word/` entry already is. An Office file whose first Office entry starts past the first 4 KiB
+  still reads as a ZIP.
+- **Status:** in force; `src/plugins/sniff-zip.test.ts` (each first entry, with and without the signature, a header
+  inside an entry's data, a descriptor of another size, an Office folder past 4 KiB). Amended by `M11-R212`: ZIP64
+  descriptors are read, since writers use them for small entries too.
+- **Visible in:** `src/plugins/sniff-containers.ts`, `src/testing/file-samples.ts`, `docs/guide/plugins.md`.
+
+### M11-R133: a container is the type it was sent as, when it can be that type
+
+- **Decision:** a detection is marked a container when its first bytes do not say which of its types the file is:
+  ISO BMFF with a general brand (`isom`, `iso2` to `iso9`, `mp41`, `mp42`, `avc1`, `dash`, `M4V `, `f4v `: `video/mp4`,
+  `audio/mp4`, `audio/x-m4a`, `video/x-m4v`), 3GPP and 3GPP2 (`video/` and `audio/`), WebM and Matroska (`video/` and
+  `audio/`), Ogg (`audio/ogg`, `audio/opus`, `video/ogg`, `application/ogg`), and a ZIP whose entries name no package
+  (`application/zip`; sent as an Office Open XML, `application/vnd.ms-*`, OpenDocument or `+zip` type, that type).
+  For a container, `deny`, `allow` and the default refusals judge each type it can be, among them the type it was
+  sent as: it is refused only when all of them are, with `reason: "refused"` and the container's first type as
+  `detected`. Sent as one of its types, which `/upload` already judged, it therefore passes. Sent untyped, nobody said
+  which type it is: it is refused when any type it can be is refused, and otherwise passes when the route accepts one
+  of them; the route's own entries count among the types a ZIP or an Office file can be. Sent as a type it cannot be, it is a `mismatch` as before. A ZIP still does not contradict any other
+  `application/` or `model/` type (`M10-K1`), but is judged as `application/zip` there. Every other detection is one
+  type, judged as before; RIFF needs no rule, since its form type (`WAVE`, `WEBP`) says what the file is. The names
+  in messages no longer claim a kind the bytes do not show: "a WebM file", "an MP4 file", "a 3GP file", "a Matroska
+  file", "an Ogg file".
+- **Why:** `deny` and the refused list were matched against the sniffer's first type, a video type for WebM and for
+  the MP4 brands above. On a route with `accept: "audio/*"` and the guide's own `deny: ["video/*"]`, a recording sent
+  as `audio/webm` (what `MediaRecorder` makes) was refused "This file is a WebM video", an `audio/x-m4a` with major
+  brand `mp42` "an MP4 video", and an Ogg video sent as `video/ogg` under `deny: ["audio/*"]` "an Ogg recording"
+  (review finding G2, reproduced). The same held for ZIP: a Word file whose `word/` entry starts past 4 KiB was
+  refused by `deny: ["application/zip"]` and, sent untyped, was not accepted by a route that takes Word files (G3).
+- **If wrong:** what `deny` cannot promise. `deny: ["video/*"]` refuses a file sent as a video type and a file
+  whose bytes show a video-only format; a video in a WebM, MP4, 3GP, Matroska or Ogg file sent as that container's
+  audio type passes. `deny: ["application/zip"]` does not refuse a plain ZIP sent as an Office, OpenDocument or
+  `+zip` type; a ZIP with an empty `word/` entry passed there already. Telling audio from video takes a parser per container
+  (track boxes, EBML tracks, Ogg codec headers), which is the scanning work the design leaves for later.
+- **Status:** in force; amends `M11-K2`: `detected` is still the sniffer's first type, and a container sent as one of
+  its own types is never refused on it.
+- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/bytes.ts`, `src/plugins/sniff-containers.ts`,
+  `src/plugins/sniff.ts`, `src/plugins/content-checks-containers.test.ts`, `docs/guide/plugins.md#containers`.
+
+### M11-R134: `allow` lets a kind through by any of its names, at both hooks
+
+- **Decision:** the refused kinds that go by several names are groups: web page (`text/html`,
+  `application/xhtml+xml`), Windows or DOS program (five names), Linux program (three), macOS program (two), `#!`
+  script (the four shell types and `application/x-perl`, `application/x-ruby`, `application/x-php`), JavaScript
+  (WHATWG's sixteen), Windows installer (two), the unknown types (two). The groups of detected kinds are the
+  sniffer's own `agrees` lists, so the two cannot drift apart. A type is let through when `allow` matches the type or
+  any name of its group. At `/complete`, content is let through when `allow` matches any type that content can be
+  here: its group, and the type it was sent as when the content agrees with that type. `deny` still wins, the route's
+  `accept` still applies, and content sent as a type it does not agree with is still a `mismatch`. What is refused by
+  default does not change: `application/x-perl`, `-ruby` and `-php` are names a script is allowed by, not types
+  refused at `/upload`.
+- **Why:** `allow` was matched against one type at a time, the declared one at `/upload` and the sniffer's at
+  `/complete`, so it had to name both (review finding G5, each reproduced). With `allow: ["text/x-shellscript"]`, a
+  script sent as `application/x-sh` or `text/x-sh` was refused at `/upload`, though the guide said it passes; with
+  `allow: ["application/x-msdownload"]` a program passed `/upload` and was refused at `/complete` as
+  `application/vnd.microsoft.portable-executable`; `allow: ["application/xhtml+xml"]` refused real XHTML as
+  `text/html`; `allow: ["application/rss+xml"]` refused a feed as `application/xml` on a route that did not name it.
+  An operator knows the type their users' browsers send, not the sniffer's name for it.
+- **If wrong:** allowing one name allows its whole group: `allow: ["application/xhtml+xml"]` also lets `text/html`
+  through a route that accepts it, and `allow: ["application/x-perl"]` every `#!` script. Each group is one risk
+  (a page that runs script, a program for one system), so there is nothing to tell apart; an app that must can leave
+  the other names out of the route's `accept`, or `deny` them.
+- **Status:** in force; `src/plugins/content-checks-allow.test.ts` allows each kind by each of its names and sends it
+  as every one, at `/upload` for the eight groups and at `/complete` for the six kinds the bytes show.
+- **Visible in:** `src/plugins/content-checks.ts`, `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`,
+  `docs/guide/plugins.md#options`.
+
+### M11-R135: an ID3 tag agrees with every type of the formats it fronts
+
+- **Decision:** a file that starts with an ID3v2 header is a container (`M11-R133`) of these types: `audio/mpeg`
+  and its aliases `audio/mp3`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg`, `audio/mpeg3`; `audio/mp2`,
+  `audio/x-mp2`; `audio/flac`, `audio/x-flac`; `audio/aac`, `audio/x-aac`, `audio/aacp` and `audio/vnd.dlna.adts`.
+  Its `detected` stays `audio/mpeg`, and a message calls it "a recording with an ID3 tag". An MPEG audio frame
+  without a tag agrees with `audio/mpeg` and the same five aliases.
+- **Why:** the tag agreed with `audio/aac` alone for AAC, so an ID3-tagged `.aac` from Chrome on Windows was a
+  `mismatch` (reproduced). Chromium's `net/base/mime_util.cc` has no entry for the extension in its own tables
+  (`audio/aac` is only in its list of supported audio types), so the platform's type is sent, and Windows registers
+  `.aac` as `audio/vnd.dlna.adts`, a type IANA lists (Microsoft, 2005); uploads from Chrome on Windows are reported
+  with it (mastodon/mastodon#11342, Borewit/music-metadata#654). Firefox's own table
+  (`nsExternalHelperAppService.cpp`) sends `audio/aac`, `audio/mpeg` and `audio/flac`; shared-mime-info adds the
+  aliases `audio/x-aac`, `audio/x-flac`, `audio/x-mp3`, `audio/x-mpeg`, `audio/x-mpg` and `audio/x-mp2`, and Chromium
+  lists `audio/mpeg3`. As a container, a tagged FLAC sent as `audio/flac` is no longer refused by
+  `deny: ["audio/mpeg"]`.
+- **If wrong:** an ID3-tagged file sent as an audio type not listed (`audio/x-hx-aac-adts`, a vendor type) is still a
+  `mismatch`, and the message names the type to add here. A tag does not front WAV or AIFF, which carry it in a chunk.
+- **Status:** in force; `src/plugins/content-checks-containers.test.ts`.
+- **Visible in:** `src/plugins/sniff.ts`, `docs/guide/plugins.md`.
+
+### M11-R136: what shows no signature is named, and four things that passed are now detected
+
+- **Decision:**
+  - **MP3 without a tag** is read by the whole of WHATWG MIME Sniffing §6.2.3: a Layer III frame header (`FF`, the
+    sync bits, layer bits `01`, a bit rate index under 15, a sample rate index under 3) and a second one where the
+    first frame ends. The frame's length is bit rate times 144 (72 for MPEG-2 and 2.5) over the sample rate, plus the
+    padding bit. One header alone is no longer MP3; Layer I and II and the free bit rate are not detected.
+  - **A script** is found by its `#!` line also behind a UTF-8 or UTF-16 byte order mark and behind the whitespace
+    bytes text is read after (blank lines, spaces).
+  - **An OLE compound file** (`D0 CF 11 E0 A1 B1 1A E1`) is detected as `application/x-ole-storage`, "an old Office
+    document or a Windows installer": a container (`M11-R133`) that can be `application/x-msi` or
+    `application/x-ms-installer`, and contradicts no `application/` type. Sent as an `application/` type it passes as
+    that type; sent untyped it is refused, since one of the types it can be is; sent as another top-level type it is
+    a `mismatch`. `allow` of an installer type takes it untyped.
+  - **Sent untyped, a container is refused when any type it can be is refused** (not only when all are, as for a
+    typed one): nobody said which it is. This also makes `deny: ["video/*"]` refuse an untyped WebM.
+  - **An HTML application** is a web page: `application/hta` is a name of that kind (`M11-R134`), and
+    `<hta:application` as the root element reads as `text/html`.
+  - **HTML or XML sent as `application/vnd.ms-excel` or `application/msword`** is still refused as a web page or
+    XML, but no longer contradicts those types, so `allow: ["application/vnd.ms-excel"]` lets it through.
+  - The guide's Limits name what still passes undetected: `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, `.url`, `.lnk`, a DOS
+    `.com`, an HTA that starts with no listed tag, and an installer sent as an old Office type.
+- **Why:** review finding G9 probed each of these. The comment on the MP3 rule said the standard "reads none from
+  fewer" than four bytes and stopped there, so `FF FF 00 00`, a Layer I header with the free bit rate, read as MP3
+  and contradicted whatever the file was sent as (reproduced). The standard's steps go on to parse the frame and
+  match a second header; its prose has slips (`and` for `or` in the sync test, `s - length`, the two rate tables'
+  names and the scale test the other way round from the code), so the arithmetic follows Firefox's `toolkit/components/mediasniffer/mp3sniff.c`, which the steps
+  were written from. `execve` does not run a file whose `#!` is not at byte 0, but POSIX.1-2024 (Shell Command
+  Language §2.9.1.4) has the shell run it as a shell script on `ENOEXEC`, and `sh file` does the same. An untyped
+  `.msi` passed every route that takes `application/octet-stream`; MS-CFB §2.2 gives the signature, which old Word and
+  Excel files share, so only the untyped case and the installer types can be refused. Web applications export HTML
+  tables as `.xls`, and there was no way to take them: allowing `text/html` left a `mismatch`.
+- **If wrong:** an untyped compound file that is a document (a `.doc` from a system with no type for it) is refused
+  and must be sent typed. A real MP3 shorter than one frame and a header, in free format, or whose first frame is
+  followed by junk shows no type and passes as sent; a browser does not sniff it either. Other compound-file formats
+  sent under a non-`application/` type are a `mismatch`. `.lnk` has a signature (the 20 bytes shared-mime-info matches for
+  `application/x-ms-shortcut`: the ShellLinkHeader's size and class id) and is not detected: it is left out to keep the entry inside its 6 kB, and belongs with the next format added.
+- **Status:** in force; `src/plugins/sniff.test.ts`, `src/plugins/sniff-text.test.ts`,
+  `src/plugins/content-checks-legacy.test.ts`, `src/plugins/content-checks-containers.test.ts`.
+- **Visible in:** `src/plugins/sniff.ts`, `src/plugins/sniff-text.ts`, `src/plugins/content-checks.ts`,
+  `docs/guide/plugins.md#limits`, `docs/decisions/m10-content.md` (two sentences corrected).
+
+### M11-R137: `content` is checked before it is sent, and dropped whole when it is not a refusal's
+
+- **Decision:** `errorBody` sends `content` only when `declared` is a string, `detected` is a string or absent, both
+  are at most 255 characters (RFC 6838 §4.2: 127 each for the type and the subtype), and `reason` is `"mismatch"`,
+  `"refused"` or `"not-accepted"`. Any other value sends no `content` at all; the code, message and `retryable` are
+  sent as before. `CloudropError`'s constructor is left as it is: it still keeps what it was given, for the server's
+  own log.
+- **Why:** `M11-K3` copied the three fields without looking at them, so a JavaScript plugin that built
+  `content: { declared: { key, name }, … }` put a key and a file name on the wire, and one with a reason of its own
+  sent it (review finding G7, reproduced with seven shapes). The client drops such a `content` (`M11-K4`), but the
+  bytes had left the server, which is the rule `M11-K3` exists for. Dropping the whole field, not the bad value,
+  keeps `content` a thing that is either complete or absent, as the client reads it.
+- **If wrong:** a plugin's own fourth reason is no longer sent; no client could read it (`M11-K4`). The two types are
+  not checked as MIME types: text of that length names no key that `/upload` can sign, but a plugin can still put
+  other short text there, as it can in `message`.
+- **Status:** in force; amends `M11-K3`'s "a plugin that sets a value outside the three reasons sends it".
+- **Visible in:** `src/server/http.ts`, `src/server/handler-failures.test.ts`.
+
+### M11-R138: a refusal claims the row, so it also ends one a stopped request left `completing`
+
+- **Decision:** with a store, a refusal at `/complete` (an `afterVerify` refusal, a failed verification) first calls
+  `claim` with a claim of its own, as a completion does, and then ends the row it holds with
+  `end("completing", "rejected")`; only then is the object deleted and `onAbort` run. `claim` takes a `pending` row
+  and a `completing` one whose claim is older than `completionLeaseMs`, and answers `busy` for a live claim, the
+  stored answer for a completed row and `UPLOAD_EXPIRED` for an ended or missing one, each answered as before.
+- **Why:** the refusal ended the row with `end("pending", "rejected")`, which changes nothing on a `completing` row.
+  A request that claimed the row and then stopped (a crash, a deploy) left it `completing`; once its lease ran out,
+  `/complete` verified the file again, was refused again, could not end the row and answered "Another request is
+  completing this upload" with `Retry-After: 2`, on every retry until the sweep ended the row as `failed`, keeping
+  the refused object (review finding G8, reproduced in lease and transaction mode). The claim rules already say who
+  may take such a row (`M5-T19`: a claim is live through exactly the lease, and one millisecond later the row can be
+  taken; `M5-T27`: a live claim is busy), so the refusal uses them instead of a rule of its own: a completion that is
+  really in flight holds a live claim and is not touched.
+- **If wrong:** a refusal now costs two store calls, not one. A request that stops between its claim and its `end`
+  leaves the row `completing`, and the next `/complete` after the lease refuses and ends it. An `onComplete` that
+  runs longer than the lease can lose its row to a refusal, as it could already lose it to a second completion
+  (`M5-T27`); `completionLeaseMs` is the setting for both. `FileCalls.end` takes `"completing"` as well as
+  `"pending"`; the store's own `end` always did.
+- **Status:** in force; `src/server/store-complete-refuse.test.ts` (busy at the lease's last millisecond, rejected
+  one later, in both modes), and `store-complete.test.ts` still holds a refusal off a completion in flight.
+- **Visible in:** `src/server/store-complete.ts`, `src/server/store-calls.ts`.
+
+### M11-R139: a refused preflight leaves the same log line as a refused POST
+
+- **Decision:** an `OPTIONS` request from an origin that is neither the server's own nor in `trustedOrigins` calls
+  the origin hint before it is answered `403`, as a refused `POST` does. The hint is unchanged: one warning per exact
+  origin, for at most 16 origins per handler, and never for a value that is not an exact origin. A preflight and the
+  `POST` of one origin share that one warning.
+- **Why:** a page on another origin posts `application/json`, which is not a CORS-safelisted type, so its browser
+  sends a preflight first and, refused, never sends the `POST`. The hint was called for the `POST` alone, so a
+  cross-origin page missing from `trustedOrigins` failed with a CORS error in its console and not one line in the
+  server's log (review finding, reproduced).
+- **If wrong:** none known; the limit of 16 origins keeps a flood of preflights out of the log as it does for posts.
+- **Status:** in force.
+- **Visible in:** `src/server/handler.ts`, `src/server/handler-origin-hint.test.ts`.
+
+### M11-R150: a deletion never ends a file it did not read as completed
+
+- **Decision:** `deleteCompleted`, with a transaction and under a lease, answers a row that was not `completed` when it
+  read it from that read, as `end` answers a row it does not change, and never calls `end` for it. `api.deleteFile` of
+  an upload whose `/complete` is recorded a moment later answers `NOT_FOUND`, and the file stays completed, with its
+  object and its `onDelete` still to run; a row already `deleted` answers `deleted: false` as before. The other
+  callers were checked and hold: `eraseOwner` deletes only rows it listed as `completed`, each read again by the same
+  code; a replacement whose listing misses a file that completes before the record rolls back with a transaction
+  (`replacedAsListed`) and runs the late hook under a lease (`afterReplacing`); and a server without any `onDelete`
+  calls `end` alone (`M10-D8`), where there is no hook to miss.
+- **Why:** the hook is chosen from the row as read. A `pending` or `completing` row chose none, and `end(completed →
+  deleted)` then matched the row a completion had recorded in between: the file was deleted with no `onDelete`, so no
+  audit row was written and no pointer cleared. Seen on the memory store in both modes and on Postgres 18 through
+  Drizzle on both drivers (`deleteFile` answered `deleted: true`, the row `deleted`, the hook never run). On Postgres
+  the window is between the deletion's `SELECT` and its `UPDATE`: an `UPDATE … WHERE status = 'completed'` does not
+  wait for a row whose committed version is `pending`, so the test holds the read until the completion has committed.
+- **If wrong:** a caller that deletes a file in the moment it completes gets `NOT_FOUND` where 0.5.0 deleted it; it
+  calls again, and the hook then runs.
+- **Status:** in force. Each test was seen failing on the code before the fix.
+- **Visible in:** `src/server/store-delete.ts`, `src/server/store-delete-race.test.ts`,
+  `src/adapters/drizzle-handler.db.integration.test.ts`, `src/testing/delete-fixture.ts` (`state.read`).
+
+### M11-R151: the tests of deletion and erasure fail when their branch is removed
+
+- **Decision:** Every branch of `src/server/erase.ts` and `src/server/store-delete.ts` was removed or inverted in turn
+  (95 one-line mutations) with the unit lane run on each, and tests were added or sharpened until each mutation a
+  caller can see fails one. In `eraseOwner`: the last read of the live statuses (an `/upload` reserved before the run
+  and recorded during it), both signal checks inside a run (between two files of a page, and between two pages, with
+  no store call after the abort), the signal check before the run (an unfinished upload stays unrevoked), every page
+  read, the `graceMs` a caller passes, `rejected` and `expired` rows, a row marked cleaned too early, a row that
+  cannot be marked cleaned, the store's error for a failed revocation, listing or last read, and options that are not
+  an object. In deletions: a failed read before the hook and after a throw, the log line of a failed deletion, the row
+  a late replacement's hook sees, and what a replacement lists (only its own route, nothing without an owner, every
+  page, nothing on a route without `onDelete`, and the store's error when the listing fails).
+- **Why:** the review removed the last live read and both mid-run signal checks and every test stayed green. The cause
+  was the frozen test clock: every file was created at the very millisecond the run started, so the check for an
+  upload that started during the run answered for the reads it was meant to back up. The same clock hid two more: the
+  live statuses read together (`M8-A5`) and `done` needing no failure. Those tests now move the clock before the run.
+- **If wrong:** three mutations change nothing a caller can see and are left without a test: marking a row cleaned
+  that is marked already (`store.cleaned` ignores it), and treating a route without `onDelete` as hooked in
+  `hookedRoute` and in `afterReplacing` (the missing hook is not called). Each only saves a call.
+- **Status:** in force.
+- **Visible in:** `src/server/erase.test.ts`, `src/server/store-delete.test.ts`,
+  `src/server/store-delete-race.test.ts`, `src/server/store-delete-replace.test.ts`.
+
+### M11-R152: `EraseReport` says what each counter leaves in the bucket
+
+- **Decision:** The guide's table for `api.eraseOwner` and the JSDoc of `EraseReport` say, per counter, what is in the
+  bucket after the run. `revoked` and `deleted` files have their objects removed later in the same run, where each
+  counts a second time, in `cleaned`, `waiting` or `failed`. `refused` files, and files whose `onDelete` threw
+  (`failed`), are still completed with their objects. `waiting` is two kinds: files still live, whose objects are
+  still there (a completed file its hook kept, a completion under way, an upload started during the run), and ended
+  uploads whose object this run removed but whose URLs, or the grace after them, have not run out. No behaviour
+  changed.
+- **Why:** both texts said of `waiting` that what the files had stored was removed. That holds only for the ended
+  ones: a refused file, a completion under way and an upload begun during the run keep their objects, so an operator
+  reading `waiting: 1` after an erasure request could believe the bucket was empty of that owner.
+- **If wrong:** none known; the counters themselves are as `M8-A5` and `M11-D4` set them.
+- **Status:** in force.
+- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
+
+### M11-R153: an erasure needs the sweep for a completion its server never finished
+
+- **Decision:** `api.eraseOwner` still never ends a `completing` row. One left by a server that died in `/complete`
+  counts in `waiting` on every run, with its object kept, until the sweep ends it as `failed`: past its lease and
+  `graceMs` past its token's deadline, 25 hours after its `/upload` with the defaults. The next run then removes the
+  object and can report `done`. The guide says so under "It needs the sweep", and `EraseReport.done` names it.
+- **Why:** the other choice was to let `eraseOwner` end such a row itself. It would gain no time, since the row may be
+  taken over by a `/complete` until its token's deadline either way. It would need the sweep's rule a second time: the
+  rule lives in each store's `stale` statement, which reads every owner's rows, so `eraseOwner` could share it only by
+  sweeping everyone or by restating it. And it would end a stuck completion without the sweep's `reported` list, the
+  one place an app learns that its `onComplete` may have recorded a file that never completed. Every store app is
+  already told to run the sweep on a schedule, so the safe change before a release is the sentence, not a second path
+  that ends rows.
+- **If wrong:** an app that erases owners and runs no sweep sees `waiting: 1, done: false` for ever for such an owner;
+  the guide names the cause and the cure. A per-owner `stale` would let `eraseOwner` share the rule later.
+- **Status:** in force. `src/server/erase.test.ts` ("waits for the sweep to end a completion its server never
+  finished…") holds the times at the millisecond: not ended at 25 hours, ended one millisecond later.
+- **Visible in:** `docs/guide/store.md#erase-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.
+
+### M11-R154: a replacement whose `onDelete` threw for a lost race asks its client to retry
+
+- **Decision:** The guide scopes the lost-race sentence: when `onDelete` throws because another deletion took the file
+  first, `api.deleteFile` answers as for a file already deleted and `api.eraseOwner` counts the file nowhere
+  (`M10-D7`), but a replacing `/complete` answers the retryable `SERVER_ERROR` of any throw, its new file stays
+  `pending`, and the client's retry, which finds nothing left to replace, completes. The behaviour is as it was.
+- **Why:** the sentence read as if every caller answered "already deleted". A replacement cannot: it has run
+  `onComplete` and holds a claim or a transaction, and whether the file it meant to replace is gone decides nothing
+  about its own completion, which the retry settles by listing again (`M10-D5`). Reading the row again there would
+  add a store call to gain an answer the retry gives anyway.
+- **If wrong:** a client sees one more retry of `/complete` in that race than a second read would cost.
+- **Status:** in force. `src/server/store-delete-race.test.ts` ("an onDelete that throws after a deletion won fails
+  /complete, which a retry finishes"), in both modes.
+- **Visible in:** `docs/guide/store.md#a-replacement-whose-files-change-meanwhile`.
 
 ### M11-R170: `checkBucket` and `doctor` judge the CORS rule the service answers with
 
@@ -2002,7 +2003,6 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** none; SQLite accepts either quoting, and the index is the same.
 - **Status:** in force.
 - **Visible in:** `docs/guide/store.md#upgrading-from-05`.
-
 
 ### M11-R195: `api.allFiles` refuses an `owner` key whose value is `undefined`
 

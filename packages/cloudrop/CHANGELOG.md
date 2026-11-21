@@ -58,10 +58,11 @@ reviewers who had to prove each problem with a failing test; everything they pro
   `https://*.example.org` (it never matched any request before), an origin with a user name, a host a browser cannot
   load, or the schemes `ws`, `wss` and `ftp`; `completionLeaseMs` and `graceMs` above 30 days (`M11-R40`, `M11-R63`,
   `M11-R111`, `M11-R176`).
-- **Stricter requests:** metadata nested more than 32 levels is `INVALID_METADATA`; a file name with NUL is
-  `INVALID_INPUT` for that file alone; an owner or file id with a broken Unicode character (a lone surrogate) is
+- **Stricter requests:** metadata nested more than 32 levels is `INVALID_METADATA`; a file name with NUL, or one whose
+  control character the route's own `key` cannot hold, is `INVALID_INPUT` for that file alone (it failed the whole
+  request before); an owner or file id with a broken Unicode character (a lone surrogate) is
   refused; an `OPTIONS` that is not a preflight for `POST` answers 405, not 403 (`M11-R42`, `M11-R46`, `M11-R60`,
-  `M11-R196`).
+  `M11-R196`, `M11-R222`).
 - **`/complete` of a multipart upload the bucket no longer has** ends the upload: with a store its row becomes
   `rejected` and its reserved bytes are released at once, and plugins hear `onAbort`. It used to stay pending until the
   sweep (`M11-R200`).
@@ -73,7 +74,9 @@ reviewers who had to prove each problem with a failing test; everything they pro
 - **`contentChecks()`:** a container that can be audio or video (WebM, MP4, Ogg, Matroska) is judged as the type it was
   sent as, so `deny: ["video/*"]` no longer refuses a voice recording; `allow` lets a refused kind through under any of
   its names, at both steps; an MP3 needs two frame headers; an old Office or installer file (OLE) sent without a type
-  is refused; a bare `<!--` reads as a web page, as browsers read it (`M11-R131` to `M11-R136`).
+  is refused; a bare `<!--` reads as a web page, as browsers read it; a document whose doctype is still open after
+  4 KiB is XML. The entry's size ceiling goes from 6 to 7 kB, provisional until the owner confirms (`M11-R131` to
+  `M11-R136`, `M11-R220`).
 - **The `cloudrop` command:** the commands it suggests are complete and quoted (`npx cloudrop … --env-file …`), and
   they name the bucket and the S3 endpoint by value; nothing else is printed by value, never a key or a secret.
   `--env-file` is read exactly as Node reads it, and may be repeated. `doctor` judges the CORS rule the service really
@@ -111,7 +114,7 @@ reviewers who had to prove each problem with a failing test; everything they pro
 - **`contentChecks()`:** an Office file written by a streaming ZIP writer read as a plain ZIP (`M11-R132`); a WebM
   whose DocType was `constructor` made `/complete` fail for ever (`M11-R130`); text such as `<a,b>` read as a web page
   (`M11-R131`); a refusal could not end a row a crashed request had left completing (`M11-R138`); a long doctype
-  took seconds to read (`M11-R211`).
+  took seconds to read (`M11-R211`); a `]>` inside a quoted value of a doctype hid the SVG behind it (`M11-R220`).
 - **The client:** `done` rejected and the file stayed queued where `crypto.getRandomValues` is missing; a hostile list
   argument threw; a `/complete` that never left the page stopped a later cancel from cleaning up; mass cancels could
   pass the browser's 64 KiB limit for requests sent while a page closes (`M11-R82` to `M11-R87`).

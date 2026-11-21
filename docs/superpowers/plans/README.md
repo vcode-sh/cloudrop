@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.5.0 (onDelete hears who deleted a file). This file
+Updated 2026-11-21 for 0.6.0, not yet released (the pilot's four gaps, `api.allFiles`, a review of every area). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -131,6 +131,12 @@ each now decided:
 - **Released in 0.5.0 (2026-11-21):** `api.deleteFile` and `api.eraseOwner` pass a `context` to `onDelete`, and a
   replacement's hook gets the replacing request (`M10-D12`): the pilot's move to 0.4.0 found its audit trail needed
   them.
+
+- **Built for 0.6.0 (2026-11-21, waiting for the pilot's run on the candidate and the owner's go):** what the pilot's
+  move to 0.5.0 could not do (`api.deleteFile` says what it did, `onDelete` can refuse, a content refusal says what the
+  file is, the command reads an app's own variable names: `M11-D`, `M11-K`, `M11-C`), `api.allFiles` (`M11-L`), and a
+  review of every area by reviewers who had to prove each finding, with every proven finding fixed (`M11-R`). Designed
+  in `docs/superpowers/specs/2026-11-21-0.6.0-design.md`.
 
 ### After 0.4.0: candidates, none decided
 
