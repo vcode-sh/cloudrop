@@ -94,8 +94,9 @@ const client = createCloudropClient<typeof cloudrop>({ namespace: userId, accoun
   `/upload` saw.
 - **Ignored without an owner.** On a route without `owner`, when `owner` returns `null`, and when the client sends no
   account (an older page during a deploy), the upload is checked as before.
-- **From a page on another origin,** the header makes the browser send a preflight; the handler allows it for a page on
-  a `trustedOrigins` origin. A proxy or framework that answers preflights itself must allow `x-cloudrop-account`.
+- **From a page on another origin,** the preflight that a cross-origin `/upload` already sends asks for this header too,
+  and the handler allows it for a page on a `trustedOrigins` origin. A proxy or framework that answers preflights itself
+  must allow `x-cloudrop-account`.
 
 ## Upload one file
 

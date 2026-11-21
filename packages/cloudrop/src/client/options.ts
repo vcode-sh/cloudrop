@@ -2,7 +2,8 @@
 // (S17, M3-U41, M3-U42, M3-U79, M8-L5), since it needs a code change, not a retry.
 
 import { configError } from "../errors.ts";
-import { type Account, type ClientFetch, encodeAccount, type ServerHeaders } from "./endpoints.ts";
+import { type Account, encodeAccount } from "./account.ts";
+import type { ClientFetch, ServerHeaders } from "./endpoints.ts";
 
 export interface ClientOptions {
   /** Where the server's handler is mounted: a path on this page's origin or an absolute URL. Default "/api/cloudrop". */

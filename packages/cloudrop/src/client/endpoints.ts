@@ -12,6 +12,7 @@ import {
   type SingleTicket,
   type UploadRequest,
 } from "../protocol/types.ts";
+import { type Account, encodeAccount } from "./account.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
 import { aborted, accountFailed, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { parseRetryAfter, waitAtLeast } from "./retry.ts";
@@ -23,23 +24,6 @@ export type Ticket = SingleTicket | MultipartTicket;
 
 /** Headers for the upload server only, or a function, possibly async, that gives them before each request (M8-L5). */
 export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
-
-/** The signed-in user's id for /upload only, or a function, possibly async, that gives it; null sends none (M10-A). */
-export type Account = string | (() => string | null | undefined | Promise<string | null | undefined>);
-
-/**
- * The account as the header sends it, percent-encoded (M10-A2), or null when `value` is not one: not a string, over
- * owner()'s 255 characters (MAX_OWNER_LENGTH on the server), or with a lone surrogate, which encodeURIComponent refuses.
- * String.isWellFormed would say the same, but is newer than the browsers the client supports (M4-F6).
- */
-export function encodeAccount(value: unknown): string | null {
-  if (typeof value !== "string" || value.length > 255) return null;
-  try {
-    return encodeURIComponent(value);
-  } catch {
-    return null;
-  }
-}
 
 export interface Endpoints {
   /**

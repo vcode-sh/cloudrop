@@ -1,8 +1,9 @@
 // Contract: the `account` option (M10-A). Its value goes percent-encoded as x-cloudrop-account with every /upload,
 // retries included, in place of one the headers option sets, and never with /sign, /complete, /abort or a bucket PUT. A
 // function is called before each /upload, null or undefined sends no header, its failure fails that /upload unsent with
-// NETWORK_ERROR, and a cancel stops its wait. A wrong option throws INVALID_CONFIG. Against a server whose route has a store and `owner`, another account ends the file
-// ACCOUNT_CHANGED without a retry, and the same account, in any characters, uploads.
+// NETWORK_ERROR, and a cancel stops its wait. A wrong option throws INVALID_CONFIG. Against a server whose route has a
+// store and `owner`, another account ends the file ACCOUNT_CHANGED without a retry, and the same account, in any
+// characters, uploads.
 // Oracle: the headers each request reached the fixture with, the requests the fixture saw, literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -107,6 +108,7 @@ describe("the account option", () => {
   it.for([
     { name: "rejects", account: () => Promise.reject(new Error("No session.")) },
     { name: "returns a number", account: () => 42 },
+    { name: "returns more than 255 characters", account: () => "u".repeat(256) },
   ])("fails an /upload unsent when the function $name", async ({ account }) => {
     const { fixture, client } = page();
     const { error } = await client({ account } as ClientOptions).upload("files", note());

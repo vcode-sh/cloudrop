@@ -20,7 +20,8 @@ Rulings for the client's `account` option, the server's check and the React guid
 - **If wrong:** an app whose `owner` is not the id the page knows (a tenant id, say) must pass that value instead; the
   client guide says to pass what `owner` returns.
 - **Status:** in force. Contract: `src/client/endpoints-account.test.ts`.
-- **Visible in:** `src/client/options.ts`, `src/client/endpoints.ts`, `src/protocol/types.ts`, `docs/guide/client.md`.
+- **Visible in:** `src/client/options.ts`, `src/client/account.ts`, `src/client/endpoints.ts`, `src/protocol/types.ts`,
+  `docs/guide/client.md`.
 
 ### M10-A2: the value is percent-encoded
 
@@ -33,7 +34,8 @@ Rulings for the client's `account` option, the server's check and the React guid
   characters. The client guide documents the encoding.
 - **Status:** in force. The unit test "the same account, percent-encoded as the client sends it" and the client's
   end-to-end row with `"Zoë 42/ü"` prove the pair agrees.
-- **Visible in:** `src/client/endpoints.ts`, `src/server/upload-request.ts` (`accountChanged`).
+- **Visible in:** `src/client/account.ts` (`encodeAccount`), `src/client/endpoints.ts`, `src/server/upload-request.ts`
+  (`accountChanged`).
 
 ### M10-A3: `""` is nobody; `null` and `undefined` send nothing
 

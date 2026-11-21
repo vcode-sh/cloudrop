@@ -88,7 +88,7 @@ These come from `cloudrop/client`. The first five never come from the server.
 
 | Code | Retryable | What it means | What to do |
 | --- | --- | --- | --- |
-| `NETWORK_ERROR` | Yes | No answer after every attempt: your server could not be reached, or the file could not reach the bucket. A bucket that refuses a `PUT` without CORS headers looks the same to a browser. Also when the client's `headers` or `account` function threw or rejected, so the request was not sent. | Check the connection and retry. If every upload ends this way, check the bucket's CORS rule first (see [Troubleshooting](troubleshooting.md#every-upload-ends-in-network_error)). |
+| `NETWORK_ERROR` | Yes | No answer after every attempt: your server could not be reached, or the file could not reach the bucket. A bucket that refuses a `PUT` without CORS headers looks the same to a browser. Also when the client's `headers` or `account` function threw, rejected, gave nothing usable or did not answer in time, so the request was not sent. | Check the connection and retry. If every upload ends this way, check the bucket's CORS rule first (see [Troubleshooting](troubleshooting.md#every-upload-ends-in-network_error)). |
 | `UPLOAD_REJECTED` | No | The bucket refused the bytes as signed: a different size, type or checksum, a link refused even after renewal, or another refusal. | Start a new upload; `retry()` asks for a new ticket. When it keeps happening, check the server's clock and the credentials' permissions. |
 | `ABORTED` | No | The upload was cancelled through `abort()` or the `signal`. | Nothing, unless the user wants to start again. |
 | `UPLOAD_IN_USE` | No | `resume()` or `discard()` found the upload held in this page or another tab. | Finish or cancel it there, then try again. |
