@@ -146,7 +146,9 @@ None of these is a gap in 0.6.0; each is a feature the pilot still writes around
   answer (`M11-R261`, `M11-R264`).
 - `api.allFiles` filters: a creation date range, files stuck in `pending` past their grace, a substring of the type,
   and the owner's details beside each file. A search by the owner's name or email stays the app's own query: those
-  live in the app's tables (spec 0.6.0, "Out of scope").
+  live in the app's tables (spec 0.6.0, "Out of scope"). The pilot does not use `api.allFiles` yet for this reason.
+- A value `onDelete` hands back to the caller of `api.deleteFile`: the pilot still passes a mutable slot through
+  `context` to carry its audit event to the notification it sends after the commit.
 
 ### After 0.4.0: candidates, none decided
 
