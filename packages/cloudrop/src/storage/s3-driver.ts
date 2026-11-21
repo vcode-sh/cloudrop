@@ -1,6 +1,7 @@
 import type { StorageRules } from "../rules.ts";
 import type { FetchLike, StorageDriver } from "./driver.ts";
 import { bucketSettingsMethods } from "./s3/bucket-settings.ts";
+import { bucketWriteMethods } from "./s3/bucket-writes.ts";
 import { createContext } from "./s3/context.ts";
 import { copyMethods } from "./s3/copy.ts";
 import { multipartMethods } from "./s3/multipart.ts";
@@ -25,7 +26,10 @@ export interface S3DriverConfig {
   now?: () => Date;
 }
 
-export function createS3Driver(config: S3DriverConfig): StorageDriver {
+/** cloudrop's own driver, which implements the optional bucket-settings writes. */
+export type S3Driver = StorageDriver & Required<Pick<StorageDriver, "putBucketCors" | "putBucketLifecycle">>;
+
+export function createS3Driver(config: S3DriverConfig): S3Driver {
   const ctx = createContext(config);
   const publicUrl =
     config.publicUrl === undefined
@@ -39,6 +43,7 @@ export function createS3Driver(config: S3DriverConfig): StorageDriver {
     publicUrl,
     ...presignMethods(ctx),
     ...bucketSettingsMethods(ctx),
+    ...bucketWriteMethods(ctx),
     ...multipart,
     ...objects,
     ...copyMethods(ctx, { head: objects.head, ...multipart }),

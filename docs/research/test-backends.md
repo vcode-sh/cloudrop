@@ -19,7 +19,8 @@ bucket, each lane file under its own `live-test/cloudrop-<hex>/`.
 (16 s).
 
 **Result:** all 24 contract cases pass, none skipped (22 in the first two runs; the third added the two copy-guard
-cases). R2 declares no gap.
+cases). R2 declares no gap of its own. Since 2026-11-21 the lane declares `bucketSettingsWrites`: the two cases that
+write bucket settings would change the owner's test bucket, so they skip there (`M9-C4`).
 
 | Behaviour | Evidence (contract case) |
 |---|---|
@@ -78,6 +79,7 @@ with `response-content-disposition` is honoured as on R2.
 | Completing a finished upload again | Succeeds. Gap `finishedUploadsLinger` (R2 answers `NoSuchUpload`) |
 | `If-None-Match: *` on a presigned PUT | `412 PreconditionFailed` as R2. No gap |
 | `x-amz-copy-source-if-match` on `CopyObject` and `UploadPartCopy` | Honoured as R2: a changed source answers `412`. No gap |
+| `PutBucketCors`, `PutBucketLifecycleConfiguration` (2026-11-21) | Accepted with `x-amz-checksum-sha256` and no `Content-MD5`. Read back with each rule's `ID` and `MaxAgeSeconds`; a write replaces the whole configuration; a lifecycle rule's `Expiration` survives being read and written back. No gap (`M9-C4`) |
 
 The contract's `NoSuchUpload` expectations after completion are R2 behaviour; AWS-style backends keep the ID, which is
 why they are a declared gap, not a driver bug: the driver maps whatever the backend answers.
@@ -108,6 +110,7 @@ and 8 skips before the presigned-GET cases, 16 of 22 and 6 skips before the copy
 | Completing a finished upload again | `404 NoSuchUpload` as R2. No gap |
 | `x-amz-copy-source-if-match` | Honoured on `CopyObject` (a changed source answers `412`). An `UploadPartCopy` carrying it answers `501 NotImplemented`; the same request without the header succeeds (measured by sending the parts without it). Gap `copyPartPrecondition`: both multipart-copy cases skip |
 | Presigned GET with `response-content-disposition` | `200` with the body but **no** `Content-Disposition`: the override is ignored (R2 and RustFS apply it). Gap `responseOverrides` |
+| `PutBucketCors`, `PutBucketLifecycleConfiguration` | `501 NotImplemented` for both (wrangler 4.166.0, 2026-11-21). Gap `bucketSettingsWrites` |
 
 Wrangler is therefore a check of the equal-part rule and presigned SigV4 only; resume by ListParts, checksums and
 multipart copy are covered by RustFS and real R2.
@@ -119,6 +122,9 @@ multipart copy are covered by RustFS and real R2.
 - **Unsigned `x-amz-meta-*` on a presigned PUT** (2026-11-15): the fake used to store it like a signed header. It now
   answers `403 SignatureDoesNotMatch`, as real R2 does.
 - It does not compute CRC64NVME, so that case skips on the fake with that reason.
+- `PutBucketCors` and `PutBucketLifecycleConfiguration` (2026-11-21) replace the stored XML, as S3 documents, and are
+  refused with `403 AccessDenied` without `bucketConfig`, like the reads. A sent `x-amz-checksum-sha256` must match.
+  R2's own answers to them are unmeasured: the live lane never writes bucket settings (`M9-C4`).
 - `x-amz-copy-source-if-match` on `CopyObject` and `UploadPartCopy`: a value that does not match the source's ETag
   (quotes ignored) answers `412 PreconditionFailed`. Modelled on S3's documentation, then confirmed on real R2 by the
   live lane.

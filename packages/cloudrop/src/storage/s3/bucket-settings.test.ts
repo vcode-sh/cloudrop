@@ -1,7 +1,13 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { credentials, driverWith, now, stubbed } from "../../testing/driver-fixture.ts";
+import { R2_RULES } from "../../rules.ts";
+import { credentials, driverWith, endpoint, neverCalled, now, stubbed } from "../../testing/driver-fixture.ts";
 import { createFakeR2 } from "../../testing/fake-r2.ts";
-import type { StorageDriver } from "../driver.ts";
+import type { FetchLike, StorageDriver } from "../driver.ts";
+import { createS3Driver, type S3Driver } from "../s3-driver.ts";
+
+const writable = (fetch: FetchLike): S3Driver =>
+  createS3Driver({ endpoint, region: "auto", bucket: "test", credentials, rules: R2_RULES, fetch, now });
 
 describe("bucket configuration", () => {
   const cors =
@@ -21,14 +27,28 @@ describe("bucket configuration", () => {
         allowedMethods: ["PUT", "GET"],
         allowedHeaders: ["content-type", "x-amz-meta-*"],
         exposeHeaders: ["ETag"],
+        maxAgeSeconds: 3600,
       },
     ]);
   });
 
-  it("reads the lifecycle rules with their abort days and prefixes", async () => {
+  it("reads the lifecycle rules with their abort days, prefixes and XML", async () => {
     expect((await configured({ lifecycle }).getBucketLifecycle()).data).toEqual([
-      { id: "Default Multipart Abort Rule", enabled: true, prefix: "", abortIncompleteMultipartUploadDays: 7 },
-      { id: "live-test", enabled: false, prefix: "live-test/" },
+      {
+        id: "Default Multipart Abort Rule",
+        enabled: true,
+        prefix: "",
+        abortIncompleteMultipartUploadDays: 7,
+        sourceXml:
+          "<ID>Default Multipart Abort Rule</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload>",
+      },
+      {
+        id: "live-test",
+        enabled: false,
+        prefix: "live-test/",
+        sourceXml:
+          "<ID>live-test</ID><Status>Disabled</Status><Filter><Prefix>live-test/</Prefix></Filter><Expiration><Days>1</Days></Expiration>",
+      },
     ]);
   });
 
@@ -85,5 +105,99 @@ describe("bucket configuration", () => {
       "STORAGE_DENIED",
       "STORAGE_DENIED",
     ]);
+  });
+});
+
+describe("bucket configuration writes", () => {
+  const abortRule = {
+    id: "cloudrop-abort-incomplete",
+    enabled: true,
+    prefix: "",
+    abortIncompleteMultipartUploadDays: 1,
+  };
+  // Without bucketConfig the fake answers as for an R2 object token, which may not change bucket settings.
+  const fake = (bucketConfig: { cors?: string; lifecycle?: string } | undefined) =>
+    writable(createFakeR2({ bucket: "test", credentials, now, bucketConfig }).fetch);
+
+  it("writes CORS rules that read back unchanged, IDs with XML characters and max age included", async () => {
+    const driver = fake({});
+    const rules = [
+      {
+        id: "R&D <uploads>",
+        allowedOrigins: ["https://app.example.com", "http://localhost:5173"],
+        allowedMethods: ["PUT"],
+        allowedHeaders: ["content-type", "x-amz-meta-*"],
+        exposeHeaders: ["ETag", "Retry-After"],
+        maxAgeSeconds: 3600,
+      },
+      { allowedOrigins: ["*"], allowedMethods: ["GET", "HEAD"], allowedHeaders: [], exposeHeaders: [] },
+    ];
+    expect((await driver.putBucketCors(rules)).error).toBeNull();
+    expect((await driver.getBucketCors()).data).toEqual(rules);
+  });
+
+  it("writes a new lifecycle rule from its fields and keeps a rule it read, actions included", async () => {
+    const lifecycle =
+      "<LifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><And><Prefix>logs/</Prefix><Tag><Key>tier</Key><Value>cold</Value></Tag></And></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule></LifecycleConfiguration>";
+    const driver = fake({ lifecycle });
+    const read = await driver.getBucketLifecycle();
+    expect((await driver.putBucketLifecycle([...(read.data ?? []), abortRule])).error).toBeNull();
+    expect((await driver.getBucketLifecycle()).data).toEqual([
+      {
+        id: "expire-logs",
+        enabled: true,
+        prefix: "logs/",
+        sourceXml:
+          "<ID>expire-logs</ID><Filter><And><Prefix>logs/</Prefix><Tag><Key>tier</Key><Value>cold</Value></Tag></And></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration>",
+      },
+      {
+        ...abortRule,
+        sourceXml:
+          "<ID>cloudrop-abort-incomplete</ID><Filter><Prefix></Prefix></Filter><Status>Enabled</Status><AbortIncompleteMultipartUpload><DaysAfterInitiation>1</DaysAfterInitiation></AbortIncompleteMultipartUpload>",
+      },
+    ]);
+  });
+
+  it("sends the SHA-256 of the exact body, the checksum S3 requires on these calls", async () => {
+    const sent: { checksum: string | null; body: Uint8Array }[] = [];
+    const capture: FetchLike = async (input, init) => {
+      const request = new Request(input, init);
+      sent.push({ checksum: request.headers.get("x-amz-checksum-sha256"), body: await request.bytes() });
+      return new Response(null, { status: 200 });
+    };
+    const driver = writable(capture);
+    await driver.putBucketCors([
+      { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] },
+    ]);
+    await driver.putBucketLifecycle([abortRule]);
+    // Node's own SHA-256 is the oracle, independent of the web crypto call the driver makes.
+    const sha256 = (body: Uint8Array) => createHash("sha256").update(body).digest("base64");
+    expect(sent.map(({ checksum, body }) => body.length > 0 && checksum === sha256(body))).toEqual([true, true]);
+  });
+
+  it.each([
+    {
+      name: "no CORS rule",
+      write: (driver: S3Driver) => driver.putBucketCors([]),
+      message: "Pass at least one CORS rule: an empty list would remove every rule.",
+    },
+    {
+      name: "no lifecycle rule",
+      write: (driver: S3Driver) => driver.putBucketLifecycle([]),
+      message: "Pass at least one lifecycle rule: an empty list would remove every rule.",
+    },
+  ])("refuses $name before sending anything", async ({ write, message }) => {
+    expect((await write(writable(neverCalled))).error).toMatchObject({ code: "INVALID_INPUT", message });
+  });
+
+  it("reports a refused write as STORAGE_DENIED", async () => {
+    const driver = fake(undefined);
+    const results = [
+      await driver.putBucketCors([
+        { allowedOrigins: ["*"], allowedMethods: ["GET"], allowedHeaders: [], exposeHeaders: [] },
+      ]),
+      await driver.putBucketLifecycle([abortRule]),
+    ];
+    expect(results.map((result) => result.error?.code)).toEqual(["STORAGE_DENIED", "STORAGE_DENIED"]);
   });
 });

@@ -1,4 +1,4 @@
-// CopyObject, UploadPartCopy and the bucket-configuration reads of the fake R2.
+// CopyObject, UploadPartCopy and the bucket-configuration reads and writes of the fake R2.
 
 import { stripQuotes } from "../../storage/xml.ts";
 import {
@@ -79,4 +79,29 @@ export function bucketConfig(bucket: FakeBucket, name: "cors" | "lifecycle"): Re
   if (xml !== undefined) return xmlResponse(xml);
   const code = name === "cors" ? "NoSuchCORSConfiguration" : "NoSuchLifecycleConfiguration";
   return errorResponse(404, code, "The bucket has no such configuration.");
+}
+
+const ROOT_ELEMENTS = { cors: "CORSConfiguration", lifecycle: "LifecycleConfiguration" } as const;
+
+/**
+ * PutBucketCors and PutBucketLifecycleConfiguration: the body replaces the whole configuration, as S3 documents. Refused
+ * like the reads when the bucket models an object token (no `bucketConfig`); a SHA-256, when sent, must match.
+ */
+export async function putBucketConfig(
+  bucket: FakeBucket,
+  name: "cors" | "lifecycle",
+  { headers, body }: FakeRequest,
+): Promise<Response> {
+  if (!bucket.config) return errorResponse(403, "AccessDenied", "Access Denied");
+  const sha256 = headers.get("x-amz-checksum-sha256");
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
+  if (sha256 !== null && sha256 !== btoa(String.fromCharCode(...digest))) {
+    return errorResponse(400, "BadDigest", "The SHA256 you specified did not match the calculated checksum.");
+  }
+  const xml = new TextDecoder().decode(body).replace(/^<\?xml[^>]*\?>/, "");
+  if (!new RegExp(`^<${ROOT_ELEMENTS[name]}[\\s>]`).test(xml)) {
+    return errorResponse(400, "MalformedXML", "The XML you provided was not well-formed.");
+  }
+  bucket.config[name] = xml;
+  return new Response(null, { status: 200 });
 }

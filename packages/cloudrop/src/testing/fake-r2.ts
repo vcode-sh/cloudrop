@@ -5,7 +5,7 @@
 import type { FetchLike } from "../storage/driver.ts";
 import type { Credentials } from "../storage/sigv4.ts";
 import type { Bytes, FakeBucket, FakeRequest, StoredObject } from "./fake-r2/bucket.ts";
-import { bucketConfig, copy } from "./fake-r2/copy.ts";
+import { bucketConfig, copy, putBucketConfig } from "./fake-r2/copy.ts";
 import { abortUpload, completeUpload, createUpload, listParts, uploadPart } from "./fake-r2/multipart.ts";
 import { deleteObject, getObject, listObjects, putObject } from "./fake-r2/objects.ts";
 import { errorResponse } from "./fake-r2/responses.ts";
@@ -17,7 +17,8 @@ export interface FakeR2Options {
   now?: () => Date;
   /**
    * The CORS and lifecycle XML the bucket serves; a missing entry answers 404 as a bucket without that configuration.
-   * Without this option, both reads answer 403 AccessDenied, as they do for an R2 object token (spike Q8).
+   * Without this option, both reads answer 403 AccessDenied, as they do for an R2 object token (spike Q8), and so do
+   * both writes. A write replaces the fake's copy of the entry, never the object passed here.
    */
   bucketConfig?: { cors?: string; lifecycle?: string };
 }
@@ -38,6 +39,7 @@ interface Route {
 }
 
 const isBucketGet = (request: FakeRequest): boolean => request.method === "GET" && request.key === "";
+const isBucketPut = (request: FakeRequest): boolean => request.method === "PUT" && request.key === "";
 
 // The first route that matches answers, so the order is part of the behaviour: a PUT with x-amz-copy-source is a copy
 // before it is a part or an object, and a request naming an upload is a multipart call before it is an object call.
@@ -45,6 +47,11 @@ const ROUTES: Route[] = [
   { matches: (r) => isBucketGet(r) && r.query.get("list-type") === "2", run: listObjects },
   { matches: (r) => isBucketGet(r) && r.query.has("cors"), run: (bucket) => bucketConfig(bucket, "cors") },
   { matches: (r) => isBucketGet(r) && r.query.has("lifecycle"), run: (bucket) => bucketConfig(bucket, "lifecycle") },
+  { matches: (r) => isBucketPut(r) && r.query.has("cors"), run: (bucket, r) => putBucketConfig(bucket, "cors", r) },
+  {
+    matches: (r) => isBucketPut(r) && r.query.has("lifecycle"),
+    run: (bucket, r) => putBucketConfig(bucket, "lifecycle", r),
+  },
   { matches: (r) => r.method === "POST" && r.query.has("uploads"), run: createUpload },
   { matches: (r) => r.method === "PUT" && r.headers.has("x-amz-copy-source"), run: copy },
   { matches: (r) => r.method === "PUT" && r.query.has("uploadId"), run: uploadPart },
@@ -61,7 +68,7 @@ export function createFakeR2(options: FakeR2Options): FakeR2 {
     name: options.bucket,
     credentials: options.credentials,
     now: options.now ?? (() => new Date()),
-    config: options.bucketConfig,
+    config: options.bucketConfig && { ...options.bucketConfig },
     objects: new Map(),
     uploads: new Map(),
     listTokens: new Map(),

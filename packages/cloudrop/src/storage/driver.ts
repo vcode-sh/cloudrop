@@ -58,12 +58,16 @@ export interface ListedObject {
   uploadedAt: Date;
 }
 
-/** One rule of the bucket's CORS configuration, as S3's GetBucketCors returns it. */
+/** One rule of the bucket's CORS configuration, as S3's GetBucketCors returns it: every field S3 documents. */
 export interface BucketCorsRule {
+  /** Present only when the rule has one. */
+  id?: string;
   allowedOrigins: string[];
   allowedMethods: string[];
   allowedHeaders: string[];
   exposeHeaders: string[];
+  /** Present only when the rule sets it. */
+  maxAgeSeconds?: number;
 }
 
 /** One rule of the bucket's lifecycle configuration; only what cloudrop checks. */
@@ -78,6 +82,12 @@ export interface BucketLifecycleRule {
   prefix: string;
   /** Days after which an incomplete multipart upload is aborted, when the rule does that. */
   abortIncompleteMultipartUploadDays?: number;
+  /**
+   * The rule's XML inside `<Rule>`, exactly as the storage sent it. `putBucketLifecycle` writes it unchanged when it is
+   * present, so what the fields above leave out (expirations, transitions, tag and size filters) survives a read
+   * followed by a write. A rule without it is written from the fields above.
+   */
+  sourceXml?: string;
 }
 
 /** Implemented by cloudrop's presets, r2() and s3(); its methods may change before 1.0. */
@@ -116,6 +126,19 @@ export interface StorageDriver {
   getBucketCors(): Promise<Result<BucketCorsRule[]>>;
   /** The bucket's lifecycle rules; [] when it has none. Credentials that may not read them get STORAGE_DENIED. */
   getBucketLifecycle(): Promise<Result<BucketLifecycleRule[]>>;
+  /**
+   * Replaces the bucket's whole CORS configuration with `rules` (at least one), as S3's PutBucketCors does: to keep a
+   * rule, read it and pass it back. Needs credentials that may change bucket settings; others get STORAGE_DENIED.
+   * Optional, so a hand-written driver need not implement it; cloudrop's presets do.
+   */
+  putBucketCors?(rules: readonly BucketCorsRule[]): Promise<Result<void>>;
+  /**
+   * Replaces the bucket's whole lifecycle configuration with `rules` (at least one), as S3's
+   * PutBucketLifecycleConfiguration does. A rule read from the bucket keeps everything through its `sourceXml`; a new
+   * rule is written from its fields and needs `abortIncompleteMultipartUploadDays`, the only action cloudrop writes.
+   * Optional, like putBucketCors.
+   */
+  putBucketLifecycle?(rules: readonly BucketLifecycleRule[]): Promise<Result<void>>;
   /** `null` only when the object does not exist; every other failure is an error. */
   head(key: string): Promise<Result<ObjectInfo | null>>;
   /** Inclusive byte range. */

@@ -12,7 +12,8 @@ const accountId = "0123456789abcdef0123456789abcdef";
 const bucket = "contract";
 
 describeStorageContract("in-process fake R2", async (onCleanup) => {
-  const fake = createFakeR2({ bucket, credentials });
+  // Configured, so the bucket answers as for credentials that may read and change its settings.
+  const fake = createFakeR2({ bucket, credentials, bucketConfig: {} });
   // Runs after the suite has removed its objects and aborted its uploads, so it proves the suite leaves none behind.
   onCleanup(async () => {
     if (fake.pendingUploads() > 0) throw new Error(`The suite left ${fake.pendingUploads()} multipart uploads open.`);

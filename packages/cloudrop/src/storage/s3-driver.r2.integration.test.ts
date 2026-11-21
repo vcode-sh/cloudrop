@@ -39,8 +39,12 @@ describeStorageContract("live R2", async () => {
       }),
     prefix,
     http: fetch,
-    // Real R2 passed every contract case on 2026-11-15, so it declares no gap.
-    gaps: {},
+    // Real R2 passed every other contract case on 2026-11-15. Its bucket-settings writes are not run: they would
+    // change the owner's bucket (M9-C4).
+    gaps: {
+      bucketSettingsWrites:
+        "The live lane never changes the test bucket's settings: AGENTS.md allows that only when the owner asks.",
+    },
     // Measured by this lane on 2026-11-15: 403 SignatureDoesNotMatch, nothing stored (r2-spike-findings.md, row 18).
     unsignedMetaOnPresignedPut: "rejected",
   };

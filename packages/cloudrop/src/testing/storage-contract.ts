@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe } from "vitest";
 import type { CloudropErrorCode } from "../errors.ts";
 import type { FetchLike, StorageDriver } from "../storage/driver.ts";
 import { toHex } from "../storage/sigv4.ts";
+import { bucketSettingsCases } from "./storage-contract/bucket-settings.ts";
 import { copyCases } from "./storage-contract/copy.ts";
 import { listCases } from "./storage-contract/list.ts";
 import { multipartCases } from "./storage-contract/multipart.ts";
@@ -26,7 +27,8 @@ export type Gap =
   | "conditionalCompletion"
   | "copyPartPrecondition"
   | "responseOverrides"
-  | "finishedUploadsLinger";
+  | "finishedUploadsLinger"
+  | "bucketSettingsWrites";
 
 export interface ContractTarget {
   /** The driver every case uses, built the way an application builds it (the public preset where there is one). */
@@ -172,5 +174,6 @@ export function describeStorageContract(name: string, connect: ConnectTarget): v
     copyCases(suite);
     presignedGetCases(suite);
     listCases(suite);
+    bucketSettingsCases(suite);
   });
 }

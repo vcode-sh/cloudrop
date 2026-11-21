@@ -44,6 +44,9 @@ describeStorageContract("Wrangler local R2", async () => {
         "Wrangler local R2 ignores If-None-Match on CompleteMultipartUpload: it overwrites the existing key, where R2 answers 412.",
       responseOverrides:
         "Wrangler local R2 ignores response-content-disposition on a presigned GET: it answers 200 without Content-Disposition, where R2 applies it.",
+      // Measured against wrangler 4.166.0 on 2026-11-21 (M9-C4).
+      bucketSettingsWrites:
+        "Wrangler local R2 answers 501 NotImplemented to PutBucketCors and PutBucketLifecycleConfiguration, as it does to their reads.",
     },
     // Measured: the last part larger than the others is refused, but as 404 NoSuchUpload (the upload survives and
     // completes once the part is replaced); R2 answers InvalidPart.

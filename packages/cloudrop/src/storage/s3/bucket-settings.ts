@@ -1,8 +1,8 @@
 import { CloudropError, fail, ok, type Result } from "../../errors.ts";
-import type { BucketLifecycleRule, StorageDriver } from "../driver.ts";
+import type { BucketCorsRule, BucketLifecycleRule, StorageDriver } from "../driver.ts";
 import { xmlBlocks, xmlText, xmlValue, xmlValues } from "../xml.ts";
 import type { S3Context } from "./context.ts";
-import { allOk, incompleteResponse } from "./responses.ts";
+import { allOk, incompleteResponse, wholeNumber } from "./responses.ts";
 import { sendForXml } from "./transport.ts";
 
 /**
@@ -23,6 +23,22 @@ function configurationReadError(error: CloudropError, missingCode: string, setti
   );
 }
 
+function readCorsRule(rule: string): Result<BucketCorsRule> {
+  const id = xmlText(rule, "ID");
+  const maxAge = xmlValue(rule, "MaxAgeSeconds");
+  const maxAgeSeconds = wholeNumber(maxAge);
+  if (maxAge !== undefined && maxAgeSeconds === undefined) return fail(incompleteResponse("valid CORS max age"));
+  // Optional fields only when present, so a rule read and written back is the rule the bucket had.
+  return ok({
+    ...(id === undefined ? {} : { id }),
+    allowedOrigins: xmlValues(rule, "AllowedOrigin"),
+    allowedMethods: xmlValues(rule, "AllowedMethod"),
+    allowedHeaders: xmlValues(rule, "AllowedHeader"),
+    exposeHeaders: xmlValues(rule, "ExposeHeader"),
+    ...(maxAgeSeconds === undefined ? {} : { maxAgeSeconds }),
+  });
+}
+
 function readLifecycleRule(rule: string): Result<BucketLifecycleRule> {
   const days = xmlValue(xmlBlocks(rule, "AbortIncompleteMultipartUpload")[0] ?? "", "DaysAfterInitiation");
   if (days !== undefined && !/^\d{1,9}$/.test(days)) return fail(incompleteResponse("valid multipart abort days"));
@@ -31,6 +47,7 @@ function readLifecycleRule(rule: string): Result<BucketLifecycleRule> {
     enabled: xmlValue(rule, "Status") === "Enabled",
     prefix: xmlText(rule, "Prefix") ?? "",
     ...(days === undefined ? {} : { abortIncompleteMultipartUploadDays: Number(days) }),
+    sourceXml: rule,
   });
 }
 
@@ -42,14 +59,7 @@ export function bucketSettingsMethods(ctx: S3Context): Pick<StorageDriver, "getB
       // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
       const configuration = xmlBlocks(result.data, "CORSConfiguration")[0];
       if (configuration === undefined) return fail(incompleteResponse("CORS configuration"));
-      return ok(
-        xmlBlocks(configuration, "CORSRule").map((rule) => ({
-          allowedOrigins: xmlValues(rule, "AllowedOrigin"),
-          allowedMethods: xmlValues(rule, "AllowedMethod"),
-          allowedHeaders: xmlValues(rule, "AllowedHeader"),
-          exposeHeaders: xmlValues(rule, "ExposeHeader"),
-        })),
-      );
+      return allOk(xmlBlocks(configuration, "CORSRule").map(readCorsRule));
     },
 
     async getBucketLifecycle() {
