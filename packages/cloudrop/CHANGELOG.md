@@ -6,6 +6,26 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+### Added
+
+- **`cloudrop/testing`:** `testBucket()`, `testClient()` and `memoryStore()` let an app test its routes, `authorize`,
+  metadata, quotas, `onComplete` and whole uploads in Vitest, Bun or `node:test`, with no bucket, browser or network.
+  The test client is the real client, wired to `cloudrop.handler` in-process; the test bucket is the in-process fake
+  of R2 that cloudrop's own tests use. Guide: [Testing your app](../../docs/guide/testing-your-app.md) (`M9-T1` to
+  `M9-T9`).
+- **The `cloudrop` command** (Node 24+ and Bun): `cloudrop doctor --origin <origin>` checks the storage settings,
+  `CLOUDROP_SECRET`, the bucket and its CORS and lifecycle rules in plain words (exit 0, 1 or 2).
+  `cloudrop setup --origin <origin>` prints the rules and the Wrangler and AWS CLI commands; with `--apply` it adds
+  cloudrop's rules through the S3 API and keeps every other rule (`--dry-run`, `--replace`). It never prints a
+  setting's value. Guide: [The cloudrop command](../../docs/guide/command.md) (`M9-C1` to `M9-C9`).
+- `StorageDriver` gains optional `putBucketCors` and `putBucketLifecycle`. `BucketCorsRule` gains `id` and
+  `maxAgeSeconds`, and `BucketLifecycleRule` gains `sourceXml`.
+
+### Changed
+
+- Reading bucket settings refuses a configuration with CDATA, comments or namespace prefixes, with a non-retryable
+  `STORAGE_ERROR`, and reads an empty self-closing configuration as no rules.
+
 ## 0.2.0 - 2026-11-20
 
 ### Added

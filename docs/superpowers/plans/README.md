@@ -115,10 +115,10 @@ The pilot moved to 0.2.0 and replaced its own avatar replacement, deletion clean
 abort plumbing with `replace`, `deleteFile`, `sweep({ all })`, `eraseOwner` and `close()`. Candidates it surfaced,
 none decided:
 
-- **`cloudrop/testing`:** the in-process fake R2 and a store fixture as a public entry, so an app tests its routes,
-  `authorize`, quotas and hooks without a bucket. Today `docs/guide/testing.md` serves only this repository.
-- **A setup and doctor command:** sets the bucket's CORS and lifecycle rules and checks the environment, in plain
-  words (the bucket-setup command recorded under M6, widened).
+- **Done on `main` (unreleased):** `cloudrop/testing` (`M9-T`) and the `cloudrop doctor`/`setup` command (`M9-C`),
+  designed in `docs/superpowers/specs/2026-11-21-testing-and-cli-design.md`. Open: R2's answer to `setup --apply`'s
+  two writes is unmeasured, since the live test bucket is never written; measuring it needs a bucket the owner gives
+  for it and a token allowed to change its settings.
 - **`api.files` filters:** the pilot kept its own listing for a name search and a join with its profile table.
 - **Who the client uploads for:** the pilot sends the user's id in `headers` so the server refuses an `/upload` sent
   with another account's cookie after a sign-in in another tab (`M7-P3`'s open window). A documented recipe, or a
