@@ -257,12 +257,22 @@ On `localhost` an upload finishes before you can press Pause. Slow it down:
 
 ### Cancel
 
-`abort()` on a file, `job.abort()`, or the `signal` you passed cancels: requests stop, the file ends `aborted`, and the
-server is told to clean up with `/abort`. A file still waiting for its ticket ends `aborted` at once; a ticket that
-arrives for it later only gets its `/abort`. A failed file ends `aborted` too, and the server is told to drop what it
-kept for `retry()`.
+`abort()` on a file, `job.abort()`, or the `signal` you passed cancels: the file's bucket `PUT`s and `/sign` calls stop,
+the file ends `aborted` at once, and the server is told to clean up with `/abort`. `done` settles once the server has
+answered that `/abort`, at most 10 seconds later. A file still waiting for its ticket ends `aborted` at once; a ticket
+that arrives for it later only gets its `/abort`. A failed file ends `aborted` too, and the server is told to drop what
+it kept for `retry()`.
 
-The one exception: a file after a `/complete` that may have succeeded is kept, never deleted.
+A file that is `completing` is the exception: every byte is in the bucket and `/complete` is running on your server,
+so the cancel does not cut that request off. The file stays `completing` until the answer arrives, at most 2 minutes
+(the time one `/complete` is given), and then ends with it:
+
+- **`done`,** with its result, when the server completed the file: it is stored and `onComplete` ran, so `upload()`
+  answers the file and not `ABORTED`. Delete it on your server if the user no longer wants it.
+- **`aborted`** for any other answer. No further attempt is made.
+
+A file after a `/complete` that may have succeeded (no answer, or a `SERVER_ERROR`) is kept, never deleted: no `/abort`
+is sent for it.
 
 ### Retry
 
@@ -367,7 +377,8 @@ cleans up.
 
 ## What gets cleaned up
 
-- **Cancelling** returns `ABORTED` and tells the server to clean up with `/abort`.
+- **Cancelling** returns `ABORTED` and tells the server to clean up with `/abort`, unless a `/complete` in flight
+  completes the file first (see [Cancel](#cancel)).
 - **A single-`PUT` file of `upload()` that fails after `/upload`** is cleaned up the same way, in the background, so
   `upload()` answers the error at once. `upload()` returns no handle to retry with, so there is nothing to keep.
 - **A multipart file of `upload()` that fails** for a reason a later attempt can fix, such as the network, keeps its

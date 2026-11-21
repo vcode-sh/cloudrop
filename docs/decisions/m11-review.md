@@ -942,3 +942,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/client/answers.ts`, `src/client/records.ts`, `src/client/endpoints.test.ts`.
 
+### M11-R86: a cancel during `/complete` waits for the answer, and the documentation says so
+
+- **Decision:** the behaviour of `M3-S14` and `M4-F4` stays: a cancel does not cut off a `/complete` in flight. The
+  file stays `completing` until that request answers, at most 120 seconds (`COMPLETE_TIMEOUT_MS`, one attempt; no
+  further attempt starts after a cancel), and ends `done` with its result when the server completed it and `aborted`
+  otherwise; `done` of an aborted file then waits for its `/abort`, at most 10 seconds. The JSDoc of
+  `FileHandle.abort`, `UploadJob.abort` and `UploadOptions.signal` and the guide's "Cancel" now say this.
+- **Why:** confirmed by test: `abort()` during `/complete` left the file `completing`, and a completion that succeeded
+  ended it `done`, while the JSDoc said the file "ends aborted at once" and that the signal's result "is ABORTED". The
+  behaviour is right: when the server answered success the object is stored and `onComplete` ran, so reporting
+  `ABORTED` would hide a file the app has recorded, and cutting the request off would leave the page not knowing which
+  it was. Only the sentences were wrong.
+- **If wrong:** an app that treats a cancel as "the file does not exist" must delete a file that ends `done` after a
+  cancel; the guide says so.
+- **Status:** in force.
+- **Visible in:** `src/client/types.ts`, `src/client.ts`, `docs/guide/client.md` ("Cancel"),
+  `src/client/cancel-completing.test.ts`.
+

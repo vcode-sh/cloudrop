@@ -60,7 +60,10 @@ export type {
 export interface UploadOptions<TMetadata = unknown> {
   /** Validated by the route's schema on the server. */
   metadata?: TMetadata;
-  /** Cancels the upload: requests stop, the server is told, and the result is ABORTED. */
+  /**
+   * Cancels the upload as abort() does: requests stop, the server is told, and the result is ABORTED. A /complete
+   * already in flight is waited for, within 2 minutes; when it completes the file, the result is that file.
+   */
   signal?: AbortSignal;
 }
 
