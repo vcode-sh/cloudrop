@@ -250,7 +250,7 @@ describe("cloudrop setup --apply", () => {
       isSettingsRead(input, init) ? answer(501, "NotImplemented") : storage.fetch(input, init);
     const [plain, replacing] = [await run(apply(), { fetch }), await run(apply("--replace"), { fetch })];
     const unsupported =
-      "PROBLEM      CORS: could not read the current rules: The storage service does not support this request. Use R2 or another backend that implements it. A write replaces every rule, so none was written.";
+      "PROBLEM      CORS: could not read the current rules: The storage service does not support this request. Use a storage service that implements it. A write replaces every rule, so none was written.";
     expect([plain.code, plain.lines[1], replacing.code, replacing.lines[1], storage.writes]).toEqual([
       1,
       unsupported,

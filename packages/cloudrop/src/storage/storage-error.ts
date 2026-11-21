@@ -78,7 +78,7 @@ const RULES: readonly Rule[] = [
     // 501 Not Implemented: the backend lacks the feature (Wrangler's ListParts), so a retry can never succeed.
     matches: (status) => status === 501,
     code: "STORAGE_ERROR",
-    message: "The storage service does not support this request. Use R2 or another backend that implements it.",
+    message: "The storage service does not support this request. Use a storage service that implements it.",
   },
   {
     // Never followed: a request is signed for one host. AWS redirects a request sent to another region than the

@@ -98,7 +98,7 @@ describe("storageError", () => {
       "a feature the storage lacks",
       501,
       xml("NotImplemented"),
-      "The storage service does not support this request. Use R2 or another backend that implements it.",
+      "The storage service does not support this request. Use a storage service that implements it.",
     ],
     [
       "a conditional write that lost to another request",

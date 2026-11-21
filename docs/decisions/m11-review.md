@@ -1776,3 +1776,15 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/testing/fake-r2/cors.ts`, `src/testing/fake-r2/cors.test.ts`, `src/testing/fake-r2.ts`,
   `src/cli/command-fixture.ts` (`upload`).
+
+### M11-R173: the message for a `501` names no service
+
+- **Decision:** a `501` from the storage service reads "The storage service does not support this request. Use a
+  storage service that implements it."
+- **Why:** it read "Use R2 or another backend that implements it." `cloudrop setup --apply` prints the message when a
+  settings read answers `501`, so a run against an S3-compatible service that lacks `GetBucketCors` was told to use R2,
+  and a run against Wrangler's local R2 was told to use the service it was already using.
+- **If wrong:** code that compares the whole message sees the new words; the code (`STORAGE_ERROR`), `retryable` and
+  the status are unchanged.
+- **Status:** in force. Extends `M11-R116`.
+- **Visible in:** `src/storage/storage-error.ts`, `src/storage/storage-error.test.ts`, `src/cli/setup.test.ts`.
