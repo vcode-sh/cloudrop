@@ -28,6 +28,7 @@ const child = spawn(
     "integration",
     "src/storage/s3-driver.r2.integration.test.ts",
     "src/server/handler.r2.integration.test.ts",
+    "src/plugins/content-checks.r2.integration.test.ts",
     ...process.argv.slice(2),
   ],
   {
