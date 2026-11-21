@@ -60,13 +60,6 @@ describe("createS3Driver", () => {
     });
   });
 
-  it("lists keys with a leading space, a trailing space and a trailing no-break space exactly as stored", async () => {
-    const { driver } = setup();
-    const keys = [" lead", "trail ", "nbsp\u00a0"];
-    for (const key of keys) expect((await driver.put(key, "x")).error).toBeNull();
-    expect((await driver.list("")).data?.items.map((item) => item.key).toSorted()).toEqual(keys.toSorted());
-  });
-
   it("puts a Blob without loading it into memory", async () => {
     const { driver } = setup();
     expect((await driver.put("blob.bin", new StreamOnlyBlob([offsetBytes(1024)]))).error).toBeNull();

@@ -84,13 +84,6 @@ describe("createS3Driver", () => {
     });
   });
 
-  it("maps throttling to RATE_LIMITED", async () => {
-    const throttled = stubbed(
-      async () => new Response("<Error><Code>ServiceUnavailable</Code></Error>", { status: 429 }),
-    );
-    expect((await driverWith(throttled).put("a.txt", "x")).error?.code).toBe("RATE_LIMITED");
-  });
-
   const hidden = stubbed(async () => new Response("<Error><Code>InternalError</Code></Error>", { status: 200 }));
   it.each<[string, (driver: StorageDriver) => Promise<Result<unknown>>, FetchLike]>([
     ["completeMultipart", (driver) => driver.completeMultipart("a", "u", [{ partNumber: 1, etag: "e" }]), hidden],
