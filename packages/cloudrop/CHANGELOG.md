@@ -38,6 +38,8 @@ reviewers who had to prove each problem with a failing test; everything they pro
 - **`trustedOrigins` takes an app's own scheme,** such as `capacitor://localhost` or `tauri://localhost`, as the exact
   `Origin` a webview sends (`M11-R41`); the command's `--origin` reads origins by the same rule (`M11-R111`).
 - `testClient` takes `account`, so the account guard can be tested (`M11-R3`).
+- `api.checkBucket` answers `advice` beside its problems: what would make the bucket better without being wrong, such
+  as a rule that hides `Retry-After` (`M11-R205`).
 - Types `DeletedFile`, `AllFilesOptions` and `ContentRefusal`.
 
 ### Changed
@@ -60,6 +62,9 @@ reviewers who had to prove each problem with a failing test; everything they pro
   `INVALID_INPUT` for that file alone; an owner or file id with a broken Unicode character (a lone surrogate) is
   refused; an `OPTIONS` that is not a preflight for `POST` answers 405, not 403 (`M11-R42`, `M11-R46`, `M11-R60`,
   `M11-R196`).
+- **`/complete` of a multipart upload the bucket no longer has** ends the upload: with a store its row becomes
+  `rejected` and its reserved bytes are released at once, and plugins hear `onAbort`. It used to stay pending until the
+  sweep (`M11-R200`).
 - **Every `api` call reads a key or a prefix in NFC,** as `/upload` stores them. On S3-compatible services, a key
   another tool wrote in another Unicode form is reached through the storage driver, not `api` (`M11-R44`).
 - **The storage drivers trust less:** an answer that is not the storage service's (a web page with status 200, a body
@@ -73,8 +78,9 @@ reviewers who had to prove each problem with a failing test; everything they pro
   they name the bucket and the S3 endpoint by value; nothing else is printed by value, never a key or a secret.
   `--env-file` is read exactly as Node reads it, and may be repeated. `doctor` judges the CORS rule the service really
   answers with (the first that matches, measured on R2), and `setup --apply` places cloudrop's rule before a rule that
-  would answer in its place. `--jurisdiction` twice, or with S3 settings, is a usage error (`M11-R110` to `M11-R120`,
-  `M11-R170` to `M11-R177`).
+  would answer in its place. A blocked upload is a problem; a rule that hides `Retry-After` is advice; `ETag` is no
+  longer required, as the client never reads it. `--jurisdiction` twice, or with S3 settings, is a usage error
+  (`M11-R110` to `M11-R120`, `M11-R170` to `M11-R177`, `M11-R205`).
 - **`cloudrop/testing`:** the test bucket now behaves as R2 was measured to: one object for a key written in two
   Unicode forms, `401` for an unknown access key, and answers to CORS preflights. The memory store orders ids and
   owners by bytes, as SQL does (`M11-R26`, `M11-R65`, `M11-R172`).
@@ -104,13 +110,16 @@ reviewers who had to prove each problem with a failing test; everything they pro
   signature (`M11-R25`); a wrong-typed checksum or bucket rule threw instead of answering an error (`M11-R24`).
 - **`contentChecks()`:** an Office file written by a streaming ZIP writer read as a plain ZIP (`M11-R132`); a WebM
   whose DocType was `constructor` made `/complete` fail for ever (`M11-R130`); text such as `<a,b>` read as a web page
-  (`M11-R131`); a refusal could not end a row a crashed request had left completing (`M11-R138`).
+  (`M11-R131`); a refusal could not end a row a crashed request had left completing (`M11-R138`); a long doctype
+  took seconds to read (`M11-R211`).
 - **The client:** `done` rejected and the file stayed queued where `crypto.getRandomValues` is missing; a hostile list
   argument threw; a `/complete` that never left the page stopped a later cancel from cleaning up; mass cancels could
   pass the browser's 64 KiB limit for requests sent while a page closes (`M11-R82` to `M11-R87`).
 - **The server:** a plugin hook returning `null` answered 500; a preflight for a header with `_` in its name was
   refused; `/complete` could fail after `onComplete` ran when its result could not be read twice (`M11-R45` to
   `M11-R47`).
+- **`eraseOwner` could report `done`** while an upload recorded by a server whose clock ran behind was still in the
+  bucket (`M11-R215`).
 - **Guides:** the signed-in recipe kept one client per user on a server that renders pages (`M11-R8`); a hook's
   `request` has its body already read (`M11-R43`); `eraseOwner` needs the sweep to finish for a crashed completion
   (`M11-R153`); on Workers with D1, sweep one bounded round per run (`M11-R70`).
