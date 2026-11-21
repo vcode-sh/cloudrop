@@ -1390,6 +1390,18 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `src/server/erase.ts`, `src/server/store-config.test.ts`, `src/server/sweep.test.ts`, `src/server/erase.test.ts`,
   `docs/guide/store.md`.
 
+### M11-R64: a null cursor is no cursor
+
+- **Decision:** `api.sweep`, `api.files` and `api.allFiles` read `cursor: null` as a missing cursor, and their option
+  types say `cursor?: string | null`. The store guide's admin listing passes `query.get("cursor")` as it is.
+- **Why:** each answers `cursor: null` for "no more", and a loop that starts with `let cursor = null` and passes back
+  what the last page answered was refused with `INVALID_INPUT` on its first call; so was a sweep given the cursor of
+  a finished one. The types made every caller write `cursor ?? undefined`.
+- **If wrong:** nothing kept: a null cursor could not page anything before.
+- **Status:** in force.
+- **Visible in:** `src/server/sweep.ts`, `src/server/owner-files.ts`, `src/server/all-files.ts`,
+  `src/server/sweep.test.ts`, `src/server/all-files.test.ts`, `docs/guide/store.md`.
+
 ### M11-R66: a page of sweep work is one index range per status
 
 - **Decision:** the SQL store's `stale` reads each status on its own, `status = '…' AND <time> < before`, ordered by

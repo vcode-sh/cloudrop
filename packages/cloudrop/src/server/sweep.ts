@@ -20,8 +20,8 @@ export interface SweepOptions {
   all?: boolean;
   /** With `all`: checked before each page. Once aborted, the call stops and its `cursor` continues where it stopped. */
   signal?: AbortSignal;
-  /** The `cursor` an earlier sweep returned, to continue where it stopped. */
-  cursor?: string;
+  /** The `cursor` an earlier sweep returned, to continue where it stopped; null, as a finished one answers, is none. */
+  cursor?: string | null;
   /**
    * How long past its token's deadline an unfinished upload, and past its end an ended one, is left alone. At least
    * 900000 (15 minutes, the life of an upload URL), so no new PUT can start once a row may be cleaned up, and at most
@@ -112,10 +112,9 @@ function readOptions(given: unknown): Result<Run> {
   if (graceMs.error) return graceMs;
   const all = readAll(options);
   if (all.error) return all;
-  const start = cursor === undefined ? { pass: "expire" as const, cursor: null } : readCursor(String(cursor));
-  if (!start || (cursor !== undefined && typeof cursor !== "string")) {
-    return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
-  }
+  const none = cursor === undefined || cursor === null;
+  const start = none ? { pass: "expire" as const, cursor: null } : typeof cursor === "string" && readCursor(cursor);
+  if (!start) return fail(invalidInput("cursor must be one an earlier sweep returned. Leave it out to start over."));
   return ok({ limit, graceMs: graceMs.data, ...all.data, ...start });
 }
 

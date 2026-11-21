@@ -223,6 +223,9 @@ describe("api.sweep: paging and failures", () => {
     expect([first.data?.expired, typeof first.data?.cursor]).toEqual([2, "string"]);
     const second = await fixture.cloudrop.api.sweep({ limit: 2, cursor: first.data?.cursor ?? undefined });
     expect(second.data).toEqual({ expired: 1, cleaned: 0, failed: 0, reported: [], cursor: null });
+    // The null a finished sweep answers starts the next one from the beginning: nothing is left to do (M11-R64).
+    const again = await fixture.cloudrop.api.sweep({ cursor: second.data?.cursor });
+    expect(again).toEqual({ data: { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null }, error: null });
   });
 
   it("logs a row that fails every time, goes on past it and still reports what it ended", async () => {

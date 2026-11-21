@@ -23,8 +23,11 @@ export interface FilesOptions {
   order?: "newest" | "oldest";
   /** Files per page, 1 to 1000. Default 100. */
   limit?: number;
-  /** The `cursor` an earlier page answered, to read the next one. Pass the same route, name, type and order. */
-  cursor?: string;
+  /**
+   * The `cursor` an earlier page answered, to read the next one; null, as the last page answers, is the first page.
+   * Pass the same route, name, type and order.
+   */
+  cursor?: string | null;
 }
 
 export interface FilesPage {
@@ -100,7 +103,7 @@ function markOf({ owner, status, route, name, type, order }: Omit<FilesQuery, "l
 
 /** The store's cursor inside the caller's, refused when it is malformed or belongs to another listing than `mark`'s. */
 function readCursor(cursor: unknown, mark: string): Result<string | null> {
-  if (cursor === undefined) return ok(null);
+  if (cursor === undefined || cursor === null) return ok(null);
   const [, given = "", position = ""] = (typeof cursor === "string" && MARKED_CURSOR.exec(cursor)) || [];
   if (!isStoreCursor(position)) {
     return fail(invalidInput("cursor must be one an earlier page of files returned. Leave it out for the first page."));

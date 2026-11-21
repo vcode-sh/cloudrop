@@ -839,7 +839,7 @@ export async function GET(request: Request) {
     status: "completed",
     name: query.get("search") ?? undefined,
     limit: 50,
-    cursor: query.get("cursor") ?? undefined,
+    cursor: query.get("cursor"), // null, like the cursor of a last page, is the first page
   });
   if (error) return Response.json({ error: error.message }, { status: error.code === "INVALID_INPUT" ? 400 : 500 });
   // data.items: FileRecord[] of every owner, newest upload first. data.cursor: the next page; null on the last one.

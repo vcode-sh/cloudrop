@@ -13,8 +13,11 @@ export interface AllFilesOptions extends Omit<FilesOptions, "owner"> {
   owner?: string;
   /** Only files in this status, such as `"completed"`. Left out: every status. */
   status?: FileStatus;
-  /** The `cursor` an earlier page answered. Pass the same owner, status, route, name, type and order. */
-  cursor?: string;
+  /**
+   * The `cursor` an earlier page answered; null, as the last page answers, is the first page. Pass the same owner,
+   * status, route, name, type and order.
+   */
+  cursor?: string | null;
 }
 
 const STATUSES: readonly unknown[] = [

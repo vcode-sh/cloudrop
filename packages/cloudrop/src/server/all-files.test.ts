@@ -57,6 +57,16 @@ describe("cloudrop.api.allFiles", () => {
     expect(idsOf(await api.allFiles())).toEqual([pending, nobodys, theirs, mine]);
   });
 
+  it("reads a null cursor, which the last page answers, as no cursor, in allFiles and in files", async () => {
+    // A loop that starts with `cursor = null` and passes back what each page answered was refused (M11-R64).
+    const { api, mine, theirs, nobodys, pending } = await uploads();
+    expect(idsOf(await api.allFiles({ cursor: null }))).toEqual([pending, nobodys, theirs, mine]);
+    expect(await api.files({ owner: "u1", cursor: null })).toEqual({
+      data: { items: [(await api.file(mine)).data], cursor: null },
+      error: null,
+    });
+  });
+
   it("narrows to an owner, a status, a route, a name and a type, oldest first when asked", async () => {
     const { api, mine, theirs, nobodys, pending } = await uploads();
     expect({
