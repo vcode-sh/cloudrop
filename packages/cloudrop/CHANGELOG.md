@@ -6,6 +6,8 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-21
+
 In short: the server can now check what a file really is, not just what the browser says it is
 (`cloudrop/plugins`, `contentChecks()`). Your app hears about every deleted file (`onDelete`), can search and sort a
 user's files, and can stop a file from landing on the wrong account after someone signs in elsewhere (`account`).
@@ -14,47 +16,42 @@ user's files, and can stop a file from landing on the wrong account after someon
 
 - **`cloudrop/plugins` with `contentChecks()`.** At `/upload` it refuses web pages, programs, scripts and XML or SVG
   types the route does not name; at `/complete` it reads the first 4 KiB, recognises the real format from its
-  signature (images, PDF, ZIP and office files, audio, video, programs, HTML, SVG, XML) and refuses a file whose content
-  contradicts its declared type or is one of those refused kinds. A refused file ends `rejected` with
-  `FILE_TYPE_NOT_ALLOWED`: its object is deleted, plugins get `onAbort` and a store releases its quota. Options: `allow`
-  and `deny`. Guide: [Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md) (`M10-K`).
+  signature (images, animated PNG, PDF, ZIP and office files, audio, video, programs, HTML, SVG, XML) and refuses a
+  file whose content contradicts its declared type or is one of those refused kinds. A refused file ends `rejected`
+  with `FILE_TYPE_NOT_ALLOWED`: its object is deleted, plugins get `onAbort` and a store releases its quota. Options:
+  `allow` and `deny`. A CSV starting with `MZ` or text starting with `ID3` is not mistaken for a program or an MP3:
+  each needs its whole header. The guide says what it cannot catch, and to serve stored files with
+  `X-Content-Type-Options: nosniff`. Guide: [Plugins](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/plugins.md) (`M10-K1` to `M10-K12`).
 - **`onDelete({ file, owner, reason, tx? })` route hook**, `reason` `"deleted"`, `"replaced"` or `"erased"`: runs when
-  `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes a completed file. With `transaction: true`
-  it runs inside the deletion's transaction, exactly once, so an audit row or a pointer commits with it; otherwise
-  before the deletion, at least once. A throw keeps the file. Guide: [onDelete](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#ondelete) (`M10-D4` to `M10-D9`).
-- **`api.files` filters:** `name` (a case-insensitive ASCII substring), `type` (exact, or a top-level prefix such as
-  `"image/"`) and `order` (`"newest"`, the default, or `"oldest"`), the same on Postgres, SQLite, D1 and the memory
-  store. A cursor is refused when it is passed with other filters or another order. No migration (`M10-D1` to
-  `M10-D3`).
+  `api.deleteFile`, a `replace: true` completion or `api.eraseOwner` deletes a completed file (the sweep never deletes
+  one). With `transaction: true` it runs inside the deletion's transaction, and what it writes through `tx` commits
+  once, with the deletion; otherwise it runs before the deletion, at least once. Either way the hook itself can run
+  twice for one file, so keep other effects idempotent. A throw keeps the file. Guide:
+  [onDelete](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/store.md#ondelete) (`M10-D4` to `M10-D9`).
+- **`api.files` filters:** `name` (a substring; ASCII letters match in either case, every other character only
+  itself), `type` (exact, or a top-level prefix such as `"image/"`) and `order` (`"newest"`, the default, or
+  `"oldest"`), the same on Postgres, SQLite, D1 and the memory store. A cursor works only with the options of the page
+  that returned it. No migration (`M10-D1` to `M10-D3`).
 - **Client option `account`:** the user this page shows, sent with `/upload` only as `x-cloudrop-account`. On a route
   with a store and `owner`, the server refuses an upload whose session is someone else's with the new code
-  `ACCOUNT_CHANGED` (409, not retryable: reload the page), before any reservation or plugin. Guide:
+  `ACCOUNT_CHANGED` (409, not retryable: reload the page), before any reservation or plugin. Pages without it are
+  checked as before. Guide:
   [Guard against a changed account](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/client.md#guard-against-a-changed-account) (`M10-A`).
 - The React guide's [Errors to show](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/react.md#errors-to-show): nothing for `ABORTED`, no error or Retry for
   `CLIENT_CLOSED`, and a Reload button for `ACCOUNT_CHANGED`.
 - Types `DeleteContext` and `DeleteReason`.
 
-### Fixed
-
-Found by the final review before this release:
-
-- `contentChecks()` read a file starting with `MZ`, `ID3` or `#!` as a program, an MP3 or a script, so a CSV whose
-  first cell is `MZ` was refused. A program now needs its MS-DOS header or the PE, NE, LE or LX header its offset at
-  `0x3C` points to, an ID3 tag its whole header, and a script a `#!` followed by a path (`M10-K10`, `M10-K11`).
-- `contentChecks()` refuses `multipart/x-mixed-replace`, whose parts a browser renders, by default (`M10-K3`). With
-  `allow: ["text/x-shellscript"]`, a script sent as a text type or as `application/x-sh`, `x-perl`, `x-ruby` or
-  `x-php` passes; it used to be refused as a contradiction (`M10-K11`).
-- The client guide says the `account` guard is safe only on routes whose `authorize` refuses anonymous sessions
-  (`M10-A5`).
-
 ### Changed
 
 - **Breaking for a store written by hand:** `CloudropStore.list` receives `name`, `type` and `order`. A 0.3 store still
-  compiles but ignores them, so `api.files` with a filter would return unfiltered pages, and `order: "oldest"` newest
-  first: implement the three. Every shipped adapter does.
+  compiles but ignores them; `api.files` then refuses its pages with a non-retryable `SERVER_ERROR` whenever they do not
+  match the options, instead of answering unfiltered files (`M10-D11`). Implement the three. Every shipped adapter
+  does.
 - **Breaking for a plugin's own tests:** `BeforeUploadContext` and `AfterVerifyContext` gain a required `accept` (the
   route's accept list), which a hand-built context must now pass.
 - `CloudropErrorCode` gains `ACCOUNT_CHANGED`, which breaks an exhaustive `switch` over it.
+- A cursor from a 0.3 `api.files` listing filtered by `route` is refused once after the upgrade with `INVALID_INPUT`;
+  start that listing again. Cursors of unfiltered listings keep working (`M10-D2`).
 - The bundled server entry's size ceiling goes from 30 to 32 kB: the owner file API and `onDelete` brought it to about
   31 kB (`M10-D10`). `contentChecks` lives in its own entry and adds nothing to it.
 

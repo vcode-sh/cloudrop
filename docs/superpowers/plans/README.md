@@ -1,6 +1,6 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.3.0 (cloudrop/testing, the command, hardening on a real bucket). This file
+Updated 2026-11-21 for 0.4.0 (content checks, onDelete, file filters, the account guard). This file
 is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
 stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
 decision is in [`docs/decisions/`](../../decisions/README.md).
@@ -15,7 +15,7 @@ decision is in [`docs/decisions/`](../../decisions/README.md).
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
 | M4 | `cloudrop/react`, examples | **Done** 2026-11-17. M4a: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b: the Next home page as an upload UI, `examples/hono`, `examples/vite-react`, `discard(upload)`, npm trusted publishing; no shadcn registry (`M4-E1`) |
 | M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | **Done** 2026-11-17 (tasks C0, A–F, a whole-branch review and its fix round), merged to `main` |
-| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Not started |
+| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Started: `contentChecks` in `cloudrop/plugins`, 0.4.0 (`M10-K`); the other three not started |
 | M7 | Docs, 0.x beta, 1.0 | Not started |
 
 ## Plans
@@ -113,23 +113,33 @@ A copy of files into the origin-private file system, so a resume needs no new pi
 
 The pilot moved to 0.2.0 and replaced its own avatar replacement, deletion cleanup, sweep loop, erasure steps and
 abort plumbing with `replace`, `deleteFile`, `sweep({ all })`, `eraseOwner` and `close()`. Candidates it surfaced,
-none decided:
+each now decided:
 
 - **Released in 0.3.0 (2026-11-21):** `cloudrop/testing` (`M9-T`), the `cloudrop doctor`/`setup` command
   (`M9-C`) and the hardening from tests on a real bucket (`M9-H`),
   designed in `docs/superpowers/specs/2026-11-21-testing-and-cli-design.md`. R2 accepts `setup --apply`'s two
   writes (measured on the development bucket with an admin token, 2026-11-21), and a real browser uploaded through the
   rule it wrote.
-- **`api.files` filters:** the pilot kept its own listing for a name search and a join with its profile table.
-- **Who the client uploads for:** the pilot sends the user's id in `headers` so the server refuses an `/upload` sent
-  with another account's cookie after a sign-in in another tab (`M7-P3`'s open window). A documented recipe, or a
-  client option that does it, would spare every signed-in app the same code.
-- **Copy for `CLIENT_CLOSED`** in the React guide's error table, since an upload picked during sign-out shows it.
+- **Released in 0.4.0 (2026-11-21),** designed in `docs/superpowers/specs/2026-11-21-0.4.0-design.md`:
+  `contentChecks()` in `cloudrop/plugins` (`M10-K`); the `onDelete` route hook and the `api.files` filters `name`,
+  `type` and `order` (`M10-D`), which cover the pilot's name search but not its join with its profile table; the
+  client option `account` and `ACCOUNT_CHANGED`, replacing the pilot's own header (`M10-A`); and the React guide's
+  copy for `CLIENT_CLOSED`, `ABORTED` and `ACCOUNT_CHANGED`. Every part was reviewed again before release; the fixes
+  are `M10-D11` and `M10-K12`.
 - A copy-paste UI stays out (`M4-E1`) unless that ruling is revisited.
+
+### After 0.4.0: candidates, none decided
+
+- The pilot can adopt 0.4.0: `account` instead of its `x-upload-user` header, `onDelete` for its audit trail, the
+  `api.files` filters for its search, and `contentChecks()`.
+- The remaining plugins: `limits()`, `images()`, `checksums()`; quarantine and virus scanning.
+- "Attach on submit" (an upload kept pending until the form that holds it is saved), a server-side upload with a row,
+  and a listing across owners (it needs another index).
+- The store paths behind their own entry (`M5-T69`), now that the bundled server is 31.2 of 32 kB (`M10-D10`).
 
 ### M6: the plugins
 
-`contentChecks`, `limits`, `images` and `checksums` (base spec §8). `limits()` keeps rate limits and the quotas a store
+`contentChecks` shipped in 0.4.0; `limits`, `images` and `checksums` remain (base spec §8). `limits()` keeps rate limits and the quotas a store
 does not count; a storage quota is the store's `quota` (M5). Still recorded from the product-fit review of
 2026-11-17: a bucket-setup command for R2 and S3-compatible services, a React Native client with background transfer,
 per-route `Cache-Control`, batches over 100 files.
