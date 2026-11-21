@@ -14,6 +14,8 @@ export interface StoredHeaders {
 }
 
 export interface StoredObject {
+  /** The key as last written: the form a listing returns. */
+  key: string;
   body: Bytes;
   headers: StoredHeaders;
   etag: string;
@@ -40,6 +42,7 @@ export interface FakeBucket {
   readonly credentials: Credentials;
   readonly now: () => Date;
   readonly config: { cors?: string; lifecycle?: string } | undefined;
+  /** By `objectId`, never by the key as written. */
   readonly objects: Map<string, StoredObject>;
   readonly uploads: Map<string, PendingUpload>;
   readonly listTokens: Map<string, string>;
@@ -56,6 +59,13 @@ export interface FakeRequest {
 }
 
 export const META_PREFIX = "x-amz-meta-";
+
+/**
+ * R2 keeps the NFC and NFD forms of a key as one object: either form reads, overwrites or deletes it, and a listing
+ * returns the form last written (r2-spike-findings.md, "Keys", measured 2026-11-21). Multipart uploads were not
+ * measured, so an upload still belongs to the key exactly as written.
+ */
+export const objectId = (key: string): string => key.normalize("NFC");
 export const MAX_LIST_PAGE = 1000;
 
 export async function etagOf(body: Bytes): Promise<string> {

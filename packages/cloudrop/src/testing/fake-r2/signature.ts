@@ -123,6 +123,12 @@ async function verifyHeaderSigned(
 ): Promise<Response | null> {
   const authorization = request.headers.get("authorization");
   if (!authorization) return errorResponse(403, "AccessDenied", "The request is not signed.");
+  // R2 answers an access key ID it does not know with 401, and cannot check anything else without the key's secret:
+  // bare to HEAD, "Unauthorized" otherwise (r2-spike-findings.md, "An unknown access key"; M9-H5). Measured for
+  // header-signed requests only, so a presigned URL of an unknown key still fails its signature.
+  if (/Credential=([^/]*)/.exec(authorization)?.[1] !== bucket.credentials.accessKeyId) {
+    return errorResponse(401, "Unauthorized", "Unauthorized");
+  }
   const signedAt = parseAmzDate(request.headers.get("x-amz-date") ?? "");
   if (Number.isNaN(signedAt.getTime())) {
     return errorResponse(403, "SignatureDoesNotMatch", "X-Amz-Date is missing or malformed.");

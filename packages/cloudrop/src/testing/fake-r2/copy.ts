@@ -7,6 +7,7 @@ import {
   type FakeBucket,
   type FakeRequest,
   findUpload,
+  objectId,
   readHeaders,
   readPartNumber,
   type StoredObject,
@@ -17,7 +18,7 @@ function copySource(bucket: FakeBucket, headers: Headers): StoredObject | Respon
   const [sourceBucket = "", ...sourceSegments] = (headers.get("x-amz-copy-source") ?? "").replace(/^\//, "").split("/");
   const source =
     decodeURIComponent(sourceBucket) === bucket.name
-      ? bucket.objects.get(sourceSegments.map(decodeURIComponent).join("/"))
+      ? bucket.objects.get(objectId(sourceSegments.map(decodeURIComponent).join("/")))
       : undefined;
   if (!source) return errorResponse(404, "NoSuchKey", "The copy source does not exist.");
   // Modelled on S3's documented CopyObject and UploadPartCopy precondition.
@@ -57,7 +58,8 @@ async function copyObject(bucket: FakeBucket, { key, headers }: FakeRequest, sou
   const replaced = headers.get("x-amz-metadata-directive") === "REPLACE";
   // R2 also rewrites a multipart object's ETag to the plain content hash on copy (spike Q14).
   const etag = await etagOf(source.body);
-  bucket.objects.set(key, {
+  bucket.objects.set(objectId(key), {
+    key,
     body: source.body,
     headers: replaced ? readHeaders(headers) : source.headers,
     etag,

@@ -55,6 +55,15 @@ describe("fake R2 header-signed requests", () => {
     expect(await code(response)).toBe("SignatureDoesNotMatch");
   });
 
+  // Measured on R2 with an access key ID of 32 zeros (r2-spike-findings.md, "An unknown access key"; M9-H5).
+  it("answers 401 to an access key ID it does not know, bare to HEAD and Unauthorized otherwise", async () => {
+    const fake = fakeAt();
+    const head = await call(fake, "HEAD", "/hs.txt", { accessKeyId: "0".repeat(32) });
+    expect({ status: head.status, body: await head.text() }).toEqual({ status: 401, body: "" });
+    const list = await call(fake, "GET", "?list-type=2", { accessKeyId: "0".repeat(32) });
+    expect({ status: list.status, code: await code(list) }).toEqual({ status: 401, code: "Unauthorized" });
+  });
+
   it("rejects a request whose query differs from the signed one", async () => {
     const { headers } = await signed("PUT", "/hs.txt?x=1", { body: text("hi") });
     const response = await fakeAt().fetch(objectUrl("hs.txt?x=2"), { method: "PUT", headers, body: text("hi") });

@@ -8,6 +8,7 @@ import {
   type FakeRequest,
   MAX_LIST_PAGE,
   META_PREFIX,
+  objectId,
   readHeaders,
   type StoredObject,
 } from "./bucket.ts";
@@ -29,9 +30,9 @@ export async function putObject(bucket: FakeBucket, { key, headers, body }: Fake
   const badChecksum = checksumMismatch(headers, body);
   if (badChecksum) return badChecksum;
   // Honoured even when unsigned (spike Q3).
-  if (headers.get("if-none-match") === "*" && bucket.objects.has(key)) return preconditionFailed();
+  if (headers.get("if-none-match") === "*" && bucket.objects.has(objectId(key))) return preconditionFailed();
   const etag = await etagOf(body);
-  bucket.objects.set(key, { body, headers: readHeaders(headers), etag, uploadedAt: bucket.now() });
+  bucket.objects.set(objectId(key), { key, body, headers: readHeaders(headers), etag, uploadedAt: bucket.now() });
   return new Response(null, { status: 200, headers: { etag: `"${etag}"` } });
 }
 
@@ -96,7 +97,7 @@ function bodyResponse(object: StoredObject, rangeHeader: string | null, headers:
 }
 
 export function getObject(bucket: FakeBucket, { key, method, headers, query }: FakeRequest): Response {
-  const object = bucket.objects.get(key);
+  const object = bucket.objects.get(objectId(key));
   if (!object) {
     return method === "HEAD"
       ? new Response(null, { status: 404 })
@@ -113,12 +114,13 @@ export function getObject(bucket: FakeBucket, { key, method, headers, query }: F
 }
 
 export function deleteObject(bucket: FakeBucket, { key }: FakeRequest): Response {
-  bucket.objects.delete(key);
+  bucket.objects.delete(objectId(key));
   return new Response(null, { status: 204 });
 }
 
 export function listObjects(bucket: FakeBucket, { query }: FakeRequest): Response {
-  const prefix = query.get("prefix") ?? "";
+  // Matched and ordered by the stored form, so a prefix in either Unicode form finds the object.
+  const prefix = objectId(query.get("prefix") ?? "");
   const token = query.get("continuation-token");
   const after = token === null ? "" : bucket.listTokens.get(token);
   if (after === undefined) return errorResponse(400, "InvalidArgument", "The continuation token is not valid.");
@@ -130,8 +132,8 @@ export function listObjects(bucket: FakeBucket, { query }: FakeRequest): Respons
   const truncated = matching.length > max;
   const contents = page
     .map(
-      ([key, object]) =>
-        `<Contents><Key>${escapeXml(key)}</Key><Size>${object.body.length}</Size><ETag>"${object.etag}"</ETag><LastModified>${object.uploadedAt.toISOString()}</LastModified></Contents>`,
+      ([, object]) =>
+        `<Contents><Key>${escapeXml(object.key)}</Key><Size>${object.body.length}</Size><ETag>"${object.etag}"</ETag><LastModified>${object.uploadedAt.toISOString()}</LastModified></Contents>`,
     )
     .join("");
   const nextToken = `fake-token-${bucket.listTokens.size + 1}`;

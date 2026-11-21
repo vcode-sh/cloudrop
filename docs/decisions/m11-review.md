@@ -304,3 +304,21 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Status:** in force.
 - **Visible in:** `src/storage/sigv4.ts`, `src/storage/sigv4.test.ts`, `src/storage/s3/copy.test.ts`,
   `docs/research/r2-spike-findings.md`.
+
+### M11-R26: the fake R2 keeps one object for a key's NFC and NFD forms, and answers 401 to an unknown access key
+
+- **Decision:** the fake stores an object under the NFC form of its key together with the key as last written. Either
+  form reads, overwrites and deletes it, a create-only `PUT` in the other form answers `412`, and a listing matches its
+  prefix in either form and returns the form last written. `FakeR2.keys()` returns those forms and `FakeR2.object(key)`
+  takes either. A header-signed request whose access key ID is not the bucket's answers `401 Unauthorized`, bare to
+  `HEAD`, before any other check.
+- **Why:** both were measured on R2 on 2026-11-21 (`docs/research/r2-spike-findings.md`, "Keys", "One key in two
+  Unicode forms, through deletePrefix" and "An unknown access key"; `M9-H5`, `M9-H6`), and the fake kept two objects
+  and answered `403 SignatureDoesNotMatch`. The driver's handling of both was covered by stubbed answers only; it now
+  runs against the fake (`src/storage/s3/objects.test.ts`), and so does anything built on `testBucket`.
+- **If wrong:** multipart uploads and presigned URLs were not measured for either behaviour, so an upload still belongs
+  to its key exactly as written until it completes, and a presigned URL of an unknown key still fails its signature.
+  A test that relied on the fake keeping both forms of one key as two objects now sees one.
+- **Status:** in force.
+- **Visible in:** `src/testing/fake-r2.ts`, `src/testing/fake-r2/bucket.ts`, `src/testing/fake-r2/objects.ts`,
+  `src/testing/fake-r2/signature.ts`, `src/testing/fake-r2.test.ts`, `src/testing/fake-r2/signature.test.ts`.

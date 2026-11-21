@@ -10,6 +10,7 @@ import {
   type FakeRequest,
   findUpload,
   MAX_LIST_PAGE,
+  objectId,
   type PendingUpload,
   readHeaders,
   readPartNumber,
@@ -111,12 +112,13 @@ export async function completeUpload(
   const sizeFailure = partSizeFailure(parts);
   if (sizeFailure) return sizeFailure;
   // A failed conditional Complete discards the upload (spike Q3).
-  if (headers.get("if-none-match") === "*" && bucket.objects.has(key)) {
+  if (headers.get("if-none-match") === "*" && bucket.objects.has(objectId(key))) {
     bucket.uploads.delete(uploadId);
     return preconditionFailed();
   }
   const etag = `${await etagOf(utf8.encode(parts.map((part) => part.etag).join("")))}-${parts.length}`;
-  bucket.objects.set(key, {
+  bucket.objects.set(objectId(key), {
+    key,
     body: concat(parts.map((part) => part.body)),
     headers: upload.headers,
     etag,

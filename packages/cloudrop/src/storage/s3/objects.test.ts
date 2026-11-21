@@ -179,4 +179,34 @@ describe("createS3Driver", () => {
   ])("%s", async (_name, call, response, code) => {
     expect((await call(driverWith(stubbed(async () => response)))).error?.code ?? null).toBe(code);
   });
+
+  // Until the fake answered as R2 does, only a stubbed 401 covered this (M9-H5).
+  it("reports an access key ID the storage does not know as refused credentials, on HEAD and on a listing", async () => {
+    const { fake } = setup();
+    const stranger = createS3Driver({
+      endpoint,
+      region: "auto",
+      bucket: "test",
+      credentials: { ...credentials, accessKeyId: "0".repeat(32) },
+      rules: R2_RULES,
+      fetch: fake.fetch,
+      now,
+    });
+    const message =
+      "The storage service did not accept these credentials. Check the access key ID and the secret access key.";
+    expect((await stranger.head("a.txt")).error).toMatchObject({ code: "STORAGE_DENIED", status: 401, message });
+    expect((await stranger.list("")).error).toMatchObject({
+      code: "STORAGE_DENIED",
+      storageCode: "Unauthorized",
+      message,
+    });
+  });
+
+  // R2 keeps the NFC and NFD forms of a key as one object and lists the form last written (M9-H6).
+  it("lists a key written in NFD under its NFC prefix, in NFD, and refuses to create its NFC form", async () => {
+    const { driver } = setup();
+    expect((await driver.put("Ame\u0301lie/a.txt", "x")).error).toBeNull();
+    expect((await driver.list("Am\u00e9lie/")).data?.items.map((item) => item.key)).toEqual(["Ame\u0301lie/a.txt"]);
+    expect((await driver.put("Am\u00e9lie/a.txt", "y", { ifNoneMatch: true })).error?.code).toBe("ALREADY_EXISTS");
+  });
 });

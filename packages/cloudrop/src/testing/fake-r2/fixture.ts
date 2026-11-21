@@ -36,6 +36,7 @@ export function fakeAt(secondsAfterSigning = 0): FakeR2 {
 interface SignedOptions {
   body?: Uint8Array<ArrayBuffer>;
   headers?: Record<string, string>;
+  accessKeyId?: string;
   secret?: string;
   date?: Date;
   payloadHash?: string;
@@ -52,7 +53,10 @@ export async function signed(
     method,
     url,
     headers: options.headers,
-    credentials: { ...credentials, secretAccessKey: options.secret ?? credentials.secretAccessKey },
+    credentials: {
+      accessKeyId: options.accessKeyId ?? credentials.accessKeyId,
+      secretAccessKey: options.secret ?? credentials.secretAccessKey,
+    },
     region: "auto",
     date: options.date ?? signedAt,
     payloadHash: options.payloadHash ?? UNSIGNED_PAYLOAD,

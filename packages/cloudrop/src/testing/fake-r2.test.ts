@@ -304,3 +304,34 @@ describe("fake R2 ListObjectsV2", () => {
     expect(second).toContain("<IsTruncated>false</IsTruncated>");
   });
 });
+
+// Measured on R2 (r2-spike-findings.md, "Keys"): the NFC and NFD forms of a key are one object.
+describe("fake R2 keys in two Unicode forms", () => {
+  const nfc = "caf\u00e9.txt";
+  const nfd = "cafe\u0301.txt";
+  const put = (fake: FakeR2, key: string, body: string, headers = {}) =>
+    call(fake, "PUT", `/${encodeURIComponent(key)}`, { body: text(body), headers });
+  const listed = async (fake: FakeR2, prefix: string) => {
+    const response = await call(fake, "GET", `?${new URLSearchParams({ "list-type": "2", prefix })}`);
+    return Array.from((await response.text()).matchAll(/<Key>(.*?)<\/Key>/g), (match) => match[1]);
+  };
+
+  it("keeps one object, read in both forms and listed in the form last written", async () => {
+    const fake = fakeAt();
+    expect((await put(fake, nfc, "first")).status).toBe(200);
+    expect((await put(fake, nfd, "second")).status).toBe(200);
+    expect(fake.keys()).toEqual([nfd]);
+    const bodies = [nfc, nfd].map(async (key) => (await call(fake, "GET", `/${encodeURIComponent(key)}`)).text());
+    expect(await Promise.all(bodies)).toEqual(["second", "second"]);
+    // Also under a prefix in the other form.
+    expect([await listed(fake, "caf\u00e9"), await listed(fake, "cafe\u0301")]).toEqual([[nfd], [nfd]]);
+  });
+
+  it("answers 412 to a create-only PUT in the other form, and deletes in either form", async () => {
+    const fake = fakeAt();
+    expect((await put(fake, nfd, "kept")).status).toBe(200);
+    expect((await put(fake, nfc, "refused", { "if-none-match": "*" })).status).toBe(412);
+    expect((await call(fake, "DELETE", `/${encodeURIComponent(nfc)}`)).status).toBe(204);
+    expect((await call(fake, "HEAD", `/${encodeURIComponent(nfd)}`)).status).toBe(404);
+  });
+});
