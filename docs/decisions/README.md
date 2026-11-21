@@ -34,6 +34,7 @@ uses one of these prefixes instead.
 | `M11-D<n>` | 0.6.0: what `api.deleteFile` answers, and `onDelete` refusals. | [m11-delete.md](m11-delete.md) |
 | `M11-K<n>` | 0.6.0: the `content` field of a content-check refusal. | [m11-content.md](m11-content.md) |
 | `M11-C<n>` | 0.6.0: `--var`, the command reading an app's own variable names. | [m11-command.md](m11-command.md) |
+| `M11-L<n>` | 0.6.0: `api.allFiles`, the files of every owner, and its index. | [m11-listing.md](m11-listing.md) |
 | `M11-R<n>` | 0.6.0: the review of every area before release. | [m11-review.md](m11-review.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
