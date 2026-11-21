@@ -2,7 +2,7 @@
 // `scripts/test-rustfs.sh`, which starts the container, sets CLOUDROP_RUSTFS_ENDPOINT and removes the container.
 import { S3_RULES } from "../rules.ts";
 import { type ContractTarget, describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
-import { createS3Driver } from "./s3-driver.ts";
+import { createS3DriverWithWrites } from "./s3-driver.ts";
 import { EMPTY_SHA256, signRequest } from "./sigv4.ts";
 
 const credentials = { accessKeyId: "cloudrop-test", secretAccessKey: "cloudrop-test-secret" };
@@ -39,7 +39,7 @@ describeStorageContract("RustFS", async () => {
     maxSinglePutSize = S3_RULES.maxSinglePutSize,
     fetch,
   }) =>
-    createS3Driver({
+    createS3DriverWithWrites({
       endpoint,
       region,
       bucket,

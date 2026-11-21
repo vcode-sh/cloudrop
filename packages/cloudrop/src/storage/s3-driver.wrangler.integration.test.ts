@@ -2,7 +2,7 @@
 // which starts Wrangler, sets CLOUDROP_WRANGLER_ENDPOINT and stops Wrangler.
 import { R2_RULES } from "../rules.ts";
 import { type ContractTarget, describeStorageContract, randomPrefix } from "../testing/storage-contract.ts";
-import { createS3Driver } from "./s3-driver.ts";
+import { createS3DriverWithWrites } from "./s3-driver.ts";
 
 const credentials = { accessKeyId: "cloudrop-local", secretAccessKey: "cloudrop-local-secret" };
 
@@ -18,7 +18,7 @@ describeStorageContract("Wrangler local R2", async () => {
     maxSinglePutSize = R2_RULES.maxSinglePutSize,
     fetch,
   }) =>
-    createS3Driver({
+    createS3DriverWithWrites({
       endpoint,
       region: "auto",
       bucket: "contract",

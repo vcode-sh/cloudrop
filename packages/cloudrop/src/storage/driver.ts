@@ -129,7 +129,8 @@ export interface StorageDriver {
   /**
    * Replaces the bucket's whole CORS configuration with `rules` (at least one), as S3's PutBucketCors does: to keep a
    * rule, read it and pass it back. Needs credentials that may change bucket settings; others get STORAGE_DENIED.
-   * Optional, so a hand-written driver need not implement it; cloudrop's presets do.
+   * Optional, so a hand-written driver need not implement it. r2() and s3() do not either, to keep it out of an app's
+   * bundle: the `cloudrop setup --apply` command writes bucket settings.
    */
   putBucketCors?(rules: readonly BucketCorsRule[]): Promise<Result<void>>;
   /**

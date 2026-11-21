@@ -26,10 +26,10 @@ export interface S3DriverConfig {
   now?: () => Date;
 }
 
-/** cloudrop's own driver, which implements the optional bucket-settings writes. */
+/** A driver with the optional bucket-settings writes. */
 export type S3Driver = StorageDriver & Required<Pick<StorageDriver, "putBucketCors" | "putBucketLifecycle">>;
 
-export function createS3Driver(config: S3DriverConfig): S3Driver {
+export function createS3Driver(config: S3DriverConfig): StorageDriver {
   const ctx = createContext(config);
   const publicUrl =
     config.publicUrl === undefined
@@ -43,9 +43,16 @@ export function createS3Driver(config: S3DriverConfig): S3Driver {
     publicUrl,
     ...presignMethods(ctx),
     ...bucketSettingsMethods(ctx),
-    ...bucketWriteMethods(ctx),
     ...multipart,
     ...objects,
     ...copyMethods(ctx, { head: objects.head, ...multipart }),
   };
+}
+
+/**
+ * createS3Driver with the bucket-settings writes, for the cloudrop command and the storage contract. A function of its
+ * own so that the writes stay out of an app's server bundle: r2() and s3() do not include them (M9-C4).
+ */
+export function createS3DriverWithWrites(config: S3DriverConfig): S3Driver {
+  return { ...createS3Driver(config), ...bucketWriteMethods(createContext(config)) };
 }

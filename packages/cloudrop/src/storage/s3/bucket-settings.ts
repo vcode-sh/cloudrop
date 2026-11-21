@@ -23,6 +23,27 @@ function configurationReadError(error: CloudropError, missingCode: string, setti
   );
 }
 
+// XML the tag reader would misread: CDATA and comments are read as text, prefixed elements not at all. A rule read
+// wrongly could be written back wrongly, so such a configuration is not read.
+const UNREADABLE_XML = /<!\[CDATA\[|<!--|<\/?[A-Za-z_][\w.-]*:/;
+
+/** The configuration element's inner XML; "" for an empty, self-closing one. */
+function readConfiguration(xml: string, root: string, setting: string): Result<string> {
+  if (new RegExp(`<${root}(?:\\s[^>]*)?/>`).test(xml)) return ok("");
+  // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
+  const configuration = xmlBlocks(xml, root)[0];
+  if (configuration === undefined) return fail(incompleteResponse(`${setting} configuration`));
+  if (UNREADABLE_XML.test(configuration)) {
+    return fail(
+      new CloudropError(
+        "STORAGE_ERROR",
+        `The bucket's ${setting} configuration uses XML that cloudrop does not read (CDATA, comments or namespace prefixes). Check its rules by hand.`,
+      ),
+    );
+  }
+  return ok(configuration);
+}
+
 function readCorsRule(rule: string): Result<BucketCorsRule> {
   const id = xmlText(rule, "ID");
   const maxAge = xmlValue(rule, "MaxAgeSeconds");
@@ -56,18 +77,17 @@ export function bucketSettingsMethods(ctx: S3Context): Pick<StorageDriver, "getB
     async getBucketCors() {
       const result = await sendForXml(ctx, "GET", new URL(`${ctx.bucketUrl}?cors=`));
       if (result.error) return configurationReadError(result.error, "NoSuchCORSConfiguration", "CORS");
-      // A 200 without the element is not "no rules" (a proxy's HTML page, say): checkBucket would report a missing rule.
-      const configuration = xmlBlocks(result.data, "CORSConfiguration")[0];
-      if (configuration === undefined) return fail(incompleteResponse("CORS configuration"));
-      return allOk(xmlBlocks(configuration, "CORSRule").map(readCorsRule));
+      const configuration = readConfiguration(result.data, "CORSConfiguration", "CORS");
+      if (configuration.error) return configuration;
+      return allOk(xmlBlocks(configuration.data, "CORSRule").map(readCorsRule));
     },
 
     async getBucketLifecycle() {
       const result = await sendForXml(ctx, "GET", new URL(`${ctx.bucketUrl}?lifecycle=`));
       if (result.error) return configurationReadError(result.error, "NoSuchLifecycleConfiguration", "lifecycle");
-      const configuration = xmlBlocks(result.data, "LifecycleConfiguration")[0];
-      if (configuration === undefined) return fail(incompleteResponse("lifecycle configuration"));
-      return allOk(xmlBlocks(configuration, "Rule").map(readLifecycleRule));
+      const configuration = readConfiguration(result.data, "LifecycleConfiguration", "lifecycle");
+      if (configuration.error) return configuration;
+      return allOk(xmlBlocks(configuration.data, "Rule").map(readLifecycleRule));
     },
   };
 }

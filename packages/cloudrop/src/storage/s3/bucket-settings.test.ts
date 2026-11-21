@@ -4,10 +4,10 @@ import { R2_RULES } from "../../rules.ts";
 import { credentials, driverWith, endpoint, neverCalled, now, stubbed } from "../../testing/driver-fixture.ts";
 import { createFakeR2 } from "../../testing/fake-r2.ts";
 import type { FetchLike, StorageDriver } from "../driver.ts";
-import { createS3Driver, type S3Driver } from "../s3-driver.ts";
+import { createS3DriverWithWrites, type S3Driver } from "../s3-driver.ts";
 
 const writable = (fetch: FetchLike): S3Driver =>
-  createS3Driver({ endpoint, region: "auto", bucket: "test", credentials, rules: R2_RULES, fetch, now });
+  createS3DriverWithWrites({ endpoint, region: "auto", bucket: "test", credentials, rules: R2_RULES, fetch, now });
 
 describe("bucket configuration", () => {
   const cors =
@@ -99,6 +99,25 @@ describe("bucket configuration", () => {
     });
   });
 
+  it("reads an empty, self-closing configuration as no rules", async () => {
+    const driver = configured({ cors: "<CORSConfiguration/>", lifecycle: '<LifecycleConfiguration xmlns="x" />' });
+    expect([(await driver.getBucketCors()).data, (await driver.getBucketLifecycle()).data]).toEqual([[], []]);
+  });
+
+  it.each([
+    ["CDATA", "<AllowedOrigin><![CDATA[https://a.example]]></AllowedOrigin>"],
+    ["a comment", "<!-- <AllowedOrigin>https://old.example</AllowedOrigin> -->"],
+    ["a namespace prefix", "<s3:AllowedOrigin>https://a.example</s3:AllowedOrigin>"],
+  ])("refuses to read a configuration with %s, which the tag reader would misread", async (_name, inner) => {
+    const cors = `<CORSConfiguration><CORSRule>${inner}<AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>`;
+    expect((await configured({ cors }).getBucketCors()).error).toMatchObject({
+      code: "STORAGE_ERROR",
+      retryable: false,
+      message:
+        "The bucket's CORS configuration uses XML that cloudrop does not read (CDATA, comments or namespace prefixes). Check its rules by hand.",
+    });
+  });
+
   it("reports a refused read as STORAGE_DENIED, never as no rules", async () => {
     const driver = configured();
     expect([(await driver.getBucketCors()).error?.code, (await driver.getBucketLifecycle()).error?.code]).toEqual([
@@ -162,6 +181,7 @@ describe("bucket configuration writes", () => {
     const sent: { checksum: string | null; body: Uint8Array }[] = [];
     const capture: FetchLike = async (input, init) => {
       const request = new Request(input, init);
+      if (request.method !== "PUT") return new Response("<LifecycleConfiguration></LifecycleConfiguration>");
       sent.push({ checksum: request.headers.get("x-amz-checksum-sha256"), body: await request.bytes() });
       return new Response(null, { status: 200 });
     };
@@ -173,6 +193,23 @@ describe("bucket configuration writes", () => {
     // Node's own SHA-256 is the oracle, independent of the web crypto call the driver makes.
     const sha256 = (body: Uint8Array) => createHash("sha256").update(body).digest("base64");
     expect(sent.map(({ checksum, body }) => body.length > 0 && checksum === sha256(body))).toEqual([true, true]);
+  });
+
+  it("sends back the bucket's transition default with a lifecycle write, so the write changes only the rules", async () => {
+    const header = "x-amz-transition-default-minimum-object-size";
+    const sent: (string | null)[] = [];
+    const awsLike: FetchLike = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === "PUT") {
+        sent.push(request.headers.get(header));
+        return new Response(null);
+      }
+      return new Response("<LifecycleConfiguration></LifecycleConfiguration>", {
+        headers: { [header]: "varies_by_storage_class" },
+      });
+    };
+    expect((await writable(awsLike).putBucketLifecycle([abortRule])).error).toBeNull();
+    expect(sent).toEqual(["varies_by_storage_class"]);
   });
 
   it.each([

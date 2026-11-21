@@ -4,9 +4,8 @@
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { StorageDriver } from "./driver.ts";
-import type { S3Driver } from "./s3-driver.ts";
 
-type Build = () => S3Driver;
+type Build = () => StorageDriver;
 
 /**
  * A read of settings from the environment, which throws INVALID_CONFIG, as a Result: such a setting is reported on
@@ -30,14 +29,14 @@ export function storageSettingsProblem(storage: StorageDriver): CloudropError | 
 }
 
 /** `checked` was built from the explicit options with stand-ins for the environment: it lends its rules and publicUrl. */
-export function lazyDriver(checked: StorageDriver, build: Build): S3Driver {
-  let built: S3Driver | undefined;
-  const resolve = (): Result<S3Driver> => readSetting(() => (built ??= build()));
-  const use = async <T>(call: (driver: S3Driver) => Promise<Result<T>>): Promise<Result<T>> => {
+export function lazyDriver(checked: StorageDriver, build: Build): StorageDriver {
+  let built: StorageDriver | undefined;
+  const resolve = (): Result<StorageDriver> => readSetting(() => (built ??= build()));
+  const use = async <T>(call: (driver: StorageDriver) => Promise<Result<T>>): Promise<Result<T>> => {
     const resolved = resolve();
     return resolved.error ? resolved : call(resolved.data);
   };
-  const lazy: S3Driver = {
+  const lazy: StorageDriver = {
     rules: checked.rules,
     publicUrl: checked.publicUrl,
     presignPut: (...args) => use((driver) => driver.presignPut(...args)),
@@ -49,8 +48,6 @@ export function lazyDriver(checked: StorageDriver, build: Build): S3Driver {
     presignGet: (...args) => use((driver) => driver.presignGet(...args)),
     getBucketCors: () => use((driver) => driver.getBucketCors()),
     getBucketLifecycle: () => use((driver) => driver.getBucketLifecycle()),
-    putBucketCors: (rules) => use((driver) => driver.putBucketCors(rules)),
-    putBucketLifecycle: (rules) => use((driver) => driver.putBucketLifecycle(rules)),
     head: (...args) => use((driver) => driver.head(...args)),
     getRange: (...args) => use((driver) => driver.getRange(...args)),
     put: (...args) => use((driver) => driver.put(...args)),

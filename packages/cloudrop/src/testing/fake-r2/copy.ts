@@ -1,6 +1,6 @@
 // CopyObject, UploadPartCopy and the bucket-configuration reads and writes of the fake R2.
 
-import { stripQuotes } from "../../storage/xml.ts";
+import { stripQuotes, xmlBlocks } from "../../storage/xml.ts";
 import {
   type Bytes,
   etagOf,
@@ -81,11 +81,23 @@ export function bucketConfig(bucket: FakeBucket, name: "cors" | "lifecycle"): Re
   return errorResponse(404, code, "The bucket has no such configuration.");
 }
 
-const ROOT_ELEMENTS = { cors: "CORSConfiguration", lifecycle: "LifecycleConfiguration" } as const;
+// What S3 requires of each rule in the body: a CORS rule allows at least one origin and one method; a lifecycle rule
+// has a status and a scope.
+const SHAPES = {
+  cors: { root: "CORSConfiguration", rule: "CORSRule", needs: [["AllowedOrigin"], ["AllowedMethod"]] },
+  lifecycle: { root: "LifecycleConfiguration", rule: "Rule", needs: [["Status"], ["Filter", "Prefix"]] },
+} as const;
+
+function wellFormed(xml: string, name: "cors" | "lifecycle"): boolean {
+  const { root, rule, needs } = SHAPES[name];
+  const rules = xmlBlocks(xmlBlocks(xml, root)[0] ?? "", rule);
+  return rules.length > 0 && rules.every((each) => needs.every((tags) => tags.some((tag) => each.includes(`<${tag}`))));
+}
 
 /**
  * PutBucketCors and PutBucketLifecycleConfiguration: the body replaces the whole configuration, as S3 documents. Refused
- * like the reads when the bucket models an object token (no `bucketConfig`); a SHA-256, when sent, must match.
+ * like the reads when the bucket models an object token (no `bucketConfig`). S3 requires an integrity checksum on both
+ * (Content-MD5 or x-amz-checksum-*); R2's answer without one is unmeasured, so the fake follows S3 and checks SHA-256.
  */
 export async function putBucketConfig(
   bucket: FakeBucket,
@@ -94,14 +106,15 @@ export async function putBucketConfig(
 ): Promise<Response> {
   if (!bucket.config) return errorResponse(403, "AccessDenied", "Access Denied");
   const sha256 = headers.get("x-amz-checksum-sha256");
+  if (sha256 === null) {
+    return errorResponse(400, "InvalidRequest", "Missing required header for this request: Content-MD5");
+  }
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
-  if (sha256 !== null && sha256 !== btoa(String.fromCharCode(...digest))) {
+  if (sha256 !== btoa(String.fromCharCode(...digest))) {
     return errorResponse(400, "BadDigest", "The SHA256 you specified did not match the calculated checksum.");
   }
   const xml = new TextDecoder().decode(body).replace(/^<\?xml[^>]*\?>/, "");
-  if (!new RegExp(`^<${ROOT_ELEMENTS[name]}[\\s>]`).test(xml)) {
-    return errorResponse(400, "MalformedXML", "The XML you provided was not well-formed.");
-  }
+  if (!wellFormed(xml, name)) return errorResponse(400, "MalformedXML", "The XML you provided was not well-formed.");
   bucket.config[name] = xml;
   return new Response(null, { status: 200 });
 }

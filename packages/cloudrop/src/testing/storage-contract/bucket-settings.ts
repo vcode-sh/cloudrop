@@ -5,9 +5,12 @@ import { expect, it } from "vitest";
 import type { BucketCorsRule, BucketLifecycleRule, StorageDriver } from "../../storage/driver.ts";
 import type { ContractSuite } from "./suite.ts";
 
+/** The lane's variant driver writes; the presets do not carry the writes (M9-C4), so `suite.driver` only reads them back. */
 function writesOf(driver: StorageDriver) {
   const { putBucketCors, putBucketLifecycle } = driver;
-  if (!putBucketCors || !putBucketLifecycle) throw new Error("The contract driver cannot write bucket settings.");
+  if (!putBucketCors || !putBucketLifecycle) {
+    throw new Error("The lane's driverWith() cannot write bucket settings. Build it with createS3DriverWithWrites.");
+  }
   return { putBucketCors, putBucketLifecycle };
 }
 
@@ -48,7 +51,7 @@ export function bucketSettingsCases(suite: ContractSuite): void {
   it("writes CORS rules that read back as written, and a write replaces the whole configuration", async (ctx) => {
     suite.skipWithout(ctx, "bucketSettingsWrites");
     const { driver } = suite;
-    const { putBucketCors } = writesOf(driver);
+    const { putBucketCors } = writesOf(suite.target.driverWith({}));
     expect((await putBucketCors([uploads, reads])).error).toBeNull();
     expect((await driver.getBucketCors()).data).toEqual([uploads, reads]);
     expect((await putBucketCors([reads])).error).toBeNull();
@@ -58,7 +61,7 @@ export function bucketSettingsCases(suite: ContractSuite): void {
   it("writes a lifecycle rule from its fields and keeps another rule's expiration when written back", async (ctx) => {
     suite.skipWithout(ctx, "bucketSettingsWrites");
     const { driver } = suite;
-    const { putBucketLifecycle } = writesOf(driver);
+    const { putBucketLifecycle } = writesOf(suite.target.driverWith({}));
     expect((await putBucketLifecycle([expireLogs, abortRule])).error).toBeNull();
     const first = await driver.getBucketLifecycle();
     expect(first.data?.map(fields)).toEqual([fields(expireLogs), abortRule]);

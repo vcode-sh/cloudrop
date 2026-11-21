@@ -5,7 +5,7 @@ import { createFakeR2 } from "../testing/fake-r2.ts";
 import { clearRunPrefix, describeStorageContract, randomPrefix, tearDownRun } from "../testing/storage-contract.ts";
 import type { StorageDriver } from "./driver.ts";
 import { r2 } from "./presets.ts";
-import { createS3Driver } from "./s3-driver.ts";
+import { createS3DriverWithWrites } from "./s3-driver.ts";
 
 const credentials = { accessKeyId: "fake-access-key", secretAccessKey: "fake-secret-key" };
 const accountId = "0123456789abcdef0123456789abcdef";
@@ -22,7 +22,7 @@ describeStorageContract("in-process fake R2", async (onCleanup) => {
     // The public preset, as the live R2 lane uses it.
     driver: r2({ bucket, accountId, ...credentials, fetch: fake.fetch }),
     driverWith: ({ secondsAgo = 0, maxSinglePutSize = R2_RULES.maxSinglePutSize, fetch = fake.fetch }) =>
-      createS3Driver({
+      createS3DriverWithWrites({
         endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
         region: "auto",
         bucket,

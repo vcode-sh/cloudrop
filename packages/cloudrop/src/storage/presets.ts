@@ -3,7 +3,7 @@ import { CloudropError, configError, type Result } from "../errors.ts";
 import { R2_RULES, S3_RULES } from "../rules.ts";
 import type { FetchLike, StorageDriver } from "./driver.ts";
 import { lazyDriver, readSetting } from "./lazy-driver.ts";
-import { createS3Driver, type S3Driver } from "./s3-driver.ts";
+import { createS3Driver, createS3DriverWithWrites, type S3Driver, type S3DriverConfig } from "./s3-driver.ts";
 
 export interface R2Options {
   /** Default: env CLOUDROP_R2_BUCKET. */
@@ -100,7 +100,7 @@ function readSettings<TSetting extends Setting>(
  * Options are checked now, as every passed option is; in development the environment is too, so a dev server fails at
  * start.
  */
-function preset(build: (read: ReadSetting) => S3Driver): StorageDriver {
+function preset(build: (read: ReadSetting) => StorageDriver): StorageDriver {
   if (fromEnv("NODE_ENV") === "development") return buildFromEnvironment(build);
   let readsEnvironment = false;
   const checked = build((_variable, setting) => {
@@ -114,7 +114,7 @@ function preset(build: (read: ReadSetting) => S3Driver): StorageDriver {
  * A value from a variable fails the same check an option would, but nothing in the app's code passed it, so the message
  * names the variable. Each variable read is tried alone, with stand-ins for the rest, to find the ones at fault.
  */
-function buildFromEnvironment(build: (read: ReadSetting) => S3Driver, env = fromEnv): S3Driver {
+function buildFromEnvironment<T>(build: (read: ReadSetting) => T, env = fromEnv): T {
   const read: string[] = [];
   try {
     return build((variable) => {
@@ -174,9 +174,9 @@ function checkAccountId(accountId: unknown): string {
   return account;
 }
 
-type Build = (read: ReadSetting) => S3Driver;
+type Create<T> = (config: S3DriverConfig) => T;
 
-function buildR2(options: R2Options): Build {
+function buildR2<T>(options: R2Options, create: Create<T>): (read: ReadSetting) => T {
   const { jurisdiction } = options;
   if (jurisdiction !== undefined && jurisdiction !== "eu" && jurisdiction !== "fedramp") {
     throw configError('The R2 jurisdiction must be "eu" or "fedramp". Omit it for the default location.');
@@ -185,7 +185,7 @@ function buildR2(options: R2Options): Build {
     const settings = readSettings("R2", options, R2_VARIABLES, read);
     const bucket = checkBucket(settings.bucket, "R2");
     const account = checkAccountId(settings.accountId);
-    return createS3Driver({
+    return create({
       endpoint: `https://${jurisdiction ? `${account}.${jurisdiction}` : account}.r2.cloudflarestorage.com`,
       region: "auto",
       bucket,
@@ -198,10 +198,10 @@ function buildR2(options: R2Options): Build {
 }
 
 // createS3Driver checks the endpoint, the publicUrl, the credentials, the region and fetch.
-function buildS3(options: S3Options): Build {
+function buildS3<T>(options: S3Options, create: Create<T>): (read: ReadSetting) => T {
   return (read) => {
     const { endpoint, region, bucket, accessKeyId, secretAccessKey } = readSettings("S3", options, S3_VARIABLES, read);
-    return createS3Driver({
+    return create({
       endpoint,
       region,
       bucket: checkBucket(bucket, "S3"),
@@ -214,23 +214,27 @@ function buildS3(options: S3Options): Build {
 }
 
 export function r2(given?: R2Options): StorageDriver {
-  return preset(buildR2(given ?? {}));
+  return preset(buildR2(given ?? {}, createS3Driver));
 }
 
 export function s3(given?: S3Options): StorageDriver {
-  return preset(buildS3(given ?? {}));
+  return preset(buildS3(given ?? {}, createS3Driver));
 }
 
 /**
- * For the cloudrop command: the preset's driver built from `variables` alone, read as the environment would be, so an
- * invalid value is named by its variable. Never reads the process environment.
+ * For the cloudrop command: the preset's driver, with the bucket-settings writes, built from `variables` alone, read as
+ * the environment would be, so an invalid value is named by its variable. Never reads the process environment.
  */
 export function storageFromVariables(
   service: "R2" | "S3",
   variables: (name: string) => string | undefined,
   options: { jurisdiction?: "eu" | "fedramp"; fetch?: FetchLike },
 ): Result<S3Driver> {
-  return readSetting(() =>
-    buildFromEnvironment(service === "R2" ? buildR2(options) : buildS3({ fetch: options.fetch }), variables),
-  );
+  return readSetting(() => {
+    const build =
+      service === "R2"
+        ? buildR2(options, createS3DriverWithWrites)
+        : buildS3({ fetch: options.fetch }, createS3DriverWithWrites);
+    return buildFromEnvironment(build, variables);
+  });
 }
