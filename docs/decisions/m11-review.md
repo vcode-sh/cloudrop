@@ -1448,6 +1448,9 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **If wrong:** a status with few stale rows among many past their deadline (completing rows whose claims are live) is
   walked along `expires_at` until a page is found or the range ends, as before the change at worst. A page costs up
   to five small ranges where one statement ran; on D1 that is one query all the same, with at most 21 parameters.
+  Five ranges are also the most D1 takes: it refuses a sixth `SELECT` in one `UNION ALL` ("too many terms in compound
+  SELECT", measured on Wrangler's local D1 and listed among D1's limits), so a sixth ended status would need a second
+  statement.
 - **Status:** in force.
 - **Visible in:** `src/store/sql/reads.ts`, `src/store/sql/stale.db.integration.test.ts`,
   `src/testing/store-contract/stale.ts`.
@@ -1508,3 +1511,29 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   the extension does, since CI has no ICU extension to load.
 - **Status:** in force.
 - **Visible in:** `src/store/sql/reads.ts`, `src/adapters/sql.db.integration.test.ts`.
+
+### M11-R70: on Workers with D1, the guide sweeps one bounded round per run
+
+- **Decision:** the store guide's Workers cron recipe calls `api.sweep({ limit: 400 })` instead of
+  `sweep({ all: true })`, names `limit: 15` for the Free plan, and has a section, "Cloudflare Workers with D1: how
+  much fits in one run", with the limits, what each call costs, and what to do with a backlog (more runs: each starts
+  with the oldest work) and with `eraseOwner` (run it again). No code changed.
+- **Why:** Cloudflare's limits, read 2026-11-21 (the pages were last changed 2026-11-20 and 2026-11-19):
+  [D1](https://developers.cloudflare.com/d1/platform/limits/) allows 1,000 queries per Worker invocation on Workers
+  Paid and 50 on Free, counts a `db.batch()` as one query, and fails the rest of the invocation with "Too many API
+  requests by single Worker invocation"; [Workers](https://developers.cloudflare.com/workers/platform/limits/) allow
+  10,000 subrequests per invocation on Paid (up to 10 million with `limits.subrequests`) and 50 on Free, and a cron
+  run 15 minutes. Counted on node:sqlite through an executor that counts each `query` and each `batch`, as D1 does:
+  an `/upload` is 1 query for all its files plus 1 query and 1 bucket request per multipart file (11 and 10 for ten
+  multipart files, 1 and 0 for ten small ones); a `/complete` 3 queries and 1 request, 1 query when replayed; a
+  sweep 2 queries to find its work, then 2 queries and 1 to 3 requests per upload it expires (44 queries and 31
+  requests for 21 uploads, ten of them multipart) and 1 query and 1 to 3 requests per ended upload it cleans (7 and
+  5 for five); a new isolate's first call 2 more for the check of the tables. So `all: true` over more than about
+  490 expired uploads passes the Paid limit in one run, and 23 pass the Free one. `limit: 400` is at most
+  2 × 400 + 2 + 2 = 804 queries and 1,200 requests; `limit: 15` at most 34 queries and 45 requests. The requests of
+  an upload fit: a reserve is two statements per file but one batch, so the largest `/upload` (`maxFiles` 100, all
+  multipart) is 101 queries.
+- **If wrong:** the limits are Cloudflare's to change; the section gives the date and the pages. The Free plan's
+  10 ms of CPU per cron run was not measured against the signing of 45 requests, and the guide says so.
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md#cloudflare-workers-with-d1-how-much-fits-in-one-run`.

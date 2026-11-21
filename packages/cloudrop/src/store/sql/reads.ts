@@ -31,6 +31,7 @@ type Listing = Omit<Parameters<StoreMethods["list"]>[0], "owner" | "statuses"> &
 /** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
 export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
 
+/** Five, which is also the most `SELECT`s D1 takes in one `UNION ALL`: `stale` reads one range for each. */
 const CLEANUP_STATUSES = ["aborted", "rejected", "failed", "expired", "deleted"];
 /** Postgres: the name with its ASCII letters in lower case and nothing else changed. */
 const FOLD_NAME = "translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";

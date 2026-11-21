@@ -976,13 +976,15 @@ in bounded rounds; run it on a schedule, once an hour is plenty. `all: true` run
 aborts, the answer's `cursor` says where to continue (it is null when every row was seen).
 
 On Cloudflare Workers, a [cron trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
-(`[triggers] crons = ["41 * * * *"]` in `wrangler.toml`) calls `scheduled`:
+(`[triggers] crons = ["41 * * * *"]` in `wrangler.toml`) calls `scheduled`. With D1, sweep one bounded round per run
+instead of `all`, because [D1 limits a run](#cloudflare-workers-with-d1-how-much-fits-in-one-run):
 
 ```ts
 export default {
   async scheduled(controller, env, ctx) {
     const cloudrop = createUploads(env); // your createCloudrop, with the store over env.DB
-    const { data, error } = await cloudrop.api.sweep({ all: true, signal: AbortSignal.timeout(60_000) });
+    // At most 400 uploads per run: about 800 of the 1,000 D1 queries a run may make. On the Free plan: limit: 15.
+    const { data, error } = await cloudrop.api.sweep({ limit: 400 });
     if (error) throw error; // shown as a failed run; the next one starts over
     for (const stuck of data.reported) console.warn(`cloudrop: completion of ${stuck.id} never finished; check it`);
   },
@@ -1026,6 +1028,40 @@ aborts incomplete multipart uploads ([Bucket setup](bucket-setup.md)): it covers
 a multipart upload and recording it, which leaves no row to sweep. With a store, `api.checkBucket()` reports that rule
 as required.
 
+### Cloudflare Workers with D1: how much fits in one run
+
+Cloudflare allows one Worker invocation 1,000 D1 queries on Workers Paid and 50 on Free, where a `batch()` counts as
+one query, and 10,000 subrequests on Paid (more with `limits.subrequests`) or 50 on Free; a cron run may take 15
+minutes ([D1 limits](https://developers.cloudflare.com/d1/platform/limits/),
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-11-21). Past the D1 limit
+every further query of that invocation fails with "Too many API requests by single Worker invocation". Counted on
+the store, a query being one statement or one batch:
+
+| Call | D1 queries | Requests to the bucket |
+| --- | --- | --- |
+| `/upload` | 1 for all its files, and 1 more per multipart file | 1 per multipart file |
+| `/complete` | 3 (1 when the file is already completed) | 1 |
+| `api.sweep`, a round | 2 to find the work | none |
+| … per unfinished upload it expires | 2 | 1 to 3 |
+| … per ended upload it cleans up | 1 | 1 to 3 |
+| The first call in a new isolate | 2 more, the check of the tables | none |
+
+- **The sweep is what needs a bound.** `api.sweep({ limit: 400 })` makes at most 804 queries and 1,200 requests to
+  the bucket, under the Paid limits whatever the rows are; `all: true` over a backlog does not stop at 1,000. On the
+  Free plan use `limit: 15`: at most 34 queries and 45 requests. The Free plan also gives a cron run 10 ms of CPU,
+  which signing that many requests may not fit (not measured).
+- **A backlog needs more runs, not a bigger one.** A run leaves what is over its `limit` where it was, and the next
+  run starts with the oldest work, so there is no cursor to keep between runs: `crons = ["*/5 * * * *"]` with
+  `limit: 400` sweeps 4,800 uploads an hour.
+- **Past the limit nothing is lost.** The sweep logs each upload whose query was refused, counts it in `failed` and
+  leaves it as it was; the next run does it. `eraseOwner` has no `limit` and costs about as much per file, so an
+  owner with several hundred files can pass the limit in one run: it then counts the files it could not handle in
+  `failed`, or answers a retryable error when a listing was refused. Run it again from the next invocation until it
+  reports `done`, as for any owner.
+- **Uploads fit.** A route takes at most 100 files per `/upload` (`maxFiles`), so the largest `/upload` is 101
+  queries and 100 requests when every file is multipart. On the Free plan that is 47 multipart files at most, or any
+  number of smaller ones, which cost one query together.
+
 ## Postgres notes
 
 - **Isolation:** READ COMMITTED, the default. See [`onComplete` with `tx`](#oncomplete-with-tx).
@@ -1049,7 +1085,8 @@ as required.
   "database is locked": `new DatabaseSync(path, { timeout: 5000 })`.
 - **Prisma on SQLite is for one process**, such as a single server or local development. Its adapter starts batches
   with a deferred `BEGIN`, so two processes writing one file may see `SQLITE_BUSY` (not measured).
-- **D1** batches are atomic and serialised by Cloudflare; nothing to configure.
+- **D1** batches are atomic and serialised by Cloudflare; nothing to configure. Its limit on queries per invocation
+  bounds a sweep: see [how much fits in one run](#cloudflare-workers-with-d1-how-much-fits-in-one-run).
 
 ## Known costs
 
