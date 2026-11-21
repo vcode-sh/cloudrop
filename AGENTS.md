@@ -18,8 +18,8 @@ Load the matching skill from `.claude/skills/` before the work:
 - Write everything in English.
 - Decisions live in `docs/decisions/`, cited by series id: `M1-R`, `M1-C`, `M1-N`, `M2-D`, `M2-X`, `M2-P`, `M3-O`,
   `M3-H`, `M3-S`, `M3-U`, `M3-K`, `M4-F`, `M4-B`, `M4-E`, `M5-T`, `M7-P`, `M8-L`, `M8-A`, `M8-Q`, `M9-T`,
-  `M9-C` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry there in the
-  same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
+  `M9-C`, `M9-H` plus a number (`M2-X38`). A ruling that changes behaviour or a public contract gets an entry there in
+  the same change; a new series is `M<milestone>-<unused letter>` with a row in its README and in this list.
 - `packages/cloudrop` has zero runtime dependencies and uses only web-platform APIs in `src/`, with one exception:
   `cloudrop/react` (`src/react.ts`, `src/react/**`) imports `react`, an optional peer dependency (`M4-B7`). The compiler
   enforces it: `tsconfig.json` has `types: []` and excludes tests; `tsconfig.test.json` adds Node types for tests.

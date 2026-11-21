@@ -27,6 +27,7 @@ uses one of these prefixes instead.
 | `M8-Q<n>` | 0.2.0, the code-quality pass: simplifications and newer platform APIs that change no behaviour. | [m8-quality.md](m8-quality.md) |
 | `M9-T<n>` | `cloudrop/testing`: the public test bucket, test client and memory store. | [m9-testing.md](m9-testing.md) |
 | `M9-C<n>` | The `cloudrop` command: `doctor` and `setup`, and the driver's bucket-settings writes they need. | [m9-cli.md](m9-cli.md) |
+| `M9-H<n>` | Hardening before 0.3.0 from tests on a real bucket and as a new user: the upload protocol from `M9-H1`, the store and owner API from `M9-H50`, `cloudrop/testing` and the command from `M9-H100`. | [m9-hardening.md](m9-hardening.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 

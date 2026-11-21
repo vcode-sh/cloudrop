@@ -1,5 +1,8 @@
 # M9-H: hardening before 0.3.0
 
+Rulings from testing against the owner's development bucket and as a new user before 0.3.0 (2026-11-21). The upload
+protocol numbers from `M9-H1`, the store and owner API from `M9-H50`, `cloudrop/testing` and the command from `M9-H100`.
+
 ### M9-H100: an origin that is not exact names the one to use; a pattern is refused
 
 - **Decision:** `--origin` still takes only an exact origin (`M9-C1`), but a value that is a URL with an origin, such as
