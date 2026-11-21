@@ -108,6 +108,9 @@ The browser uploads to the bucket directly, so the bucket needs a CORS rule that
 with the headers cloudrop signs (`content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`) and
 exposes `ETag` and `Retry-After`, plus a lifecycle rule that aborts incomplete multipart uploads. Both rules, with the
 Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/bucket-setup.md).
+`npx cloudrop setup --origin <origin> --apply` adds both and keeps the bucket's other rules, and `npx cloudrop doctor
+--origin <origin>` checks the settings, the bucket and its rules:
+[The cloudrop command](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/command.md).
 
 ## Documentation
 

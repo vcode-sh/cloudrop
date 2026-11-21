@@ -10,7 +10,8 @@ For developers adding uploads to an app, in reading order:
 1. [Server](guide/server.md): `createCloudrop`, storage drivers, routes and who may use them, the upload token,
    mounting the handler in your framework, origins, and the `cloudrop.api` file operations.
 2. [Bucket setup](guide/bucket-setup.md): the CORS and lifecycle rules for R2 and S3, credentials and permissions,
-   and what `checkBucket` reports.
+   and what `checkBucket` reports. [The cloudrop command](guide/command.md) checks the settings and the bucket
+   (`cloudrop doctor`) and adds the rules (`cloudrop setup`).
 3. [Client](guide/client.md): `cloudrop/client` without React: uploading, progress, pause, retry, concurrency and
    offline.
 4. [React](guide/react.md): `useUpload` and `useResumable`, and how to build an upload UI on them.

@@ -132,7 +132,15 @@ const { data, error } = await upload("avatar", file); // never rejects for an ex
 ```
 
 **5. Allow your page to upload to the bucket.** Without a CORS rule the browser blocks every upload, which shows as
-`NETWORK_ERROR`. For R2, write `cors.json` with your page's origin:
+`NETWORK_ERROR`. With credentials that may change bucket settings, the [cloudrop command](docs/guide/command.md) adds
+the CORS and lifecycle rules and keeps the bucket's other rules:
+
+```bash
+npx cloudrop setup --origin http://localhost:3000 --apply
+npx cloudrop doctor --origin http://localhost:3000    # checks the settings, the bucket and its rules
+```
+
+Or by hand: for R2, write `cors.json` with your page's origin:
 
 ```json
 {
@@ -261,6 +269,7 @@ Start at the [documentation index](docs/README.md). The guides:
 | [Client](docs/guide/client.md) | `createCloudropClient`, `upload()` and `start()`, progress, pause, retry, concurrency, offline |
 | [React](docs/guide/react.md) | `useUpload` and `useResumable` for inputs, drop zones, progress lists and resume |
 | [Bucket setup](docs/guide/bucket-setup.md) | CORS and lifecycle rules for R2 and S3, credentials, `checkBucket` |
+| [The cloudrop command](docs/guide/command.md) | `cloudrop doctor` and `cloudrop setup`: check the settings and bucket, add the rules |
 | [Database store](docs/guide/store.md) | Adapters, tables, `owner`, `quota`, `onComplete` once, revocation, the sweep |
 | [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies, proxies, building without secrets |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |

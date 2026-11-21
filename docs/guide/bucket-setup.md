@@ -5,6 +5,10 @@ upload to it: the CORS rule, in R2's format and in the S3 format, the lifecycle 
 the Wrangler commands that set both on R2 and the AWS CLI commands for any S3-compatible service, which credentials and
 permissions cloudrop needs, and what `checkBucket` can and cannot report about all of this.
 
+The [cloudrop command](command.md) does most of this for you: `npx cloudrop setup --origin <origin>` prints these rules
+and commands for your origins, `--apply` adds the rules to the bucket and keeps every other rule, and
+`npx cloudrop doctor --origin <origin>` checks the settings, the bucket and its rules.
+
 The rule lists the origin of the **page** that uploads, not the origin of your API: the browser sends the bytes from
 the page. With the page and the API on different origins, see [Deployment](deployment.md).
 
@@ -37,7 +41,8 @@ misses any header a `PUT` carries blocks that `PUT`.
 
 ## Set the CORS rule on R2
 
-Setting CORS replaces the bucket's whole policy. Read the current rules first and keep any you still need:
+Setting CORS replaces the bucket's whole policy. Read the current rules first and keep any you still need (or let
+`cloudrop setup --apply` merge them):
 
 ```bash
 wrangler r2 bucket cors list <bucket>

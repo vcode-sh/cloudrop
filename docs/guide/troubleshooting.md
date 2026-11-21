@@ -14,8 +14,10 @@ checksum header you add), blocks every `PUT`. The browser hides the reason from 
 failure and gives up only after its retry budget.
 
 - The browser console names what was blocked: the origin or the header.
-- `cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })` checks the rule, when the credentials may read
-  it. An R2 object token cannot, and reports `unknown`.
+- `npx cloudrop doctor --origin https://app.example.com` or
+  `cloudrop.api.checkBucket({ origins: ["https://app.example.com"] })` checks the rule, when the credentials may read
+  it. An R2 object token cannot, and reports `unknown` ("not checked"). `npx cloudrop setup --origin <origin> --apply`
+  adds the rule and keeps the bucket's others ([The cloudrop command](command.md)).
 - The rule must allow `PUT` from the exact origin of the page, with `content-type`, `content-disposition`,
   `if-none-match` and `x-amz-meta-cloudrop-id`. The full rule: [Bucket setup](bucket-setup.md).
 
@@ -132,6 +134,9 @@ invalid value with the variable that holds it. Each request reads the environmen
 your app sets on `process.env` after start (a secrets loader, say) take effect without a restart. For variables your
 platform sets, restart or redeploy as usual. Once they are complete they are kept until the process restarts.
 
+`npx cloudrop doctor --origin <origin>` (with `--env-file .env.local` for a file) names each missing or invalid
+variable the same way, before you deploy ([The cloudrop command](command.md)).
+
 With `NODE_ENV=development` the same settings are checked when the server is created, so a dev server fails as soon as
 the server module loads instead (in `next dev`, on the first request to the cloudrop route).
 
@@ -146,8 +151,8 @@ for `r2()` or `s3()` that sets `accept-encoding: identity` on `HEAD` requests wo
 
 ## checkBucket reports unknown
 
-The credentials may not read the bucket's settings (an R2 Object Read & Write token cannot), the storage cannot report
-them (Wrangler's local R2), or you gave no origins. Check the settings with `wrangler r2 bucket cors list <bucket>` and
+`cloudrop doctor` shows the same as `NOT CHECKED`. The credentials may not read the bucket's settings (an R2 Object
+Read & Write token cannot), the storage cannot report them (Wrangler's local R2), or you gave no origins. Check the settings with `wrangler r2 bucket cors list <bucket>` and
 `wrangler r2 bucket lifecycle list <bucket>`, or in the dashboard. See
 [What checkBucket can tell you](bucket-setup.md#what-checkbucket-can-tell-you).
 
