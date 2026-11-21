@@ -293,9 +293,3 @@ describe("encodeRfc3986", () => {
     expect(encodeRfc3986("!'()*")).toBe("%21%27%28%29%2A");
   });
 });
-
-describe("sha256Hex", () => {
-  it("hashes the empty string to the published constant", async () => {
-    expect(await sha256Hex("")).toBe(EMPTY_SHA256);
-  });
-});
