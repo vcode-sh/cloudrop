@@ -874,7 +874,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 
 - **Decision:** the errors of a request the client gave up before sending it (the `headers` or `account` function
   threw, rejected, gave nothing usable or did not answer within the request's time) are marked as unsent
-  (`maySent` in `src/client/failures.ts`), and a `/complete` that failed that way leaves no doubt. Their code stays
+  (`wasSent` in `src/client/failures.ts`), and a `/complete` that failed that way leaves no doubt. Their code stays
   `NETWORK_ERROR`, retryable.
 - **Why:** reproduced: with a `headers` function that failed for every `/complete`, `upload()` kept the stored object
   for good and `abort()` after `start()` sent no `/abort`, because any `NETWORK_ERROR` of `/complete` counted as "may
@@ -883,7 +883,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   `/upload` only, where no decision reads the mark.
 - **If wrong:** none known. A custom `fetch` that rejects before sending is still counted as sent, which keeps the file.
 - **Status:** in force.
-- **Visible in:** `src/client/failures.ts` (`maySent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
+- **Visible in:** `src/client/failures.ts` (`wasSent`, `headersFailed`, `accountFailed`), `src/client/upload.ts`
   (`complete`), `src/client/upload-abort.test.ts`.
 
 ### M11-R83: without `crypto.getRandomValues`, the `/upload` key comes from `Math.random`
@@ -984,4 +984,26 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
 - **Visible in:** `src/client/keepalive.ts`, `src/client/endpoints.ts` (`send`),
   `src/client/endpoints-keepalive.test.ts`, `spikes/keepalive/measure.mjs`,
   `docs/guide/client.md` ("Close the client").
+
+### M11-R88: the client retries S3's `400 RequestTimeout`
+
+- **Decision:** a bucket answer whose S3 code is `RequestTimeout` is retried within the part's attempts and, when
+  they run out, fails the file with the retryable `STORAGE_ERROR` "The storage service failed. Try again in a
+  moment.", as a `408` does; `retry()` then keeps the ticket and the parts that landed (`M11-R80`). It was
+  `UPLOAD_REJECTED`, not retryable, which made the person start the whole file again.
+- **Why:** AWS documents the case as transient: "an HTTP 400 with the error code `RequestTimeout` is classified as
+  transient and retried", listed with `InternalError` under the transient errors of every SDK
+  (https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html, read 2026-11-21). S3's error list
+  (https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html) names it as the answer to a socket not read
+  from or written to within the timeout period, with status 400; that page did not load its table for this review, so
+  the status comes from the SDK guide's sentence. A browser on a stalling link is exactly who gets it, and the same
+  bytes sent again pass. R2 was not measured: `docs/research/r2-spike-findings.md` has no stalled body, only uploads
+  that took 11 to 13 s and still answered `200`; the client gives a stalled `PUT` up itself after 30 s (`M3-U27`), so
+  R2's own answer rarely reaches it. The rule is by S3 code, whatever the status, so it holds for both.
+- **If wrong:** a storage service that answers `RequestTimeout` for a request it will never take costs five more
+  attempts before the file fails, with a retryable error instead of `UPLOAD_REJECTED`.
+- **Status:** in force. The server's driver (`src/storage/storage-error.ts`) is settled apart in this review; the rule
+  to share is this one: the S3 code `RequestTimeout`, whatever its status, is a retryable `STORAGE_ERROR`.
+- **Visible in:** `src/client/bucket.ts`, `src/client/bucket.test.ts`, `src/client/retry-steps.test.ts`,
+  `docs/guide/errors.md`.
 

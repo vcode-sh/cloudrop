@@ -99,6 +99,14 @@ describe("classifyAnswer", () => {
       expected: { kind: "retry", error: error("STORAGE_ERROR", FAILED, true), retryAfterMs: 0 },
     },
     {
+      // S3 answers a body it stopped waiting for with 400, not 408; AWS's SDKs retry it as transient (M11-R88).
+      name: "retries a body the storage stopped waiting for",
+      status: 400,
+      text: s3Error("RequestTimeout"),
+      retryAfter: null,
+      expected: { kind: "retry", error: error("STORAGE_ERROR", FAILED, true), retryAfterMs: 0 },
+    },
+    {
       name: "fails a corrupted body",
       status: 400,
       text: s3Error("BadDigest"),

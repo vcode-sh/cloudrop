@@ -150,6 +150,12 @@ describe("retry after the bucket answered a PUT", () => {
     },
     { name: "503", answer: () => errorResponse(503, "SlowDown", "Slow down."), first: "RATE_LIMITED", step: SAME_PUT },
     {
+      name: "400 for a body the bucket stopped waiting for",
+      answer: () => errorResponse(400, "RequestTimeout", "Your socket connection was not written to in time."),
+      first: "STORAGE_ERROR",
+      step: SAME_PUT,
+    },
+    {
       name: "no answer",
       answer: () => Promise.reject(new TypeError("Failed to fetch")),
       first: "NETWORK_ERROR",
