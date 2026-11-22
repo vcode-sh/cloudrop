@@ -12,7 +12,7 @@ import { storeOfRoute } from "./store-route.ts";
 /** An owner's limit in bytes, or null for no limit. */
 export type Quota = (owner: string) => Awaitable<number | null>;
 
-/** `eraseOwner`'s settings (M12-O3). */
+/** `eraseOwner`'s settings. */
 export interface EraseSettings {
   /**
    * Folders of the owner's that no row tracks, such as files your app wrote with `putObject`, emptied with

@@ -3,10 +3,15 @@
   "compilerOptions": {
     "types": ["node"],
     "isolatedDeclarations": false,
-    // ../../scripts has no node_modules of its own, so its tests would not find vitest without this mapping.
-    "paths": { "vitest": ["./node_modules/vitest"] }
+    // ../../scripts has no node_modules of its own, so its tests would not find vitest, nor scripts/api-report.ts
+    // api-extractor's types, without these mappings.
+    "paths": {
+      "vitest": ["./node_modules/vitest"],
+      "@microsoft/api-extractor": ["./node_modules/@microsoft/api-extractor"]
+    }
   },
   "include": ["src", "fixtures", "vitest.config.ts", "tsdown.config.ts", "../../scripts"],
-  // The consumer fixture compiles against the packed tarball, in scripts/check-package.sh.
-  "exclude": ["fixtures/consumer-types"]
+  // The consumer fixture compiles against the packed tarball, in scripts/check-package.sh; the Deno smoke test imports
+  // through Deno's npm: specifiers, in scripts/check-deno.sh.
+  "exclude": ["fixtures/consumer-types", "../../scripts/deno-smoke.ts"]
 }

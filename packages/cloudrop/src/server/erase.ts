@@ -16,7 +16,7 @@ import { badOwner, isOwnerOrId } from "./owner-files.ts";
 import type { CloudropStore } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
-/** `api.eraseOwner`'s options; `context` is what its routes' `onDelete` declare for an erasure (M12-T6). */
+/** `api.eraseOwner`'s options; `context` is what its routes' `onDelete` declare for an erasure. */
 export type EraseOptions<TErased = unknown> = EraseRunOptions & ContextOption<TErased>;
 
 interface EraseRunOptions {

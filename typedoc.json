@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "cloudrop",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "out": "docs/reference",
+  "readme": "none",
+  "validation": { "notExported": false },
+  "disableSources": true
+}

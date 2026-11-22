@@ -30,8 +30,8 @@ export function allowAnyone(): object {
 
 /**
  * A store's extra context (an adapter's `tx`) beside the hook's own. At runtime it replaces an authorize field of the
- * same name; since M12-A8 the types forbid such a field (`AuthResult`), so a plain intersection is exact. No `Omit`: it
- * would merge `DeleteContext`'s union by `reason` and hide the annotation `onDelete`'s context is inferred from (M12-T6).
+ * same name; the types forbid such a field (`AuthResult`), so a plain intersection is exact. No `Omit`: it would
+ * merge `DeleteContext`'s union by `reason` and hide the annotation `onDelete`'s context is inferred from.
  */
 type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : TContext & TExtra;
 
@@ -131,7 +131,7 @@ export interface RouteCallbacks<
    * commit once, with the deletion; the hook itself may run more than once, so keep other effects idempotent. Without
    * one, at least once, before the deletion. `context` is what the caller passed to `api.deleteFile` or
    * `api.eraseOwner`; a replacement gets the replacing upload's `request` instead. Annotate the parameter,
-   * `DeleteContext<FileDeleter>`, and those calls require a `FileDeleter` (M12-T6).
+   * `DeleteContext<FileDeleter>`, and those calls require a `FileDeleter`.
    */
   // biome-ignore lint/suspicious/noConfusingVoidType: `undefined` would refuse every hook that is an async function.
   onDelete?: (context: WithExtra<DeleteContext<TDeleted, TErased>, TExtra>) => Awaitable<void | CloudropError>;
@@ -160,8 +160,8 @@ export interface RouteDefinition {
 }
 
 /**
- * `TAuth` is what `authorize` returns, which plugins are checked against (M12-T5); `TDeleted` and `TErased` are the
- * `context` its `onDelete` declares for `api.deleteFile` and `api.eraseOwner` (M12-T6).
+ * `TAuth` is what `authorize` returns, which plugins are checked against; `TDeleted` and `TErased` are the `context`
+ * its `onDelete` declares for `api.deleteFile` and `api.eraseOwner`.
  */
 export interface Route<
   TMetadataInput = unknown,

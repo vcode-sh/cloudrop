@@ -3,7 +3,7 @@
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 
 /**
- * Names cloudrop puts, or may put, into a route context: an authorize result may not use them (M12-A8), so a context
+ * Names cloudrop puts, or may put, into a route context: an authorize result may not use them, so a context
  * field added after 1.0 cannot collide with an app's own. At runtime cloudrop's fields still win.
  */
 export type ReservedName = "request" | "metadata" | "file" | "data" | "tx" | "route" | "signal";

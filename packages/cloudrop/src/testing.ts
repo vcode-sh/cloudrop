@@ -24,11 +24,11 @@ export interface TestBucketOptions {
   publicUrl?: string;
   /**
    * The bucket's CORS configuration as S3 XML. `api.checkBucket` reads it, and the bucket answers a browser's requests
-   * by it, as R2 does (M11-R172): `fetch` answers an `OPTIONS` preflight with 204 and the answering rule's
+   * by it, as R2 does: `fetch` answers an `OPTIONS` preflight with 204 and the answering rule's
    * `access-control-*` headers, or with 403 and none when no rule allows the origin, the method and every header
    * asked for; a signed request that names an `Origin` a rule allows gets `access-control-allow-origin` and the
    * rule's exposed headers. Without `cors` every preflight is refused. Once `cors` or `lifecycle` is given, the other
-   * one reads as not configured; with neither, both read as refused, as with an R2 object token (M9-T6).
+   * one reads as not configured; with neither, both read as refused, as with an R2 object token.
    */
   cors?: string;
   /** The bucket's lifecycle configuration as S3 XML, for tests of `api.checkBucket`. */
@@ -132,7 +132,7 @@ export function testBucket(options?: TestBucketOptions | null): TestBucket {
 /**
  * The real `cloudrop/client` client, wired to `cloudrop.handler` and the test bucket in-process. Requests to the server
  * arrive as a same-origin page sends them; bucket PUTs go through fetch, never XMLHttpRequest, and nothing is kept
- * for resuming after a reload (M9-T4, M9-T5). Throws INVALID_CONFIG without a bucket or with a basePath that is not
+ * for resuming after a reload. Throws INVALID_CONFIG without a bucket or with a basePath that is not
  * a path.
  */
 export function testClient<TCloudrop extends InferableCloudrop>(
@@ -171,7 +171,7 @@ export function testClient<TCloudrop extends InferableCloudrop>(
  * An in-memory database store with the guarantees of the shipped adapters, for tests of an app that uses `store`:
  * owners, `quota`, `afterComplete`, `replace` and the store's file API. With `{ transaction: true }` it has
  * `transaction` and `store.route`, like `sqlStore(executor, { transaction: true })`; its `tx` is undefined, since
- * there is no database to write through (M9-T7).
+ * there is no database to write through.
  */
 export function memoryStore(options: { transaction: true }): TransactionalStore<undefined>;
 export function memoryStore(options?: { transaction?: false } | null): CloudropStore;

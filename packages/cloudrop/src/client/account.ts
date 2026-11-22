@@ -1,7 +1,7 @@
 // The client's `account` option (M10-A): the user this page shows, sent with /upload only, so that the server can
 // refuse an upload that a sign-in in another tab would make someone else's.
 
-/** The signed-in user's id for /upload only, or a function, possibly async, that gives it; null sends none (M10-A). */
+/** The signed-in user's id for /upload only, or a function, possibly async, that gives it; null sends none. */
 export type Account = string | (() => string | null | undefined | Promise<string | null | undefined>);
 
 /**

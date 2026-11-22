@@ -6,7 +6,7 @@ import type { CompleteResponse } from "../protocol/types.ts";
 /** Where one file of a job stands. `done`, `failed` and `aborted` are final. */
 export type FileStatus = "queued" | "uploading" | "paused" | "completing" | "done" | "failed" | "aborted";
 
-/** One file as a page renders it (spec §2.1). */
+/** One file as a page renders it. */
 export interface FileSnapshot<R> {
   /** The same id as the file's handle. */
   id: string;
@@ -16,12 +16,12 @@ export interface FileSnapshot<R> {
   status: FileStatus;
   /**
    * Bytes sent, never decreasing while the file keeps its ticket: a re-sent part counts once it passes its earlier
-   * attempt (spec §4.2). A retry() that starts a new upload starts again from 0.
+   * attempt. A retry() that starts a new upload starts again from 0.
    */
   bytes: number;
   /** `bytes / size`; for an empty file, 1 once done and 0 before. */
   progress: number;
-  /** Bytes per second, averaged over about 3 s (spec §4.3); 0 unless uploading. */
+  /** Bytes per second, averaged over about 3 s; 0 unless uploading. */
   speed: number;
   /** Seconds left at the current speed; null while the speed is 0. */
   eta: number | null;
@@ -29,7 +29,7 @@ export interface FileSnapshot<R> {
   result: CompleteResponse<R> | null;
 }
 
-/** The whole job as a page renders it. A new object only when something changed (spec §2.1). */
+/** The whole job as a page renders it. A new object only when something changed. */
 export interface JobSnapshot<R> {
   /** In the order the files were passed. */
   files: readonly FileSnapshot<R>[];
@@ -128,7 +128,7 @@ export interface UploadJob<R> {
 
 /**
  * An unfinished upload this browser keeps, as `resumable()` lists it: enough to ask the user for the file again. A
- * plain, JSON-safe object; never the upload's token, key or metadata (resume spec §2).
+ * plain, JSON-safe object; never the upload's token, key or metadata.
  */
 export interface ResumableUpload<TName extends string = string> {
   /** The upload's id, stable across page loads: the ticket's `id`. */

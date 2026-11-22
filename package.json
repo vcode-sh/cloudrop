@@ -22,7 +22,10 @@
     "test:browser:live": "bun scripts/test-browser-live.ts",
     "build": "bun run --filter cloudrop build",
     "package:check": "bun run --filter cloudrop package:check",
-    "verify": "bun run check && bun run typecheck && bun run test && bun run build && bun run --filter cloudrop-example-next typecheck && bun run package:check && bun run --filter cloudrop-example-hono typecheck && bun run --filter cloudrop-example-vite-react typecheck"
+    "api:report": "bun scripts/api-report.ts",
+    "api:check": "bun scripts/api-report.ts --check",
+    "docs:reference": "node scripts/api-reference.ts",
+    "verify": "bun run check && bun run typecheck && bun run test && bun run build && bun run api:check && bun run --filter cloudrop-example-next typecheck && bun run package:check && bun run --filter cloudrop-example-hono typecheck && bun run --filter cloudrop-example-vite-react typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8"

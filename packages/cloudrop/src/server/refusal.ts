@@ -51,7 +51,7 @@ export function refusalError(refusal: Refusal): CloudropError {
 /**
  * For a caller who sends too many uploads: RATE_LIMITED, retryable, answered 429 with `Retry-After` of `seconds`
  * rounded up, at least 1 and at most a day. The client waits that long before it asks again, or, past its own 20-second
- * cap, leaves the file failed and retryable for the app's `retry()` (M12-E2, M12-E4).
+ * cap, leaves the file failed and retryable for the app's `retry()`.
  */
 export function rateLimited(seconds: number, message?: string): CloudropError {
   if (!Number.isFinite(seconds) || seconds < 0) {

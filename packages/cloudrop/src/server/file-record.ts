@@ -145,7 +145,7 @@ export interface MappedRecord extends RecordBase<string> {
 }
 
 /**
- * A file's row as the store holds it, by status: each status fixes which times are set (spec 1.0 §3b, M12-T1), so
+ * A file's row as the store holds it, by status: each status fixes which times are set, so
  * `record.status === "completed"` narrows `completedAt` to a `Date`. `endedAt` is when the row reached an ended status
  * (`deleted` included); `cleanedAt` when the sweep finished removing what the upload left in the bucket.
  */

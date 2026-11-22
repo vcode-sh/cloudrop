@@ -10,7 +10,7 @@ import type { FileRecord } from "./store.ts";
 
 /**
  * `api.sweep`'s options; `context` reaches the `onDelete` of a file the sweep deletes while it carries an erasure on,
- * as `eraseOwner`'s does, so it is required when the routes' `onDelete` declare one (M12-T6).
+ * as `eraseOwner`'s does, so it is required when the routes' `onDelete` declare one.
  */
 export type SweepOptions<TErased = unknown> = SweepSettings & ContextOption<TErased>;
 
@@ -39,7 +39,7 @@ interface SweepSettings {
 export interface SweepReport {
   /** Unfinished uploads ended as expired, with what they left removed. */
   expired: number;
-  /** Ended uploads whose late objects and parts were removed, counted once no upload URL can add more (M8-A4). */
+  /** Ended uploads whose late objects and parts were removed, counted once no upload URL can add more. */
   cleaned: number;
   /**
    * Rows that failed this time (a storage or database error, logged with the row's id). Each stays as it was and the

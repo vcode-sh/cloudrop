@@ -23,7 +23,7 @@ export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export type Ticket = SingleTicket | MultipartTicket;
 
-/** Headers for the upload server only, or a function, possibly async, that gives them before each request (M8-L5). */
+/** Headers for the upload server only, or a function, possibly async, that gives them before each request. */
 export type ServerHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 
 export interface Endpoints {

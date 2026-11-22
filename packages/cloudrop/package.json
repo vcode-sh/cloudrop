@@ -20,6 +20,8 @@
   "files": [
     "dist",
     "docs",
+    "llms.txt",
+    "llms-full.txt",
     "CHANGELOG.md"
   ],
   "engines": {
@@ -96,6 +98,7 @@
     "@arethetypeswrong/cli": "^0.18.5",
     "@cloudflare/workers-types": "5.20261119.1",
     "@libsql/client": "^0.18.0",
+    "@microsoft/api-extractor": "7.60.1",
     "@prisma/adapter-better-sqlite3": "^7.10.1",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
@@ -122,7 +125,9 @@
     "react-dom": "^19.3.1",
     "size-limit": "^14.3.0",
     "tsdown": "^0.23.7",
+    "typedoc": "0.28.20",
     "typescript": "^7.0.2",
+    "typescript-6": "npm:typescript@6.0.3",
     "vitest": "^5.1.1",
     "wrangler": "^4.166.0"
   }

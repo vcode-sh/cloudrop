@@ -6,7 +6,13 @@ import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import type { Awaitable, RouteDefinition } from "./route.ts";
 
-/** A file the server has accepted and given a key, before any byte is uploaded. */
+/**
+ * A file the server has accepted and given a key, before any byte is uploaded.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
+ */
 export interface PluginFile {
   id: string;
   key: string;
@@ -15,6 +21,13 @@ export interface PluginFile {
   type: string;
 }
 
+/**
+ * What `beforeUpload` receives.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
+ */
 export interface BeforeUploadContext<TAuth = unknown> {
   /** The `/upload` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
@@ -27,6 +40,13 @@ export interface BeforeUploadContext<TAuth = unknown> {
   auth: Jsonified<TAuth>;
 }
 
+/**
+ * What `afterVerify` receives.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
+ */
 export interface AfterVerifyContext<TAuth = unknown> {
   /** The `/complete` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
@@ -40,6 +60,13 @@ export interface AfterVerifyContext<TAuth = unknown> {
   storage: StorageDriver;
 }
 
+/**
+ * What `onAbort` receives.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
+ */
 export interface AbortContext<TAuth = unknown> {
   route: string;
   file: PluginFile;
@@ -50,6 +77,13 @@ export interface AbortContext<TAuth = unknown> {
   reason: "aborted" | "rejected" | "failed";
 }
 
+/**
+ * The server hooks a plugin can use.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
+ */
 export interface ServerHooks<TAuth = unknown> {
   /** Runs in `/upload` after authorization and policy, before anything is signed. Return an error to refuse every file. */
   beforeUpload?(context: BeforeUploadContext<TAuth>): Awaitable<CloudropError | null | undefined>;
@@ -64,14 +98,24 @@ export interface ServerHooks<TAuth = unknown> {
    * a multipart upload the bucket no longer has runs it again with "rejected", also after an `/abort` that ran it.
    */
   onAbort?(context: AbortContext<TAuth>): Awaitable<void>;
-  /** Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route. */
+  /**
+   * Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route.
+   *
+   * Experimental, outside semver, with the rest of the plugin API.
+   *
+   * @beta
+   */
   extendRoute?(route: { name: string; definition: RouteDefinition }): void;
 }
 
 /**
  * A plugin typed for the authorize result it reads, such as `CloudropPlugin<{ userId: string }>`: createCloudrop
- * refuses it beside a route whose `authorize` can answer without that shape (M12-T5). `CloudropPlugin` alone reads
+ * refuses it beside a route whose `authorize` can answer without that shape. `CloudropPlugin` alone reads
  * `auth` as unknown and fits every server.
+ *
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface CloudropPlugin<TAuth = unknown> {
   id: string;

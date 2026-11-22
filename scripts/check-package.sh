@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
-# README, LICENSE and CHANGELOG, the repository that trusted publishing checks and the Node 26 floor in engines.node
-# (M12-P2), index.js must load none of the store's code (M12-S1), the built bin must run, an app's type rows compile
+# README, LICENSE and CHANGELOG, llms.txt and llms-full.txt with every shipped guide, the repository that trusted
+# publishing checks and the Node 26 floor in engines.node (M12-P2), the shipped doc comments must cite no decision id
+# (M12-P10), index.js must load none of the store's code (M12-S1), the built bin must run, an app's type rows compile
 # against the packed .d.ts (M12-T5, M12-T6), publint and attw read the tarball, and size-limit reads the built
-# entries. The
-# tarball goes to a scratch directory that the trap removes on success, failure and interrupt.
+# entries. The tarball goes to a scratch directory that the trap removes on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/packages/cloudrop"
@@ -22,12 +22,36 @@ TARBALL=("$SCRATCH"/*.tgz)
 # its own when they sit next to package.json, and the changelog through `files`, so this catches a deleted or renamed
 # file.
 CONTENTS="$(tar -tzf "${TARBALL[0]}")"
-for required in README.md LICENSE CHANGELOG.md docs/README.md docs/server.md; do
+for required in README.md LICENSE CHANGELOG.md docs/README.md docs/server.md llms.txt llms-full.txt; do
   if ! grep -qx "package/$required" <<<"$CONTENTS"; then
     echo "The packed tarball has no $required. Add packages/cloudrop/$required." >&2
     exit 1
   fi
 done
+# A coding agent reads llms.txt first (M12-P10): it must link every guide the package ships, and llms-full.txt must
+# carry each one in full, so a guide added to docs/guide/ but missing from them fails here.
+# Read once into variables: grep -q stops reading early, and pipefail would count tar's broken pipe as a failure.
+LLMS="$(tar -xzOf "${TARBALL[0]}" package/llms.txt)"
+LLMS_FULL="$(tar -xzOf "${TARBALL[0]}" package/llms-full.txt)"
+for guide in $(grep -oE '^package/docs/[^/]+\.md$' <<<"$CONTENTS" | grep -v '/README\.md$'); do
+  guide="${guide#package/}"
+  if ! grep -qF "]($guide)" <<<"$LLMS"; then
+    echo "llms.txt does not link $guide. Check readingOrder in scripts/package-docs.ts." >&2
+    exit 1
+  fi
+  if ! grep -qxF "<!-- $guide -->" <<<"$LLMS_FULL"; then
+    echo "llms-full.txt does not carry $guide. Check llmsFull in scripts/llms.ts." >&2
+    exit 1
+  fi
+done
+# The doc comments an app's editor shows come from the .d.ts, and an app cannot look up a decision id or the design
+# spec's sections (M12-P10). Write the reason in plain words in the source's doc comment; a // comment keeps its id.
+if leaked="$(grep -rnE 'M[0-9]+-[A-Z][0-9]*|§' dist --include='*.d.ts')"; then
+  echo "The shipped .d.ts cite internal decisions or the spec, which an app cannot look up:" >&2
+  echo "$leaked" >&2
+  echo "Rewrite those doc comments in src/ in plain words." >&2
+  exit 1
+fi
 if ! cmp -s "$ROOT/LICENSE" LICENSE; then
   echo "packages/cloudrop/LICENSE differs from the repository's. Copy it: cp LICENSE packages/cloudrop/LICENSE" >&2
   exit 1
