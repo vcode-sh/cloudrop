@@ -168,9 +168,10 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Added
 
-- `useUpload` options `onUploaded(file)` and `onError(error)`: called once per mounted component for each file of the
-  route that ends done or failed, and `onError` for a start refused before it had a file; never for a cancel, and never
-  late for a file that ended while nothing was mounted (`M12-H1`, `M12-H3`).
+- `useUpload` options `onUploaded(file)` and `onError(error)`: called once per mounted `useUpload` for each file of the
+  route that ends done or failed, so a component with two `useUpload` calls on one route is called twice, and `onError`
+  for a start refused before it had a file; never for a cancel, and never late for a file that ended while nothing was
+  mounted (`M12-H1`, `M12-H3`).
 - `useUpload().startError`: the route's last start refused before it had a file row, such as `CLIENT_CLOSED` for a
   file picked after `close()`, which a pick or a drop used to lose; cleared by the route's next start and by `clear()`
   (`M12-H2`).
@@ -214,6 +215,7 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Changed
 
+- CI runs the React tests on React 18.3.1 too, in a job of its own, `react-18` (`M12-R53`).
 - The refusal of a `plugins` option that is not a list suggests `[contentChecks()]`, not the removed `limits()`
   (`M12-A11`).
 - A server without a store no longer carries the store's code: it travels with the store object. The bundled server
@@ -241,6 +243,17 @@ Every notable change to the `cloudrop` package. The format follows
   driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
   After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the
   client waits it out for each of them (`M12-E5`).
+- `createUploadHooks` with options that are not an object, such as `createUploadHooks("/api/cloudrop")` from plain
+  JavaScript, resolves `INVALID_CONFIG` from `upload()`, `resumeUpload()` and `refresh()` and shows it in
+  `startError`. Before: `upload()`, a pick, a drop and `close()` threw a `TypeError`, and a function was ignored, so
+  uploads went to the default basePath (`M12-R50`).
+- `useUpload().upload(file, null)`, or any options that are not an object, resolves `INVALID_INPUT` as the client's
+  `upload()` does and shows it in `startError`. Before: it threw a `TypeError` (`M12-R51`).
+- A `useUpload` that React has committed hears every end of its route. Before: an end that landed after the commit and
+  before React ran its passive effects reached the route's other hooks, not this one's `onUploaded` or `onError`
+  (`M12-R54`).
+- The React guide no longer says `refresh()`'s `INVALID_CONFIG` reaches `startError` and `onError`; only `upload()`
+  and `resumeUpload()`, which start an upload, set them (`M12-R52`).
 
 ## 0.6.0 - 2026-11-21
 

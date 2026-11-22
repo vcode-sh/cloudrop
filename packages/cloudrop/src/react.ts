@@ -8,6 +8,8 @@ import {
   type InferableCloudrop,
   type Result,
 } from "./client.ts";
+import { configError } from "./errors.ts";
+import { optionsOf } from "./input.ts";
 import { createJobTracker } from "./react/job-tracker.ts";
 import type { UploadHooks, UploadHooksOptions, UseUploadOptions } from "./react/types.ts";
 import { createUploadStore, type UploadStore } from "./react/upload-store.ts";
@@ -34,10 +36,16 @@ export type {
 export function createUploadHooks<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: UploadHooksOptions<TCloudrop> = {},
 ): UploadHooks<TCloudrop> {
-  // null counts as no options, as createCloudropClient reads its own (M11-R7).
-  const given = options ?? {};
+  // null counts as no options, as createCloudropClient reads its own (M11-R7); anything but an object is a wrong
+  // option from plain JavaScript, such as the basePath alone (M11-R245, M12-R50).
+  const given = optionsOf(options) as UploadHooksOptions<TCloudrop> | null;
   let created: Result<CloudropClient> | undefined;
   function createClient(): Result<CloudropClient> {
+    if (given === null) {
+      const message =
+        'Pass createUploadHooks the client\'s options as an object, such as { basePath: "/api/cloudrop" }, or { client } to share a client.';
+      return { data: null, error: configError(message) };
+    }
     try {
       const client = "client" in given ? given.client : createCloudropClient<TCloudrop>(given);
       return { data: client as CloudropClient, error: null };

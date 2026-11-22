@@ -33,7 +33,8 @@ Entries start from 1.
   callback to one component only, as the guide says. A file that ends while it is being rendered by two components
   calls each one's callback: that is the contract, not a duplicate. A hook whose route changes in the render a file's
   end causes hears that end on neither route.
-- **Status:** in force. `src/react/use-upload-callbacks.test.ts`, rendering without `act` as a browser does: a hook
+- **Status:** in force; amended by M12-R54, which registers the listener in a layout effect in the browser.
+  `src/react/use-upload-callbacks.test.ts`, rendering without `act` as a browser does: a hook
   the end unmounts hears it and one the end mounts does not; a hook the end moves from `notes` to `closed` tells
   `closed`'s callback nothing, while another hook on `notes` hears the end (before the listener checked its route,
   `closed`'s callback heard `notes`' end).

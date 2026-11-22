@@ -72,4 +72,21 @@ describe("createUploadHooks(options)", () => {
 
     expect(answer?.error?.code).toBe("CLIENT_CLOSED");
   });
+
+  // From plain JavaScript: a string such as the basePath threw a TypeError from upload() and close(), and a function
+  // was read as options and ignored. Options are read by one rule (M11-R245).
+  it.each([
+    { name: "a string", options: "/api/cloudrop" },
+    { name: "a function", options: () => ({ basePath: "/api/cloudrop" }) },
+  ])("resolves INVALID_CONFIG from upload() for $name as options, and close() resolves", async ({ options }) => {
+    const { useUpload, close } = createUploadHooks(options as never);
+    const { result } = renderHook(() => useUpload("notes"));
+    const answer = await act(() => result.current.upload(note("hello", "a.txt")));
+
+    expect({
+      code: answer?.error?.code,
+      startError: result.current.startError?.code,
+      closed: await close(),
+    }).toEqual({ code: "INVALID_CONFIG", startError: "INVALID_CONFIG", closed: undefined });
+  });
 });

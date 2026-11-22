@@ -170,7 +170,9 @@ describe("what useUpload renders", () => {
     });
   });
 
-  it("shows what the jobs did while it was hidden by <Activity>, once it is shown again", async () => {
+  it("shows what the jobs did while it was hidden by <Activity>, once it is shown again", async (ctx) => {
+    // The React 18 lane (scripts/test-react-18.sh) runs this file too: React 18 has no <Activity> (M12-R53).
+    if (Activity === undefined) ctx.skip("<Activity> needs React 19");
     const held = holdPut(5);
     const { useUpload } = setup(held.fault);
     const { result, rerender } = renderHook(() => useUpload("notes"), {

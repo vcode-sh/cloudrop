@@ -82,6 +82,25 @@ describe("useUpload", () => {
     });
   });
 
+  // From plain JavaScript: the client refuses upload options that are not an object (read in client/arguments.ts).
+  it.each([
+    { name: "null", call: null },
+    { name: "a string", call: "notes" },
+  ])(
+    "refuses $name as upload() options with INVALID_INPUT, shown in startError, and sends nothing",
+    async ({ call }) => {
+      const { fixture, useUpload } = setup();
+      const { result } = renderHook(() => useUpload("notes"));
+      const answer = await act(() => result.current.upload(note("alpha", "a.txt"), call as never));
+
+      expect({
+        code: answer?.error?.code,
+        startError: result.current.startError?.code,
+        requests: fixture.requests,
+      }).toEqual({ code: "INVALID_INPUT", startError: "INVALID_INPUT", requests: [] });
+    },
+  );
+
   // The client's job for a refused start() has no file (client/job.ts): nothing to list, retry or read the list for.
   it("keeps nothing of an upload refused before it starts: no file, and no new read of the resumable list", async () => {
     const fixture = clientFixture(routes);

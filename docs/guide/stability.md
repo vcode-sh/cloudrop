@@ -103,7 +103,7 @@ it.
 | Deno | 2, with `--allow-env` for `NODE_ENV` and `CLOUDROP_*` | a smoke job: the packed package uploads a file to a fake bucket |
 | Cloudflare Workers | current | the store on Wrangler's local D1 and the storage driver on its local R2 |
 | Browsers | Chrome 103, Firefox 100, Safari 16 or newer | headless Chromium uploads the examples; client code uses no web API newer than these |
-| React | 18 and 19 | the hooks' tests and the examples, on React 19 |
+| React | 18 and 19 | the hooks' tests on React 19 and, in a job of their own, on React 18.3.1; the examples on React 19 |
 | TypeScript | 7.0 or newer, for the shipped types | a job type-checks the packed `.d.ts` with TypeScript 7.0.2, the oldest 7.0 release npm published |
 
 Raising a floor in this table is a major release; supporting an older version is a minor one. On Deno, cloudrop reads

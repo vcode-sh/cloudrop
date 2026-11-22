@@ -47,6 +47,7 @@ Run the lanes your change touches, on top of `verify`:
 | The Drizzle adapter | also `scripts/check-drizzle-versions.sh` (drizzle-orm 0.45) |
 | The client or the server's upload protocol | `bun run test:chaos` |
 | The client, the hooks or an example | `bun run test:browser` |
+| The hooks | also `scripts/test-react-18.sh` (React 18.3.1) |
 
 | Lane | What it runs | Needs |
 | --- | --- | --- |
