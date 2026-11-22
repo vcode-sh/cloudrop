@@ -1,4 +1,4 @@
-// Contract: spec 1.0 §2d (M12-E7): in a browser on the XHR path, a single PUT or a part fails at once with
+// Contract: spec 1.0 §2d (M12-E7, M12-R40): in a browser on the XHR path, a single PUT or a part fails at once with
 // BUCKET_BLOCKED, not retryable, when two consecutive attempts ended in XHR onerror without upload progress and a /sign
 // of that part answered 2xx between them while the page is online; any other failure keeps the old budget of six
 // attempts and NETWORK_ERROR. BUCKET_BLOCKED keeps the ticket, so retry() sends only what had not landed.
@@ -18,11 +18,15 @@ const files = route({ accept: "*/*", maxSize: "100MB", authorize: allowAnyone })
 /** How the bucket ends a PUT: `nth` counts the file's PUTs from 1. */
 type End = (call: XhrCall, nth: number) => unknown;
 
+/** An online browser's navigator. */
+const BROWSER = { onLine: true };
+
 /**
- * A browser client whose bucket PUTs end as `bucket.end` says. `log` holds every request in order: the server's as the
- * fixture saw them, each PUT when the XHR sent it. `fault` answers the server's requests.
+ * A client in a runtime with `navigator` (a browser by default) whose bucket PUTs end as `bucket.end` says. `log` holds
+ * every request in order: the server's as the fixture saw them, each PUT when the XHR sent it. `fault` answers the
+ * server's requests.
  */
-function setup({ fault = (() => undefined) as Fault, fetchOption = false } = {}) {
+function setup({ fault = (() => undefined) as Fault, fetchOption = false, navigator = BROWSER as object } = {}) {
   const log: string[] = [];
   const fixture = clientFixture(
     { files },
@@ -43,6 +47,7 @@ function setup({ fault = (() => undefined) as Fault, fetchOption = false } = {})
   });
   vi.stubGlobal("XMLHttpRequest", xhr.XMLHttpRequest);
   vi.stubGlobal("fetch", fixture.fetch);
+  vi.stubGlobal("navigator", navigator);
   const client = createCloudropClient({
     basePath: fixture.basePath,
     persist: false,
@@ -141,6 +146,13 @@ describe("BUCKET_BLOCKED", () => {
     const { log, run } = setup();
     // A refused URL (bad signature, expired) sends an empty body too: no progress can tell it from a blocked request.
     const job = await run(new File([], "empty.bin", { type: "application/octet-stream" }), refused);
+    expect({ error: errorOf(job), log }).toEqual({ error: LOST, log: SIX_PUTS });
+  });
+
+  it("keeps NETWORK_ERROR outside a browser: React Native has XMLHttpRequest and a navigator without onLine", async () => {
+    // React Native has no CORS, so a PUT refused before any byte left is a lost connection there (DNS, TLS, handover).
+    const { log, run } = setup({ navigator: { product: "ReactNative" } });
+    const job = await run(small(), refused);
     expect({ error: errorOf(job), log }).toEqual({ error: LOST, log: SIX_PUTS });
   });
 

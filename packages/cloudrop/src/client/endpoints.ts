@@ -188,7 +188,7 @@ export function createEndpoints(
     if (sent.error) return sent;
     const { response, text } = sent.data;
     const json = parseJson(text);
-    const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+    const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), response.headers.get("date"));
     if (!response.ok) {
       const body = readErrorBody(json);
       return fail(waitAtLeast(body ? toError(body) : refusal(response.status), retryAfterMs));

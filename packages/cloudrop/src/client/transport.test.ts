@@ -163,6 +163,32 @@ describe("createPut through XMLHttpRequest", () => {
     });
   });
 
+  it("leaves nothing on the caller's signal when the XMLHttpRequest fails inside send()", async () => {
+    const { put, target, body, onBytes } = await setup();
+    // Browsers report a failure later, but an XMLHttpRequest that calls onerror inside send() must settle just as
+    // cleanly: the caller's signal outlives the PUT, and a listener left on it would abort a finished request.
+    const aborts: string[] = [];
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      class {
+        upload = {};
+        onerror: (() => void) | null = null;
+        open() {}
+        setRequestHeader() {}
+        send() {
+          this.onerror?.();
+        }
+        abort() {
+          aborts.push("abort");
+        }
+      },
+    );
+    const controller = new AbortController();
+    const outcome = await put(target, body, controller.signal, onBytes);
+    controller.abort();
+    expect({ kind: outcome.kind, aborts }).toEqual({ kind: "opaque", aborts: [] });
+  });
+
   it("stops the request when the signal fires", async () => {
     const { xhr, put, target, body, onBytes } = await setup({ hold: true });
     const controller = new AbortController();

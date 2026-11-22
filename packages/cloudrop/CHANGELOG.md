@@ -146,13 +146,19 @@ Every notable change to the `cloudrop` package. The format follows
 - The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
   600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
   such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
+- The client no longer waits out a `Retry-After` longer than its 20-second backoff cap, at `/upload`, `/sign` or
+  `/complete`. Before: a server or proxy asking for 600 seconds was asked again five times, 20 seconds apart. After:
+  the file fails at once with the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when the app
+  chooses. The error has no field for the wait: only `rateLimited()`'s default message names it, so pick the delay
+  before `retry()` yourself (`M12-E4`, `M12-R41`, `M12-R42`).
 - A bucket the browser cannot reach while the upload server answers fails the file with `BUCKET_BLOCKED`. Before: a
   CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
   `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, two `PUT` attempts that send no byte
   around a `/sign` that answered end it with `error.code === "BUCKET_BLOCKED"`, not retryable, within about a second;
   `retry()` keeps the ticket. Code that shows a Retry button only for `error.retryable`, or that maps every code in an
   exhaustive `switch` over `CloudropErrorCode` or `ClientErrorCode`, handles the new code. With a `fetch` option and
-  outside a browser nothing changes (`M12-E7`).
+  outside a browser nothing changes: the rule needs `navigator.onLine === true`, which React Native does not report
+  (`M12-E7`, `M12-R40`).
 - The usage table has two more columns and an index, for an owner's erase mark. Before: `cloudrop_usage` was
   `owner, reserved_bytes, active_bytes, files, updated_at`. After: it also has `erase_requested_at` and `erased_at`,
   and until it does, the store's first call answers `INVALID_CONFIG` with the SQL to run. On Postgres:
@@ -251,6 +257,12 @@ Every notable change to the `cloudrop` package. The format follows
   (`M12-P10`).
 
 ### Fixed
+
+- A `Retry-After` given as an HTTP date counts from the answer's own `Date` header when the client can read it. Before:
+  a proxy whose clock ran minutes ahead of the browser's asked for a 3-second wait, the client read minutes, and the
+  file failed at once. After: it waits the 3 seconds (`M12-R43`).
+- A bucket `PUT` through an `XMLHttpRequest` that fails inside `send()` no longer leaves a listener on the upload's
+  signal (`M12-R44`).
 
 - A route whose `authorize` only refuses, such as `() => forbidden("closed")`, authorizes no one in the types. Before:
   its auth type was the refusal itself (or `AuthResult` for `() => rateLimited(30)`), so a typed plugin such as

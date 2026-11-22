@@ -80,14 +80,17 @@ Entries start from 1.
 
 - **Decision:** `waitsTooLong(error)` in `src/client/retry.ts` holds when the error's recorded wait exceeds the
   20-second backoff cap. `withRetry` then returns the error instead of waiting, and so does the per-file re-ask in
-  `launch.ts`: the file fails with the retryable error (`RATE_LIMITED` from `rateLimited(600)`), and the app's
-  `retry()` asks again. Bucket PUTs keep their capped backoff, as the spec names only these two.
+  `launch.ts`, and so does a part's `/sign` (`M12-R41`): the file fails with the retryable error (`RATE_LIMITED` from
+  `rateLimited(600)`), and the app's `retry()` asks again. Bucket PUTs keep their capped backoff.
 - **Why:** spec 1.0 §2a: `rateLimited(600)` would otherwise be retried five times, 20 seconds apart, against a server
   that said ten minutes.
-- **If wrong:** a page that left uploads to the client's retries alone now shows a retryable failure for a long wait;
-  the error's message gives the wait.
+- **If wrong:** a page that left uploads to the client's retries alone now shows a retryable failure for a long wait.
+  Only `rateLimited()`'s default message gives the wait ("Try again in 600 seconds."); a proxy's `429`, storage
+  throttling and a custom message say "Try again in a moment" or what the app wrote, and `CloudropError` has no field
+  for the wait, so the app picks when to call `retry()` (`M12-R42`).
 - **Status:** in force.
-- **Visible in:** `src/client/retry.ts`, `src/client/launch.ts`, `src/client/upload-rate-limited.test.ts`.
+- **Visible in:** `src/client/retry.ts`, `src/client/launch.ts`, `src/client/parts.ts`,
+  `src/client/upload-rate-limited.test.ts`, `docs/guide/client.md`.
 
 ### M12-E5: the 200 of `/upload` carries the bucket's `Retry-After`
 
@@ -138,8 +141,8 @@ Entries start from 1.
 - **Decision:** a part, or a single `PUT`, fails at once with the client code `BUCKET_BLOCKED`, not retryable, when two
   consecutive attempts of it ended in XHR `onerror` with no upload progress (`loaded > 0` never seen), a `/sign` of that
   part answered 2xx between them (the second attempt used a URL the server had just signed), and `navigator.onLine` is
-  not `false`. Only on the XHR path: with a `fetch` option, or where there is no XMLHttpRequest, nothing changes.
-  cloudrop's own stall abort and `ontimeout` are never counted, nor is an XHR whose `open()` or `send()` throws, nor an
+  `true`, which a browser reports and React Native does not (amended by `M12-R40`). Only on the XHR path: with a
+  `fetch` option, or where there is no XMLHttpRequest, nothing changes. cloudrop's own stall abort and `ontimeout` are never counted, nor is an XHR whose `open()` or `send()` throws, nor an
   empty body: a 0-byte file has no byte to report, so a bad signature or an expired URL on it would look blocked, and it
   keeps the six attempts and `NETWORK_ERROR`. The code is in `ClientErrorCode`, so the server's status table cannot hold
   it, and in `KEEPS_TICKET`: `retry()` after the rule is fixed sends only what had not landed. The message names the

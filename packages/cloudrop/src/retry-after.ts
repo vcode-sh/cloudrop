@@ -18,10 +18,14 @@ export function waitAtLeast<T extends object>(target: T, ms: number): T {
 
 /**
  * A Retry-After header in milliseconds (RFC 9110 §10.2.3): delay seconds or an HTTP date. 0 when absent, past or
- * unreadable: NaN or a negative number would reach setTimeout, which reads both as 0 only by accident.
+ * unreadable: NaN or a negative number would reach setTimeout, which reads both as 0 only by accident. An HTTP date is
+ * read against the answer's own `date` header when the caller can read it, so a local clock minutes off neither
+ * stretches the wait past the client's cap nor cuts it to nothing; otherwise against the local clock (M12-R43).
  */
-export function parseRetryAfter(value: string | null, now: number = Date.now()): number {
+export function parseRetryAfter(value: string | null, date: string | null = null): number {
   if (value === null) return 0;
-  const waitMs = /^\d+$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value) - now;
+  if (/^\d+$/.test(value.trim())) return Number(value) * 1000;
+  const answeredAt = Date.parse(date ?? "");
+  const waitMs = Date.parse(value) - (Number.isNaN(answeredAt) ? Date.now() : answeredAt);
   return Number.isFinite(waitMs) ? Math.max(waitMs, 0) : 0;
 }
