@@ -1195,7 +1195,7 @@ stability guide allows new members of a union: list the statuses a query wants
 
 | `cloudrop_usage` | Postgres | SQLite and D1 | Holds |
 | --- | --- | --- | --- |
-| `owner` | `text` | `TEXT` | An owner that ever reserved a file. Its row stays for good, at zeros once its files are gone. |
+| `owner` | `text` | `TEXT` | An owner that ever reserved a file, or that `eraseOwner` marked, which writes a row at zeros for an owner that never uploaded. Its row stays for good, at zeros once its files are gone. |
 | `reserved_bytes` | `bigint` | `INTEGER` | The bytes of its unfinished uploads. |
 | `active_bytes` | `bigint` | `INTEGER` | The bytes of its completed files. |
 | `files` | `integer` | `INTEGER` | Its completed files. |
@@ -1331,7 +1331,9 @@ LIMIT 100;
 ```
 
 Check each against your own records. If your app has the file, it is yours, whatever its row says. If not, remove its
-object with `api.deleteObject(row.key)`. Leave the row: it is the only record of that object.
+object, once `api.headObject(row.key)` shows it is still this upload's: its `metadata["cloudrop-id"]` is the row's
+`id`, as the sweep checks before it deletes anything. Another upload may have written the key since. Then
+`api.deleteObject(row.key)`, and leave the row: it is the only record of that object.
 
 #### Failures of the last day
 

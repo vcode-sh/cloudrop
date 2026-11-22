@@ -208,19 +208,14 @@ In every callback and plugin hook, `request` is for its headers and `url`:
 **Retiring a route.** With a [store](store.md), a route's rows keep its name after you remove it from `routes`, and
 `api` types `route` as the names your server has. Keep a retired route declared, with an `authorize` that refuses,
 until its rows are erased: its files keep their `onDelete`, and every record `api` answers names a route the server
-knows. Give that `authorize` the result type it had, so its `owner` and `onDelete` keep their types and a
-[typed plugin](#plugin-hooks) still fits:
+knows:
 
 ```ts
-import { forbidden, type Refusal, route } from "cloudrop";
+import { forbidden, route } from "cloudrop";
 
 const scans = route(
-  {
-    accept: "image/*",
-    maxSize: "10MB",
-    authorize: (): { userId: string } | Refusal => forbidden("This upload is closed."),
-  },
-  { owner: ({ userId }) => userId },
+  { accept: "image/*", maxSize: "10MB", authorize: () => forbidden("This upload is closed.") },
+  { owner: () => null, onDelete: recordDeletion }, // no upload reaches owner any more; onDelete as it was
 );
 ```
 
@@ -778,12 +773,25 @@ export default defineHandler((event) => cloudrop.handler(event.req));
 #### Deno and Cloudflare Workers
 
 ```ts
-// Deno
+// main.ts, on Deno
+import { cloudrop } from "./lib/cloudrop.ts";
+
 Deno.serve((request) => cloudrop.handler(request));
 ```
 
+```sh
+deno run --allow-net --allow-env=NODE_ENV,CLOUDROP_SECRET,CLOUDROP_R2_ACCOUNT_ID,CLOUDROP_R2_ACCESS_KEY_ID,CLOUDROP_R2_SECRET_ACCESS_KEY,CLOUDROP_R2_BUCKET main.ts
+```
+
+`--allow-net` lets the server listen and reach the bucket. `--allow-env` lets it read its settings: `r2()` and the
+secret come from the `CLOUDROP_*` variables, and `NODE_ENV` decides whether it checks them at start. Without that
+permission, reading a variable throws Deno's `NotCapable` and every request fails. Name the variables, as above, or
+pass a plain `--allow-env`; with `s3()`, name the `CLOUDROP_S3_*` variables instead.
+
 ```ts
-// Cloudflare Workers
+// src/index.ts, a Cloudflare Worker
+import { cloudrop } from "./cloudrop";
+
 export default {
   fetch: (request: Request) => cloudrop.handler(request),
 };

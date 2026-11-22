@@ -41,6 +41,8 @@ const FILES: readonly (readonly [string, string | null, string, number, number, 
   ["f-09", "u-1", "pending.png", 40, 8, "pending"],
   ["f-10", "u-2", "report-deleted.pdf", 60, 9, "deleted"],
   ["f-11", "u-2", "cancelled.png", 70, 10, "aborted"],
+  ["f-12", "u-2", "abandoned.png", 80, 11, "expired"],
+  ["f-13", "u-2", "old-invoice.pdf", 90, 12, "deleted"],
 ];
 
 /** When each ended row was proven clean; the stuck completion is cleaned as the sweep ends it. */
@@ -49,6 +51,8 @@ const CLEANED: Record<string, number> = {
   "f-07": 12 * MINUTE,
   "f-10": 40 * MINUTE,
   "f-11": 15 * MINUTE,
+  "f-12": 16 * MINUTE,
+  "f-13": 20 * MINUTE,
 };
 
 const minutes = (count: number) => at(count * MINUTE);
@@ -139,20 +143,24 @@ function recipeCases(db: TestDatabase, store: () => CloudropStore<unknown>): voi
 
   test("the purge deletes only ended rows proven clean before its time, never a failed one", async () => {
     await db.query(recipe("purge", db.dialect), [time(db, minutes(30))]);
-    // f-00 and f-11 go. f-06 and f-07 are failed, f-08 is not cleaned, f-10 was cleaned after the cutoff.
+    // One row of each purged status goes: f-00 rejected, f-11 aborted, f-12 expired, f-13 deleted. f-06 and f-07 are
+    // failed, f-08 is not cleaned, f-10 was cleaned after the cutoff.
+    const purged = ["f-00", "f-11", "f-12", "f-13"];
     expect((await rawTables(db).files()).map((row) => row.id)).toEqual(
-      FILES.map(([id]) => id).filter((id) => id !== "f-00" && id !== "f-11"),
+      FILES.map(([id]) => id).filter((id) => !purged.includes(id)),
     );
   });
 
   test("the erased owners' purge deletes their rows once the erasure finished, and keeps the usage row", async () => {
+    // u-1 is marked too, but its erasure has not finished: its live rows must stay.
+    await store().markErasure({ owner: "u-1", now: minutes(20) });
     const { requestedAt } = await store().markErasure({ owner: "u-3", now: minutes(20) });
     await store().end("f-05", "completed", "deleted", minutes(21), { cleaned: true });
     expect(await store().erased({ owner: "u-3", requestedAt, now: minutes(22) })).toBe(true);
     await db.query(recipe("purge-erased", db.dialect));
-    const rows = await rawTables(db).files();
-    expect(rows.map((row) => row.owner).includes("u-3")).toBe(false);
-    expect(rows).toHaveLength(FILES.length - 1);
+    expect((await rawTables(db).files()).map((row) => row.id)).toEqual(
+      FILES.map(([id]) => id).filter((id) => id !== "f-05"),
+    );
     expect((await rawTables(db).usage()).map((row) => [row.owner, row.erasedAt])).toContainEqual(["u-3", minutes(22)]);
   });
 }

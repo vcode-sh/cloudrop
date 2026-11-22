@@ -1,10 +1,10 @@
 # Hono with better-auth and Drizzle
 
 This page starts with the smallest Hono server on Bun, without a database. The rest of it adds cloudrop to an app built
-like this: a Hono API on Bun with better-auth, Drizzle on Postgres with
-drizzle-kit migrations, a React SPA on another origin of the same site calling the API with cookies, background jobs
-in a worker process, and shadcn on Base UI. The steps are in the order you take them. The working version of every
-snippet is in [`examples/hono`](../../examples/hono/README.md) (the API and the worker) and
+like this: a Hono API on Bun with better-auth, Drizzle on Postgres with drizzle-kit migrations, a React SPA on another
+origin of the same site calling the API with cookies, background jobs in a worker process, and shadcn on Base UI. The
+steps are in the order you take them. The working version of every snippet is in
+[`examples/hono`](../../examples/hono/README.md) (the API and the worker) and
 [`examples/vite-react`](../../examples/vite-react/README.md) (the web app), which run against RustFS and Postgres in
 Docker with no credentials.
 
