@@ -192,7 +192,11 @@ Entries start from 1.
   `EraseRunOptions`, `SweepSettings`, `ReservedName`, `AuthResult`, `Awaitable`, `CompleteData`, `RouteTypes`,
   `RouteTypeMap`, `RoutesOf`, `SchemaInput`, `SchemaOutput`, `StandardResult`, `StandardIssue`, `NoExtra`, `WithExtra`
   and `ContextOf` from `cloudrop`; `Account`, `ServerHeaders`, `ClientFetch` and `TicketFields` from `cloudrop/client`;
-  `UseUploadArguments` and `ResumableOf` from `cloudrop/react`. Their shapes are frozen through the report (`M12-P6`).
+  `UseUploadArguments` and `ResumableOf` from `cloudrop/react`. `M12-T7` adds two to `cloudrop`'s list:
+  - `Authorized`, the authorize result without its refusals: an app reads it from `Route`'s third parameter.
+  - `CallbackAuth`, what the callbacks see: an app gets it from contextual typing, never writes it.
+
+  Their shapes are frozen through the report (`M12-P6`).
   The plugin API's types (`CloudropPlugin`, `ServerHooks`, `BeforeUploadContext`, `AfterVerifyContext`,
   `AbortContext`, `PluginFile` and `extendRoute`) are marked experimental in their doc comments, as `M12-A12` rules,
   with the tag `@beta`, the release tag api-extractor knows, so the reports show the tier (TypeDoc refuses `@beta`
