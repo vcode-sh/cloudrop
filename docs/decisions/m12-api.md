@@ -125,3 +125,24 @@ Entries start from 1.
 - **Status:** in force.
 - **Visible in:** `src/client/options.ts`, `src/client/forget.test.ts`, `docs/guide/client.md`,
   `docs/guide/resume.md`, `docs/guide/react.md`, `docs/guide/hono.md`, `examples/vite-react/src/lib/upload.ts`.
+
+### M12-A7: the browser's own storage fails with `BROWSER_STORAGE_ERROR`
+
+- **Decision:** `BROWSER_STORAGE_ERROR`, not retryable, joins `CloudropErrorCode` and `ClientErrorCode`, so the
+  server's status table has no entry for it. The client answers it in exactly the two places that reported the
+  browser's own failures as `STORAGE_ERROR`: IndexedDB failing to read or write resume records (`resumable()`,
+  `resume()`'s checks, `discard()`, `forget()`, through `storageUnavailable`), and the browser refusing `discard()` a
+  Web Lock (`lockRefused`). The messages are unchanged. `STORAGE_ERROR` stays for everything about the bucket and the
+  server's storage: a bucket `PUT` answered `408`, `5xx` or `RequestTimeout` (`bucket.test.ts` keeps it), and the
+  server's own storage failures. `resume()` where the browser refuses Web Locks keeps `NOT_FOUND` (`M3-U88`): nothing
+  can be resumed in such a browser, which is not a failure of one call. Saving a record still fails silently, as
+  before: a browser storage failure never stops an upload.
+- **Why:** spec 1.0 §6: one code meant two different fixes, a server or bucket to check, and a browser profile
+  (private mode, full disk, blocked storage) where only resuming is lost. A page that shows `STORAGE_ERROR` as "the
+  upload failed" was wrong for the browser's case.
+- **If wrong:** a page that branched on `STORAGE_ERROR` from `resumable()`, `discard()` or `forget()` must name the new
+  code; TypeScript does not catch a string comparison that can no longer match, so the changelog lists the four calls.
+- **Status:** in force.
+- **Visible in:** `src/errors.ts`, `src/client/failures.ts`, `src/client/records.test.ts`,
+  `src/client/forget.test.ts`, `src/client/discard.test.ts`, `src/client/resume-checks.test.ts`,
+  `docs/guide/errors.md`, `docs/guide/client.md`, `docs/guide/resume.md`.

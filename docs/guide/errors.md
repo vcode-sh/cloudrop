@@ -46,9 +46,9 @@ code change, not a retry.
    one of two codes: `RATE_LIMITED` ("The storage service is busy") when the storage was throttling, otherwise
    `STORAGE_ERROR`, retryable when the storage failure was. A browser never sees `STORAGE_DENIED`,
    `STORAGE_UNREACHABLE`, `INVALID_PART` or `CHECKSUM_MISMATCH`.
-3. **Client.** The client adds five codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`, `UPLOAD_IN_USE`,
-   `CLIENT_CLOSED`) and uses a few shared codes for its own failures, such as `STORAGE_ERROR` when the browser's
-   storage fails.
+3. **Client.** The client adds six codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`, `UPLOAD_IN_USE`,
+   `CLIENT_CLOSED`, `BROWSER_STORAGE_ERROR`) and uses a few shared codes for its own failures, such as `NOT_FOUND`
+   when an upload can no longer be resumed.
 
 The HTTP status in the tables is what the handler answers with that code.
 
@@ -103,7 +103,7 @@ These come from `cloudrop/client`. The first five never come from the server.
 | `STORAGE_ERROR` (from the bucket) | Yes | The bucket answered a `PUT` with `408`, a `5xx` other than `501`, S3's `400 RequestTimeout` (it stopped waiting for the body) or S3's `409 OperationAborted` (a conflicting operation was still running) on every attempt. A `501` ends the file with `UPLOAD_REJECTED` instead. | Retry the upload: `retry()` keeps the file's ticket and the parts already stored. |
 | `NO_SUCH_UPLOAD` (from the bucket) | No | The bucket answered a part's `PUT` with `404 NoSuchUpload`: the multipart upload was aborted (in another tab, by the sweep or by the bucket's lifecycle rule). The same code and message as the server's. | Start a new upload: `retry()` gives the ticket up and asks for a new one. |
 | `STORAGE_ERROR` (from your server) | Yes / No | Your server's call to the storage service failed or was refused, as in the [endpoint table](#upload-endpoint-errors): such as bad credentials, or Wrangler's local R2 refusing a multipart completion. | When retryable, retry. Otherwise check the server log. Either way `retry()` keeps the file's ticket, or asks `/upload` again when the file had none yet. |
-| `STORAGE_ERROR` (browser storage) | No | The browser's storage for unfinished uploads could not be read or written. Only `resumable()`, `resume()`, `discard()` and `forget()` answer it; `discard()` also when the browser refuses Web Locks. | Nothing for the upload: a browser storage failure never stops uploads; only resuming after a reload may not work. `retry()` of a `resume()` job refused with it reads the storage again. |
+| `BROWSER_STORAGE_ERROR` | No | The browser's storage for unfinished uploads could not be read or written. Only `resumable()`, `resume()`, `discard()` and `forget()` answer it; `discard()` also when the browser refuses Web Locks. | Nothing for the upload: a browser storage failure never stops uploads; only resuming after a reload may not work. `retry()` of a `resume()` job refused with it reads the storage again. |
 | `SERVER_ERROR` | When HTTP 500+ | Your server sent an answer the client cannot read: a wrong `basePath`, a proxy's error page, or another cloudrop version. | Check that `basePath` points at the cloudrop handler and that server and client run the same cloudrop version. `retry()` keeps the file's ticket, or asks `/upload` again when the file had none yet; after a `/complete` it sends `/complete` alone, since the file may be complete. |
 | `NOT_FOUND` | No | `resume()` found no unexpired record of that upload: it finished, was cancelled or expired, or persistence is off. `discard()` found it no longer listed: it finished, or was cancelled or discarded. | After `resume()`, start the upload again with `start()` or `upload()`: `retry()` of the refused job runs its checks again and finds the same. After `discard()`, read the list again: nothing is left to discard. |
 | `INVALID_INPUT` | No | Wrong arguments: no route name, no `File`, options that are not an object, a `signal` that is not an `AbortSignal`, metadata that JSON cannot encode, a different file passed to `resume()`, or a wrong argument to `discard()` or `forget()`. | Fix the call: `retry()` of a job refused for its arguments answers the same refusal. For `resume()`, ask the user to pick the same file again and call `resume()` with it. |

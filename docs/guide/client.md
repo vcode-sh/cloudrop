@@ -330,7 +330,7 @@ server has answered which parts the bucket lacks: the page before the reload may
   | `UPLOAD_REJECTED` | The bucket: a `403` for the signature or after a renewed link, `501`, any other `4xx` | New ticket. |
   | `ABORTED`, or a file that is done | A cancel | Nothing: answers the outcome as it is. |
   | `INVALID_INPUT`, `CLIENT_CLOSED` | The client, for the arguments of `start()` or a closed client | Nothing: answers the refusal. |
-  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `STORAGE_ERROR` | The checks of [`resume()`](resume.md#checks-before-any-request) | Runs the checks again. |
+  | `NOT_FOUND`, `UPLOAD_IN_USE`, `INVALID_INPUT`, `BROWSER_STORAGE_ERROR` | The checks of [`resume()`](resume.md#checks-before-any-request) | Runs the checks again. |
 
   [Errors](errors.md) says for each code what to do besides.
 
@@ -485,7 +485,7 @@ In React, the factory returns the same `close()`: [Signed-in users](react.md#sig
 
 ## Errors that only the client produces
 
-Five codes come from the client and never from the server:
+Six codes come from the client and never from the server:
 
 - `UPLOAD_REJECTED`: the bucket refused the bytes as signed (a different size, type or checksum).
 - `ABORTED`: a cancel.
@@ -493,6 +493,8 @@ Five codes come from the client and never from the server:
 - `UPLOAD_IN_USE`: `resume()` or `discard()` found the upload held in this browser (see
   [Resume after reload](resume.md#two-tabs)).
 - `CLIENT_CLOSED`: `start()`, `upload()` or `resume()` after [`close()`](#close-the-client).
+- `BROWSER_STORAGE_ERROR`: the browser's own storage for unfinished uploads (IndexedDB) failed, or it refused
+  `discard()` a Web Lock. Uploads go on; only resuming after a reload may not. Never the bucket's `STORAGE_ERROR`.
 
 Every other code, and what to do about it: [Errors](errors.md).
 

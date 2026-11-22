@@ -142,7 +142,7 @@ describe("discard(upload)", () => {
 
     expect({ error: brief(result.error), requests: fixture.requests, stored: Object.keys(db.stored()) }).toEqual({
       error: {
-        code: "STORAGE_ERROR",
+        code: "BROWSER_STORAGE_ERROR",
         message:
           "The browser did not let this page lock the upload, so it was left as it was. Reload the page, then try again.",
       },

@@ -1,7 +1,7 @@
 // Contract: client/records.ts, the store of unfinished multipart uploads (resume spec §3.1, §3.2, §3.6, §3.7;
 // rulings M3-U70 to M3-U72). One record per upload, kept per namespace; expired ones (less than 60 s left) are never
 // returned and are deleted when seen; operations apply in the order they were made; uploads never hear of a store
-// failure, while list and clear report it as STORAGE_ERROR; off or without IndexedDB nothing is read or written.
+// failure, while list and clear report it as BROWSER_STORAGE_ERROR; off or without IndexedDB nothing is read or written.
 // Oracle: what the fake IndexedDB holds (`stored()`: structured clones keyed as the browser keys them), literal
 // records and literal timestamps. The fake is the platform boundary; the store under test is the real module.
 
@@ -33,10 +33,11 @@ const SAVED: UploadRecord = {
 /** SAVED under another id, namespace, save time or expiry. */
 const recordOf = (changes: Partial<UploadRecord>): UploadRecord => ({ ...SAVED, ...changes });
 
-const STORAGE_ERROR = {
-  code: "STORAGE_ERROR",
+const BROWSER_STORAGE_ERROR = {
+  code: "BROWSER_STORAGE_ERROR",
   message:
     "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
+  retryable: false,
 };
 
 let fake: FakeIndexedDb;
@@ -249,14 +250,14 @@ describe("store failures", () => {
     expect(Object.keys(fake.stored())).toEqual(["u-1"]);
   });
 
-  it("a failed read resolves STORAGE_ERROR without the browser's text, and the next read works", async () => {
+  it("a failed read resolves BROWSER_STORAGE_ERROR without the browser's text, and the next read works", async () => {
     const records = storeAt();
     records.save(SAVED);
     await afterQueued(records);
     fake.failNext("UnknownError");
     const failed = await records.list("user-1");
     // The whole message is cloudrop's own sentence.
-    expect(failed).toMatchObject({ data: null, error: STORAGE_ERROR });
+    expect(failed).toMatchObject({ data: null, error: BROWSER_STORAGE_ERROR });
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
   });
 
@@ -267,7 +268,7 @@ describe("store failures", () => {
     expect(await records.list("user-1")).toEqual({ data: [], error: null });
     expect(fake.stored()).toEqual({});
     fake.failNext("UnknownError");
-    expect(await records.list("user-1")).toMatchObject({ data: null, error: STORAGE_ERROR });
+    expect(await records.list("user-1")).toMatchObject({ data: null, error: BROWSER_STORAGE_ERROR });
     records.save(SAVED);
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
     // The save's open failed and the first list's worked; the failed list's request kept that connection.
@@ -284,7 +285,7 @@ describe("store failures", () => {
     fake.closeConnections(notify);
     // Without a word, the first operation finds the connection dead and fails; the next one opens again.
     const first = await records.list("user-1");
-    expect(first).toMatchObject(notify ? { data: [SAVED], error: null } : { data: null, error: STORAGE_ERROR });
+    expect(first).toMatchObject(notify ? { data: [SAVED], error: null } : { data: null, error: BROWSER_STORAGE_ERROR });
     expect(await records.list("user-1")).toEqual({ data: [SAVED], error: null });
     expect(opens).toHaveBeenCalledTimes(2);
   });

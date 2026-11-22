@@ -23,8 +23,8 @@ import {
 import { offsetBytes } from "../testing/storage-contract.ts";
 
 const NOW = Date.parse("2026-11-16T12:00:00.000Z");
-const STORAGE_ERROR = {
-  code: "STORAGE_ERROR",
+const BROWSER_STORAGE_ERROR = {
+  code: "BROWSER_STORAGE_ERROR",
   message:
     "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
 };
@@ -206,11 +206,11 @@ describe("resume() refuses before any request, leaving the record as it was", ()
     expect(job.getSnapshot().files[0]?.status).toBe("failed");
   });
 
-  it("STORAGE_ERROR when the browser's storage cannot be read", async () => {
+  it("BROWSER_STORAGE_ERROR when the browser's storage cannot be read", async () => {
     const setup = await reloaded(gate(partThree));
     setup.db.failNext("UnknownError");
     const { error } = await setup.client.resume(setup.upload, fourParts()).done;
-    expect({ error: brief(error), sent: setup.sent() }).toEqual({ error: STORAGE_ERROR, sent: [] });
+    expect({ error: brief(error), sent: setup.sent() }).toEqual({ error: BROWSER_STORAGE_ERROR, sent: [] });
   });
 });
 
@@ -305,7 +305,7 @@ describe("retry() of a resume() that a check refused checks again (M3-U90)", () 
     }).toEqual({ data: null, error, status: "failed", sent: [] });
   });
 
-  it("resumes after STORAGE_ERROR once the browser's storage reads again", async () => {
+  it("resumes after BROWSER_STORAGE_ERROR once the browser's storage reads again", async () => {
     const setup = await reloaded(gate(partThree));
     setup.db.failNext("UnknownError");
     const job = setup.client.resume(setup.upload, fourParts());
@@ -314,7 +314,7 @@ describe("retry() of a resume() that a check refused checks again (M3-U90)", () 
     await setup.drained();
 
     expect({ first, retried: data?.files[0]?.status, error, sent: setup.sent(), stored: setup.db.stored() }).toEqual({
-      first: STORAGE_ERROR,
+      first: BROWSER_STORAGE_ERROR,
       retried: "done",
       error: null,
       sent: RESUMED,

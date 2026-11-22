@@ -3,7 +3,7 @@
 // asked, and deletes the expired ones; it leaves out every upload this client holds: a running or failed file's, and
 // one being resumed, until the page lets it go, each claim released on its own (M4-F22). forget() deletes the
 // namespace's records or, with { all: true }, every one, refuses any other argument, and leaves a running upload
-// running. A failed store is STORAGE_ERROR; with persistence
+// running. A failed store is BROWSER_STORAGE_ERROR; with persistence
 // off, no indexedDB or no Web Locks (M3-U88) nothing is kept and nothing can be resumed.
 // Oracle: what the fake IndexedDB holds, the requests the fixture saw, literal records and literal messages.
 
@@ -23,8 +23,8 @@ import {
 import { createRecords, type UploadRecord } from "./records.ts";
 
 const NOW = Date.parse("2026-11-16T12:00:00.000Z");
-const STORAGE_ERROR = {
-  code: "STORAGE_ERROR",
+const BROWSER_STORAGE_ERROR = {
+  code: "BROWSER_STORAGE_ERROR",
   message:
     "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
 };
@@ -100,10 +100,10 @@ describe("resumable()", () => {
     });
   });
 
-  it("resolves STORAGE_ERROR when the browser's storage fails", async () => {
+  it("resolves BROWSER_STORAGE_ERROR when the browser's storage fails", async () => {
     const { client, db } = persistFixture();
     db.failNext("UnknownError");
-    expect(brief((await client.resumable()).error)).toEqual(STORAGE_ERROR);
+    expect(brief((await client.resumable()).error)).toEqual(BROWSER_STORAGE_ERROR);
   });
 });
 
@@ -252,10 +252,10 @@ describe("forget()", () => {
     });
   });
 
-  it("resolves STORAGE_ERROR when the browser's storage fails", async () => {
+  it("resolves BROWSER_STORAGE_ERROR when the browser's storage fails", async () => {
     const { client, db } = await seeded();
     db.failNext("UnknownError");
-    expect(brief((await client.forget()).error)).toEqual(STORAGE_ERROR);
+    expect(brief((await client.forget()).error)).toEqual(BROWSER_STORAGE_ERROR);
   });
 
   it("leaves a running upload running, and it saves no record again (M3-U78)", async () => {

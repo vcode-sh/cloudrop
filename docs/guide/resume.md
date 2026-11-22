@@ -75,12 +75,12 @@ The file is `queued` while the record, the file and the lock are checked. When a
 | --- | --- |
 | `INVALID_INPUT` | Wrong arguments, or a different file than the one the upload started with. |
 | `NOT_FOUND` | No unexpired record of that upload in the client's namespace: it finished, was cancelled or expired, or persistence is off. |
-| `STORAGE_ERROR` | The browser's storage cannot be read. |
+| `BROWSER_STORAGE_ERROR` | The browser's storage cannot be read. |
 | `UPLOAD_IN_USE` | The upload is held in this page or another tab (see [Two tabs](#two-tabs)). |
 
 A cancel meanwhile resolves `ABORTED` the same way. `retry()` of a refused job runs the checks again: it resolves the
 same refusal while they fail, sending nothing, and resumes once they pass, such as after `UPLOAD_IN_USE` once the other
-tab let go, or after `STORAGE_ERROR` once the storage reads again.
+tab let go, or after `BROWSER_STORAGE_ERROR` once the storage reads again.
 
 ### The server is asked first
 
@@ -265,7 +265,7 @@ record, and still uploads.
 
 The client looks for `indexedDB` and Web Locks once, when it is created: create it after any polyfill for them.
 
-`resumable()`, `discard()` and `forget()` never reject. When the browser's storage fails, they resolve `STORAGE_ERROR`.
+`resumable()`, `discard()` and `forget()` never reject. When the browser's storage fails, they resolve `BROWSER_STORAGE_ERROR`.
 A storage failure never fails, pauses or slows an upload.
 
 Records live in the origin's best-effort storage, which a browser may evict under pressure. cloudrop never calls

@@ -48,13 +48,13 @@ export const notListed = (): CloudropError =>
 
 export const lockRefused = (): CloudropError =>
   new CloudropError(
-    "STORAGE_ERROR",
+    "BROWSER_STORAGE_ERROR",
     "The browser did not let this page lock the upload, so it was left as it was. Reload the page, then try again.",
   );
 
 export const storageUnavailable = (): CloudropError =>
   new CloudropError(
-    "STORAGE_ERROR",
+    "BROWSER_STORAGE_ERROR",
     "The browser's storage for unfinished uploads could not be read or written. Uploads still work; resuming after a reload may not.",
   );
 

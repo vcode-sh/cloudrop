@@ -70,6 +70,10 @@ Every notable change to the `cloudrop` package. The format follows
   `""`. After: `createCloudropClient({ account: userId })` keeps them under `userId`. A function `account` keeps `""`,
   and an explicit `namespace` wins. A page that passed `account` alone stops listing the unfinished uploads it saved
   under `""` before the upgrade; pass `namespace: ""` for a day to keep them resumable (`M12-A4`).
+- The browser's own storage fails with `BROWSER_STORAGE_ERROR`. Before: `resumable()`, `resume()`, `discard()` and
+  `forget()` answered `STORAGE_ERROR` when IndexedDB failed, and `discard()` when the browser refused a Web Lock.
+  After: `error.code === "BROWSER_STORAGE_ERROR"`, not retryable, with the same messages. `STORAGE_ERROR` now always
+  means the bucket or the server's storage (`M12-A7`).
 
 ### Added
 

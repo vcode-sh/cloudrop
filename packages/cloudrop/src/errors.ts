@@ -38,10 +38,18 @@ export type CloudropErrorCode =
   | "ABORTED"
   | "NETWORK_ERROR"
   | "UPLOAD_IN_USE"
-  | "CLIENT_CLOSED";
+  | "CLIENT_CLOSED"
+  // The browser's own storage for resume records (IndexedDB) or its Web Locks failed: never the bucket (M12-A7).
+  | "BROWSER_STORAGE_ERROR";
 
 /** Codes only the client produces; the server's status table has no entry for them. */
-export type ClientErrorCode = "UPLOAD_REJECTED" | "ABORTED" | "NETWORK_ERROR" | "UPLOAD_IN_USE" | "CLIENT_CLOSED";
+export type ClientErrorCode =
+  | "UPLOAD_REJECTED"
+  | "ABORTED"
+  | "NETWORK_ERROR"
+  | "UPLOAD_IN_USE"
+  | "CLIENT_CLOSED"
+  | "BROWSER_STORAGE_ERROR";
 
 /** What a type check found in a file it refused (M11-K1). The two types are MIME types, never a name, key or byte. */
 export interface ContentRefusal {

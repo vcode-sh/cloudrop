@@ -1,6 +1,6 @@
 // The browser's store of unfinished multipart uploads, so that one can resume after a reload (resume spec §3.1, §3.2;
 // rulings M3-U70 to M3-U72). An upload only queues writes here: it never waits for the store or fails on it. Reads
-// report a failure as STORAGE_ERROR, never with the browser's own text.
+// report a failure as BROWSER_STORAGE_ERROR, never with the browser's own text.
 
 import { fail, ok, type Result } from "../errors.ts";
 import { isPartPlan } from "./answers.ts";
@@ -39,7 +39,7 @@ export interface Records {
    * is dropped: an upload never waits for or fails on the store.
    */
   save(record: UploadRecord | Promise<UploadRecord>): void;
-  /** Resolves once the delete has run (a failure resolves STORAGE_ERROR); most callers ignore it. */
+  /** Resolves once the delete has run (a failure resolves BROWSER_STORAGE_ERROR); most callers ignore it. */
   remove(id: string): Promise<Result<unknown>>;
   /** The namespace's unexpired records, newest first (`savedAt` descending); expired ones are removed. */
   list(namespace: string): Promise<Result<UploadRecord[]>>;
