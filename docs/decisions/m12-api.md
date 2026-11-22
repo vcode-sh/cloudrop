@@ -128,7 +128,9 @@ Entries start from 1.
   Reserving the names before the freeze makes later additions safe.
 - **If wrong:** an app that returns one of these names gets a compile error naming the field and wraps it, as the
   server guide shows. A name needed later that is not on the list is a breaking change, as before.
-- **Status:** in force.
+- **Status:** in force, with a limit (`M12-R21`): the constraint reads the result's declared keys, so a result typed
+  with an index signature (`Record<string, string>`, jose's `JWTPayload`) compiles and may carry a reserved name at
+  runtime. The route-context JSDoc and the server guide say so and show returning a plain object of named claims.
 - **Visible in:** `src/server/route-context.ts`, `src/server/route.ts`, `src/server/store-route.ts`,
   `src/server/types.test.ts`, `src/server/store-types.test.ts`, `src/server/store-transaction.test.ts`,
   `docs/guide/server.md`.
@@ -141,7 +143,9 @@ Entries start from 1.
   and at construction with `NODE_ENV=development`. A missing variable is the same `INVALID_CONFIG` naming each one,
   the bucket included. `r2()` is called only when `storage` is absent, so a server on `s3()` never reads an R2
   variable. A value that is not a driver says what to pass and that leaving it out means `r2()`. With nothing passed
-  at all, the first refusal is now the missing routes, since storage has a default.
+  at all, the first refusal outside development is now the missing routes, since storage has a default; with
+  `NODE_ENV=development` it is the missing R2 settings, because `storage` is read before `routes` and `r2()` reads
+  its variables at construction there (corrected by `M12-R23`).
 - **Why:** spec 1.0 §6: one line less on the simple path, and the missing-settings error already names the variables.
 - **If wrong:** an app that meant to configure S3 and forgot `storage` gets an R2 error naming R2 variables on its
   first request, not at start; the message says which variables, which points at the missing option.

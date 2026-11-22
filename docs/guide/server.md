@@ -200,7 +200,11 @@ const attachment = route(
 
 Because the result is spread into every context, `authorize` may not return a field named `request`, `metadata`,
 `file`, `data`, `tx`, `route` or `signal`: TypeScript refuses it, since cloudrop sets or may set those names itself.
-Wrap such a value in a field of your own, such as `{ order: { route } }`.
+Wrap such a value in a field of your own, such as `{ order: { route } }`. TypeScript can check only the keys a type
+names: a result typed with an index signature, such as `Record<string, string>` or a JWT payload
+(`{ [claim: string]: unknown }`), compiles and may still carry one of these names, which then shadows cloudrop's field
+or is shadowed by it. Return the claims you need as a plain object instead, such as
+`({ userId: payload.sub, role: payload.role })`.
 
 In every callback and plugin hook, `request` is for its headers and `url`:
 [its body is already read](#the-requests-body-is-already-read).
@@ -526,7 +530,8 @@ const quota: CloudropPlugin<{ userId: string }> = {
 ```
 
 `auth` in every hook is the JSON form of what `authorize` returned, the snapshot signed into the upload token: a
-`Date` there is its ISO string, so read it back with `new Date(auth.since)`. A plugin typed `CloudropPlugin<TAuth>`
+`Date` there is its ISO string, so read it back with `new Date(auth.since)`, and a field that was `undefined` has no
+key at all, so its type is optional (`teamId?: string`). A plugin typed `CloudropPlugin<TAuth>`
 reads `auth` as that JSON form of `TAuth`, and `createCloudrop` refuses it, as a type error, beside a route whose
 `authorize` can answer without those fields, such as one with `allowAnyone`. An untyped `CloudropPlugin`, such as
 `contentChecks()`, reads `auth` as `unknown` and fits every server.

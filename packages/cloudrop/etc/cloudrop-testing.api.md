@@ -613,6 +613,9 @@ interface FilesPage<TRecord extends FileRecord = FileRecord> {
 // @public
 type FileStatus = "queued" | "uploading" | "paused" | "completing" | "done" | "failed" | "aborted";
 
+// @public
+type Flattened<T> = { [K in keyof T]: T[K]; };
+
 // Warning: (ae-forgotten-export) The symbol "RouteTypes" needs to be exported by the entry point testing.d.ts
 //
 // @public
@@ -637,10 +640,12 @@ interface JobSnapshot<R> {
     };
 }
 
+// Warning: (ae-forgotten-export) The symbol "Flattened" needs to be exported by the entry point testing.d.ts
+//
 // @public
 type Jsonified<T> = T extends {
     toJSON(): infer J;
-} ? Jsonified<J> : T extends string | number | boolean | null ? T : T extends void ? never : T extends symbol | bigint | ((...args: never[]) => unknown) ? never : T extends readonly (infer E)[] ? Jsonified<E>[] : T extends object ? { [K in keyof T as K extends string | number ? Jsonified<T[K]> extends never ? never : K : never]: Jsonified<T[K]>; } : unknown;
+} ? Jsonified<J> : T extends string | number | boolean | null ? T : T extends void ? never : T extends symbol | bigint | ((...args: never[]) => unknown) ? never : T extends readonly (infer E)[] ? Jsonified<E>[] : T extends object ? Flattened<{ [K in keyof T as K extends string | number ? Jsonified<T[K]> extends never ? never : undefined extends T[K] ? never : K : never]: Jsonified<T[K]>; } & { [K in keyof T as K extends string | number ? Jsonified<T[K]> extends never ? never : undefined extends T[K] ? K : never : never]?: Jsonified<Exclude<T[K], undefined>>; }> : unknown;
 
 // Warning: (ae-forgotten-export) The symbol "OwnerContext" needs to be exported by the entry point testing.d.ts
 //
