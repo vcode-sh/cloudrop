@@ -1,9 +1,11 @@
 // useUpload (spec §6.1, M4-B2, M4-B4): the jobs a factory's hooks started on one route, rendered through
 // useSyncExternalStore. No upload starts in an effect or during render, so StrictMode's second render and second effect
 // start nothing. The hook follows the factory of its latest render, as it follows the route: hooks taken from a context
-// that changed upload through the new factory's client and show its list (M11-R4).
+// that changed upload through the new factory's client and show its list (M11-R4). A start refused before it has a
+// file shows in the route's `startError`, and the route's store tells each mounted hook's callbacks when a file ends
+// (M12-H1 to M12-H3).
 
-import { useCallback, useInsertionEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useInsertionEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
 import type { CloudropClient, Result, UploadJob, UploadResult } from "../client.ts";
 import { createDropHandlers } from "./drop.ts";
@@ -39,13 +41,20 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
 
   function start(begin: (client: CloudropClient) => UploadJob<unknown>): Promise<UploadResult<unknown>> {
     const { source } = controller.latest;
+    const routeStore = store();
+    const seq = routeStore.begin();
     const client = source.client();
-    if (client.error) return Promise.resolve({ data: null, error: client.error });
+    if (client.error) {
+      routeStore.refuse(seq, client.error);
+      return Promise.resolve({ data: null, error: client.error });
+    }
     const job = begin(client.data);
     // A job refused before it started, by a closed client or for its arguments, has no file to list, retry or follow:
-    // its `done` carries the refusal (M11-R6).
-    if (job.files.length > 0) {
-      store().add(job);
+    // its `done` carries the refusal (M11-R6), which the route's startError shows (M12-H2).
+    if (job.files.length === 0) {
+      void job.done.then(({ error }) => error && routeStore.refuse(seq, error));
+    } else {
+      routeStore.add(job);
       source.track(job);
     }
     return job.done;
@@ -58,13 +67,17 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
     const metadata = "metadata" in call ? call.metadata : options.metadata;
     return start((client) => client.start(route, files, { metadata }));
   };
-  /** Files from a pick or a drop: no caller sees the result, so a wrong client option is thrown in a task (M3-U8). */
+  /**
+   * Files from a pick or a drop: no caller sees the result, so a refusal shows in startError, and a wrong client option
+   * is thrown in a task too, for the console and error reporting (M3-U8).
+   */
   const take = (files: File[]) => {
+    void upload(files);
     const { error } = controller.latest.source.client();
-    if (!error) return void upload(files);
-    setTimeout(() => {
-      throw error;
-    });
+    if (error)
+      setTimeout(() => {
+        throw error;
+      });
   };
   const onChange: InputProps["onChange"] = (event) => {
     const input = event.currentTarget;
@@ -111,6 +124,17 @@ export function useUploadWith(source: HookSource, route: string, options: UseUpl
   });
   const store = source.storeOf(route);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
+  // In an effect, so StrictMode's second effect still leaves one listener per mounted hook, which reads the callbacks
+  // of the latest committed render (M12-H1).
+  useEffect(
+    () =>
+      store.onEnd((event) => {
+        const { onUploaded, onError } = controller.latest.options;
+        if (event.kind === "done") onUploaded?.(event.file);
+        else onError?.(event.error);
+      }),
+    [store, controller],
+  );
   const { multiple = false, accept } = options;
   // Built from this render's options, so a changed `accept` reaches the input in the same render.
   const getInputProps = useCallback(
