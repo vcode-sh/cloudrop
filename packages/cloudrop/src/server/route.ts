@@ -15,7 +15,7 @@ import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
 import type { RouteFunction } from "./store-route.ts";
 
-export { forbidden, isRefusal, type Refusal, refusalError, unauthorized } from "./refusal.ts";
+export { forbidden, isRefusal, type Refusal, rateLimited, refusalError, unauthorized } from "./refusal.ts";
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -58,13 +58,13 @@ export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchem
   replace?: boolean;
   /**
    * Required. Return a plain object with the facts later steps need (they are signed into the upload token, which the
-   * browser can read: return ids, never secrets), or `unauthorized()` or `forbidden()`. `allowAnyone` makes the route
-   * public.
+   * browser can read: return ids, never secrets), or refuse with `unauthorized()`, `forbidden()`, `rateLimited(seconds)`
+   * or a `CloudropError` of a code /upload may send (server guide). `allowAnyone` makes the route public.
    *
    * It runs only in `/upload`. The token it signs is the authority for the next 24 hours, so a session revoked
    * mid-upload can still finish that upload; check the session again in `onComplete` when that matters.
    */
-  authorize: (context: AuthorizeContext<SchemaOutput<TSchema>>) => Awaitable<TAuth | Refusal>;
+  authorize: (context: AuthorizeContext<SchemaOutput<TSchema>>) => Awaitable<TAuth | Refusal | CloudropError>;
 }
 
 /**

@@ -208,6 +208,7 @@ describe("the public entry", () => {
       "createCloudrop",
       "forbidden",
       "r2",
+      "rateLimited",
       "route",
       "s3",
       "unauthorized",

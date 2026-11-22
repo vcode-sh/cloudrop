@@ -77,16 +77,20 @@ describe("cloudrop.handler failures", () => {
   });
 
   // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status. The
-  // client's own codes have none either: the server never sends them.
+  // client's own codes have none either: the server never sends them. /upload checks its refusals itself
+  // (upload-authorize.test.ts); here a refusal at /complete reaches the handler as it was returned.
   it.each([{ code: "OUT_OF_CREDITS" }, { code: "ABORTED" }])(
     "answers a plugin refusal with the code $code, which the server cannot send, as a generic 500",
     async ({ code }) => {
       const plugin: CloudropPlugin = {
         id: "quota",
-        server: { beforeUpload: () => new CloudropError(code as CloudropErrorCode, "No quota left.") },
+        server: { afterVerify: () => new CloudropError(code as CloudropErrorCode, "No quota left.") },
       };
       const fixture = serverFixture({ avatar }, { plugins: [plugin] });
-      const response = await fixture.post("upload", uploadBody);
+      const ticket = await fixture.single("avatar", { name: "a.png", size: 10, type: "image/png" });
+      const stored = { type: "image/png", metadata: { "cloudrop-id": ticket.id } };
+      await fixture.storage.put(ticket.key, new Uint8Array(10), stored);
+      const response = await fixture.post("complete", { token: ticket.token });
       expect({ status: response.status, body: await response.json(), logged: fixture.logger.errors }).toEqual({
         status: 500,
         body: {
@@ -99,7 +103,7 @@ describe("cloudrop.handler failures", () => {
         logged: [
           {
             message:
-              "cloudrop: /upload failed with an error code the server cannot send, so the client got a generic 500. Return a CloudropError with one of cloudrop's server codes, not a client-only code such as ABORTED.",
+              "cloudrop: /complete failed with an error code the server cannot send, so the client got a generic 500. Return a CloudropError with one of cloudrop's server codes, not a client-only code such as ABORTED.",
             error: expect.objectContaining({ code, message: "No quota left." }),
           },
         ],

@@ -38,6 +38,7 @@ export {
   type RouteCallbacks,
   type RouteDefinition,
   type RoutePolicy,
+  rateLimited,
   route,
   unauthorized,
 } from "./server/route.ts";

@@ -12,11 +12,11 @@ import {
   type SingleTicket,
   type UploadRequest,
 } from "../protocol/types.ts";
+import { parseRetryAfter, waitAtLeast } from "../retry-after.ts";
 import { type Account, encodeAccount } from "./account.ts";
 import { readCompleted, readErrorBody, readSignedParts, readSignedRequest, readTickets } from "./answers.ts";
 import { aborted, accountFailed, headersFailed, serverBusy, serverUnreachable, unreadableAnswer } from "./failures.ts";
 import { createKeepaliveBudget } from "./keepalive.ts";
-import { parseRetryAfter, waitAtLeast } from "./retry.ts";
 
 /** How the client sends every request: the endpoints' POSTs and the bucket's PUTs. */
 export type ClientFetch = (url: string, init: RequestInit) => Promise<Response>;

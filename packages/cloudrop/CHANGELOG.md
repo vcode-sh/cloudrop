@@ -114,6 +114,16 @@ Every notable change to the `cloudrop` package. The format follows
   such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
   `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
   compiles (`M12-T5`, `M12-T6`).
+- `RATE_LIMITED` answers HTTP 429 from every source. Before: storage throttling, and a plugin's `RATE_LIMITED`,
+  answered 503. After: 429, with `Retry-After` when the bucket or `rateLimited()` gave a wait. A proxy, monitor or
+  custom client that keyed on 503 from the upload server keys on 429 (`M12-E3`).
+- A plugin's `beforeUpload` refuses only with the codes `authorize` may use. Before: any server code was sent as
+  returned, such as `NOT_FOUND` with 404 or `STORAGE_ERROR` with 502. After: such a refusal answers the generic,
+  non-retryable `SERVER_ERROR` with 500, and the log says `cloudrop: a plugin's beforeUpload returned NOT_FOUND, which
+  /upload cannot send. Return one of …`. Return one of the listed codes, such as `FORBIDDEN` (`M12-E1`).
+- The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
+  600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
+  such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
 
 ### Added
 
@@ -123,6 +133,12 @@ Every notable change to the `cloudrop` package. The format follows
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
 - `CloudropPlugin<TAuth>` types `auth` in every hook of a plugin, checked against the routes' authorize results
   (`M12-T5`).
+- `rateLimited(seconds, message?)` from `cloudrop`: `authorize` refuses with `RATE_LIMITED`, answered 429 with
+  `Retry-After` (`M12-E2`).
+- `authorize` may return a `CloudropError`, and it and a plugin's `beforeUpload` refuse `/upload` with any of
+  `UNAUTHORIZED`, `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`,
+  `TOO_MANY_FILES`, `INVALID_METADATA`, `INVALID_INPUT` and `SERVER_ERROR`, sent without its `parts`, `file` or
+  `cause`. Any other code answers the generic 500 and is logged with that list (`M12-E1`).
 - `DeleteContext<TDeleted, TErased>`: annotate `onDelete`'s parameter and `api.deleteFile` and `api.eraseOwner` take a
   `context` of that type, required when it does not admit `undefined` (`M12-T6`).
 

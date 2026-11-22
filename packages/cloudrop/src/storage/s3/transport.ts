@@ -134,7 +134,7 @@ export async function send(
       // NaN without a readable Date header, which storageError reads as no offset.
       const clockOffsetMs = Date.parse(response.headers.get("date") ?? "") - signedAt.getTime();
       const { bytes } = await readBody(response, MAX_ERROR_BYTES);
-      return fail(storageError(status, decoder.decode(bytes), clockOffsetMs));
+      return fail(storageError(status, decoder.decode(bytes), clockOffsetMs, response.headers.get("retry-after")));
     }
     // A server that ignores Range answers 200 with the whole object; never read gigabytes for a 4 KiB sniff.
     if (headers.range !== undefined && response.status !== 206) {

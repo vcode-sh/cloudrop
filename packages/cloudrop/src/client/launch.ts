@@ -4,13 +4,14 @@
 // at once and leaves an /upload in flight to answer, so the tickets it brings can be aborted (M11-R261).
 
 import { CloudropError, fail, type Result } from "../errors.ts";
+import { retryAfterOf } from "../retry-after.ts";
 import { counted } from "./close.ts";
 import type { Ticket } from "./endpoints.ts";
 import { type Entry, held, settle } from "./entry.ts";
 import { aborted, unreadableAnswer, withFile } from "./failures.ts";
 import type { Job } from "./job-run.ts";
 import { uploadOf } from "./persist.ts";
-import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay, withRetry } from "./retry.ts";
+import { MAX_ATTEMPTS, pause, retryDelay, waitsTooLong, withRetry } from "./retry.ts";
 import type { UploadContext } from "./upload.ts";
 
 type Answer = Result<(Ticket | CloudropError)[]>;
@@ -31,11 +32,14 @@ function newRequestKey(): string {
 
 /**
  * A file /upload refused at `attempt`. A retryable refusal asks again for this file alone, within the budget and after
- * the wait of any request's retry (M3-U92); the file stays queued meanwhile. A file cancelled meanwhile ends aborted
+ * the wait of any request's retry (M3-U92); the file stays queued meanwhile. One that asks to wait longer than the
+ * backoff's cap fails the file, retryable, for the app's retry() (M12-E4). A file cancelled meanwhile ends aborted
  * and sends nothing: it holds no ticket the server must be told about (M3-U51). Resolves once the file has settled.
  */
 async function refused(job: Job, entry: Entry, refusal: CloudropError, attempt: number): Promise<void> {
-  if (!refusal.retryable || attempt === MAX_ATTEMPTS) return settle(entry, "failed", withFile(refusal, entry));
+  if (!refusal.retryable || attempt === MAX_ATTEMPTS || waitsTooLong(refusal)) {
+    return settle(entry, "failed", withFile(refusal, entry));
+  }
   await launch(job, [entry], { first: attempt + 1, waitMs: retryDelay(attempt, retryAfterOf(refusal)) });
   return entry.run;
 }

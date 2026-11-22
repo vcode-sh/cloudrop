@@ -4,9 +4,10 @@
 
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { PARTS_PER_SIGN, type SignedPart, type SignedRequest } from "../protocol/types.ts";
+import { retryAfterOf } from "../retry-after.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import { aborted, unreadableAnswer } from "./failures.ts";
-import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay } from "./retry.ts";
+import { MAX_ATTEMPTS, pause, retryDelay } from "./retry.ts";
 
 /** At most this many parts of one file in flight (spec §6.1). */
 const PARTS_IN_FLIGHT = 4;

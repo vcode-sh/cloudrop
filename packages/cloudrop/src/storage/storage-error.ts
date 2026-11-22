@@ -1,4 +1,5 @@
 import { CloudropError, type CloudropErrorCode } from "../errors.ts";
+import { parseRetryAfter, waitAtLeast } from "../retry-after.ts";
 import { xmlValue } from "./xml.ts";
 
 const INVALID_PART_CODES = new Set(["InvalidPart", "InvalidPartOrder", "EntityTooSmall"]);
@@ -115,15 +116,25 @@ const RULES: readonly Rule[] = [
  * Turns a failed S3 response into a CloudropError. 429 and 503 are matched by status, never by S3 code: real R2
  * answered a same-key write burst with HTTP 429 and S3 code "ServiceUnavailable" (docs/research/r2-spike-findings.md, Q9).
  * `clockOffsetMs` is the answer's Date header minus the request's signing time: an answer to HEAD has no body, so a
- * bare 403 that far off is the clock, not the credentials (M9-H2).
+ * bare 403 that far off is the clock, not the credentials (M9-H2). `retryAfter`, the answer's Retry-After header, is
+ * recorded as the wait of an error worth retrying (M12-E3).
  */
-export function storageError(status: number, body: string, clockOffsetMs = 0): CloudropError {
+export function storageError(
+  status: number,
+  body: string,
+  clockOffsetMs = 0,
+  retryAfter: string | null = null,
+): CloudropError {
   const rawCode = xmlValue(body, "Code");
   // The code comes from the response body and goes to logs, so accept only what an S3 code looks like.
   const storageCode = rawCode && /^[A-Za-z0-9]{1,64}$/.test(rawCode) ? rawCode : undefined;
   const skewed = status === 403 && storageCode === undefined && Math.abs(clockOffsetMs) > MAX_CLOCK_SKEW_MS;
   const rule = skewed ? CLOCK_SKEWED : RULES.find((candidate) => candidate.matches(status, storageCode));
-  if (rule) return new CloudropError(rule.code, rule.message, { status, storageCode, retryable: rule.retryable });
+  if (rule?.retryable) {
+    const error = new CloudropError(rule.code, rule.message, { status, storageCode, retryable: true });
+    return waitAtLeast(error, parseRetryAfter(retryAfter));
+  }
+  if (rule) return new CloudropError(rule.code, rule.message, { status, storageCode });
   return new CloudropError(
     "STORAGE_ERROR",
     `The storage service rejected the request (HTTP ${status}). Check the key, size and headers you passed, then retry.`,

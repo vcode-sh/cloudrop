@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { SignedPart } from "../protocol/types.ts";
+import { waitAtLeast } from "../retry-after.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import {
   aborted,
@@ -17,7 +18,6 @@ import {
   unreadableAnswer,
 } from "./failures.ts";
 import { nextStep, type PartSender, sendParts } from "./parts.ts";
-import { waitAtLeast } from "./retry.ts";
 
 const HOUR_MS = 3_600_000;
 

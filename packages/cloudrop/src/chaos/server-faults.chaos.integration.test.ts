@@ -16,7 +16,7 @@ const loggedErrors = () =>
     return { message, code, retryable, status, storageCode };
   });
 
-test("a CompleteMultipartUpload the storage answers 503 reaches the client as a retryable RATE_LIMITED, and the retried /complete finishes the file", async () => {
+test("a CompleteMultipartUpload the storage answers 503 reaches the client as a retryable RATE_LIMITED with 429, and the retried /complete finishes the file", async () => {
   chaos.proxy.set([
     {
       match: { kind: "server", operation: "CompleteMultipartUpload" },
@@ -30,7 +30,7 @@ test("a CompleteMultipartUpload the storage answers 503 reaches the client as a 
   expect(error).toBeNull();
   await chaos.expectStored(data?.file.key ?? "", file);
   await chaos.expectNoUploadsLeft();
-  expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /complete 503", "POST /complete 200"]);
+  expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /complete 429", "POST /complete 200"]);
   expect(chaos.appErrors()).toEqual([
     {
       error: { code: "RATE_LIMITED", message: "The storage service is busy. Try again in a moment.", retryable: true },

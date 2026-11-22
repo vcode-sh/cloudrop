@@ -2,6 +2,7 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { SignedRequest } from "../protocol/types.ts";
+import { parseRetryAfter } from "../retry-after.ts";
 import type { ClientFetch } from "./endpoints.ts";
 import {
   aborted,
@@ -13,7 +14,6 @@ import {
   uploadGone,
   uploadRejected,
 } from "./failures.ts";
-import { parseRetryAfter } from "./retry.ts";
 
 /**
  * stored: the object or part is in the bucket. opaque: no answer could be read; renew the URL once, wait, retry.
