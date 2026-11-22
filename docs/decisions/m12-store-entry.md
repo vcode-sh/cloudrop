@@ -32,7 +32,8 @@ Entries start from 1.
   brings the code. A symbol from `Symbol.for` lets a store built by a second copy of cloudrop be recognised, so it is
   refused by its version (`M12-S2`) instead of reported as carrying nothing.
 - **If wrong:** a wrapper that copies a store without spread (from `Object.entries`, a class without the symbol) loses
-  the code; the server then says so on every request (`M12-S2`). Moving back is the four imports in the endpoints and
+  the code; the server then logs that at start and answers every request with a retryable 500 and every `api` call
+  with `INVALID_CONFIG` (`M12-S2`). Moving back is the four imports in the endpoints and
   `api.ts`.
 - **Status:** in force.
 - **Visible in:** `src/server/store-paths.ts`, `src/store/paths.ts`, `src/store/define-store.ts`,
@@ -51,8 +52,9 @@ Entries start from 1.
   from "cloudrop/store"; if you wrapped an adapter's store, copy it with spread ({ ...store }), which keeps that code.`
   Paths whose `version` is not 1 answer `cloudrop is installed twice: the store's adapter comes from another copy.
   Install cloudrop once.` The failure is reported through `ready`, the path a missing environment setting takes, so
-  the logger hears it once per message and no client sees the server's configuration. `createCloudrop` also logs it
-  once at start (`logger.error`, from `announce`), so a server is not silent about it until its first request.
+  no client sees the server's configuration. The logger hears it at start, from `createCloudrop` (`logger.error`, in
+  `announce`), so a server is not silent about it until its first request; then once more from the handler, on the
+  first request it fails, and again only when the message changes.
 - **Why:** spec §5 and the brief ask for `INVALID_CONFIG` on the requests and the `api` calls, which needs a server
   that was built; throwing from `createCloudrop`, as other option mistakes do, would leave no `api` to answer. The
   returned object is the same one because a store may be a class instance whose methods need `this` (the delete
