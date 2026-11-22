@@ -1,8 +1,8 @@
 # Plugins
 
 `cloudrop/plugins` holds the plugins cloudrop ships for `createCloudrop({ plugins })`. They run on the server only and
-add nothing to the client. Today there is one, `contentChecks()`. To write your own, see
-[Plugin hooks](server.md#plugin-hooks).
+add nothing to the client. There is one, `contentChecks()`, and a recipe for the check it does not make,
+[scanning uploads for malware](#scanning-uploads). To write your own, see [Plugin hooks](server.md#plugin-hooks).
 
 ## contentChecks()
 
@@ -12,11 +12,10 @@ checks the declared type at `/upload`, before anything is signed, and the conten
 of the stored file.
 
 ```ts
-import { createCloudrop, r2, route } from "cloudrop";
+import { createCloudrop, route } from "cloudrop";
 import { contentChecks } from "cloudrop/plugins";
 
 export const cloudrop = createCloudrop({
-  storage: r2({ bucket: "uploads" }),
   routes: {
     avatar: route({ accept: "image/*", maxSize: "5MB", authorize }),
     document: route({ accept: ["application/pdf", "image/*"], maxSize: "50MB", authorize }),
@@ -292,6 +291,55 @@ may reach either parser, so the check reads both ways and the root either readin
   the file passes as the type it was sent as. A root hidden behind such an instruction is not seen either.
 - **It costs one ranged `GET` per completed file** (a Class B operation on R2), outside any database transaction. An
   empty file is not read: R2 answers any range of an empty object with `416` (measured 2026-11-21).
+
+## Scanning uploads
+
+cloudrop scans nothing for malware: `contentChecks()` looks at what a file is, not at what it carries. A plugin of
+about ten lines hands each file to your scanning service before the upload completes:
+
+<!-- scan-recipe -->
+```ts
+import { CloudropError, type CloudropPlugin } from "cloudrop";
+
+/** Refuses an infected file at /complete. `scan` is your scanning service: it reads the URL and gives its verdict. */
+export function virusScan(scan: (url: string) => Promise<{ infected: boolean }>): CloudropPlugin {
+  return {
+    id: "virus-scan",
+    server: {
+      async afterVerify({ file, storage }) {
+        const link = await storage.presignGet(file.key, { expiresIn: 300 });
+        if (link.error) throw link.error; // a throw keeps the object, and the client completes again
+        const { infected } = await scan(link.data.url); // so does a scanner that is down: it fails closed
+        if (!infected) return undefined;
+        return new CloudropError("VERIFICATION_FAILED", "This file did not pass the virus scan. Pick another file.");
+      },
+    },
+  };
+}
+```
+
+Pass it with the others, `plugins: [contentChecks(), virusScan((url) => myScanner.scanUrl(url))]`, where `scanUrl`
+stands for your service's call. The URL lets whoever holds it read the file for 5 minutes: hand it to the scanner and
+never log it. A scanner that takes the bytes instead can read them with `storage.getRange(file.key, 0, file.size - 1)`,
+for a file of at least one byte.
+
+- **An infected file** is refused like any `afterVerify` refusal: the client gets `VERIFICATION_FAILED` (HTTP 422, not
+  retryable) with your message, the object is deleted, every plugin's `onAbort` runs with `reason: "rejected"`, and
+  with a [database store](store.md) the row ends `rejected`, so a retry answers `UPLOAD_EXPIRED` and nothing was ever
+  `completed`.
+- **A scanner that fails** fails closed: the throw keeps the object and answers a retryable `SERVER_ERROR` (HTTP
+  500), the file is not completed, and the client sends `/complete` again, which scans again. Nothing reaches
+  `onComplete` unscanned.
+- **It runs inside `/complete`**, before `onComplete`, and the client counts a `/complete` slower than 120 seconds as
+  no answer and asks again ([Stalled requests](client.md#stalled-requests)). A scan must fit in that budget with
+  everything else `/complete` does. A scanner that takes longer belongs in a job of your own, started from
+  `afterComplete`, with the file kept from your users until it passes.
+- **Keep the route `visibility: "private"`.** Between its `PUT` and `/complete` the object is already in the bucket:
+  on a public route, anyone who has its URL can read it before the scan ends. On a private route only a URL you sign
+  can, as the recipe's.
+
+cloudrop ships no scanner: each one is a service of its own, with its own licence and cost, and this recipe is what a
+plugin for it would do. `src/plugins/scan-recipe.test.ts` runs the recipe on the fake R2, with a store.
 
 Rulings and their reasons: [M10-K](../decisions/m10-content.md) for the checks, [M11-K](../decisions/m11-content.md)
 for what a refusal carries, and the entries of the review before 0.6.0 that changed what is detected

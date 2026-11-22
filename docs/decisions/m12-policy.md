@@ -75,3 +75,28 @@ Entries start from 1.
   the release documentation (spec §8, plan Task 11).
 - **Source:** owner, 2026-11-22.
 - **Visible in:** `README.md` ("Requirements"), `packages/cloudrop/package.json` (`typescript`).
+
+### M12-P4: framework recipes, two of them run against these versions
+
+- **Decision:** `docs/guide/server.md` ("Other frameworks") gives a mount for Express 5, Fastify 5, Hono, Bun, Elysia,
+  SvelteKit, React Router 7, Astro, Nuxt and Nitro (h3 v1 and v2), Deno and Workers, each with its trap, and the five
+  traps they share: a body parser that reads first, a mount that strips the prefix (Hono's and Elysia's `mount`), a
+  route that misses `OPTIONS` (React Router's preflight goes to the `loader`), CORS middleware over the path, and the
+  origin the framework sees (SvelteKit's `adapter-node` without `ORIGIN`, h3 v1 trusting `X-Forwarded-Proto`). Fastify
+  is mounted as an encapsulated plugin that removes the content-type parsers and adds a `*` parser that leaves the body
+  unread, then `reply.hijack()` and `toNodeHandler`, with no adapter of cloudrop's own. On 2026-11-22 the Express and
+  Fastify recipes ran with the packed candidate on Node 26.13.0, Express 5.3.0 and Fastify 5.12.8, in a scratch
+  directory deleted afterwards: for each, `/upload` from a trusted origin answered 200 with a ticket, its preflight 204
+  with that origin, and a sibling JSON route still parsed its body. The traps were run too: `express.json()` before
+  cloudrop, and the Fastify route without the two parser lines, each made `/upload` answer `400 INVALID_INPUT`. Every
+  snippet was type-checked with TypeScript 7.0.2 against Hono 4.13.20, Elysia 1.4.32, h3 1.15.11 and 2.0.8,
+  `@sveltejs/kit` 3.4.0, React Router 7.18.6 and Astro 7.4.13; the others rest on each framework's documentation, read
+  for the 1.0 design (spec 1.0 §8), where Hono, Bun, Elysia and h3 were also run with a handler that echoed the request.
+- **Why:** spec 1.0 §8: the base spec promised a one-line mount for every framework, and the 1.0 design found three
+  that silently break it (Fastify's parsers, React Router's `OPTIONS`, path-stripping mounts). Only Express and Fastify
+  go through `toNodeHandler`, where a body read first fails without any error from the framework, so those two were
+  run.
+- **If wrong:** a framework's next major changes its mount; the recipe names the version it was checked against, and
+  the fix is a guide edit. No recipe adds code to the package.
+- **Status:** in force.
+- **Visible in:** `docs/guide/server.md` ("Mounting the handler").

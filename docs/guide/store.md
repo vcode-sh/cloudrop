@@ -24,11 +24,10 @@ keeps one row per upload in two tables of your database.
 
    ```ts
    // lib/cloudrop.ts
-   import { createCloudrop, r2, unauthorized } from "cloudrop";
+   import { createCloudrop, unauthorized } from "cloudrop";
 
    export const cloudrop = createCloudrop({
-     storage: r2({ bucket: "media" }),
-     store,
+     store, // storage: r2() by default, from the CLOUDROP_R2_* variables
      quota: () => 1024 * 1024 * 1024, // 1 GiB per owner
      routes: {
        avatar: store.route(
@@ -271,9 +270,9 @@ Use the tool you query with:
   ```
 
   On SQLite, `cloudropSqliteTables()`. Both take `{ tables }`, the same names you pass to `drizzleStore`.
-  `api.files({ owner })` lists a user's files and `api.allFiles()` every owner's; for anything else, read the tables freely
-  (`db.select().from(cloudropFiles)`): they are your app's. Write to them only through the store, which keeps the
-  usage counters in step with the files.
+  `api.files({ owner })` lists a user's files and `api.allFiles()` every owner's; for a join with your own tables, read
+  them with your own queries (`db.select().from(cloudropFiles)`), by the rules of
+  [Your own queries](#your-own-queries): which columns are guaranteed, and why you never write to them.
 - **Everyone else:** run the SQL below in a migration. On D1: `wrangler d1 migrations create DB cloudrop`, paste the
   SQLite statements into the new file, then `wrangler d1 migrations apply DB` (it applies to the local database; add
   `--remote` for the deployed one).
@@ -537,11 +536,29 @@ which prints the SQL below for your dialect and table names. Add them before you
   `prisma migrate dev --create-only`, add the `CREATE INDEX` line above to the generated `migration.sql`, then apply
   it with `prisma migrate dev`.
 
-Adding nullable columns rewrites no row on Postgres or SQLite, and is quick. On a large Postgres table, add the two
-columns first, then build the index by hand with `CREATE INDEX CONCURRENTLY` before the migration's `CREATE INDEX`
-(made `IF NOT EXISTS`) runs, as [Upgrading from 0.5](#upgrading-from-05) shows: the index needs the columns. A store you wrote yourself needs
-the four new methods `markErasure`, `erased`, `reopen` and `erasing`, and `reserve`'s new `"erased"` answer, before
-`createCloudrop` accepts it.
+Adding nullable columns rewrites no row on Postgres or SQLite, and is quick. On a large Postgres table a plain
+`CREATE INDEX` blocks uploads while it builds, and the index needs the columns, so build it by hand between the two,
+in one of two ways:
+
+- **One migration, made safe to run after you.** Write its statements with `IF NOT EXISTS`, so that it finds what you
+  built and does nothing:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN IF NOT EXISTS erase_requested_at timestamptz(3), ADD COLUMN IF NOT EXISTS erased_at timestamptz(3);
+  CREATE INDEX IF NOT EXISTS "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
+  ```
+
+  Then run its `ALTER TABLE` by hand, then `CREATE INDEX CONCURRENTLY IF NOT EXISTS` with the rest of the index
+  statement, then the migration. Without `IF NOT EXISTS` on the columns, the migration's `ALTER TABLE` answers
+  `column "erase_requested_at" of relation "cloudrop_usage" already exists` and stops. Edit a migration that
+  drizzle-kit or Prisma generated the same way.
+- **Two migrations.** The first adds the columns; apply it. Build the index by hand with `CREATE INDEX CONCURRENTLY`,
+  then apply a second migration with the `CREATE INDEX IF NOT EXISTS` above.
+
+Either way, check that the index is valid, as [Upgrading from 0.5](#upgrading-from-05) shows, and send
+`CONCURRENTLY` as a statement of its own, outside any transaction. A store you wrote yourself needs the four new
+methods `markErasure`, `erased`, `reopen` and `erasing`, and `reserve`'s new `"erased"` answer, before `createCloudrop`
+accepts it.
 
 ### Tables in another schema
 
@@ -1095,22 +1112,14 @@ are emptied with [`deletePrefix`](server.md) only once the owner's rows are eras
 
 cloudrop cannot see your users, so finding the accounts that are gone stays your app's: `cloudrop_usage` has a row for
 every owner that ever uploaded, and an anti-join with your user table finds those whose account is gone and who are not
-marked yet. On Postgres, with a `"user"` table keyed by `id`:
-
-```sql
-SELECT u.owner FROM cloudrop_usage AS u
-WHERE u.erase_requested_at IS NULL
-  AND NOT EXISTS (SELECT 1 FROM "user" AS a WHERE a.id = u.owner)
-ORDER BY u.owner
-LIMIT 100;
-```
-
-Call `eraseOwner` for each owner it answers, on a schedule, page after page; marked owners leave the query, and the
-sweep finishes them.
+marked yet. The query, for Postgres and SQLite, and the loop that calls `eraseOwner` for each owner it answers:
+[Owners who no longer exist](#owners-who-no-longer-exist).
 
 ## File operations
 
-With a store, `cloudrop.api` gains these, each returning `{ data, error }`. Without one they answer `INVALID_CONFIG`.
+With a store, `cloudrop.api` gains these, each returning `{ data, error }`. Without one they are not in `api`'s type,
+and a JavaScript caller gets `INVALID_CONFIG` from them. A store that only some deployments pass:
+[An optional store](#an-optional-store).
 
 | Call | What it does |
 | --- | --- |
@@ -1150,6 +1159,290 @@ if (data?.deleted) await notifyOwner(id); // only the call that deleted the file
 - **An error means the file was not deleted by this call**: `NOT_FOUND`, your `onDelete`'s refusal, or a retryable
   `SERVER_ERROR` when the hook threw or the database failed. After a database failure the deletion may have been
   committed all the same, and the call that follows then answers `deleted: false`.
+
+## Your own queries
+
+`cloudrop_files` and `cloudrop_usage` are tables of your app's database, and reading them with your own SQL is
+supported: an admin inventory that searches your users too, a usage page, a check for stuck completions. Use `api` for
+what it already answers (`api.files`, `api.allFiles`, `api.usage`); write SQL for what crosses into your own tables.
+Read them, and never write to them ([Never write](#never-write)).
+
+### What is guaranteed
+
+These columns keep their names, types and meaning across every 1.x release. Removing or renaming one, changing its
+type or what it holds is a major release. A minor may add a column, an index, or a value of `status`, as the
+stability guide allows new members of a union: list the statuses a query wants
+(`status IN ('rejected', 'failed')`), rather than the ones it does not (`status <> 'completed'`).
+
+| `cloudrop_files` | Postgres | SQLite and D1 | Holds |
+| --- | --- | --- | --- |
+| `id` | `text` | `TEXT` | The file's id, `file.id` everywhere: a ULID, so it sorts by creation to the millisecond. |
+| `route` | `text` | `TEXT` | The route's name. |
+| `key` | `text` | `TEXT` | The object's key in the bucket, in Unicode's NFC form. |
+| `owner` | `text`, null | `TEXT`, null | What the route's `owner` answered; NULL for a route without `owner` or an answer of null. |
+| `status` | `text` | `TEXT` | `pending`, `completing`, `completed`, `deleted`, `aborted`, `expired`, `rejected` or `failed`. |
+| `name` | `text` | `TEXT` | The file's name as the browser sent it, in NFC. |
+| `type` | `text` | `TEXT` | The type it was sent as, which `/complete` verified. |
+| `size` | `bigint` | `INTEGER` | Its size in bytes. |
+| `metadata` | `text`, null | `TEXT`, null | The route's validated metadata as JSON, or NULL. |
+| `result` | `text`, null | `TEXT`, null | What `onComplete` returned, as JSON, or NULL. Set only on `completed` and `deleted` rows. |
+| `claimed_at` | `timestamptz(3)`, null | `INTEGER`, null | When a `/complete` claimed the file to complete it. |
+| `expires_at` | `timestamptz(3)` | `INTEGER` | Its upload token's deadline, 24 hours after `/upload`. |
+| `created_at` | `timestamptz(3)` | `INTEGER` | When `/upload` accepted it. |
+| `completed_at` | `timestamptz(3)`, null | `INTEGER`, null | When its completion was recorded. |
+| `ended_at` | `timestamptz(3)`, null | `INTEGER`, null | When it was deleted, aborted, expired, rejected or failed. |
+| `cleaned_at` | `timestamptz(3)`, null | `INTEGER`, null | When the bucket was proven to hold nothing more of it. |
+
+| `cloudrop_usage` | Postgres | SQLite and D1 | Holds |
+| --- | --- | --- | --- |
+| `owner` | `text` | `TEXT` | An owner that ever reserved a file. Its row stays for good, at zeros once its files are gone. |
+| `reserved_bytes` | `bigint` | `INTEGER` | The bytes of its unfinished uploads. |
+| `active_bytes` | `bigint` | `INTEGER` | The bytes of its completed files. |
+| `files` | `integer` | `INTEGER` | Its completed files. |
+| `erase_requested_at` | `timestamptz(3)`, null | `INTEGER`, null | When [`eraseOwner`](#erasing-an-owner) first marked it; NULL when it is not being erased. |
+| `erased_at` | `timestamptz(3)`, null | `INTEGER`, null | When that erasure finished. |
+
+Which time columns a row has set follows from its status, on every backend:
+
+| `status` | `claimed_at` | `completed_at` | `ended_at` | `cleaned_at` | `result` |
+| --- | --- | --- | --- | --- | --- |
+| `pending` | null | null | null | null | null |
+| `completing` | set | null | null | null | null |
+| `completed` | set | set | null | null | set or null |
+| `deleted` | set | set | set | set or null | set or null |
+| `aborted`, `expired` | null | null | set | set or null | null |
+| `rejected` | set | null | set | set or null | null |
+| `failed`, never started | null | null | set | set or null | null |
+| `failed`, a stuck completion | set | null | set | set | null |
+
+- **`updated_at`** exists on both tables and moves when cloudrop writes the row, but when it moves is not promised: it
+  is no watermark for "every row changed since".
+- **Internal:** `upload_id`, `claim` and `request_key`, which may change meaning in a minor, and the indexes' names.
+  That the indexes of [Create the tables](#create-the-tables) exist, on those columns, is guaranteed.
+- **A route you remove** from `routes` leaves its rows with its name. Keep it declared, with an `authorize` that
+  refuses, until its rows are erased: `api` types `route` as the names your server has, and a file whose route is gone
+  is deleted without its `onDelete` ([Retiring a route](server.md#define-routes)).
+
+### Reading safely
+
+- **One statement, one snapshot.** cloudrop writes while you read. At Postgres's READ COMMITTED each statement sees
+  the tables as they were when it started, so a page and a count read in two statements can disagree by an upload that
+  completed in between. When they must agree, read both in one `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`
+  transaction: your own transaction's level does not change the store's, which stays at READ COMMITTED. On SQLite,
+  read both inside one `BEGIN` and `COMMIT`, and keep it short: outside WAL mode a read transaction holds back writers.
+- **SQLite and D1 times are integer milliseconds** since 1970 UTC: compare them with `Date.now()`-style numbers and
+  show them with `datetime(created_at / 1000, 'unixepoch')`. Postgres times are `timestamptz(3)`.
+- **Drivers return `bigint` as text.** node-postgres and postgres.js answer `size`, `reserved_bytes`, `active_bytes`
+  and any `count(*)` or `sum(...)` as strings, to keep 64 bits: `Number(row.size)` is exact up to 8 PiB. Drizzle's
+  `cloudropPgTables()` columns select as numbers. SQLite drivers answer numbers.
+- **Order by `created_at, id`.** The files of one `/upload` share one `created_at`, so order and page by both, newest
+  first with `ORDER BY created_at DESC, id DESC`, and page with the last row's pair, as
+  [the inventory](#an-admin-inventory-searched-across-your-users) does, never with `OFFSET`: then files that arrive or
+  leave between two pages make the next one skip or repeat nothing.
+- **Keys and names are NFC.** Compare them with NFC text: `key = $1` with `key.normalize("NFC")`.
+- **Owner-less rows exist.** `owner` is NULL for a route without `owner`. Join your users with `LEFT JOIN` to keep
+  those rows, and look for missing owners with `NOT EXISTS`, never `NOT IN` a list that can hold NULL, which answers
+  no row at all.
+- **Only `completed` rows are files you have.** `pending` and `completing` are uploads under way; every other status
+  is an upload that ended, and a `deleted` row names a file that is gone.
+
+### Recipes
+
+Each recipe is one statement for Postgres (parameters `$1`, `$2`) and for SQLite or D1 (`?1`, `?2`), over the default
+table names, with your users in a table `"user"` keyed by a text `id`, with an `email`, as better-auth creates it.
+Rename what differs; with integer user ids compare `CAST(a.id AS text) = f.owner`. Run them with your driver, or with
+Drizzle's `` db.execute(sql`...`) ``. The database lane runs every statement of this section on both dialects, read
+from this page (`recipes.db.integration.test.ts`), so they stay true.
+
+#### An admin inventory, searched across your users
+
+Completed files of every owner whose name or owner's email matches a search, newest first. `$1` is a `LIKE` pattern:
+escape `\`, `%` and `_` in what was typed, then wrap it in `%`, as
+`` `%${search.replace(/[\\%_]/g, "\\$&")}%` ``. Postgres's `ILIKE` ignores case in any script, SQLite's `LIKE` in ASCII
+letters only.
+
+<!-- recipe:inventory:postgres -->
+```sql
+SELECT f.id, f.owner, u.email, f.route, f.name, f.type, f.size, f.created_at
+FROM cloudrop_files AS f
+LEFT JOIN "user" AS u ON u.id = f.owner
+WHERE f.status = 'completed'
+  AND (f.name ILIKE $1 ESCAPE '\' OR u.email ILIKE $1 ESCAPE '\')
+ORDER BY f.created_at DESC, f.id DESC
+LIMIT 50;
+```
+
+<!-- recipe:inventory:sqlite -->
+```sql
+SELECT f.id, f.owner, u.email, f.route, f.name, f.type, f.size, f.created_at
+FROM cloudrop_files AS f
+LEFT JOIN "user" AS u ON u.id = f.owner
+WHERE f.status = 'completed'
+  AND (f.name LIKE ?1 ESCAPE '\' OR u.email LIKE ?1 ESCAPE '\')
+ORDER BY f.created_at DESC, f.id DESC
+LIMIT 50;
+```
+
+The next page adds the last row's `created_at` and `id` as `$2` and `$3`:
+
+<!-- recipe:inventory-next:postgres -->
+```sql
+SELECT f.id, f.owner, u.email, f.route, f.name, f.type, f.size, f.created_at
+FROM cloudrop_files AS f
+LEFT JOIN "user" AS u ON u.id = f.owner
+WHERE f.status = 'completed'
+  AND (f.name ILIKE $1 ESCAPE '\' OR u.email ILIKE $1 ESCAPE '\')
+  AND (f.created_at, f.id) < ($2, $3)
+ORDER BY f.created_at DESC, f.id DESC
+LIMIT 50;
+```
+
+<!-- recipe:inventory-next:sqlite -->
+```sql
+SELECT f.id, f.owner, u.email, f.route, f.name, f.type, f.size, f.created_at
+FROM cloudrop_files AS f
+LEFT JOIN "user" AS u ON u.id = f.owner
+WHERE f.status = 'completed'
+  AND (f.name LIKE ?1 ESCAPE '\' OR u.email LIKE ?1 ESCAPE '\')
+  AND (f.created_at, f.id) < (?2, ?3)
+ORDER BY f.created_at DESC, f.id DESC
+LIMIT 50;
+```
+
+Files of routes without `owner` stay in, with a NULL `email`. A search reads files in upload order until it has 50
+that match, so one that matches almost nothing reads the whole table, as `api.allFiles` does with `name`
+([Known costs](#known-costs)): for frequent searches over many files, add an index of your own, such as a trigram
+index on Postgres.
+
+#### Stuck completions
+
+A completion whose server stopped in the middle of `/complete` stays `completing` until the sweep ends it, past its
+lease and `graceMs` past its token's deadline, as `failed` with its claim kept. The sweep reports each one once, in
+`reported`, and keeps its object, because its `onComplete` may have recorded the file. The same on Postgres and
+SQLite:
+
+<!-- recipe:stuck -->
+```sql
+SELECT id, owner, route, key, name, size, claimed_at, ended_at
+FROM cloudrop_files
+WHERE status = 'failed' AND claimed_at IS NOT NULL
+ORDER BY ended_at DESC, id DESC
+LIMIT 100;
+```
+
+Check each against your own records. If your app has the file, it is yours, whatever its row says. If not, remove its
+object with `api.deleteObject(row.key)`. Leave the row: it is the only record of that object.
+
+#### Failures of the last day
+
+Files refused at `/complete` (`rejected`: a failed check, a plugin's refusal such as `contentChecks()` or a
+[scanner](plugins.md#scanning-uploads), a multipart upload the bucket no longer had), and files that could not start
+or whose completion got stuck (`failed`). Cancels are `aborted`, and uploads nobody finished `expired`. `$1` is a day
+ago: `new Date(Date.now() - 86_400_000)` on Postgres, `Date.now() - 86_400_000` on SQLite.
+
+<!-- recipe:failures:postgres -->
+```sql
+SELECT id, owner, route, status, name, type, size, ended_at
+FROM cloudrop_files
+WHERE status IN ('rejected', 'failed') AND ended_at >= $1
+ORDER BY ended_at DESC, id DESC
+LIMIT 100;
+```
+
+<!-- recipe:failures:sqlite -->
+```sql
+SELECT id, owner, route, status, name, type, size, ended_at
+FROM cloudrop_files
+WHERE status IN ('rejected', 'failed') AND ended_at >= ?1
+ORDER BY ended_at DESC, id DESC
+LIMIT 100;
+```
+
+The server log has why each one ended; the row does not.
+
+#### Usage per owner
+
+The owners who keep the most, with their email. These are the counters the quota checks. The same on Postgres and
+SQLite:
+
+<!-- recipe:usage -->
+```sql
+SELECT u.owner, a.email, u.active_bytes, u.reserved_bytes, u.files
+FROM cloudrop_usage AS u
+LEFT JOIN "user" AS a ON a.id = u.owner
+ORDER BY u.active_bytes DESC, u.owner
+LIMIT 50;
+```
+
+An owner being erased, or erased, is listed with what it still holds; add `WHERE u.erase_requested_at IS NULL` to
+leave them out. Counters that look wrong after someone edited the tables by hand: `api.reconcile({ owner })`.
+
+#### Owners who no longer exist
+
+The owners with a usage row whose account is gone and who are not marked for erasure yet. The same on Postgres and
+SQLite:
+
+<!-- recipe:gone-owners -->
+```sql
+SELECT u.owner FROM cloudrop_usage AS u
+WHERE u.erase_requested_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "user" AS a WHERE a.id = u.owner)
+ORDER BY u.owner
+LIMIT 100;
+```
+
+Then erase each owner it answers. `eraseOwner` marks the owner first, so it leaves the query, and the
+[sweep](#the-sweep) finishes the erasure. Run it on a schedule, such as daily, page after page:
+
+```ts
+// goneOwners runs the query above through your database client and answers the owner column.
+async function eraseGoneOwners(goneOwners: () => Promise<string[]>) {
+  for (let owners = await goneOwners(); owners.length > 0; owners = await goneOwners()) {
+    for (const owner of owners) {
+      const { error } = await cloudrop.api.eraseOwner(owner);
+      // An owner the call could not mark is still in the query: stop, and the next run tries it again.
+      if (error) return console.error(`cloudrop: erasing ${owner} stopped: ${error.message}`);
+    }
+  }
+}
+```
+
+When `owner` is a team or a workspace rather than a user, join that table instead. And keep the query exact: an owner
+it answers by mistake, such as one whose account lives in another table, loses every file.
+
+### Never write
+
+- **No `INSERT` or `UPDATE` on either table, and no `DELETE` on `cloudrop_usage`.** The usage row holds the owner's
+  quota counters and erase mark: without it the next upload starts a row at zero, and an owner being erased can upload
+  again. A files row the store did not write breaks the counters and the record types every `api` call answers.
+- **Fix drift with `api.reconcile`**, which recounts usage from the rows, for one owner or all of them.
+- **The only delete is a purge of rows that are over**, to keep the table small. Ended rows whose bucket is proven
+  clean, of a day ago or more, so that no upload token still names them; a `/complete` with a token whose row is gone
+  is refused as cancelled. The same on Postgres (`$1`) and SQLite (`?1`), with `$1` as for
+  [the failures](#failures-of-the-last-day), or further back:
+
+  <!-- recipe:purge:postgres -->
+  ```sql
+  DELETE FROM cloudrop_files
+  WHERE status IN ('aborted', 'rejected', 'expired', 'deleted') AND cleaned_at < $1;
+  ```
+
+  <!-- recipe:purge:sqlite -->
+  ```sql
+  DELETE FROM cloudrop_files
+  WHERE status IN ('aborted', 'rejected', 'expired', 'deleted') AND cleaned_at < ?1;
+  ```
+
+  Nothing else: not a row without `cleaned_at`, which the sweep still needs to remove a late `PUT`'s object, and no
+  `failed` row, among them stuck completions, whose row is the only record of an object kept in the bucket.
+- **And the rows of an erased owner**, once its erasure is finished, if your erasure policy asks for it, since they
+  name the owner's files. Keep its usage row: its mark answers `done` and refuses its uploads.
+
+  <!-- recipe:purge-erased -->
+  ```sql
+  DELETE FROM cloudrop_files
+  WHERE owner IN (SELECT owner FROM cloudrop_usage WHERE erased_at IS NOT NULL);
+  ```
 
 ## The sweep
 
@@ -1321,8 +1614,9 @@ the store, a query being one statement or one batch:
   before the run started, reports it in `waiting`, and answers `done: false` until a later run. Servers whose clocks
   are more than `graceMs` apart (at least 15 minutes, 1 hour by default) can still hide such an upload from a run.
   Keep server clocks in sync (NTP), as SigV4 signing already requires.
-- **Bundle size.** The store paths add about 6.7 kB (gzip) to `cloudrop`'s server code whether or not you use a store;
-  the browser bundle does not change.
+- **Bundle size.** The store's code travels with the store object, so a server without a store does not carry it: the
+  bundled server measured 34.7 kB (gzip) with the store's code in 0.6.0, and about 29 kB without it in 1.0. An app
+  with a store ships that code with its adapter. The browser bundle does not change.
 
 ## Turning it on, or off, in a running app
 
@@ -1330,3 +1624,26 @@ Tokens signed with a store carry a `stored` mark. During a rolling deploy, a tok
 takes the stateless path on an instance with one, until it expires (24 hours); a stored token whose row is missing is
 refused as cancelled. Turning the store off makes stored tokens stateless again. So you can enable the store with a
 normal deploy: uploads started before it finish as they began, and their files count toward no owner's usage.
+
+### An optional store
+
+`api` has the store's calls only when `createCloudrop` surely gets a store: a store that may be `undefined`, such as
+`store: databaseUrl ? sqlStore(...) : undefined`, types `api` without them. Write one view of `api` with them, next to
+your server, and call the store's calls through it where the store may be off:
+
+```ts
+// lib/cloudrop.ts
+import { createCloudrop, type RouteName, type StoreFileApi } from "cloudrop";
+
+const store = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL) : undefined; // your sqlStore(...)
+export const cloudrop = createCloudrop({ store, routes: { avatar } });
+/** The store's calls, or null on a deployment without a store. */
+export const storeApi = store ? (cloudrop.api as StoreFileApi<RouteName<typeof cloudrop>>) : null;
+```
+
+```ts
+if (storeApi) await storeApi.revokeUploads(userId); // where you wrote cloudrop.api.revokeUploads(userId)
+```
+
+The view is a type only: at runtime it is `cloudrop.api`. Without a store, the same calls through `cloudrop.api` would
+answer `INVALID_CONFIG`.

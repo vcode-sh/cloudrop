@@ -10,10 +10,10 @@ quotas, revocation, cleanup), see [Database store](store.md).
 
 ```ts
 // lib/cloudrop.ts
-import { createCloudrop, r2, route, unauthorized } from "cloudrop";
+import { createCloudrop, route, unauthorized } from "cloudrop";
 
+// storage is r2() unless you pass one: it reads the four CLOUDROP_R2_* variables on the first request.
 export const cloudrop = createCloudrop({
-  storage: r2({ bucket: "media" }),
   routes: {
     avatar: route(
       {
@@ -204,6 +204,25 @@ Wrap such a value in a field of your own, such as `{ order: { route } }`.
 
 In every callback and plugin hook, `request` is for its headers and `url`:
 [its body is already read](#the-requests-body-is-already-read).
+
+**Retiring a route.** With a [store](store.md), a route's rows keep its name after you remove it from `routes`, and
+`api` types `route` as the names your server has. Keep a retired route declared, with an `authorize` that refuses,
+until its rows are erased: its files keep their `onDelete`, and every record `api` answers names a route the server
+knows. Give that `authorize` the result type it had, so its `owner` and `onDelete` keep their types and a
+[typed plugin](#plugin-hooks) still fits:
+
+```ts
+import { forbidden, type Refusal, route } from "cloudrop";
+
+const scans = route(
+  {
+    accept: "image/*",
+    maxSize: "10MB",
+    authorize: (): { userId: string } | Refusal => forbidden("This upload is closed."),
+  },
+  { owner: ({ userId }) => userId },
+);
+```
 
 ### Keys
 
@@ -488,11 +507,12 @@ of these functions:
 ```ts
 import { type CloudropPlugin, CloudropError } from "cloudrop";
 
-const quota: CloudropPlugin = {
+// Typed with what the routes' authorize returns, so auth.userId is a string in every hook.
+const quota: CloudropPlugin<{ userId: string }> = {
   id: "quota",
   server: {
     beforeUpload: async ({ files, auth }) => {
-      const ok = await reserveQuota(auth, files); // your app's quota check
+      const ok = await reserveQuota(auth.userId, files); // your app's quota check
       return ok ? undefined : new CloudropError("FORBIDDEN", "You are out of storage. Delete some files first.");
     },
     onAbort: async ({ file }) => {
@@ -501,6 +521,12 @@ const quota: CloudropPlugin = {
   },
 };
 ```
+
+`auth` in every hook is the JSON form of what `authorize` returned, the snapshot signed into the upload token: a
+`Date` there is its ISO string, so read it back with `new Date(auth.since)`. A plugin typed `CloudropPlugin<TAuth>`
+reads `auth` as that JSON form of `TAuth`, and `createCloudrop` refuses it, as a type error, beside a route whose
+`authorize` can answer without those fields, such as one with `allowAnyone`. An untyped `CloudropPlugin`, such as
+`contentChecks()`, reads `auth` as `unknown` and fits every server.
 
 A `beforeUpload` refusal refuses every file of the job with its code and message. `FORBIDDEN` says the user is signed
 in but may not upload this; the message says what to do (see [Errors](errors.md#upload-endpoint-errors)).
@@ -553,7 +579,7 @@ export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 `next build` loads `lib/cloudrop.ts`. Settings from the environment are read on the first request, so the build needs
 no secrets.
 
-### Node http, http2 and Express
+### Node http and http2
 
 ```ts
 import http from "node:http";
@@ -562,21 +588,6 @@ import { cloudrop } from "./lib/cloudrop";
 
 http.createServer(toNodeHandler(cloudrop)).listen(3000);
 ```
-
-With Express (installed separately), mount it at the path, before any body parser:
-
-```ts
-import express from "express";
-import { toNodeHandler } from "cloudrop/node";
-import { cloudrop } from "./lib/cloudrop";
-
-const app = express();
-app.use("/api/cloudrop", toNodeHandler(cloudrop));
-app.use(express.json()); // body parsers after cloudrop
-app.listen(3000);
-```
-
-A parser that reads the body first leaves nothing for cloudrop to read.
 
 `toNodeHandler` takes the request's origin from `Host` (or HTTP/2's `:authority`) and the scheme from the connection,
 never from `X-Forwarded-*` or `:scheme`, because that origin decides the same-origin check. Rather than guess an origin
@@ -591,7 +602,69 @@ such as `localhost`, it answers `400` when:
 
 A hand-built request without `rawHeaders` is read from `headers` alone.
 
-### Hono
+### Other frameworks
+
+Every framework below hands cloudrop the request as it came, with its whole path and its body unread. Each recipe was
+checked against the framework's own documentation; Express and Fastify were also run, with the versions in
+[`M12-P4`](../decisions/m12-policy.md). The traps they share:
+
+- **The body must reach cloudrop unread.** A body parser that runs first leaves nothing to read, and every `/upload`
+  answers `400 INVALID_INPUT`. Mount cloudrop before any parser, or switch the parsers off for its path.
+- **The whole path.** The handler matches `basePath`, so a mount that strips the prefix (Hono's and Elysia's `mount`)
+  hands it `/upload`, which it answers `404`. Use a catch-all route instead.
+- **Every method, `OPTIONS` included.** The handler answers the CORS preflight itself, and any method but `POST` with
+  `METHOD_NOT_ALLOWED`.
+- **No CORS middleware over its path**, such as `hono/cors`, `@fastify/cors` or Elysia's `cors()`: it answers the
+  preflight itself, by its own rules, and cloudrop's never runs. Scope it to your other routes.
+- **The origin the framework sees** is the one the same-origin check compares with the page's. Behind a proxy that
+  terminates TLS or rewrites `Host`, list the public origin in `trustedOrigins` ([Origins](#origins)).
+
+#### Express 5
+
+Mount it at the path, before any body parser:
+
+```ts
+import express from "express";
+import { toNodeHandler } from "cloudrop/node";
+import { cloudrop } from "./lib/cloudrop";
+
+const app = express();
+app.use("/api/cloudrop", toNodeHandler(cloudrop));
+app.use(express.json()); // body parsers after cloudrop
+app.listen(3000);
+```
+
+`app.use` keeps the whole path for cloudrop. As a route, Express 5 needs a named wildcard:
+`app.all("/api/cloudrop/*splat", toNodeHandler(cloudrop))`. With `express.json()` first, every `/upload` answers
+`400 INVALID_INPUT`.
+
+#### Fastify 5
+
+Fastify parses JSON and text bodies before a route runs, so cloudrop goes in a plugin of its own that removes the
+parsers, and takes the request over with `reply.hijack()`:
+
+```ts
+import Fastify from "fastify";
+import { toNodeHandler } from "cloudrop/node";
+import { cloudrop } from "./lib/cloudrop";
+
+const app = Fastify();
+const node = toNodeHandler(cloudrop);
+app.register(async (scope) => {
+  scope.removeAllContentTypeParsers(); // only inside this plugin: your other routes keep theirs
+  scope.addContentTypeParser("*", (_request, _payload, done) => done(null)); // leave the body unread
+  scope.all("/api/cloudrop/*", async (request, reply) => {
+    reply.hijack();
+    await node(request.raw, reply.raw);
+  });
+});
+await app.listen({ port: 3000 });
+```
+
+Without the two parser lines every `/upload` answers `400 INVALID_INPUT`. `request.raw.url` keeps the whole path,
+also under a plugin `prefix`, and `all` takes `OPTIONS`.
+
+#### Hono
 
 ```ts
 import { Hono } from "hono";
@@ -603,15 +676,11 @@ app.all("/api/cloudrop/*", (c) => cloudrop.handler(c.req.raw));
 export default app;
 ```
 
-`c.req.raw` is the standard `Request`. The path is your `basePath` followed by `/*`.
+`c.req.raw` is the standard `Request`. The path is your `basePath` followed by `/*`. Use `app.all`, not `app.post`,
+and not `app.mount`, which strips the prefix. Keep `hono/cors` off that path: scope it to your other routes, for
+example `app.use("/api/app/*", cors())`, as the [Hono guide](hono.md) does.
 
-- Use `app.all`, not `app.post`. The handler answers the CORS preflight (`OPTIONS`) itself, and answers any other
-  method with `METHOD_NOT_ALLOWED`.
-- Keep that path out of CORS middleware such as `hono/cors`. The handler already answers preflights from
-  `trustedOrigins` and sets the CORS headers on its own answers. A middleware would apply its own rules instead: scope
-  it to your other routes, for example `app.use("/api/app/*", cors())`.
-
-### Bun
+#### Bun
 
 ```ts
 import { cloudrop } from "./lib/cloudrop";
@@ -625,9 +694,93 @@ Bun.serve({
 });
 ```
 
-### Any runtime with Request and Response
+#### Elysia
 
-Deno, Cloudflare Workers and frameworks that speak `Request` and `Response` call the handler directly:
+```ts
+import { Elysia } from "elysia";
+import { cloudrop } from "./lib/cloudrop";
+
+new Elysia().all("/api/cloudrop/*", ({ request }) => cloudrop.handler(request), { parse: "none" }).listen(3000);
+```
+
+`parse: "none"` keeps Elysia from reading the body, which it does as soon as a handler asks for `body`. `.mount()`
+strips the prefix: use `.all`.
+
+#### SvelteKit
+
+```ts
+// src/routes/api/cloudrop/[...path]/+server.ts
+import type { RequestHandler } from "@sveltejs/kit";
+import { cloudrop } from "$lib/cloudrop";
+
+export const fallback: RequestHandler = ({ request }) => cloudrop.handler(request);
+```
+
+`fallback` answers every method the file does not export, `OPTIONS` included. With `adapter-node`, set `ORIGIN` to
+the site's origin, such as `ORIGIN=https://app.example.com`: without it the adapter takes every request as `https`, so
+a site served over `http` sees its own pages as cross-origin and gets `ORIGIN_NOT_ALLOWED`. Behind a proxy, set
+`PROTOCOL_HEADER` and `HOST_HEADER` instead, as the adapter's documentation says.
+
+#### React Router 7
+
+A resource route, in framework mode:
+
+```ts
+// app/routes.ts: route("api/cloudrop/*", "routes/cloudrop.ts")
+// app/routes/cloudrop.ts
+import type { LoaderFunctionArgs } from "react-router";
+import { cloudrop } from "../lib/cloudrop";
+
+export const loader = ({ request }: LoaderFunctionArgs) => cloudrop.handler(request);
+export const action = loader;
+```
+
+Export both and no default component. React Router sends `OPTIONS` to the `loader`, and `POST` to the `action`, so
+with the `action` alone every preflight fails.
+
+#### Astro
+
+```ts
+// src/pages/api/cloudrop/[...path].ts
+import type { APIRoute } from "astro";
+import { cloudrop } from "../../../lib/cloudrop";
+
+export const prerender = false;
+export const ALL: APIRoute = ({ request }) => cloudrop.handler(request);
+```
+
+The route renders on demand, so the site needs a server adapter; `prerender = false` is what keeps it out of a static
+build. `ALL` takes `OPTIONS`.
+
+#### Nuxt and Nitro
+
+Nuxt 3 and 4, and Nitro 2, run h3 v1, which builds the `Request` with `toWebRequest`:
+
+```ts
+// server/api/cloudrop/[...path].ts
+import { defineEventHandler, toWebRequest } from "h3";
+import { cloudrop } from "../../../lib/cloudrop";
+
+export default defineEventHandler((event) => cloudrop.handler(toWebRequest(event)));
+```
+
+Keep the file name without a method (not `[...path].post.ts`), or `OPTIONS` gets `405`. h3 v1 trusts a client's
+`X-Forwarded-Proto` when it builds the URL: behind a TLS proxy that gives the right origin, and a client that sends it
+falsely only makes its own request fail. Nitro 3 runs h3 v2, where the event carries the `Request` itself:
+
+```ts
+import { defineHandler } from "h3";
+import { cloudrop } from "../../../lib/cloudrop";
+
+export default defineHandler((event) => cloudrop.handler(event.req));
+```
+
+#### Deno and Cloudflare Workers
+
+```ts
+// Deno
+Deno.serve((request) => cloudrop.handler(request));
+```
 
 ```ts
 // Cloudflare Workers
@@ -636,7 +789,8 @@ export default {
 };
 ```
 
-On Workers, pass `secret` and the storage credentials explicitly unless your Worker exposes `process.env` (see
+Route your app's other paths before these when the server has any. On Workers, pass `secret` and the storage
+credentials explicitly unless your Worker exposes `process.env` (see
 [Settings from the environment](#settings-from-the-environment)); creating the server from the Worker's `env`:
 [Deployment](deployment.md#cloudflare-workers). How the server's parallel storage calls fit Workers' subrequest limits
 has not been measured yet.
