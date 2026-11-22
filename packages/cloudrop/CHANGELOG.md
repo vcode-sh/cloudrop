@@ -117,6 +117,12 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Added
 
+- `useUpload` options `onUploaded(file)` and `onError(error)`: called once per mounted component for each file of the
+  route that ends done or failed, and `onError` for a start refused before it had a file; never for a cancel, and never
+  late for a file that ended while nothing was mounted (`M12-H1`, `M12-H3`).
+- `useUpload().startError`: the route's last start refused before it had a file row, such as `CLIENT_CLOSED` for a
+  file picked after `close()`, which a pick or a drop used to lose; cleared by the route's next start and by `clear()`
+  (`M12-H2`).
 - `cloudrop/store`: `defineStore` and the store types, for a database store you write yourself (`M12-S2`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and

@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 // Contract: spec §6.1 (M4-B2, M4-B4, M4-B8, M4-B11) for what useUpload renders, through createUploadHooks on the real
 // client and the fake server: `files` lists every file of the route's jobs in start order and keeps a file's object
-// until that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs, for every
-// component on the route; a hook hidden by <Activity> shows what its jobs did meanwhile; unmounting leaves the jobs
-// running, and the next component on the route lists them; two components on one route share one list.
+// until that file changes; `totals` and `isUploading` span those jobs; clear() keeps failed and running jobs and drops
+// the start error (M12-H2), for every component on the route; a hook hidden by <Activity> shows what its jobs did
+// meanwhile; unmounting leaves the jobs running, and the next component on the route lists them; two components on one
+// route share one list.
 // Oracle: the server's verdicts for the route below, the requests the fixture saw and the statuses the client reports.
 
+import { File as NodeFile } from "node:buffer";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Activity, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -256,19 +258,24 @@ describe("what useUpload renders", () => {
     }).toEqual({ sender: ["a.txt done"], reader: ["a.txt done"], readerTotals: 1, other: ["b.txt done"], uploads: 2 });
   });
 
-  it("clear() from one component clears the route's settled uploads for every component on it", async () => {
+  it("clear() from one component clears the route's settled uploads and start error for every component on it", async () => {
     const { useUpload } = setup();
     const sender = renderHook(() => useUpload("notes"));
     const reader = renderHook(() => useUpload("notes"));
     const other = renderHook(() => useUpload("photos"));
     await act(() => sender.result.current.upload(note("alpha", "a.txt")));
     await act(() => other.result.current.upload(note("bravo", "b.txt")));
+    // Node's File is not this window's: the client refuses it before it has a file row (M12-H2).
+    await act(() => sender.result.current.upload(new NodeFile(["alpha"], "c.txt") as unknown as File));
+    const refused = reader.result.current.startError?.code;
     act(() => reader.result.current.clear());
 
     expect({
+      refused,
+      startError: sender.result.current.startError,
       sender: statuses(sender.result.current.files),
       reader: statuses(reader.result.current.files),
       other: statuses(other.result.current.files),
-    }).toEqual({ sender: [], reader: [], other: ["b.txt done"] });
+    }).toEqual({ refused: "INVALID_INPUT", startError: null, sender: [], reader: [], other: ["b.txt done"] });
   });
 });

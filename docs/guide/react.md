@@ -5,8 +5,8 @@ hooks: `useUpload` for a file input, a drop zone and a list of files with progre
 continuing large uploads after a reload. They are a thin layer over [`cloudrop/client`](client.md): every upload is a
 client job, and the hooks only render it.
 
-This page covers setup, a one-file input, a list of several files with progress and controls, drag and drop, resume
-after a reload, building a full upload UI on the hooks, what each hook returns, and how the hooks behave under server
+This page covers setup, a one-file input, a list of several files with progress and controls, drag and drop, reacting
+when a file ends and when a start is refused, resume after a reload, building a full upload UI on the hooks, what each hook returns, and how the hooks behave under server
 rendering, StrictMode and unmounting.
 
 ## Set up
@@ -177,6 +177,54 @@ renders, and
 `getInputProps` keeps it while `multiple` and `accept` stay the same, so an effect that lists one of them in its
 dependencies does not run again on every render.
 
+## When a file ends, and refused starts
+
+`onUploaded` and `onError` tell a component when a file of its route ends, such as to refresh a list of the user's
+files. `startError` shows a start that was refused before it had a file to list, which a pick or a drop would
+otherwise lose, since nothing awaits it.
+
+```tsx
+"use client";
+import { useUpload } from "../lib/upload";
+import { useQueryClient } from "@tanstack/react-query"; // or your own data layer
+
+export function Documents({ folderId }: { folderId: string }) {
+  const queries = useQueryClient();
+  const { files, startError, getInputProps } = useUpload("documents", {
+    metadata: { folderId },
+    multiple: true,
+    onUploaded: () => queries.invalidateQueries({ queryKey: ["documents", folderId] }),
+    onError: (error) => reportToYourTracker(error), // your error reporting, if you want failures there
+  });
+  return (
+    <section>
+      <input {...getInputProps()} aria-label="Documents" />
+      {startError && <p role="alert">{startError.message}</p>}
+      <ul>{files.map((file) => <li key={file.id}>{file.name}: {file.status}</li>)}</ul>
+    </section>
+  );
+}
+```
+
+- **`onUploaded(file)`** is called once for each file of the route that ends done, on its first try or after
+  `retry()`, with `{ id, name, status: "done", result }`; `result` is typed by the route's `onComplete`.
+- **`onError(error)`** is called once for each file of the route that ends failed, with `error.file` naming it, and once
+  for each start refused before it had a file (`error.file` is undefined). A cancelled file calls neither.
+- **Route-wide, like `files`.** Every mounted component on the route hears every file of the route, whichever component
+  started it, and two components on one route are each called once. Put the callback in the component that owns the
+  reaction, or give it to one of them only.
+- **Only while mounted.** A file that ended while no component on the route was mounted is not reported when one mounts
+  again; its row in `files` still shows how it ended. The latest render's functions are called, so a callback may read
+  current props and state, and StrictMode does not call them twice.
+- **A callback may start or retry an upload.** It runs after the components rendered the change, outside the client's
+  own work. One that throws does not stop the others: its error is thrown again in a separate task, for the console and
+  your error reporting.
+- **`startError`** is the route's last start refused without a file row: `CLIENT_CLOSED` after `close()`,
+  `INVALID_INPUT` for arguments the client cannot take, such as a `File` from another frame, or `INVALID_CONFIG` for a
+  wrong client option. Every component on the route shows it. The route's next start clears it, from any component, and
+  so does `clear()`; when two starts overlap, only the latest one sets it. Every other refusal, also of a whole
+  `/upload`, fails the files of that start, and their rows show it.
+
 ## Resume after a reload
 
 ```tsx
@@ -346,14 +394,26 @@ async function signOut() {
   sends in between, for a queued file or a retry, goes with the new user's session. On a route with a store and
   `owner`, `account` makes the server refuse it with `ACCOUNT_CHANGED` (see [Errors to show](#errors-to-show)), so
   the file never becomes the other user's; on a route without `owner`, nothing tells the two users apart.
-- **After `close()`** every `upload()` and `resumeUpload()` of the hooks resolves `CLIENT_CLOSED` without a request.
-  `useResumable()` and `forget()` keep working. The first `close()` decides: a later one, with or without options,
+- **After `close()`** every `upload()` and `resumeUpload()` of the hooks resolves `CLIENT_CLOSED` without a request,
+  and a file picked or dropped then adds no row: the route's `startError` holds that error, and `onError` hears it, so
+  the page can say the file was not uploaded (see [Errors to show](#errors-to-show)). `useResumable()` and `forget()`
+  keep working. The first `close()` decides: a later one, with or without options,
   changes nothing. A sign-out that fails leaves the page on a closed client, so reload then, as the example's
   `src/components/auth-panel.tsx` does after every sign-out.
 - **Keep the hooks per user.** A factory keeps its uploads in memory, so `uploadsFor` returns the same one while the
   same user stays signed in, and a component that unmounts finds its files again on its next mount.
 - **Effects, not render.** `close()` is permanent, so call it from an event handler or from an effect that runs again
   harmlessly, as `useCloseOtherUsers` does; never from an effect's cleanup, which StrictMode runs once on mount.
+
+A file picked during sign-out, or on a client `useCloseOtherUsers` closed, leaves no row in `files`. Show it from the
+route's `startError`; there is no need to wrap the client to catch it:
+
+```tsx
+const { useUpload } = useUploads();
+const { startError, getInputProps } = useUpload("documents", { metadata: { folderId: "inbox" } });
+// ...
+{startError?.code === "CLIENT_CLOSED" && <p role="status">Not uploaded: you signed out or changed accounts.</p>}
+```
 
 ## Build your upload UI
 
@@ -492,7 +552,7 @@ where the message alone is not the right thing to show:
 | `error.code` | When | What to show |
 | --- | --- | --- |
 | `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close()`, with or without `{ abort: true }`, at sign-out or from `useCloseOtherUsers`. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
-| `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say the file was not uploaded because the account changed. |
+| `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added; the route's `startError` holds it. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say from `startError` that the file was not uploaded because the account changed. |
 | `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
 | `FILE_TYPE_NOT_ALLOWED` with `error.content` | [`contentChecks()`](plugins.md#what-a-refusal-carries) refused the file. | The message, or your own words built from `error.content`, as below. |
 
@@ -530,7 +590,8 @@ Every other code and what it means: [Errors](errors.md).
 
 ## What the hooks return
 
-`useUpload(route, options?)`. Options: `metadata`, `multiple` (default `false`), `accept`.
+`useUpload(route, options?)`. Options: `metadata`, `multiple` (default `false`), `accept`, `onUploaded(file)` and
+`onError(error)` ([When a file ends](#when-a-file-ends-and-refused-starts)).
 
 | Field | What it is |
 | --- | --- |
@@ -538,6 +599,7 @@ Every other code and what it means: [Errors](errors.md).
 | `totals` | `bytes`, `size`, `progress`, `speed`, `eta`, `done`, `failed`, `aborted` and `count` across those uploads. |
 | `isUploading` | True while a file is queued, uploading or completing. A paused file is not uploading. |
 | `isDragOver` | True while files are dragged over the element that has `getDropProps()`. |
+| `startError` | The route's last start refused before it had a file row, or `null`; cleared by its next start and by `clear()`. |
 | `upload(files, { metadata }?)` | Starts one upload; resolves with its `UploadResult`, or `null` for no file. |
 | `getInputProps()` | `type`, `multiple`, `accept` and `onChange` for an `<input>`. |
 | `getDropProps()` | `onDragEnter`, `onDragOver`, `onDragLeave` and `onDrop` for any element. |

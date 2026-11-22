@@ -1,10 +1,16 @@
 // Type tests for cloudrop/react (spec §6.1, M4-B1 and M4-B2): the route name, its metadata and its result are inferred
-// from useUpload's first argument; metadata is required where the route's schema requires it; a record from
+// from useUpload's first argument, onUploaded's file included; metadata is required where the route's schema requires it; a record from
 // useResumable resumes only into a hook of its route. `bun run typecheck` compiles this file: every expectTypeOf and
 // every expect-error directive is an assertion. Oracle: the route definitions below.
 
 import { describe, expectTypeOf, it } from "vitest";
-import { type CompleteResponse, createCloudropClient, type ResumableUpload, type UploadResult } from "../client.ts";
+import {
+  type CloudropError,
+  type CompleteResponse,
+  createCloudropClient,
+  type ResumableUpload,
+  type UploadResult,
+} from "../client.ts";
 import { createUploadHooks } from "../react.ts";
 import { createCloudrop } from "../server/cloudrop.ts";
 import { allowAnyone, route } from "../server/route.ts";
@@ -74,6 +80,14 @@ describe("cloudrop/react types", () => {
       void avatar.upload([file], { metadata: { albumId: "a2" } });
       // @ts-expect-error the call's metadata is the route's too
       void avatar.upload([file], { metadata: { albumId: 1 } });
+
+      // onUploaded gets the route's result on a file that is surely done (M12-H1).
+      useUpload("avatar", {
+        metadata: { albumId: "a1" },
+        onUploaded: (done) => expectTypeOf(done.result).toEqualTypeOf<CompleteResponse<{ url: string | null }>>(),
+        onError: (error) => expectTypeOf(error).toEqualTypeOf<CloudropError>(),
+      });
+      expectTypeOf(avatar.startError).toEqualTypeOf<CloudropError | null>();
 
       // @ts-expect-error the avatar route's schema requires metadata
       useUpload("avatar");

@@ -4,6 +4,7 @@ import type { ChangeEvent, DragEvent } from "react";
 import type {
   ClientOptions,
   CloudropClient,
+  CloudropError,
   FileOutcome,
   FileSnapshot,
   InferableCloudrop,
@@ -26,19 +27,29 @@ export type UploadHooksOptions<TCloudrop extends InferableCloudrop> =
       client: CloudropClient<TCloudrop> & { resumable: (route?: RouteName<TCloudrop>) => unknown };
     };
 
-export interface UseUploadOptions<TMetadata> {
+export interface UseUploadOptions<TMetadata, R = unknown> {
   /** Sent with every upload of the hook, validated by the route's schema; the latest render's value is used. */
   metadata?: TMetadata;
   /** The input's `multiple`; without it a drop uploads only its first file. Default false. */
   multiple?: boolean;
   /** The input's `accept`, such as "image/*": it filters the file picker only, the route's `accept` decides. */
   accept?: string;
+  /**
+   * A file of this route ended done, on its first try or after retry(), from any component on the route. Called while
+   * this component is mounted; the latest render's function is called.
+   */
+  onUploaded?: (file: Extract<FileOutcome<R>, { status: "done" }>) => void;
+  /**
+   * A file of this route ended failed (error.file is set), or a start was refused without a file row (error.file is
+   * undefined). Never called for a cancel. Called as onUploaded is.
+   */
+  onError?: (error: CloudropError) => void;
 }
 
 /** The options argument is required when the route's metadata is. */
-export type UseUploadArguments<TMetadata> = undefined extends TMetadata
-  ? [options?: UseUploadOptions<TMetadata>]
-  : [options: UseUploadOptions<TMetadata> & { metadata: TMetadata }];
+export type UseUploadArguments<TMetadata, R = unknown> = undefined extends TMetadata
+  ? [options?: UseUploadOptions<TMetadata, R>]
+  : [options: UseUploadOptions<TMetadata, R> & { metadata: TMetadata }];
 
 /** One file of useUpload's `files`: the client's snapshot of it, with that file's controls (FileHandle). */
 export interface UploadItem<R> extends FileSnapshot<R> {
@@ -77,6 +88,11 @@ export interface UseUploadResult<R, TName extends string, TMetadata> {
   isUploading: boolean;
   /** True while files are dragged over the element that has getDropProps(). */
   isDragOver: boolean;
+  /**
+   * The route's last start refused without a file row, such as CLIENT_CLOSED after close(); cleared by the route's next
+   * start and by clear().
+   */
+  startError: CloudropError | null;
   /**
    * Starts one upload of the files and resolves with its result once every file has first settled. A FileList, an
    * array or one File; null or an empty list resolves null and starts nothing. The call's metadata replaces the hook's.
@@ -137,7 +153,7 @@ export interface UploadHooks<TCloudrop extends InferableCloudrop> {
    */
   useUpload<TName extends RouteName<TCloudrop>>(
     route: TName,
-    ...options: UseUploadArguments<RouteMetadata<TCloudrop, TName>>
+    ...options: UseUploadArguments<RouteMetadata<TCloudrop, TName>, RouteResult<TCloudrop, TName>>
   ): UseUploadResult<RouteResult<TCloudrop, TName>, TName, RouteMetadata<TCloudrop, TName>>;
   /**
    * The unfinished uploads this browser keeps, of `route` or of every route, without the ones this page holds; read
