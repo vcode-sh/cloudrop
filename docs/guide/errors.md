@@ -17,7 +17,7 @@ Every public call returns `{ data, error }` instead of throwing for an expected 
 | `parts` | `PARTS_MISSING` only: the part numbers to send again. |
 | `content` | `FILE_TYPE_NOT_ALLOWED` from [`contentChecks()`](plugins.md#what-a-refusal-carries), or from a plugin of your own that sets it: `{ declared, detected?, reason, kind? }`, the type the file was sent as, the type its bytes show, why it was refused and, for a refused type, what it is (`"web-page"`, `"program"`, `"script"`…). Word the refusal from it in your own language. |
 | `file` | In a job, the file the error belongs to: `{ id, name }`. |
-| `retryAfter` | How long to wait before trying again, in whole seconds (at most 86,400), when the answer named a wait: the `Retry-After` of `rateLimited(seconds)`, of a proxy's `429` or of a busy bucket. `undefined` when no wait is known. |
+| `retryAfter` | How long to wait before trying again, in whole seconds (at most 86,400), when the answer named a wait: the `Retry-After` of `rateLimited(seconds)`, of a proxy's `429` or of a busy bucket. `undefined` when no wait is known, and on the client for a final refusal, such as `FILE_TOO_LARGE`, that shared an answer with a throttled file. |
 | `status`, `storageCode` | On the server only: the storage service's HTTP status and own error code, for logs. Never shown to users. |
 
 ```ts
@@ -31,6 +31,8 @@ if (error) {
 Messages never contain credentials, presigned URLs or raw storage responses. The handler sends a client only an error's
 `code`, `message`, `retryable`, `parts` and `content`; everything else goes to your server's `logger`. The wait is not
 in the body: it travels as the `Retry-After` header, and the client reads it from there into `retryAfter`.
+`retryAfter` is a getter, not an own property, so a spread (`{ ...error }`) or a JSON copy drops it: read it from the
+error cloudrop gives you, or copy it explicitly.
 
 **The client has already retried.** A retryable error that reaches your code has been through the client's attempts
 (up to 6 per request, with backoff). Offer the user a retry button rather than retrying in a loop: `retry()` on a job or

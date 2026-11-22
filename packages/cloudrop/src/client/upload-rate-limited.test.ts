@@ -7,7 +7,7 @@
 // the moment each was sent on the fake clock, and the result the job reports.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type CloudropError, createCloudropClient } from "../client.ts";
+import { type CloudropError, createCloudropClient, type UploadResult } from "../client.ts";
 import { rateLimited, route } from "../server/route.ts";
 import { clientFixture } from "../testing/client-fixture.ts";
 import { offsetBytes } from "../testing/storage-contract.ts";
@@ -26,7 +26,33 @@ function setup(seconds: number) {
   return { fixture, client, uploadsSent };
 }
 
-const file = () => new File([offsetBytes(1000)], "a.bin", { type: "application/octet-stream" });
+const file = (name = "a.bin") => new File([offsetBytes(1000)], name, { type: "application/octet-stream" });
+
+/**
+ * What the job of `files` ends with, moving the fake clock `stepMs` at a time. The in-process server answers in real
+ * time, so each step also lets real I/O run: no request's deadline passes however slow a loaded lane is, and a job
+ * still running after 2 real seconds (one that waits longer than the steps allow) fails the test.
+ */
+async function outcome(fixture: ReturnType<typeof clientFixture>, stepMs: number, files = [file()]) {
+  let ended: UploadResult<unknown> | undefined;
+  const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
+  void client.start("files", files).done.then((result) => {
+    ended = result;
+  });
+  const giveUpAt = performance.now() + 2000;
+  while (ended === undefined && performance.now() < giveUpAt) {
+    await vi.advanceTimersByTimeAsync(stepMs);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return ended;
+}
+
+/** The parts of an error the rows below compare. */
+const waitOf = (error: CloudropError | null | undefined) => ({
+  code: error?.code,
+  retryable: error?.retryable,
+  retryAfter: error?.retryAfter,
+});
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -150,24 +176,11 @@ describe("a part's /sign refused with Retry-After", () => {
     );
 
   it("fails at once, retryable, when the wait is 600 seconds, instead of waiting 20 seconds to ask again", async () => {
-    const { basePath, fetch, requests } = fixture();
-    const client = createCloudropClient({ basePath, fetch });
-    let error: CloudropError | null | undefined;
-    void client.start("files", [file()]).done.then((result) => {
-      error = result.error;
-    });
-    // The fake clock stays at 0 and only timers due now fire (the backoff's are 0 ms here), while the in-process server
-    // answers in real time. So no request's deadline passes however slow a loaded lane is, and a part that waits
-    // 20 seconds before its next /sign never settles: it fails this test after 2 real seconds.
-    const giveUpAt = performance.now() + 2000;
-    while (error === undefined && performance.now() < giveUpAt) {
-      await vi.advanceTimersByTimeAsync(0);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    expect({
-      failed: { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter },
-      requests,
-    }).toEqual({
+    const signing = fixture();
+    // The fake clock stays at 0 and only timers due now fire (the backoff's are 0 ms here): a part that waits
+    // 20 seconds before its next /sign never settles.
+    const ended = await outcome(signing, 0);
+    expect({ failed: waitOf(ended?.error), requests: signing.requests }).toEqual({
       failed: { code: "RATE_LIMITED", retryable: true, retryAfter: 600 },
       requests: ["POST /upload", "PUT object", "POST /sign"],
     });
@@ -178,25 +191,6 @@ describe("the wait on the error the app gets (M12-R70)", () => {
   const files = route({ accept: "application/octet-stream", maxSize: "100MB", authorize: () => ({}) });
   const busy = { code: "RATE_LIMITED", message: "Too many requests.", retryable: true };
 
-  /**
-   * The job's error once it ends, moving the fake clock `stepMs` at a time. The in-process server answers in real
-   * time, so each step also lets real I/O run; a job still running after 2 real seconds fails the test.
-   */
-  async function failure(fixture: ReturnType<typeof clientFixture>, stepMs: number) {
-    let ended: { error: CloudropError | null } | undefined;
-    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
-    void client.start("files", [file()]).done.then((result) => {
-      ended = result;
-    });
-    const giveUpAt = performance.now() + 2000;
-    while (ended === undefined && performance.now() < giveUpAt) {
-      await vi.advanceTimersByTimeAsync(stepMs);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    const error = ended?.error;
-    return { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter };
-  }
-
   it("has no retryAfter when the 429 carried no Retry-After, after the whole budget", async () => {
     const fixture = clientFixture(
       { files },
@@ -204,7 +198,7 @@ describe("the wait on the error the app gets (M12-R70)", () => {
         fault: ({ label }) => (label === "POST /upload" ? Response.json({ error: busy }, { status: 429 }) : undefined),
       },
     );
-    expect({ error: await failure(fixture, 20_000), sent: fixture.requests }).toEqual({
+    expect({ error: waitOf((await outcome(fixture, 20_000))?.error), sent: fixture.requests }).toEqual({
       error: { code: "RATE_LIMITED", retryable: true, retryAfter: undefined },
       sent: Array(6).fill("POST /upload"),
     });
@@ -221,6 +215,37 @@ describe("the wait on the error the app gets (M12-R70)", () => {
       },
     );
     // Each wait is the backoff's 20-second cap.
-    expect(await failure(fixture, 20_000)).toEqual({ code: "RATE_LIMITED", retryable: true, retryAfter: 30 });
+    expect(waitOf((await outcome(fixture, 20_000))?.error)).toEqual({
+      code: "RATE_LIMITED",
+      retryable: true,
+      retryAfter: 30,
+    });
+  });
+
+  // A final refusal says nothing about waiting, though the 200 that carried it named the throttled file's wait.
+  it("gives the wait of a 200's Retry-After to its retryable refusal only", async () => {
+    const tooLarge = { code: "FILE_TOO_LARGE", message: "This file is too large.", retryable: false };
+    const fixture = clientFixture(
+      { files },
+      {
+        fault: ({ label }) =>
+          label === "POST /upload"
+            ? Response.json(
+                {
+                  files: [
+                    { kind: "rejected", error: tooLarge },
+                    { kind: "rejected", error: busy },
+                  ],
+                },
+                { headers: { "retry-after": "600" } },
+              )
+            : undefined,
+      },
+    );
+    const ended = await outcome(fixture, 0, [file("big.bin"), file("small.bin")]);
+    expect(ended?.data?.files.map((done) => ("error" in done ? waitOf(done.error) : done.status))).toEqual([
+      { code: "FILE_TOO_LARGE", retryable: false, retryAfter: undefined },
+      { code: "RATE_LIMITED", retryable: true, retryAfter: 600 },
+    ]);
   });
 });

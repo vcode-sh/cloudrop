@@ -570,7 +570,7 @@ where the message alone is not the right thing to show:
 | `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
 | `BUCKET_BLOCKED` | The browser could not send the file to the bucket on any of its attempts while the upload server answers, usually because the bucket's CORS rule misses this page's origin or a header cloudrop sends. In Firefox a connection that keeps dropping, or wrong storage credentials, look the same. | Your own words that do not blame the site alone, such as "Couldn't reach the storage service. Check your connection and try again; if it keeps happening, contact the site's administrator.", and a Retry button: the error is retryable, and Retry passes once the rule or the connection is fixed. Report it: it is usually the site's configuration, but in Firefox it can be the person's connection. |
 | `FILE_TYPE_NOT_ALLOWED` with `error.content` | [`contentChecks()`](plugins.md#what-a-refusal-carries) refused the file. | The message, or your own words built from `error.content`, as below. |
-| Any code with `error.retryAfter` | The answer named a wait: `rateLimited(seconds)` in your `authorize`, a proxy's `429`, or a busy bucket. A wait over 20 seconds is not waited for, so the file fails retryable at once. | Your own words with the wait, such as "Try again in 600 s", and a Retry button. `retryAfter` is whole seconds, at most 86,400; a Retry pressed sooner is usually refused again. |
+| `error.retryable` with `error.retryAfter` | The answer named a wait: `rateLimited(seconds)` in your `authorize`, a proxy's `429`, or a busy bucket. A wait over 20 seconds is not waited for, so the file fails retryable at once. | Your own words with the wait, such as "Try again in 600 s", and a Retry button. `retryAfter` is whole seconds, at most 86,400; a Retry pressed sooner is usually refused again. |
 
 ```tsx
 function FileError({ error }: { error: CloudropError | null }) {
@@ -585,12 +585,13 @@ function FileError({ error }: { error: CloudropError | null }) {
 ```
 
 **The wait in your own words.** The message names the wait only when it is `rateLimited()`'s default one, and it is
-English. `error.retryAfter` gives it in whole seconds whenever the answer carried `Retry-After`:
+English. `error.retryAfter` gives it in whole seconds whenever the answer carried `Retry-After`. Offer the wait only for
+a retryable error: a final one has nothing to wait for.
 
 ```tsx
 // `t` is your app's translate function.
 function retryText(error: CloudropError): string {
-  if (error.retryAfter === undefined) return error.message;
+  if (!error.retryable || error.retryAfter === undefined) return error.message;
   if (error.retryAfter < 120) return t("upload.retryInSeconds", { seconds: error.retryAfter }); // "Try again in 45 s."
   return t("upload.retryInMinutes", { minutes: Math.ceil(error.retryAfter / 60) }); // "Try again in 10 minutes."
 }

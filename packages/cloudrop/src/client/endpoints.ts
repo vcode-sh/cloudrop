@@ -210,9 +210,10 @@ export function createEndpoints(
         "upload",
         request,
         { signal, answerOnceSent: true },
+        // The 200's wait is the longest of its retryable refusals: a final one, such as FILE_TOO_LARGE, gets none.
         (json, retryAfterMs) =>
           readTickets(json, files)?.map((ticket) =>
-            "kind" in ticket ? ticket : waitAtLeast(toError(ticket), retryAfterMs),
+            "kind" in ticket ? ticket : waitAtLeast(toError(ticket), ticket.retryable ? retryAfterMs : 0),
           ) ?? null,
       );
     },

@@ -556,19 +556,25 @@ Entries start from 1.
 - **Decision:** `CloudropError` gains `retryAfter`, a read-only `number | undefined`: the wait recorded on the error, in
   whole seconds rounded up and at most 86,400, the same value and cap as the `Retry-After` header the handler sends
   (`retryAfterSeconds` in `src/retry-after.ts`, which `retryAfterHeaders` uses too). It is a getter over the one
-  recorded wait (`waitAtLeast`/`retryAfterOf`), not a second field, so it cannot disagree with the header or the
-  client's backoff, and, not being an own enumerable property, it never reaches JSON, logs or a spread copy.
+  recorded wait (`waitAtLeast`/`retryAfterOf`), not a second field, because `waitAtLeast` records the wait after the
+  error is constructed (in `rateLimited`, `storageError`, `post()` and the copies that keep it), which a `readonly`
+  field set in the constructor could not follow; one record also cannot disagree with the header or the client's
+  backoff. Being a getter, it is not copied by a spread or by JSON, which errors.md says.
   - Server: `rateLimited(seconds)` and a storage error that recorded the bucket's `Retry-After` have it, and so do the
     refusals rebuilt from them (`uploadRefusal`, `storageFailure`).
   - Client: an error built from an answer with `Retry-After` has it: `/upload`, `/sign`, `/complete` and `/abort` (in
     `post()`), a file a 200 of `/upload` refused with the bucket's wait, and a bucket `PUT` answered `429`, `503`,
-    `408` or a `5xx` (`classifyAnswer` now records the wait on the error as well as on the outcome). `withFile` and the
+    `408` or a `5xx` (`classifyAnswer` now records the wait on the error as well as on the outcome). A 200 of `/upload`
+    gives its `Retry-After` to its retryable refusals only: a final one, such as `FILE_TOO_LARGE` beside a throttled
+    file, has no `retryAfter` (fix round 1). `withFile` and the
     React store's copy that names the file keep the wait; before, their spread dropped it. That covers the long-wait
     stop (`M12-E4`, `M12-R41`): the file fails retryable at once and `error.retryAfter` says when `retry()` may pass.
-  - Wire: nothing is added to the JSON body. The client reads the wait from the header, as before. `M11-K3` holds: a
-    client still receives only `code`, `message`, `retryable`, `parts` and `content` in the body.
+  - Wire: nothing is added to the JSON body. The client reads the wait from the header, as before. `M11-K3` holds
+    because `errorBody` copies an allow-list of fields: a client still receives only `code`, `message`, `retryable`,
+    `parts` and `content` in the body.
   - The declared shape is `get retryAfter(): number | undefined`, like the class's other optional fields
-    (`status: number | undefined`), rather than `readonly retryAfter?: number`, which would need a stored field.
+    (`status: number | undefined`), rather than `readonly retryAfter?: number`, which would need a field stored at
+    construction.
 - **Why:** pilot gap G1. vstack refuses with `rateLimited(600)`, the client fails the file at once (`M12-E4`), and the
   wait existed only in the English message, so upload rows could not say "try again in 10 minutes" in Polish, and a
   Retry pressed at once was refused again. The owner approved the field before 1.0.
@@ -576,6 +582,7 @@ Entries start from 1.
   sends a wrong `Retry-After` is reported as it is, under the day's cap.
 - **Status:** in force.
 - **Visible in:** `src/errors.ts`, `src/retry-after.ts`, `src/server/http.ts`, `src/client/bucket.ts`,
+  `src/client/endpoints.ts`,
   `src/client/failures.ts`, `src/react/upload-store.ts`, `src/client/upload-rate-limited.test.ts`,
   `src/server/upload-authorize.test.ts`, `src/storage/storage-error.test.ts`,
   `src/react/use-upload-callbacks.test.ts`, `docs/guide/client.md`, `docs/guide/react.md`, `docs/guide/errors.md`,
