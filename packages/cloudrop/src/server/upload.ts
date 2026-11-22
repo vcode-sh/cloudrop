@@ -9,7 +9,7 @@ import type { EndpointConfig, EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
-import { isRefusal, refusalError } from "./route.ts";
+import { isRefusal, refusalError } from "./refusal.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 import { accountChanged, prepareFile, readRequest } from "./upload-request.ts";
@@ -124,6 +124,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (new TextEncoder().encode(ownerJson).length > MAX_METADATA_JSON_BYTES) {
     throw new TypeError(`Route "${route.name}": authorize returned more than 2 KiB of JSON. Return ids, not records.`);
   }
+  // Every plugin hook sees this snapshot, as onComplete does, never the live object (M12-T5): one type is true in all.
   const owner: unknown = JSON.parse(ownerJson);
   const signedMetadata: unknown = metadataJson === undefined ? undefined : JSON.parse(metadataJson);
   const prepared = files.map((file) => prepareFile(route, file, { request, metadata, auth }));
@@ -138,7 +139,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,
-      { request, route: route.name, accept: route.accept, files: accepted, metadata, auth },
+      { request, route: route.name, accept: route.accept, files: accepted, metadata, auth: owner },
       config.logger,
     );
     if (refused) return fail(refused);
@@ -178,6 +179,6 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const unstarted = prepared.filter(
     (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
   );
-  await releaseUnstarted(config, { route: route.name, metadata, auth }, unstarted, refusals);
+  await releaseUnstarted(config, { route: route.name, metadata, auth: owner }, unstarted, refusals);
   return ok({ files: tickets });
 }

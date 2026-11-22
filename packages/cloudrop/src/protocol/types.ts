@@ -154,13 +154,18 @@ export interface ErrorResponse {
  * null, a `T | undefined` property is typed as present though JSON may drop it, and a Map, a Set or a class instance is
  * typed by its own fields while JSON keeps only own enumerable properties (a Map becomes `{}`). Return plain data.
  */
-export type Jsonified<T> = unknown extends T
-  ? unknown
-  : T extends { toJSON(): infer J }
-    ? Jsonified<J>
-    : T extends string | number | boolean | null
-      ? T
-      : T extends undefined | symbol | bigint | ((...args: never[]) => unknown)
+// T is only ever the type being checked, never the one it is checked against, so TypeScript relates Jsonified<A> to
+// Jsonified<B> whenever A relates to B: a plugin for { userId } is checked against the routes' results (M12-T5).
+// `unknown` reaches the last branch and stays unknown.
+export type Jsonified<T> = T extends { toJSON(): infer J }
+  ? Jsonified<J>
+  : T extends string | number | boolean | null
+    ? T
+    : // void, not undefined: it covers undefined too, and an onComplete that returns nothing has the result void, which
+      // would otherwise reach the `unknown` branch.
+      T extends void
+      ? never
+      : T extends symbol | bigint | ((...args: never[]) => unknown)
         ? never
         : T extends readonly (infer E)[]
           ? Jsonified<E>[]
@@ -172,7 +177,7 @@ export type Jsonified<T> = unknown extends T
                     : K
                   : never]: Jsonified<T[K]>;
               }
-            : never;
+            : unknown;
 
 /** The types the client reads from a route. */
 export interface RouteTypes {

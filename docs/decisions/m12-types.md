@@ -85,3 +85,61 @@ Entries start from 1.
   breaking type change.
 - **Status:** in force.
 - **Visible in:** `src/server/owner-files.ts`, `src/server/all-files.ts`, `src/server/store-api.ts`.
+
+### M12-T5: a plugin is typed by the authorize result it reads, and every hook gets the token's JSON snapshot
+
+- **Decision:** `CloudropPlugin<TAuth = unknown>`, `ServerHooks<TAuth>` and the three hook contexts type `auth` as
+  `Jsonified<TAuth>`. The plugin carries a type-only `readonly "~auth"?: (auth: Jsonified<TAuth>) => void`, a function
+  property, so it is checked contravariantly where the hooks, written as methods, are bivariant. `Route` gains `TAuth`
+  (`Route<TMetadataInput, TResult, TAuth = object, TDeleted, TErased>`), which `route()` and a store's `route()` fill
+  from `authorize`, and `CloudropOptions.plugins` is `readonly NoInfer<CloudropPlugin<AuthOf<TRoutes>>>[]`, where
+  `AuthOf` (`src/server/route-types.ts`) is the union of every route's result. A `CloudropPlugin<{ userId: string }>`
+  beside a route with `authorize: allowAnyone` is a type error; `CloudropPlugin` alone, and `contentChecks()`, fit
+  every server. `NoInfer` wraps the whole plugin type, not only `AuthOf`: inside it, an inline plugin's hook was typed
+  from a merged object (`{ userId: string; since: never; teamId: never }`) instead of the union. At runtime
+  `handleUpload` passes `beforeUpload`, and the `onAbort` of files it ends, the parsed JSON it signs into the token
+  (`owner` in `upload.ts`); `afterVerify` and the `onAbort` of `/abort` and `/complete` already read it from the token.
+  To make the check possible, `Jsonified<T>` now uses `T` only as the type being checked: its first branch
+  `unknown extends T ? unknown` is gone (an `unknown` now reaches a last branch that answers `unknown`), and `void`
+  is handled as `undefined` is, so an `onComplete` that returns nothing still sends `null`. With `T` on the other side
+  of a conditional, TypeScript could not relate `Jsonified<A>` to `Jsonified<B>` (prototyped: `Ctx<object>` was not
+  assignable to `Ctx<unknown>`), and the check would have refused even `contentChecks()`.
+- **Why:** spec 1.0 §3a: `auth` was `unknown`, which forced the pilot's `isUploadActor` guard, and the same plugin
+  saw a `Date` in `beforeUpload` and its ISO string in `afterVerify`, so no one type was true in every hook.
+- **If wrong:** a plugin whose `beforeUpload` read a `Date`, a `Map` or a class instance from `auth` now reads its JSON
+  form; it reads what `afterVerify` always read. `Jsonified<any>` is now `any` rather than `unknown`: an `authorize`
+  typed `any` gives `any` in `onComplete`, which is what `any` asks for. A plugin typed for a field only some routes
+  have must narrow inside its hooks; typing it `CloudropPlugin` restores `unknown`.
+- **Status:** in force.
+- **Visible in:** `src/server/plugins.ts`, `src/server/route.ts`, `src/server/route-types.ts`, `src/server/config.ts`,
+  `src/server/upload.ts`, `src/protocol/types.ts`, `src/server/store-types.test.ts`, `src/server/plugins.test.ts`,
+  `fixtures/consumer-types/app.ts`, `scripts/check-package.sh`.
+
+### M12-T6: the deletion context is declared per route, by annotating `onDelete`'s parameter
+
+- **Decision:** `DeleteContext<TDeleted = unknown, TErased = TDeleted>` is `DeleteBase` (`file`, `owner`) and a union
+  by `reason`: `"deleted"` carries `context: TDeleted`, `"erased"` `context: TErased`, and `"replaced"`
+  `context: undefined` with `request: Request`. `route()` and a store's `route()` infer `TDeleted` and `TErased` from
+  the annotation of `onDelete`'s parameter (`({ context }: DeleteContext<FileDeleter, undefined>) => ...`) and carry
+  them on `Route`. `Cloudrop["api"]` is `StoreFileApi<R, DeletedOf<TRoutes>, ErasedOf<TRoutes>>`, each the
+  intersection of what the routes declare (read through a parameter position); a route without an annotation adds
+  `unknown`. `deleteFile(id, ...options)` and `eraseOwner(owner, ...options)` take their options as an optional tuple
+  element when the context admits `undefined` and a required one otherwise, and `context` inside them follows the same
+  rule (`ContextOption` in `delete-context.ts`). `DeleteFileOptions<T>` and `EraseOptions<T>` are now type aliases.
+  `WithExtra` in `route.ts`, which adds a store's `tx`, is a plain intersection without `Omit`: measured, with `Omit`
+  a store route annotated `DeleteContext<FileDeleter, undefined> & { tx }` inferred `TErased` as `FileDeleter` (the
+  `Omit` merged the union by `reason`), so `eraseOwner("u1")` was refused. M12-A8 forbids an authorize field named
+  `tx`, so the intersection is exact. The runtime is unchanged; `store-delete.ts` casts the context it builds to the
+  union, as each caller pairs a reason with its context or request. Declaring the context once on `createCloudrop`
+  was rejected: a type argument there turns off inference of the routes (spec §3a).
+- **Why:** spec 1.0 §3a: the context was `unknown`, which forced the pilot's 14-line `deleterOf` guard, and nothing
+  told a caller of `api.deleteFile` that a route's audit row needs to know who deletes.
+- **If wrong:** an app that calls `deleteFile` with a context of another type than the routes declare now fails to
+  compile; that is the point. `interface X extends DeleteContext` no longer compiles, since it is a union; use
+  `type X = DeleteContext & { ... }`. Two routes that declare contexts with no common value make the context
+  `never`, and `deleteFile` cannot be called with any; the fix is a shared type. An unannotated `onDelete` that
+  destructures `context` keeps `unknown`, as before.
+- **Status:** in force.
+- **Visible in:** `src/server/delete-context.ts`, `src/server/route.ts`, `src/server/store-route.ts`,
+  `src/server/route-types.ts`, `src/server/cloudrop.ts`, `src/server/store-api.ts`, `src/server/erase.ts`,
+  `src/server/store-delete.ts`, `src/server/store-types.test.ts`, `fixtures/consumer-types/app.ts`.

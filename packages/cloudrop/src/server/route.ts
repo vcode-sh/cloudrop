@@ -1,7 +1,7 @@
-import { CloudropError, configError } from "../errors.ts";
-import { isPlainObject } from "../input.ts";
+import { type CloudropError, configError } from "../errors.ts";
 import type { UploadedFile } from "../protocol/types.ts";
 import type { DeleteContext } from "./delete-context.ts";
+import type { Refusal } from "./refusal.ts";
 import type {
   AfterCompleteContext,
   AuthorizeContext,
@@ -15,51 +15,13 @@ import type { SchemaInput, SchemaOutput, StandardSchema } from "./schema.ts";
 import type { Size } from "./size.ts";
 import type { RouteFunction } from "./store-route.ts";
 
+export { forbidden, isRefusal, type Refusal, refusalError, unauthorized } from "./refusal.ts";
+
 export type Awaitable<T> = T | Promise<T>;
 
-// Symbol.for, not Symbol(): two copies of cloudrop in one app must recognise each other's refusals, or one would read
-// as a signed-in user.
-const DENIED: unique symbol = Symbol.for("cloudrop.unauthorized");
-// Symbol.for for the same reason: an adapter may come from another copy of cloudrop than the server.
+// Symbol.for, not Symbol(): an adapter may come from another copy of cloudrop than the server, and the server must still
+// recognise the routes it marks.
 export const STORE: unique symbol = Symbol.for("cloudrop.store");
-
-/**
- * Returned by `authorize` to refuse an upload: `unauthorized()` answers UNAUTHORIZED (401), `forbidden()` FORBIDDEN
- * (403), with `message`.
- */
-export interface Refusal {
-  readonly [DENIED]: true;
-  /** Absent on a refusal from a copy of cloudrop that predates forbidden(): it means UNAUTHORIZED. */
-  readonly code?: "UNAUTHORIZED" | "FORBIDDEN";
-  readonly message: string;
-}
-
-const SIGN_IN_MESSAGE = "Sign in to upload files here.";
-const NOT_ALLOWED_MESSAGE =
-  "You are not allowed to upload files here. Ask the site owner for access if you think this is wrong.";
-
-/** For a caller who is not signed in. */
-export function unauthorized(message: string = SIGN_IN_MESSAGE): Refusal {
-  return { [DENIED]: true, code: "UNAUTHORIZED", message };
-}
-
-/** For a signed-in caller who may not upload this: a quota, a plan or a role. */
-export function forbidden(message: string = NOT_ALLOWED_MESSAGE): Refusal {
-  return { [DENIED]: true, code: "FORBIDDEN", message };
-}
-
-/** Only a plain object carrying the brand refuses: a Response or an Error is never read as a refusal or as a user. */
-export function isRefusal(value: unknown): value is Refusal {
-  return isPlainObject(value) && (value as Partial<Refusal>)[DENIED] === true;
-}
-
-/** A refusal built by plain JavaScript or another copy of cloudrop may lack a code or a message; it still refuses. */
-export function refusalError(refusal: Refusal): CloudropError {
-  const forbids = refusal.code === "FORBIDDEN";
-  const fallback = forbids ? NOT_ALLOWED_MESSAGE : SIGN_IN_MESSAGE;
-  const message = typeof refusal.message === "string" && refusal.message !== "" ? refusal.message : fallback;
-  return new CloudropError(forbids ? "FORBIDDEN" : "UNAUTHORIZED", message);
-}
 
 /** `authorize: allowAnyone` makes a route public. It must be written out: public uploads are never a default. */
 export function allowAnyone(): object {
@@ -67,10 +29,11 @@ export function allowAnyone(): object {
 }
 
 /**
- * A store's extra context (an adapter's `tx`) replaces an authorize field of the same name. Since M12-A8 the types forbid
- * such a field (`AuthResult`), so the replacement only matters to plain JavaScript.
+ * A store's extra context (an adapter's `tx`) beside the hook's own. At runtime it replaces an authorize field of the
+ * same name; since M12-A8 the types forbid such a field (`AuthResult`), so a plain intersection is exact. No `Omit`: it
+ * would merge `DeleteContext`'s union by `reason` and hide the annotation `onDelete`'s context is inferred from (M12-T6).
  */
-type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : Omit<TContext, keyof TExtra> & TExtra;
+type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : TContext & TExtra;
 
 type NoExtra = Record<never, never>;
 
@@ -108,7 +71,14 @@ export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchem
  * route()'s second argument: the callbacks typed from authorize's result. A separate argument because TypeScript
  * infers from callbacks left to right within one object, so one written before authorize would see `object`.
  */
-export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra extends object = NoExtra> {
+export interface RouteCallbacks<
+  TAuth extends object,
+  TMetadata,
+  TResult,
+  TExtra extends object = NoExtra,
+  TDeleted = unknown,
+  TErased = TDeleted,
+> {
   /** Folder for generated keys `<prefix>/<ulid><ext>`. Sanitized like every key. */
   prefix?: (context: KeyContext<TAuth, TMetadata>) => string;
   /**
@@ -147,10 +117,11 @@ export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra
    * throw keeps it too, as a failure (store guide). With a transaction it runs inside it, and writes through `tx`
    * commit once, with the deletion; the hook itself may run more than once, so keep other effects idempotent. Without
    * one, at least once, before the deletion. `context` is what the caller passed to `api.deleteFile` or
-   * `api.eraseOwner`; a replacement gets the replacing upload's `request` instead.
+   * `api.eraseOwner`; a replacement gets the replacing upload's `request` instead. Annotate the parameter,
+   * `DeleteContext<FileDeleter>`, and those calls require a `FileDeleter` (M12-T6).
    */
   // biome-ignore lint/suspicious/noConfusingVoidType: `undefined` would refuse every hook that is an async function.
-  onDelete?: (context: WithExtra<DeleteContext, TExtra>) => Awaitable<void | CloudropError>;
+  onDelete?: (context: WithExtra<DeleteContext<TDeleted, TErased>, TExtra>) => Awaitable<void | CloudropError>;
 }
 
 /**
@@ -175,10 +146,26 @@ export interface RouteDefinition {
   readonly [STORE]?: object;
 }
 
-export interface Route<TMetadataInput = unknown, TResult = unknown> {
+/**
+ * `TAuth` is what `authorize` returns, which plugins are checked against (M12-T5); `TDeleted` and `TErased` are the
+ * `context` its `onDelete` declares for `api.deleteFile` and `api.eraseOwner` (M12-T6).
+ */
+export interface Route<
+  TMetadataInput = unknown,
+  TResult = unknown,
+  TAuth = object,
+  TDeleted = unknown,
+  TErased = TDeleted,
+> {
   readonly definition: RouteDefinition;
   /** Type-only: never set at runtime. */
-  readonly "~types"?: { readonly metadata: TMetadataInput; readonly result: TResult };
+  readonly "~types"?: {
+    readonly metadata: TMetadataInput;
+    readonly result: TResult;
+    readonly auth: TAuth;
+    readonly deleted: TDeleted;
+    readonly erased: TErased;
+  };
 }
 
 const CALLBACKS = ["prefix", "key", "owner", "onComplete", "afterComplete", "onDelete"] as const;
@@ -204,12 +191,18 @@ function checkPlacement(policy: object, callbacks: object): void {
  * An upload route: `route({ accept, maxSize, authorize }, { prefix, onComplete })`. The second argument is optional
  * and typed from what `authorize` returns.
  */
-export function route<TAuth extends AuthResult, TSchema extends StandardSchema | undefined = undefined, TResult = null>(
+export function route<
+  TAuth extends AuthResult,
+  TSchema extends StandardSchema | undefined = undefined,
+  TResult = null,
+  TDeleted = unknown,
+  TErased = TDeleted,
+>(
   policy: RoutePolicy<TAuth, TSchema>,
-  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult>,
+  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, NoExtra, TDeleted, TErased>,
   // NoInfer: written inside createCloudrop({ routes }), the call would otherwise infer TResult from the expected Route
   // and type a route without onComplete as unknown, not null.
-): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>> {
+): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>> {
   // Plain JavaScript may pass anything; createCloudrop reports a definition without authorize or accept.
   const given: object = policy ?? {};
   checkPlacement(given, callbacks ?? {});

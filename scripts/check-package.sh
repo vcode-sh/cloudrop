@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
 # README, LICENSE and CHANGELOG, the repository that trusted publishing checks and the Node 26 floor in engines.node
-# (M12-P2), index.js must load none of the store's code (M12-S1), the built bin must run, publint and attw read the
-# tarball, and size-limit reads the built entries. The
+# (M12-P2), index.js must load none of the store's code (M12-S1), the built bin must run, an app's type rows compile
+# against the packed .d.ts (M12-T5, M12-T6), publint and attw read the tarball, and size-limit reads the built
+# entries. The
 # tarball goes to a scratch directory that the trap removes on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -135,6 +136,16 @@ check_bin() {
 check_bin node
 if command -v bun >/dev/null; then
   check_bin bun
+fi
+# The typed plugin auth and deletion context (M12-T5, M12-T6) as an app sees them: fixtures/consumer-types compiles
+# against the tarball's own .d.ts, unpacked as its node_modules/cloudrop, so a check the build drops fails here.
+CONSUMER="$SCRATCH/consumer"
+mkdir -p "$CONSUMER/node_modules/cloudrop"
+cp fixtures/consumer-types/app.ts fixtures/consumer-types/tsconfig.json "$CONSUMER/"
+tar -xzf "${TARBALL[0]}" -C "$CONSUMER/node_modules/cloudrop" --strip-components=1
+if ! ./node_modules/.bin/tsc -p "$CONSUMER/tsconfig.json"; then
+  echo "fixtures/consumer-types/app.ts does not compile against the packed types. Fix the types the errors above name." >&2
+  exit 1
 fi
 ./node_modules/.bin/publint run "${TARBALL[0]}" --strict
 # The package is ESM-only by decision. The esm-only profile leaves out the two resolutions that cannot load ESM at

@@ -2,7 +2,7 @@
 // handler applies to them. The plugins cloudrop ships are in cloudrop/plugins (src/plugins.ts).
 
 import { CloudropError } from "../errors.ts";
-import type { UploadedFile } from "../protocol/types.ts";
+import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import type { Awaitable, RouteDefinition } from "./route.ts";
 
@@ -15,7 +15,7 @@ export interface PluginFile {
   type: string;
 }
 
-export interface BeforeUploadContext {
+export interface BeforeUploadContext<TAuth = unknown> {
   /** The `/upload` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
   route: string;
@@ -23,10 +23,11 @@ export interface BeforeUploadContext {
   accept: readonly string[];
   files: readonly PluginFile[];
   metadata: unknown;
-  auth: unknown;
+  /** The JSON snapshot of `authorize`'s result that the upload token carries: a Date is its ISO string here. */
+  auth: Jsonified<TAuth>;
 }
 
-export interface AfterVerifyContext {
+export interface AfterVerifyContext<TAuth = unknown> {
   /** The `/complete` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
   request: Request;
   route: string;
@@ -34,24 +35,26 @@ export interface AfterVerifyContext {
   accept: readonly string[];
   file: UploadedFile;
   metadata: unknown;
-  auth: unknown;
+  /** The JSON snapshot of `authorize`'s result that the upload token carries: a Date is its ISO string here. */
+  auth: Jsonified<TAuth>;
   storage: StorageDriver;
 }
 
-export interface AbortContext {
+export interface AbortContext<TAuth = unknown> {
   route: string;
   file: PluginFile;
   metadata: unknown;
-  auth: unknown;
+  /** The JSON snapshot of `authorize`'s result that the upload token carries: a Date is its ISO string here. */
+  auth: Jsonified<TAuth>;
   /** "aborted": the client called /abort. "rejected": a check refused the file. "failed": the server could not start it. */
   reason: "aborted" | "rejected" | "failed";
 }
 
-export interface ServerHooks {
+export interface ServerHooks<TAuth = unknown> {
   /** Runs in `/upload` after authorization and policy, before anything is signed. Return an error to refuse every file. */
-  beforeUpload?(context: BeforeUploadContext): Awaitable<CloudropError | null | undefined>;
+  beforeUpload?(context: BeforeUploadContext<TAuth>): Awaitable<CloudropError | null | undefined>;
   /** Runs in `/complete` after verification, before `onComplete`. An error deletes the object and reaches the client. */
-  afterVerify?(context: AfterVerifyContext): Awaitable<CloudropError | null | undefined>;
+  afterVerify?(context: AfterVerifyContext<TAuth>): Awaitable<CloudropError | null | undefined>;
   /**
    * Runs when a file this plugin's `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete` or
    * is ended through an `/abort` that keeps nothing: after a cancel, or after a failure no `/complete` may have
@@ -60,14 +63,24 @@ export interface ServerHooks {
    * idempotent by `file.id`. Without a store the server keeps no record of an upload it ended, so every `/complete` of
    * a multipart upload the bucket no longer has runs it again with "rejected", also after an `/abort` that ran it.
    */
-  onAbort?(context: AbortContext): Awaitable<void>;
+  onAbort?(context: AbortContext<TAuth>): Awaitable<void>;
   /** Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route. */
   extendRoute?(route: { name: string; definition: RouteDefinition }): void;
 }
 
-export interface CloudropPlugin {
+/**
+ * A plugin typed for the authorize result it reads, such as `CloudropPlugin<{ userId: string }>`: createCloudrop
+ * refuses it beside a route whose `authorize` can answer without that shape (M12-T5). `CloudropPlugin` alone reads
+ * `auth` as unknown and fits every server.
+ */
+export interface CloudropPlugin<TAuth = unknown> {
   id: string;
-  server?: ServerHooks;
+  server?: ServerHooks<TAuth>;
+  /**
+   * Type-only, never set: a function property, not a method, so it is checked contravariantly and a plugin for
+   * `{ userId: string }` does not fit a server whose routes may authorize without one.
+   */
+  readonly "~auth"?: (auth: Jsonified<TAuth>) => void;
 }
 
 export interface Logger {

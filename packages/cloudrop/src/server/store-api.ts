@@ -6,6 +6,7 @@ import { invalidInput, optionsOf } from "../input.ts";
 import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
 import type { FileApi } from "./api.ts";
 import type { ServerConfig } from "./config.ts";
+import type { ContextOption } from "./delete-context.ts";
 import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
 import { removeDeleted } from "./leftovers.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listFiles } from "./owner-files.ts";
@@ -16,9 +17,10 @@ import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 
 /**
  * `api` on a server with a store: the storage calls and the store's. `R` is the server's route names, the type of every
- * record's `route` and of the listings' `route` filter.
+ * record's `route` and of the listings' `route` filter. `TDeleted` and `TErased` are the `context` the routes' `onDelete`
+ * declare (M12-T6): required when it does not admit undefined.
  */
-export interface StoreFileApi<R extends string = string> extends FileApi {
+export interface StoreFileApi<R extends string = string, TDeleted = unknown, TErased = TDeleted> extends FileApi {
   /** A file's row, or null when the store has none. */
   file(id: string): Promise<Result<FileRecord<R> | null>>;
   /** An owner's completed files, newest or oldest first, optionally by route, name and type, a page at a time. */
@@ -40,22 +42,26 @@ export interface StoreFileApi<R extends string = string> extends FileApi {
    * its row becomes `deleted`, its bytes are released and its object removed. Idempotent: `deleted` says whether this
    * call deleted it. When `onDelete` returns a `CloudropError`, the file is kept and that error is the answer.
    */
-  deleteFile(id: string, options?: DeleteFileOptions): Promise<Result<DeletedFile>>;
+  deleteFile(
+    id: string,
+    ...options: undefined extends TDeleted ? [DeleteFileOptions<TDeleted>?] : [DeleteFileOptions<TDeleted>]
+  ): Promise<Result<DeletedFile>>;
   /**
    * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
    * what ended uploads left. Idempotent; run it again, such as with each sweep, until it reports done.
    */
-  eraseOwner(owner: string, options?: EraseOptions): Promise<Result<EraseReport>>;
+  eraseOwner(
+    owner: string,
+    ...options: undefined extends TErased ? [EraseOptions<TErased>?] : [EraseOptions<TErased>]
+  ): Promise<Result<EraseReport>>;
   /** Recounts one owner's counters from their rows, or every owner's: for drift after manual database edits. */
   reconcile(options?: { owner?: string }): Promise<Result<{ checked: number; repaired: number }>>;
   /** One bounded round of cleanup; run it on a schedule, such as an hourly cron. */
   sweep(options?: SweepOptions): Promise<Result<SweepReport>>;
 }
 
-export interface DeleteFileOptions {
-  /** Passed to the route's `onDelete` as `context`, as it is: who asked for the deletion and why, for an audit row. */
-  context?: unknown;
-}
+/** `api.deleteFile`'s options: the `context` its routes' `onDelete` declare. */
+export type DeleteFileOptions<TDeleted = unknown> = ContextOption<TDeleted>;
 
 /** What `api.deleteFile` did. */
 export interface DeletedFile {

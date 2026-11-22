@@ -10,10 +10,12 @@ export type RouteFunction<TExtra extends object> = <
   TAuth extends AuthResult,
   TSchema extends StandardSchema | undefined = undefined,
   TResult = null,
+  TDeleted = unknown,
+  TErased = TDeleted,
 >(
   policy: RoutePolicy<TAuth, TSchema>,
-  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra>,
-) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>>>;
+  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra, TDeleted, TErased>,
+) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>>;
 
 /** The store whose route() made the route, if any. */
 export const storeOfRoute = (definition: RouteDefinition): object | undefined => definition[STORE];

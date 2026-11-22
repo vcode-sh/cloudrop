@@ -1,0 +1,15 @@
+{
+  // An app's view of the packed package (scripts/check-package.sh): it compiles against the tarball's .d.ts, not the
+  // source, so a type the build drops or widens fails here.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "files": ["app.ts"]
+}

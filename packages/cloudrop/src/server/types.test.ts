@@ -160,7 +160,7 @@ describe("type inference for the client", () => {
         onComplete: ({ teamId }) => expectTypeOf(teamId).toEqualTypeOf<string>(),
       },
     );
-    expectTypeOf(contextOf).toEqualTypeOf<Route<undefined, null>>();
+    expectTypeOf(contextOf).toEqualTypeOf<Route<undefined, null, { teamId: string }>>();
   });
 
   it("types the schema's output in authorize and the callbacks when metadata is written after authorize", () => {
@@ -186,7 +186,7 @@ describe("type inference for the client", () => {
         },
       },
     );
-    expectTypeOf(albums).toEqualTypeOf<Route<{ albumId: string }, { userId: string }>>();
+    expectTypeOf(albums).toEqualTypeOf<Route<{ albumId: string }, { userId: string }, { userId: string }>>();
   });
 
   it("types onComplete's metadata as undefined without a schema", () => {

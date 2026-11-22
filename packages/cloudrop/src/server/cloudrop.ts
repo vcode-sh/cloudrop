@@ -3,14 +3,9 @@ import { createFileApi, type FileApi } from "./api.ts";
 import { type CloudropOptions, readConfig } from "./config.ts";
 import { createHandler } from "./handler.ts";
 import type { Route } from "./route.ts";
+import type { DeletedOf, ErasedOf, RouteTypeMap } from "./route-types.ts";
 import type { CloudropStore } from "./store.ts";
 import type { StoreFileApi } from "./store-api.ts";
-
-type RouteTypeMap<TRoutes extends Record<string, Route>> = {
-  [TName in keyof TRoutes & string]: TRoutes[TName] extends Route<infer TMetadata, infer TResult>
-    ? { metadata: TMetadata; result: TResult }
-    : never;
-};
 
 /**
  * The server `createCloudrop` returns. `TStore` is the type of its `store` option: `api` has the store's calls only
@@ -20,8 +15,13 @@ export interface Cloudrop<TRoutes extends Record<string, Route> = Record<string,
   extends InferableCloudrop<RouteTypeMap<TRoutes>> {
   /** The single adapter surface: mount it at `basePath` in any framework that speaks Request and Response. */
   handler(request: Request): Promise<Response>;
-  /** Server-side file operations on the same storage, each returning { data, error }; with a store, on its rows too. */
-  readonly api: [TStore] extends [CloudropStore<unknown>] ? StoreFileApi<keyof TRoutes & string> : FileApi;
+  /**
+   * Server-side file operations on the same storage, each returning { data, error }; with a store, on its rows too,
+   * and `deleteFile` and `eraseOwner` take the `context` the routes' `onDelete` declare (M12-T6).
+   */
+  readonly api: [TStore] extends [CloudropStore<unknown>]
+    ? StoreFileApi<keyof TRoutes & string, DeletedOf<TRoutes>, ErasedOf<TRoutes>>
+    : FileApi;
 }
 
 /**

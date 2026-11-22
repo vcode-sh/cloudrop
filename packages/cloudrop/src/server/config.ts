@@ -10,6 +10,7 @@ import { readOrigins } from "./origins.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { isFunction, readRoute } from "./route-config.ts";
+import type { AuthOf } from "./route-types.ts";
 import { parseSize, type Size } from "./size.ts";
 import { readStoreConfig, readStorePaths, type StoreConfig, type StoreOptions, unownedRoutes } from "./store-config.ts";
 import type { StorePaths } from "./store-paths.ts";
@@ -39,7 +40,8 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> extends 
   trustedOrigins?: readonly string[];
   /** Files larger than this use multipart. Default 64 MiB. */
   multipartThreshold?: Size;
-  plugins?: readonly CloudropPlugin[];
+  /** Each plugin's `auth` type must fit every route's authorize result (M12-T5); its hooks get the token's JSON form. */
+  plugins?: readonly NoInfer<CloudropPlugin<AuthOf<TRoutes>>>[];
   /** Where failures inside the handler and configuration warnings go. Default: console. */
   logger?: Logger;
 }
@@ -206,7 +208,8 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   const entries = readRouteEntries(options.routes);
   const basePath = readBasePath(options.basePath);
   const multipartThreshold = readThreshold(options.multipartThreshold);
-  const plugins = readPlugins(options.plugins);
+  // The type of `plugins` checked each one against the routes; from here on the handler runs them untyped.
+  const plugins = readPlugins(options.plugins as readonly CloudropPlugin[] | undefined);
   const logger = readLogger(options.logger);
   const environment = environmentReader(options.secret, storage);
   const trustedOrigins = readTrustedOrigins(options.trustedOrigins);

@@ -5,13 +5,17 @@
 import { fail, ok, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
+import type { ContextOption } from "./delete-context.ts";
 import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
 import { badOwner, isOwnerOrId } from "./owner-files.ts";
 import type { CloudropStore, FileRecord, FileRecordStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 import { deleteCompleted } from "./store-delete.ts";
 
-export interface EraseOptions {
+/** `api.eraseOwner`'s options; `context` is what its routes' `onDelete` declare for an erasure (M12-T6). */
+export type EraseOptions<TErased = unknown> = EraseSettings & ContextOption<TErased>;
+
+interface EraseSettings {
   /**
    * How long a PUT already under way gets to land after its URL ran out, before the key is checked for the last time:
    * at least 900000 (15 minutes), at most 2592000000 (30 days). Default 3600000 (1 hour).
@@ -19,8 +23,6 @@ export interface EraseOptions {
   graceMs?: number;
   /** Stops the run before the next file; the report then says done: false. */
   signal?: AbortSignal;
-  /** Passed to `onDelete` as `context` for each completed file this run deletes, as it is. */
-  context?: unknown;
 }
 
 export interface EraseReport {

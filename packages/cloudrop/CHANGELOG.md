@@ -81,6 +81,23 @@ Every notable change to the `cloudrop` package. The format follows
   its name (`M12-A5`).
 - `useResumable().discarding` is `discardingIds`. Before: `disabled={discarding.has(upload.id)}`. After:
   `disabled={discardingIds.has(upload.id)}` (`M12-A6`).
+- A plugin's `beforeUpload` sees the JSON form of `authorize`'s result, as `afterVerify` and `onAbort` always did.
+  Before: with `authorize: () => ({ userId, since: new Date(0) })`, `beforeUpload({ auth })` read `auth.since` as a
+  `Date`, and so did the `onAbort` of a file `/upload` refused. After: `auth.since` is
+  `"1970-01-01T00:00:00.000Z"` in every hook, the snapshot signed into the upload token. Read a `Date` back with
+  `new Date(auth.since)` (`M12-T5`).
+- A plugin typed for an authorize result is checked against every route. Before: `CloudropPlugin` typed `auth` as
+  `unknown`. After: `const limits: CloudropPlugin<{ userId: string }> = { ... }` reads `auth.userId` as a `string`,
+  and `createCloudrop({ routes: { avatar, open }, plugins: [limits] })` is a type error when `open`'s `authorize` can
+  answer without a `userId` (`allowAnyone`). A plugin typed `CloudropPlugin`, such as `contentChecks()`, is unchanged
+  (`M12-T5`).
+- `DeleteContext` is a union by `reason`, and its `context` is typed from `onDelete`'s annotation. Before:
+  `onDelete: ({ context }) => ...` read `context` as `unknown`, and `api.deleteFile(id)` never asked for one. After:
+  `onDelete: ({ reason, context }: DeleteContext<FileDeleter, undefined>) => ...` reads `context` as a `FileDeleter`
+  when `reason === "deleted"`, `api.deleteFile(id)` is a type error and `api.deleteFile(id, { context: deleter })`
+  compiles; `eraseOwner(owner)` still compiles, as the erased context admits `undefined`. Without an annotation nothing
+  changes. `interface Audit extends DeleteContext` no longer compiles: write `type Audit = DeleteContext & { ... }`.
+  `request` is set only with `reason: "replaced"`, and its `context` is `undefined` (`M12-T6`).
 
 ### Added
 
@@ -88,6 +105,10 @@ Every notable change to the `cloudrop` package. The format follows
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
+- `CloudropPlugin<TAuth>` types `auth` in every hook of a plugin, checked against the routes' authorize results
+  (`M12-T5`).
+- `DeleteContext<TDeleted, TErased>`: annotate `onDelete`'s parameter and `api.deleteFile` and `api.eraseOwner` take a
+  `context` of that type, required when it does not admit `undefined` (`M12-T6`).
 
 ### Changed
 

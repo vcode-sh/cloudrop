@@ -8,7 +8,7 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
-import type { DeleteReason } from "./delete-context.ts";
+import type { DeleteContext, DeleteReason } from "./delete-context.ts";
 import type { CloudropStore, CompletedRecord, FileRecord, Transition } from "./store.ts";
 import { storeCall, storeUnavailable } from "./store-calls.ts";
 import { storeOfRoute } from "./store-route.ts";
@@ -65,7 +65,9 @@ async function runOnDelete(
   const extra = transaction && storeOfRoute(route.definition) ? transaction : {};
   const from = request === undefined ? {} : { request };
   try {
-    const kept = await route.definition.onDelete?.({ ...extra, ...from, file, owner: file.owner, reason, context });
+    // One context of the union by reason: `deleteCompleted`'s callers pair each reason with its context or request.
+    const hookContext = { ...extra, ...from, file, owner: file.owner, reason, context } as DeleteContext;
+    const kept = await route.definition.onDelete?.(hookContext);
     if (kept === undefined || kept instanceof CloudropError) return kept;
     // A CloudropError from a second installed copy of cloudrop fails that check too, so the message names the cause.
     throw new TypeError(

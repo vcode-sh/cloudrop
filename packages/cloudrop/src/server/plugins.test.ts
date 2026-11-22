@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
+import { serverFixture } from "../testing/server-fixture.ts";
 import {
   type BeforeUploadContext,
   type CloudropPlugin,
@@ -7,6 +8,7 @@ import {
   runBeforeUpload,
   runOnAbort,
 } from "./plugins.ts";
+import { route } from "./route.ts";
 
 /** Records what the runners log. */
 function recordingLogger() {
@@ -122,5 +124,45 @@ describe("runAfterVerify", () => {
       await runAfterVerify(plugins, verified),
       seen,
     ]).toEqual([undefined, undefined, ["before", "after"]]);
+  });
+});
+
+describe("the auth every hook receives", () => {
+  // M12-T5: one type, Jsonified<TAuth>, is true in every hook only if each gets the token's JSON snapshot. beforeUpload
+  // and the onAbort it triggers used to see the live object, with a Date where the others saw its ISO string.
+  it("is the signed JSON snapshot of authorize's result in beforeUpload, onAbort and afterVerify", async () => {
+    const seen: { hook: string; auth: unknown }[] = [];
+    const recorder: CloudropPlugin<{ userId: string; at: Date }> = {
+      id: "recorder",
+      server: {
+        beforeUpload: ({ auth }) => void seen.push({ hook: "beforeUpload", auth }),
+        afterVerify: ({ auth }) => void seen.push({ hook: "afterVerify", auth }),
+        onAbort: ({ auth, reason }) => void seen.push({ hook: `onAbort ${reason}`, auth }),
+      },
+    };
+    const refusing: CloudropPlugin = {
+      id: "refusing",
+      server: {
+        beforeUpload: ({ request }) =>
+          request.headers.has("x-refuse") ? new CloudropError("FORBIDDEN", "Refused.") : undefined,
+      },
+    };
+    const files = route({ accept: "*/*", maxSize: 1024, authorize: () => ({ userId: "u1", at: new Date(0) }) });
+    const fixture = serverFixture({ files }, { plugins: [recorder, refusing] });
+    const refused = await fixture.post("upload", { route: "files", files: [file] }, { "x-refuse": "1" });
+    const ticket = await fixture.single("files", file);
+    await fixture.send(ticket.put, new TextEncoder().encode("a"));
+    const completed = await fixture.post("complete", { token: ticket.token });
+    const auth = { userId: "u1", at: "1970-01-01T00:00:00.000Z" };
+    expect({ refused: refused.status, completed: completed.status, seen }).toEqual({
+      refused: 403,
+      completed: 200,
+      seen: [
+        { hook: "beforeUpload", auth },
+        { hook: "onAbort rejected", auth },
+        { hook: "beforeUpload", auth },
+        { hook: "afterVerify", auth },
+      ],
+    });
   });
 });
