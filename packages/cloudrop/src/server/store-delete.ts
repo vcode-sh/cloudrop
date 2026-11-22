@@ -9,6 +9,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import type { DeleteContext, DeleteReason } from "./delete-context.ts";
+import { completeRefusal } from "./refusal.ts";
 import type { CloudropStore, CompletedRecord, FileRecord, Transition } from "./store.ts";
 import { storeCall, storeUnavailable } from "./store-calls.ts";
 import { storeOfRoute } from "./store-route.ts";
@@ -171,7 +172,8 @@ export async function deleteCompleted(
 /**
  * Before a replacing completion is recorded: onDelete for each file of the owner it is about to replace, with `tx` in a
  * transaction. Answers their ids, or null when the route has no onDelete. A throw answers as one in onComplete does,
- * a refusal with the error the hook returned, and either way the completion is not recorded.
+ * a refusal with the error the hook returned, rebuilt as /complete may send it, and either way the completion is not
+ * recorded.
  */
 export async function beforeReplacing(
   config: ServerConfig,
@@ -193,7 +195,9 @@ export async function beforeReplacing(
     if (page.error) return page;
     for (const file of page.data.records) {
       const kept = await runOnDelete(config, route, file, { reason: "replaced", request }, transaction);
-      if (kept !== undefined) return fail(kept || unfinished());
+      // A refusal is rebuilt as /complete may send it, as an afterVerify refusal is (M12-R31).
+      if (kept) return fail(completeRefusal(kept, `onDelete for route "${route.name}"`, config.logger));
+      if (kept === false) return fail(unfinished());
       ran.add(file.id);
     }
     cursor = page.data.cursor;

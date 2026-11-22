@@ -56,7 +56,7 @@ export type ClientErrorCode =
 
 /**
  * What a file `contentChecks()` refused is: a web page, a program, a Windows installer, a script, an SVG image
- * or another XML type the route does not name, or "denied" for a type only the app's `deny` refuses.
+ * or another XML type, or "denied" for a type only the app's `deny` refuses. A kind wins over "denied".
  */
 export type RefusedKind = "web-page" | "program" | "installer" | "script" | "svg" | "xml" | "denied";
 

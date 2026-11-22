@@ -3,7 +3,7 @@ import { CloudropError } from "../errors.ts";
 import { complete, files } from "../testing/complete-fixture.ts";
 import { PUBLIC_URL, serverFixture } from "../testing/server-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
-import { allowAnyone, route } from "./route.ts";
+import { allowAnyone, rateLimited, route } from "./route.ts";
 
 const TEXT = { name: "hello.txt", size: 5, type: "text/plain" };
 const hello = new TextEncoder().encode("hello");
@@ -149,6 +149,39 @@ describe("POST /complete: plugins and onComplete", () => {
       retryable: false,
     });
     expect((await fixture.storage.head(ticket.key)).data).toBeNull();
+  });
+
+  // M12-R30: "not now" from a plugin, such as a throttled scanner, keeps the object as a throw does, so the retry the
+  // answer asks for can complete the file. Deleting it made that retry answer NOT_UPLOADED.
+  it("keeps the object when afterVerify returns a retryable error, sends its wait, and completes on retry", async () => {
+    const aborted: string[] = [];
+    let throttled = true;
+    const scanner: CloudropPlugin = {
+      id: "scanner",
+      server: {
+        afterVerify: () => (throttled ? rateLimited(5, "The scanner is busy. Try again in 5 seconds.") : undefined),
+        onAbort: ({ reason }) => void aborted.push(reason),
+      },
+    };
+    const fixture = serverFixture({ files }, { plugins: [scanner] });
+    const ticket = await fixture.single("files", TEXT);
+    await fixture.send(ticket.put, hello);
+    const response = await fixture.post("complete", { token: ticket.token });
+    expect({
+      status: response.status,
+      retryAfter: response.headers.get("retry-after"),
+      body: await response.json(),
+      aborted,
+    }).toEqual({
+      status: 429,
+      retryAfter: "5",
+      body: {
+        error: { code: "RATE_LIMITED", message: "The scanner is busy. Try again in 5 seconds.", retryable: true },
+      },
+      aborted: [],
+    });
+    throttled = false;
+    expect((await complete(fixture, ticket.token)).status).toBe(200);
   });
 
   it("keeps the verified object when afterVerify throws, and asks the client to retry", async () => {

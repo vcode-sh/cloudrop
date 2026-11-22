@@ -87,7 +87,11 @@ export interface AbortContext<TAuth = unknown> {
 export interface ServerHooks<TAuth = unknown> {
   /** Runs in `/upload` after authorization and policy, before anything is signed. Return an error to refuse every file. */
   beforeUpload?(context: BeforeUploadContext<TAuth>): Awaitable<CloudropError | null | undefined>;
-  /** Runs in `/complete` after verification, before `onComplete`. An error deletes the object and reaches the client. */
+  /**
+   * Runs in `/complete` after verification, before `onComplete`. An error that is not retryable deletes the object and
+   * reaches the client. A retryable one, such as `rateLimited(5)`, reaches the client and keeps the object, as a throw
+   * does, so the client's retry can complete the file.
+   */
   afterVerify?(context: AfterVerifyContext<TAuth>): Awaitable<CloudropError | null | undefined>;
   /**
    * Runs when a file this plugin's `beforeUpload` accepted is refused, cannot be started, is rejected at `/complete` or

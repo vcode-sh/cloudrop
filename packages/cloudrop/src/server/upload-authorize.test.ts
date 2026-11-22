@@ -220,18 +220,22 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
     });
   });
 
-  it.for([{ seconds: -1 }, { seconds: Number.NaN }, { seconds: Number.POSITIVE_INFINITY }])(
-    "answers 500 and logs the app's bug for rateLimited($seconds)",
-    async ({ seconds }) => {
-      const fixture = serverFixture({ files: refusing(() => rateLimited(seconds)) });
-      const { status, body } = await answer(fixture);
-      expect({ status, code: body.error.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
-        status: 500,
-        code: "SERVER_ERROR",
-        logged: `TypeError: rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got ${seconds}.`,
-      });
-    },
-  );
+  // M12-R33: from plain JavaScript a string may arrive; "It got 30." would read as though 30 had been fine.
+  it.for([
+    { seconds: -1, got: "-1" },
+    { seconds: Number.NaN, got: "NaN" },
+    { seconds: Number.POSITIVE_INFINITY, got: "Infinity" },
+    { seconds: "30", got: 'the string "30"' },
+    { seconds: undefined, got: "a value of type undefined" },
+  ])("answers 500 and logs the app's bug for rateLimited($seconds)", async ({ seconds, got }) => {
+    const fixture = serverFixture({ files: refusing(() => rateLimited(seconds as number)) });
+    const { status, body } = await answer(fixture);
+    expect({ status, code: body.error.code, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
+      status: 500,
+      code: "SERVER_ERROR",
+      logged: `TypeError: rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got ${got}.`,
+    });
+  });
 
   it.for([
     {
@@ -253,6 +257,14 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
       refusal: new CloudropError("RATE_LIMITED", "Slow down."),
       status: 429,
       error: { code: "RATE_LIMITED", message: "Slow down.", retryable: true },
+    },
+    // M12-R34: from plain JavaScript. The client reads a body whose retryable is not a boolean as no error body, which
+    // would lose the message; only `true` is retryable.
+    {
+      name: "FORBIDDEN with a retryable of 1, sent as false",
+      refusal: new CloudropError("FORBIDDEN", "Upgrade your plan.", { retryable: 1 as never }),
+      status: 403,
+      error: { code: "FORBIDDEN", message: "Upgrade your plan.", retryable: false },
     },
     {
       name: "SERVER_ERROR with 500, keeping the app's retryable",

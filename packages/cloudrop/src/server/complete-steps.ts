@@ -8,6 +8,7 @@ import type { Verdict } from "./complete-verify.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import type { Logger } from "./plugins.ts";
 import { runAfterVerify } from "./plugins.ts";
+import { completeRefusal } from "./refusal.ts";
 import type { UploadTokenPayload } from "./token.ts";
 
 /** The object is verified and kept; a retried /complete verifies it again and reruns the hooks (spec §5.4). */
@@ -24,7 +25,11 @@ export function uploadedFile(config: ServerConfig, token: UploadTokenPayload, ro
   return { id, key, name, size, type, url };
 }
 
-/** afterVerify on every plugin: a refusal discards the object; a throw keeps it and asks the client to retry. */
+/**
+ * afterVerify on every plugin. A refusal is rebuilt as /complete may send it (M12-R31). A non-retryable one discards
+ * the object. A retryable one, a code /complete cannot send, and a throw keep it: "not now" and a plugin's bug are no
+ * verdict on the file, and the client's retry completes it (M12-R30).
+ */
 export async function checkAfterVerify(
   request: Request,
   config: ServerConfig,
@@ -39,7 +44,11 @@ export async function checkAfterVerify(
     config.logger.error(`cloudrop: a plugin's afterVerify failed for route "${route.name}".`, error);
     return { kind: "failed", error: unfinished() };
   }
-  return refused ? { kind: "refused", error: refused, cleanup: "delete" } : { kind: "verified" };
+  if (!refused) return { kind: "verified" };
+  const answer = completeRefusal(refused, "a plugin's afterVerify", config.logger);
+  // A changed code is the generic 500 for a code /complete cannot send, already logged: kept, as after a throw.
+  const kept = answer.retryable || answer.code !== refused.code;
+  return kept ? { kind: "failed", error: answer } : { kind: "refused", error: answer, cleanup: "delete" };
 }
 
 /** The fields cloudrop sets on every completion context; the authorize JSON's own fields sit beside them. */

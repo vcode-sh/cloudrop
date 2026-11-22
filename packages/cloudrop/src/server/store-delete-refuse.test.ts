@@ -230,24 +230,48 @@ describe("an onDelete that refuses, with replace", () => {
     },
   );
 
-  // The handler's rule for every endpoint: a code with no HTTP status, such as a client's own, is never sent.
-  it("a refusal with a code the server cannot send reaches the client as the generic SERVER_ERROR", async () => {
-    const { fixture, uploaded, upload, status } = deleting("transaction", {
+  // M12-R31: rebuilt as an afterVerify refusal is. A code /complete cannot send, such as a client's own or a storage
+  // driver's, reaches the client as the generic SERVER_ERROR and is logged; part numbers never leave with a refusal.
+  const generic = {
+    code: "SERVER_ERROR",
+    message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
+    retryable: false,
+  };
+  it.for([
+    { returned: new CloudropError("ABORTED", "Not now."), status: 500, error: generic, logged: ["ABORTED"] },
+    {
+      returned: new CloudropError("STORAGE_DENIED", "Check the access key."),
+      status: 500,
+      error: generic,
+      logged: ["STORAGE_DENIED"],
+    },
+    {
+      returned: new CloudropError("FORBIDDEN", "Not now.", { parts: [1, 2] }),
+      status: 403,
+      error: { code: "FORBIDDEN", message: "Not now.", retryable: false },
+      logged: [],
+    },
+  ])("a refusal with $returned.code reaches the client as $error.code", async ({ returned, status, error, logged }) => {
+    const {
+      fixture,
+      uploaded,
+      upload,
+      status: statusOf,
+    } = deleting("transaction", {
       replace: true,
-      answer: () => new CloudropError("ABORTED", "Not now."),
+      answer: () => returned,
     });
     const previous = await uploaded();
     const next = await upload();
     const refused = await complete(fixture, next.token);
-    expect([refused.status, refused.body.error]).toEqual([
-      500,
-      {
-        code: "SERVER_ERROR",
-        message: "The server could not handle the upload. Contact the site owner if this keeps happening.",
-        retryable: false,
-      },
-    ]);
-    expect([await status(previous.id), await status(next.id)]).toEqual(["completed", "pending"]);
+    expect([refused.status, refused.body.error]).toStrictEqual([status, error]);
+    expect(fixture.logger.errors.map(({ message }) => message)).toEqual(
+      logged.map(
+        (code) =>
+          `cloudrop: onDelete for route "files" returned ${code}, which /complete cannot send. Return one of UNAUTHORIZED, FORBIDDEN, QUOTA_EXCEEDED, RATE_LIMITED, FILE_TOO_LARGE, FILE_TYPE_NOT_ALLOWED, INVALID_METADATA, VERIFICATION_FAILED, SERVER_ERROR.`,
+      ),
+    );
+    expect([await statusOf(previous.id), await statusOf(next.id)]).toEqual(["completed", "pending"]);
   });
 
   it.for(MODES)("%s: a refusal stands when another call deleted the previous file meanwhile", async (mode) => {
