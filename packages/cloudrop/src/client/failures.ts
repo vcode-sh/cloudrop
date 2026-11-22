@@ -96,7 +96,7 @@ export const accountFailed = (cause: unknown): CloudropError =>
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers
 // carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16"). A bucket
 // CORS rule that misses the page's origin or a signed header fails the preflight instead, before any byte leaves, and
-// ends as bucketBlocked below once it is seen twice (M12-E7); on the fetch path it still ends here.
+// ends as bucketBlocked below when every attempt failed so (M12-E7, M12-R60); on the fetch path it still ends here.
 export const bucketUnreachable = (): CloudropError =>
   new CloudropError(
     "NETWORK_ERROR",
@@ -105,14 +105,15 @@ export const bucketUnreachable = (): CloudropError =>
   );
 
 /**
- * Two attempts of one PUT failed before any byte left, around a renewal the upload server answered (M12-E7): not
- * retryable, since a retry meets the same rule, and it keeps the ticket for a retry() once the rule is fixed.
+ * Every attempt of one PUT failed before the browser reported a byte sent, around a renewal the upload server answered
+ * (M12-E7, M12-R60). Retryable, keeping the ticket: Firefox reports a dropped connection or a bad signature this way
+ * too, and retry() passes once the rule, the network or the credentials are fixed.
  */
 export const bucketBlocked = (): CloudropError =>
   new CloudropError(
     "BUCKET_BLOCKED",
-    "The browser blocked the file's request to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension that blocks the storage service looks the same.",
-    { retryable: false },
+    "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a bad signature (wrong storage credentials, or the server's clock off) the same way too. Retry once it is fixed.",
+    { retryable: true },
   );
 
 /** A proxy's rate-limit page in front of the app: it passes, so it is retried (rulings S-4, S-7). */

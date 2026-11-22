@@ -161,7 +161,8 @@ Entries start from 1.
   Objects already stored at the root stay where they are; their keys live in the app's rows or the store's, and nothing
   looks them up by prefix.
 - **Why:** spec 1.0 §6: no silent mixing of routes at the root, and a whole route can be found, listed or emptied by
-  prefix (`deletePrefix("avatar/")`).
+  prefix (`deletePrefix("avatar/")`), as long as no other route's `prefix` starts with that route's name as its first
+  folder; the guide's `prefix` row warns about it (amended by `M12-R63`).
 - **If wrong:** an app that relied on root keys and lists the bucket root by prefix finds new files under the route's
   folder; `prefix: () => ""` restores the old keys, and the changelog says so.
 - **Status:** in force.

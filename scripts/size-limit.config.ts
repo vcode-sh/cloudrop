@@ -92,7 +92,8 @@ export default [
   // after its final fix round (M5-T69), 27.29 kB after the /upload idempotency key (M5-T104), 27.37 kB after /abort's
   // `keep` (M3-U94), 29.55 kB at 0.3.0 and 30.76 kB after onDelete and the file filters, when the ceiling went from 30
   // to 32 kB (M10-D10). 0.6.0's features and review fixes pass 32 kB: the owner set 36 kB for 0.6.0 (M11-R100).
-  // Measured 2026-11-21 for 0.6.0: 34.71 kB. 28.25 kB on 2026-11-22 once the store's code left it (M12-S1).
+  // Measured 2026-11-21 for 0.6.0: 34.71 kB. 28.25 kB on 2026-11-22 once the store's code left it (M12-S1), 29.47 kB
+  // at the end of the 1.0 branch.
   {
     name: "cloudrop (bundled)",
     path: join(dist, "index.js"),
@@ -101,13 +102,14 @@ export default [
     modifyEsbuildConfig: quietBareImport,
   },
   // Bundled and minified, what a server with a SQL store ships: createCloudrop and sqlStore (M12-S1). Measured
-  // 2026-11-22 when it was added: 33.13 kB before the store's code moved to the store object, 33.61 kB after.
+  // 2026-11-22: 33.61 kB when it was added, 46.4 kB at the end of the 1.0 branch, so the ceiling went from 50 to 60 kB
+  // (owner, M12-R62).
   {
     name: "cloudrop + adapters/sql (bundled)",
     path: [join(dist, "index.js"), join(dist, "adapters/sql.js")],
     import: { [join(dist, "index.js")]: "{ createCloudrop }", [join(dist, "adapters/sql.js")]: "{ sqlStore }" },
     gzip: true,
-    limit: "50 kB",
+    limit: "60 kB",
     modifyEsbuildConfig: quietBareImport,
   },
   // Bundled and minified, the size an app ships. History: 8.35 kB after progress plan B, 10.57 kB after resume

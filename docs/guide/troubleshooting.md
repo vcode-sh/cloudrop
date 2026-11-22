@@ -6,13 +6,13 @@ the meaning of every error code, see [Errors](errors.md).
 
 ## Uploads fail with BUCKET_BLOCKED
 
-You see `BUCKET_BLOCKED` with "The browser blocked the file's request to the storage service, while the upload server
-answers", within a second or so of the upload's start. Your server answered `/upload` and `/sign`; the browser sent
-nothing to the bucket.
+You see `BUCKET_BLOCKED` with "The browser blocked every attempt to send the file to the storage service, while the
+upload server answers", after the client's six attempts (up to about 15 seconds of waits). Your server answered
+`/upload` and `/sign`; the browser reported no byte sent to the bucket on any attempt.
 
 **The bucket's CORS rule does not let the page through.** A rule that misses the page's origin, or one of the headers
 cloudrop signs (or a checksum header you add), fails the browser's preflight, so no byte of the file leaves the page.
-The client sees that twice, around a URL your server renewed, and stops: a retry would meet the same rule.
+The client sees that on every attempt, around a URL your server renewed, and reports it once its attempts are spent.
 
 - The browser console names what was blocked: the origin or the header.
 - `npx cloudrop doctor --origin https://app.example.com` or
@@ -25,7 +25,10 @@ The client sees that twice, around a URL your server renewed, and stops: a retry
 - Once the rule is fixed, `retry()` goes on with the file's ticket and the parts already stored.
 
 The same code comes from a firewall, proxy or browser extension that blocks the storage host while your server is
-reachable. A page that is offline gets `NETWORK_ERROR` instead.
+reachable. In Firefox it also comes from a connection that keeps dropping and from a bad signature: Firefox reports no
+upload progress for a body sent quickly whose answer is an error, so wrong storage credentials or a server clock that is off
+look like a block there (Chromium and Safari report the body first, and end those with `NETWORK_ERROR`). When the rule
+checks out, check the credentials and the server's clock. A page that is offline gets `NETWORK_ERROR` instead.
 
 ## Every upload ends in NETWORK_ERROR
 
@@ -38,8 +41,8 @@ than as [`BUCKET_BLOCKED`](#uploads-fail-with-bucket_blocked). Check it as that 
 
 Other causes that look the same from a page: R2 answers a refused upload URL (expired, or a bad signature) without CORS
 headers, so the browser cannot read that answer either. Its body was sent, so the client renews the URL once and tries
-again before it gives up with `NETWORK_ERROR`. When every upload ends this way with CORS in order, check the server's
-clock and the storage credentials.
+again before it gives up with `NETWORK_ERROR` (in Firefox, often with `BUCKET_BLOCKED`: see above). When
+every upload ends this way with CORS in order, check the server's clock and the storage credentials.
 
 ## Every request gets ORIGIN_NOT_ALLOWED
 

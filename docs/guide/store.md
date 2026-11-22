@@ -256,8 +256,9 @@ methods and `this`. Without it, the server logs `INVALID_CONFIG` at start saying
 retryable 500 (`SERVER_ERROR`, the server is not ready) and every `api` call answers that `INVALID_CONFIG`. An
 adapter's store needs no `defineStore`, and a copy made with spread (`{ ...store, get: logged(store.get) }`) keeps what
 it carries, the routes of a `transaction: true` store's `route()` included. A copy made any other way, such as from
-`Object.entries`, does not: wrap that copy with `defineStore` too. Spread copies only an object's own properties, so a
-class instance loses its methods to it: wrap such a store in an object whose methods call it instead.
+`Object.entries`, does not: wrap that copy with `defineStore` too (a `transaction: true` store must be copied with
+spread). Spread copies only an object's own properties, so a class instance loses its methods to it: wrap such a store
+in an object whose methods call it instead.
 
 ## Create the tables
 
@@ -807,7 +808,7 @@ A throw keeps the file too, but as a failure. What each caller answers:
 - **Only a returned error refuses.** A thrown `CloudropError` is a failure like any other throw, so an error from a
   cloudrop call that your hook rethrows never passes for your refusal. Any other returned value is a failure too,
   logged with its type: a string, `false`, `null`, the result of a query in an arrow function without braces, or a
-  `CloudropError` made by a second installed copy of cloudrop. Up to 0.5.0 a returned value was ignored.
+  `CloudropError` from a cloudrop older than 1.0. Up to 0.5.0 a returned value was ignored.
 - **A replacing `/complete`.** With a transaction the whole completion rolls back, `onComplete`'s writes through `tx`
   included. Under a lease `onComplete` has already run and what it wrote stays, as after a throw; the claim is handed
   back, so a later `/complete` runs both hooks again without waiting. The client ends the file with your error, as

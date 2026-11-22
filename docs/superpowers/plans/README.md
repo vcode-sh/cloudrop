@@ -185,8 +185,8 @@ reviewer, so a pushed `v*` tag publishes only after `vcode-sh` approves the run'
 repository administrator bypasses the review, which the environment allows (`can_admins_bypass: true`, GitHub's
 default). Checked with `gh api` on 2026-11-22; [`docs/releasing.md`](../../releasing.md), "The approval".
 
-Still to do before 1.0 ships: `BUCKET_BLOCKED`'s rule is measured on Chromium only; Firefox and Safari, whose progress
-events may differ, are measured before release (spec 1.0 §2d, `M12-E7`).
+`BUCKET_BLOCKED`'s rule is measured on Chromium, Firefox and WebKit, and the browser lane runs its rows on all three
+(spec 1.0 §2d, `M12-R60`, `M12-R61`).
 
 ### Known costs at 1.0
 
@@ -205,9 +205,10 @@ Accepted, each in force in its decision:
 Audited against `main` (spec 1.0 §9) and removed from the lists above:
 
 - **Fixed:** `Retry-After` on the `200` that refuses a file storage could not start (`M12-E5`); unreadable R2 refusals,
-  for the CORS case that matters (`BUCKET_BLOCKED`, `M12-E7`; a bad-signature `403` sends its body and stays a
-  `NETWORK_ERROR`); the store paths that stateless server apps paid for (`M5-T69`, fixed by `M12-S1`: the bundled
-  server went from 34.71 to 28.25 kB); the resume guide's claim that Deno has no `indexedDB`, measured by the Deno
+  for the CORS case that matters (`BUCKET_BLOCKED`, `M12-E7`, decided after the whole budget by `M12-R60`; a
+  bad-signature `403` stays a `NETWORK_ERROR` in Chromium and WebKit, and is `BUCKET_BLOCKED` in Firefox for a body
+  sent quickly); the store paths that stateless server apps paid for (`M5-T69`, fixed by `M12-S1`: the bundled
+  server went from 34.71 to 29.47 kB); the resume guide's claim that Deno has no `indexedDB`, measured by the Deno
   smoke lane's `indexedDB` assertion (Task 11; spec 1.0 §8).
 - **Closed:** a retry that could not reuse a lost ask's key (`M5-T101`), resolved by `M11-R92`; an expired ticket
   that could never confirm a `/complete` that may have succeeded (`M3-U30`), resolved by `M11-R81`; the unit row for

@@ -14,6 +14,11 @@ export interface XhrCall {
   finish(): Promise<void>;
   /** Fires onerror, as a browser does for a network or CORS failure. */
   fail(): void;
+  /**
+   * Sends through the fixture's fetch, then fires onerror without progress, whatever came back: Firefox for a fast body
+   * whose answer is an error without CORS headers or whose connection drops (r2-spike-findings.md, 2026-11-22).
+   */
+  lose(): Promise<void>;
 }
 
 export interface FakeXhr {
@@ -112,6 +117,11 @@ export function fakeXhr(fetch: ClientFetch, options: FakeXhrOptions = {}): FakeX
           this.onload?.();
         },
         fail: () => {
+          if (this.#end()) this.onerror?.();
+        },
+        lose: async () => {
+          if (this.#call !== call) return;
+          await fetch(this.#url, { method: this.#method, headers: this.#headers, body }).catch(() => undefined);
           if (this.#end()) this.onerror?.();
         },
       };

@@ -168,7 +168,7 @@ const photo = route(
 | `maxFiles` | Files per `/upload` call, 1 to 100. Default 10. |
 | `metadata` | Any [Standard Schema](https://standardschema.dev) (zod, valibot, arktype). The client sends metadata with the upload; the server validates it. Its output, as JSON, must fit in 2 KiB. A route without a schema refuses metadata. |
 | `authorize` | Required. Decides who may upload (see [Authorize uploads](#authorize-uploads)). |
-| `prefix` | The folder for generated keys. A key is `<prefix>/<ulid><ext>`, such as `users/42/avatars/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Default: the route's name, so a route `avatar` writes `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Return `""` to write at the bucket root. |
+| `prefix` | The folder for generated keys. A key is `<prefix>/<ulid><ext>`, such as `users/42/avatars/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Default: the route's name, so a route `avatar` writes `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Return `""` to write at the bucket root. A route's name must not be the first folder of another route's `prefix`: with a route `users` and an avatar route whose prefix is `users/42/avatars`, `deletePrefix("users/")` empties both routes. |
 | `key` | The whole key instead of `<prefix>/<ulid><ext>`. Pass `prefix` or `key`, not both. A custom key must be unique (see below). |
 | `visibility` | `"public"` or `"private"`. `"public"` needs the storage's `publicUrl`. Default: `"public"` when the storage has a `publicUrl`, otherwise `"private"`. |
 | `replace` | With a store and `owner`: one file per owner, such as an avatar. A completed file deletes the owner's previous files on the route ([One file per owner](store.md#one-file-per-owner-replace)). |
@@ -337,8 +337,8 @@ status:
 - Any other code is a bug: the client gets the generic, non-retryable `SERVER_ERROR` and the log names the code and
   the list above.
 - A refusal is not a failure: nothing is logged.
-- Import `CloudropError` from the same `cloudrop` the server uses. One from a second installed copy is answered `500`,
-  and the log says to install cloudrop once.
+- An error from a copy of cloudrop older than 1.0 is answered `500`, and the log says to install cloudrop once; a
+  second 1.x copy's error is recognised.
 
 ### Read the session
 

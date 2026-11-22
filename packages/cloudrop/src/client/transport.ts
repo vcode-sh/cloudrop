@@ -39,7 +39,8 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       signal.removeEventListener("abort", cancel);
       resolve(outcome);
     };
-    // Whether any byte of the body left: an error before that is the browser's refusal, such as a failed preflight.
+    // Whether the browser reported a byte of the body sent: an error before that is usually its refusal, such as a
+    // failed preflight.
     let sending = false;
     xhr.upload.onprogress = (event) => {
       watch();
@@ -56,9 +57,10 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       settle(classifyAnswer(xhr.status, xhr.responseText, xhr.getResponseHeader("retry-after")));
     };
     // A network failure and a refusal without CORS headers look the same here, as with fetch (decision S10), except
-    // that an error before any progress is marked: twice around a renewal, it ends as BUCKET_BLOCKED (M12-E7). A
-    // timeout or an abort, cloudrop's stall abort included, is never marked, nor is an empty body, which has no byte
-    // to report and so cannot tell a refused URL from a blocked request.
+    // that an error before any progress is marked: on every attempt around a renewal, it ends as BUCKET_BLOCKED
+    // (M12-E7, M12-R60). Firefox sends no progress for a fast body whose answer is an error, so the mark is a hint, not
+    // proof. A timeout or an abort, cloudrop's stall abort included, is never marked, nor is an empty body, which has
+    // no byte to report and so cannot tell a refused URL from a blocked request.
     const lost = () => settle(unreachable(signal));
     xhr.onerror = () => settle(unreachable(signal, !sending && body.size > 0));
     xhr.ontimeout = lost;

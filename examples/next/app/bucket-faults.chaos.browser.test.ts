@@ -29,7 +29,8 @@ const PART_TWO = { kind: "presigned", operation: "UploadPart", part: 2 } as cons
 // Chromium itself sends a PUT again when a connection it reused is reset before any answer byte, on a new connection
 // unless another idle one is open, and the page hears nothing (measured 2026-11-17: one reset reached the proxy, the
 // page saw one PUT). A PUT reuses its preflight's connection, so a reset rule faults the first two arrivals: whichever
-// connection Chromium used, the client sees exactly one network error.
+// connection Chromium used, the client sees exactly one network error. Firefox does the same; WebKit sends nothing
+// again, so its client sees both resets (the 412 row).
 const firstTwo = (match: ChaosRule["match"], fault: ChaosRule["fault"]): ChaosRule[] => [
   { match, fault },
   { match: { ...match, nth: 2 }, fault },
@@ -64,55 +65,62 @@ const jitterAtItsCeiling = (page: Page) =>
 const multipartCalls = (log: readonly ChaosEntry[]) =>
   log.filter((entry) => entry.kind === "server" && entry.label.endsWith("MultipartUpload")).map((entry) => entry.label);
 
-test("a part reset mid-body is renewed and sent again, and the bar never goes back", async ({
-  page,
-  chaos,
-}, testInfo) => {
-  const file = await onDiskFile(testInfo, 20);
-  await chaos.set(firstTwo(PART_TWO, { kind: "reset", afterBytes: MIB }));
-  await signIn(page);
-  // 4 MiB/s inside Chromium, so the bar is sampled while the parts send, and parts 1 and 3 hold their connections
-  // while part 2 is reset: no idle one is left for Chromium to send it again on.
-  await throttleUploads(page, 4 * MIB);
-  await upload(page, file.path);
-  const stopSampling = sampleProgress(page, file.name);
+// @cdp: it throttles through Chrome's DevTools Protocol, so only the Chromium project runs it (playwright.config.ts).
+test(
+  "a part reset mid-body is renewed and sent again, and the bar never goes back",
+  { tag: "@cdp" },
+  async ({ page, chaos }, testInfo) => {
+    const file = await onDiskFile(testInfo, 20);
+    await chaos.set(firstTwo(PART_TWO, { kind: "reset", afterBytes: MIB }));
+    await signIn(page);
+    // 4 MiB/s inside Chromium, so the bar is sampled while the parts send, and parts 1 and 3 hold their connections
+    // while part 2 is reset: no idle one is left for Chromium to send it again on.
+    await throttleUploads(page, 4 * MIB);
+    await upload(page, file.path);
+    const stopSampling = sampleProgress(page, file.name);
 
-  await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
-  const samples = await stopSampling();
-  // Part 2's bytes count once, at their best: its resend from zero does not pull the bar back (M3-U11).
-  expect(samples).toEqual(samples.toSorted((a, b) => a - b));
-  expect(samples.at(-1)).toBe(20 * MIB);
-  expect(sortedPuts(await chaos.log())).toEqual([
-    ["PUT part 1", 200],
-    ["PUT part 2", 200],
-    ["PUT part 2", "reset"],
-    ["PUT part 2", "reset"],
-    ["PUT part 3", 200],
-  ]);
-  expect(await requestRows(page)).toEqual([
-    ["/upload", "200", ""],
-    ["PUT part 1", "200", ""],
-    ["PUT part 2", "network error", ""],
-    ["PUT part 3", "200", ""],
-    ["/sign", "200", "renewal of part 2"],
-    ["PUT part 2", "200", "retry"],
-    ["/complete", "200", ""],
-  ]);
-  await expectStoredAsResult(page, file.path);
-  expect(await chaos.uploadsLeft()).toEqual([]);
-});
+    await expect(page.getByRole("status")).toContainText("completed", { timeout: 20_000 });
+    const samples = await stopSampling();
+    // Part 2's bytes count once, at their best: its resend from zero does not pull the bar back (M3-U11).
+    expect(samples).toEqual(samples.toSorted((a, b) => a - b));
+    expect(samples.at(-1)).toBe(20 * MIB);
+    expect(sortedPuts(await chaos.log())).toEqual([
+      ["PUT part 1", 200],
+      ["PUT part 2", 200],
+      ["PUT part 2", "reset"],
+      ["PUT part 2", "reset"],
+      ["PUT part 3", 200],
+    ]);
+    expect(await requestRows(page)).toEqual([
+      ["/upload", "200", ""],
+      ["PUT part 1", "200", ""],
+      ["PUT part 2", "network error", ""],
+      ["PUT part 3", "200", ""],
+      ["/sign", "200", "renewal of part 2"],
+      ["PUT part 2", "200", "retry"],
+      ["/complete", "200", ""],
+    ]);
+    await expectStoredAsResult(page, file.path);
+    expect(await chaos.uploadsLeft()).toEqual([]);
+  },
+);
 
 test("a file whose part 2 was reset six times is retried with its ticket, sending part 2 alone", async ({
   page,
   chaos,
+  browserName,
 }, testInfo) => {
   // Six attempts wait up to 0.5 + 1 + 2 + 4 + 8 s between them (M3-S9) before the file fails.
   test.setTimeout(60_000);
+  // Firefox reports no upload progress before this reset, so every attempt looks blocked and the file ends
+  // BUCKET_BLOCKED, retryable and with its ticket, as a CORS miss does; Chromium and WebKit report the first MiB
+  // (r2-spike-findings.md, "Upload progress in Firefox and WebKit, 2026-11-22"; M12-R60).
+  const code = browserName === "firefox" ? "BUCKET_BLOCKED" : "NETWORK_ERROR";
   const file = await onDiskFile(testInfo, 20);
   await chaos.set([{ match: { ...PART_TWO, nth: "every" }, fault: { kind: "reset", afterBytes: MIB } }]);
   await signIn(page);
   await upload(page, file.path);
-  await expect(page.getByRole("status")).toContainText("failed with NETWORK_ERROR", { timeout: 30_000 });
+  await expect(page.getByRole("status")).toContainText(`failed with ${code}`, { timeout: 30_000 });
   const failed = await requestRows(page);
   expect(failed).toEqual([
     ["/upload", "200", ""],
@@ -123,7 +131,7 @@ test("a file whose part 2 was reset six times is retried with its ticket, sendin
     ...Array(5).fill(["PUT part 2", "network error", "retry"]),
   ]);
   const result = page.getByRole("figure", { name: "Result" });
-  await expect(result).toContainText('"code": "NETWORK_ERROR"');
+  await expect(result).toContainText(`"code": "${code}"`);
   await expect(result).toContainText('"retryable": true');
   // The failed file keeps its ticket, and the bucket its upload, for Retry to finish (§4.7).
   const ticket = await chaos.uploadsLeft();
@@ -147,15 +155,15 @@ test("a file whose part 2 was reset six times is retried with its ticket, sendin
     ["PUT part 1", 200],
     ["PUT part 3", 200],
   ]);
-  // Each of the client's six attempts reached the bucket, a second time when Chromium resent it on a reused connection;
-  // then the retry stored it.
+  // Each of the client's six attempts (the request rows above) reached the bucket, then the retry stored it. A browser
+  // may also resend an attempt by itself on a new connection, which is not the client's to count: Chromium once at
+  // most, Firefox up to twice (13 arrivals for six attempts, measured 2026-11-22).
   const partTwo = bucketPuts(log)
     .filter(([label]) => label === "PUT part 2")
     .map(([, outcome]) => outcome);
   expect(partTwo.at(-1)).toBe(200);
   expect(partTwo.slice(0, -1).filter((outcome) => outcome !== "reset")).toEqual([]);
   expect(partTwo.length - 1).toBeGreaterThanOrEqual(6);
-  expect(partTwo.length - 1).toBeLessThanOrEqual(12);
   expect(multipartCalls(log)).toEqual(["CreateMultipartUpload", "CompleteMultipartUpload"]);
   // The same key before and after Retry, and its upload completed.
   expect([await resultKey(page)]).toEqual(ticket);
@@ -318,11 +326,13 @@ test("a 403 without CORS headers is opaque to the page: renewed, then sent again
 });
 
 // A bucket whose CORS rule misses the page: the preflight fails, so no byte of the body leaves (spec 1.0 §2d, M12-E7).
-// Measured in Playwright's Chromium headless shell, the one engine this lane runs; Firefox and Safari are not.
-test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED, and Retry keeps its ticket", async ({
+// The rule decides only after the whole budget, since Firefox reports a fast failed body the same way (M12-R60).
+test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED after six attempts, and Retry keeps its ticket", async ({
   page,
   chaos,
 }, testInfo) => {
+  // Six attempts wait up to 0.5 + 1 + 2 + 4 + 8 s between them (M3-S9) before the file fails.
+  test.setTimeout(60_000);
   const file = await onDiskFile(testInfo, 1);
   // Every preflight, as a rule that misses the origin refuses them all; the renewed URL needs its own.
   const preflight = { operation: "Options", nth: "every" } as const;
@@ -330,21 +340,21 @@ test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED, and Ret
   await signIn(page);
   await upload(page, file.path);
 
-  // Two round trips and one backoff, not the six attempts of a NETWORK_ERROR.
-  await expect(page.getByRole("status")).toContainText("failed with BUCKET_BLOCKED", { timeout: 5_000 });
+  await expect(page.getByRole("status")).toContainText("failed with BUCKET_BLOCKED", { timeout: 30_000 });
   const log = await chaos.log();
+  // A refused preflight is not cached, so each attempt sends its own.
   expect({ puts: bucketPuts(log), preflights: log.filter((entry) => entry.kind === "preflight").length }).toEqual({
     puts: [],
-    preflights: 2,
+    preflights: 6,
   });
   const failed = await requestRows(page);
   expect(failed).toEqual([
     ["/upload", "200", ""],
     ["PUT single", "network error", ""],
     ["/sign", "200", "renewal"],
-    ["PUT single", "network error", "retry"],
+    ...Array(5).fill(["PUT single", "network error", "retry"]),
   ]);
-  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"retryable": false');
+  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"retryable": true');
   await chaos.set([]);
 
   await page.getByRole("button", { name: `Retry ${file.name}`, exact: true }).click();
@@ -361,6 +371,7 @@ test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED, and Ret
 test("a single PUT whose answer was cut is sent again, and its 412 counts as stored", async ({
   page,
   chaos,
+  browserName,
 }, testInfo) => {
   const file = await onDiskFile(testInfo, 1);
   // The bucket stores the PUT and answers; the client gets a reset before the status line.
@@ -375,10 +386,13 @@ test("a single PUT whose answer was cut is sent again, and its 412 counts as sto
     ["PUT object", "reset"],
     ["PUT object", 412],
   ]);
+  // Unlike Chromium and Firefox, WebKit does not resend the first PUT itself: the client's second attempt meets reset 2.
+  const unheard = browserName === "webkit" ? [["PUT single", "network error", "retry"]] : [];
   expect(await requestRows(page)).toEqual([
     ["/upload", "200", ""],
     ["PUT single", "network error", ""],
     ["/sign", "200", "renewal"],
+    ...unheard,
     ["PUT single", "412", "retry; already stored"],
     ["/complete", "200", ""],
   ]);

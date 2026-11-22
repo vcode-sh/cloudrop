@@ -102,7 +102,7 @@ it.
 | Bun | 1.4 or newer | the built command's checks, and the Hono example's API in the browser lane |
 | Deno | 2, with `--allow-env` for `NODE_ENV` and `CLOUDROP_*` | a smoke job: the packed package uploads a file to a fake bucket |
 | Cloudflare Workers | current | the store on Wrangler's local D1 and the storage driver on its local R2 |
-| Browsers | Chrome 103, Firefox 100, Safari 16 or newer | headless Chromium uploads the examples; client code uses no web API newer than these |
+| Browsers | Chrome 103, Firefox 100, Safari 16 or newer | headless Chromium uploads the examples, and Firefox and WebKit run the bucket-fault rows; client code uses no web API newer than these. One known difference: Firefox reports no upload progress for a body sent quickly whose answer is an error, so a dropped connection or a bad signature there can end `BUCKET_BLOCKED` where Chromium and Safari end `NETWORK_ERROR`; both are retryable and keep the ticket ([Errors](errors.md#client-errors)) |
 | React | 18 and 19 | the hooks' tests on React 19 and, in a job of their own, on React 18.3.1; the examples on React 19 |
 | TypeScript | 7.0 or newer, for the shipped types | a job type-checks the packed `.d.ts` with TypeScript 7.0.2, the oldest 7.0 release npm published |
 

@@ -1069,8 +1069,62 @@ What this means for cloudrop:
   `M12-E8` was not written.
 - The last PUT of each case shows no `xhr.error` in the table because the client's own `onerror` ended the job, and the
   page read the record, before the probe's later listener on the same event ran; the CDP failure confirms the error.
-- Not measured: Firefox and Safari, a part of a multipart upload (the unit and browser-chaos lanes cover parts), and a
-  header missing from the rule rather than the origin (the same preflight `403` by the [cors] rules, not tried here).
+- Not measured here: Firefox and Safari (measured in
+  [Upload progress in Firefox and WebKit](#upload-progress-in-firefox-and-webkit-2026-11-22), which changed the rule:
+  under `M12-R60` cases A and E end `BUCKET_BLOCKED`, retryable, after six PUTs), a part of a multipart upload (the unit
+  and browser-chaos lanes cover parts), and a header missing from the rule rather than the origin (the same preflight
+  `403` by the [cors] rules, not tried here).
+
+## Upload progress in Firefox and WebKit, 2026-11-22
+
+Measured 2026-11-22 for `M12-E7`, in two rounds. The first is the final review of the 1.0 branch at `b8491f4b`
+(`.superpowers/sdd/2026-11-22-1.0.0/final-review.md`, finding 1): Playwright-core 1.64.1 with Chromium 156, Firefox
+157.0 and WebKit 27.2, against a local HTTP server standing in for the bucket, no R2. The second is this branch's
+browser lane after the fix: Playwright 1.65.1 with its Chromium headless shell, Firefox 159.0 and WebKit 27.2,
+uploading to RustFS through the chaos proxy (`examples/next/app/bucket-faults.chaos.browser.test.ts` and
+`lab-blocked.browser.test.ts`).
+
+**Round 1, raw XHR.** The page on `127.0.0.1:19991`, the bucket on `localhost:19992`; each PUT carried `content-type`,
+so the browser sent a preflight. The largest `upload.onprogress` `loaded` seen before `onerror`:
+
+| Bucket behaviour | Chromium 156 | Firefox 157 | WebKit 27.2 |
+| --- | --- | --- | --- |
+| Preflight 403 without CORS (a CORS miss), 14 B and 1 MB | 0, 0 | 0, 0 | 0, 0 |
+| Preflight OK, body read, then 403 without CORS (R2's bad signature), 14 B and 1 MB | 14, 1000000 | 0, 0 | 14, 1000000 |
+| The same with the body read slowly (20 ms per chunk), 14 B / 200 KB / 5 MB | all | 0 / 200000 / 5000000 | all |
+| Preflight OK, body read, then the socket destroyed (a drop), 14 B / 50 KB / 1 MB | all | 0 / 0 / 0 | all |
+
+**Round 1, the real client end to end** (`dist/client.js`, `createCloudrop` with `s3()` through `toNodeHandler`, one
+20,000-byte file, preflight answered 204 with CORS), under the rule as it then stood (two blocked attempts around a
+`/sign`):
+
+| Mode | Chromium 156 | Firefox 157 | WebKit 27.2 |
+| --- | --- | --- | --- |
+| Body read, then the socket destroyed | `NETWORK_ERROR`, retryable, 2140 ms | `BUCKET_BLOCKED`, not retryable, 163 ms, after 2 client attempts | `NETWORK_ERROR`, 7422 ms |
+| Body read, then 403 without CORS | `NETWORK_ERROR`, 9490 ms | `BUCKET_BLOCKED`, 346 ms | `NETWORK_ERROR`, 7732 ms |
+
+**Round 2, the browser lane after `M12-R60`** (every row of both files passed on all three engines in the final run;
+the `@cdp` row runs on Chromium alone; `test:browser:live` ran the lab's block row on live R2 in all three, passing):
+
+| Row | Chromium | Firefox 159 | WebKit 27.2 |
+| --- | --- | --- | --- |
+| Every preflight 403 without CORS, 1 MiB single PUT | `BUCKET_BLOCKED`, retryable, 6 PUTs and 6 preflights, Retry on the same ticket | the same | the same |
+| The lab's injected block, 1 KiB | `BUCKET_BLOCKED` after 6 attempts, Retry on the same ticket | the same | the same |
+| Part 2 of 20 MiB reset after 1 MiB of its 8 MiB body, every time | `NETWORK_ERROR` | `BUCKET_BLOCKED`, after 10.2 s: no progress before the reset | `NETWORK_ERROR` |
+| One part answered 403 without CORS (an expired R2 URL), then good | renewed, completed | the same | the same |
+| A single PUT reset before its answer, twice | the browser resends once by itself: the page sees one network error, then `412` | the same | no resend: the page sees two network errors, then `412` |
+
+What this means for cloudrop:
+
+- **Firefox reports no upload progress for a body whose answer is an error, unless the body took long enough to send**
+  (round 1's slow body). On a fast connection a dropped connection and a bad signature then look exactly like a CORS
+  miss, even for an 8 MiB part reset after 1 MiB (round 2). Chromium and WebKit report the body first.
+- So the progress signal is a hint, not proof, and `M12-R60` decides `BUCKET_BLOCKED` only after the whole budget of
+  six attempts, retryable and keeping the ticket: a transient drop in Firefox gets the same six attempts as anywhere,
+  and a persistent one ends retryable, so an app's Retry still works. A bad signature in Firefox ends `BUCKET_BLOCKED`
+  rather than `NETWORK_ERROR`, and the message names it.
+- WebKit, unlike Chromium and Firefox, does not resend a PUT whose reused connection is reset before the answer; the
+  client's own retry covers it. Firefox can resend an attempt twice (13 arrivals at the bucket for 6 attempts).
 
 ## Not verified
 

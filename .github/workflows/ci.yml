@@ -250,7 +250,8 @@ jobs:
       - run: bun run test:chaos:soak --silent=false
 
   # Headless Chromium uploads to RustFS: the Next.js example stateless and with its store, then the Vite example with
-  # the Hono API on its own Postgres. Only the headless shell is installed (--only-shell).
+  # the Hono API on its own Postgres. Only Chromium's headless shell is installed (--only-shell). Firefox and WebKit run
+  # the bucket-fault and BUCKET_BLOCKED rows of the stateless pass (M12-R61).
   browser:
     needs: check
     runs-on: ubuntu-latest
@@ -267,6 +268,8 @@ jobs:
           node-version: 26
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps --only-shell chromium
+        working-directory: examples/next
+      - run: bunx playwright install --with-deps firefox webkit
         working-directory: examples/next
       - run: bun run test:browser
 

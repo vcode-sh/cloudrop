@@ -57,22 +57,28 @@ function signFailure(error: CloudropError): BucketOutcome {
 }
 
 /**
- * What to do after an attempt: `attempt` is its number, `renewed` whether this part's URL was already renewed, and
- * `blockedBefore` whether the previous attempt was refused before any byte left and this one used a URL a /sign
- * answered since (M12-E7).
+ * Whether the browser refused this attempt before any byte left (XHR onerror without upload progress) while the page
+ * says it is online. React Native has XMLHttpRequest but no CORS and no `onLine`, so a refusal there is a lost
+ * connection (M12-R40).
  */
-export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boolean, blockedBefore = false): Step {
+const blockedOnline = (outcome: BucketOutcome): boolean =>
+  outcome.kind === "opaque" && outcome.blocked === true && globalThis.navigator?.onLine === true;
+
+/**
+ * What to do after an attempt: `attempt` is its number, `renewed` whether this part's URL was already renewed, and
+ * `blockedSoFar` whether every earlier attempt was blocked online and a /sign answered between two of them (M12-R60).
+ */
+export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boolean, blockedSoFar = false): Step {
   if (outcome.kind === "stored") return { kind: "done" };
   // Rejected or aborted: the outcomes without a wait (`kind` alone cannot narrow their shared union member).
   if (!("retryAfterMs" in outcome)) return { kind: "fail", error: outcome.error };
-  // The upload server answers and the browser still sends nothing to the bucket: a retry meets the same refusal. An
-  // offline page refuses every request the same way, so it waits as before (spec §2d). Only a browser says it is online:
-  // React Native has XMLHttpRequest but no CORS and no `onLine`, so a refusal there is a lost connection (M12-R40).
-  if (blockedBefore && outcome.kind === "opaque" && outcome.blocked && globalThis.navigator?.onLine === true) {
-    return { kind: "fail", error: bucketBlocked() };
-  }
   // A renewed URL refused as expired again will not get better (S11).
-  if (attempt >= MAX_ATTEMPTS || (outcome.kind === "expired" && renewed)) return { kind: "fail", error: outcome.error };
+  if (attempt >= MAX_ATTEMPTS || (outcome.kind === "expired" && renewed)) {
+    // Only after the whole budget: Firefox reports no progress for a fast body whose answer is an error, so a dropped
+    // connection or a bad signature looks blocked there too (M12-R60). An offline attempt never counts (spec §2d).
+    const blocked = attempt >= MAX_ATTEMPTS && blockedSoFar && blockedOnline(outcome);
+    return { kind: "fail", error: blocked ? bucketBlocked() : outcome.error };
+  }
   // A failure the browser hides (an expired R2 URL answers without CORS headers) or a readable expiry: new URL, once.
   const renew = (outcome.kind === "opaque" || outcome.kind === "expired") && !renewed;
   // A readable expiry is retried at once with the new URL; every other failure waits first (spec §6.2).
@@ -119,9 +125,11 @@ const stopped = (run: Run): CloudropError | null => (run.sender.signal.aborted ?
 async function sendPart(run: Run, partNumber: number): Promise<CloudropError | null> {
   let renew = false;
   let renewed = false;
-  // The previous attempt's URL, and whether the browser refused that attempt before any byte left (M12-E7).
+  // The previous attempt's URL; whether every attempt so far was blocked online; whether a /sign answered between two
+  // of them, giving a URL the last attempt did not use (M12-R60).
   let previous: SignedRequest | null = null;
-  let blocked = false;
+  let blocked = true;
+  let signedBetween = false;
   for (let attempt = 1; ; attempt++) {
     if (stopped(run)) return stopped(run);
     const target = await urlFor(run, partNumber, renew);
@@ -130,9 +138,9 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
     const outcome = target.error
       ? signFailure(target.error)
       : await run.sender.put(target.data, partNumber, run.stop.signal);
-    // Another URL object than the last attempt's came from a /sign that answered 2xx in between.
-    const step = nextStep(outcome, attempt, renewed, blocked && target.data !== previous);
-    blocked = outcome.kind === "opaque" && outcome.blocked === true;
+    signedBetween ||= attempt > 1 && target.data !== null && target.data !== previous;
+    const step = nextStep(outcome, attempt, renewed, blocked && signedBetween);
+    blocked &&= blockedOnline(outcome);
     previous = target.data;
     if (step.kind === "done") return null;
     if (step.kind === "fail") return step.error;

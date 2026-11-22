@@ -123,7 +123,7 @@ What it recognises, what it refuses and its limits:
 The browser uploads to the bucket directly, so the bucket needs a CORS rule that allows `PUT` from your page's origin
 with the headers cloudrop signs (`content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`) and
 exposes `ETag` and `Retry-After`, plus a lifecycle rule that aborts incomplete multipart uploads. Without the CORS
-rule every upload fails with `BUCKET_BLOCKED`. `npx cloudrop setup --origin http://localhost:3000` prints both rules
+rule, uploads fail, usually with `BUCKET_BLOCKED`. `npx cloudrop setup --origin http://localhost:3000` prints both rules
 and the commands that set them, `--apply` adds both and keeps the bucket's other rules, and `npx cloudrop doctor
 --origin <origin>` checks the settings, the bucket and its rules. Both rules, with the Wrangler and AWS CLI commands:
 [Bucket setup](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/bucket-setup.md), and the command:

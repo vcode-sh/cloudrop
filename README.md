@@ -117,7 +117,7 @@ Any other S3-compatible service: pass `storage: s3()`, which reads the `CLOUDROP
 ([Server](docs/guide/server.md#any-s3-compatible-service)).
 
 **6. Allow your page to upload to the bucket.** The browser sends the bytes to the bucket itself, so the bucket needs a
-CORS rule for your page's origin; without one every upload fails with `BUCKET_BLOCKED`. This prints the rule and the
+CORS rule for your page's origin; without one, uploads fail, usually with `BUCKET_BLOCKED`. This prints the rule and the
 commands that set it, and changes nothing:
 
 ```bash

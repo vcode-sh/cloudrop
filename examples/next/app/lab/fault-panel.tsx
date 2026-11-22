@@ -50,7 +50,7 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "bucketBlocked",
     label: "Block every bucket PUT as a CORS rule that misses this page would, while ticked",
     effect:
-      "No byte reaches the bucket while the upload server answers. After a first failure the client renews the URL once through /sign; when the renewed URL fails the same way, the file fails at once with BUCKET_BLOCKED and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends only what had not landed (M12-E7). With PUTs sent through fetch the client cannot see that no byte left, and the file ends with NETWORK_ERROR after its attempts.",
+      "No byte reaches the bucket while the upload server answers. After a first failure the client renews the URL once through /sign and makes 6 attempts with random waits of up to 0.5, 1, 2, 4 and 8 s between them; when every one failed before any byte left, the file fails with BUCKET_BLOCKED, retryable, and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends only what had not landed (M12-E7, M12-R60). With PUTs sent through fetch the client cannot see that no byte left, and the file ends with NETWORK_ERROR after its attempts.",
   },
   {
     fault: "bucket400",

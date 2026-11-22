@@ -1,9 +1,12 @@
-// Contract: spec 1.0 §2d (M12-E7, M12-R40): in a browser on the XHR path, a single PUT or a part fails at once with
-// BUCKET_BLOCKED, not retryable, when two consecutive attempts ended in XHR onerror without upload progress and a /sign
-// of that part answered 2xx between them while the page is online; any other failure keeps the old budget of six
-// attempts and NETWORK_ERROR. BUCKET_BLOCKED keeps the ticket, so retry() sends only what had not landed.
-// Oracle: the spec's five conditions; the six attempts are MAX_ATTEMPTS (client/retry.ts); the requests the fake XHR
-// and the fixture saw, in order.
+// Contract: spec 1.0 §2d (M12-E7, M12-R40, M12-R60): in a browser on the XHR path, a single PUT or a part that used up
+// its six attempts fails with BUCKET_BLOCKED, retryable, when every attempt ended in XHR onerror without upload progress
+// while the page was online and a /sign of that part answered 2xx between attempts; any other mix ends NETWORK_ERROR as
+// before. Firefox reports no progress for a fast body whose answer is an error, so a dropped connection or a bad
+// signature looks blocked there, and the budget is never cut short. BUCKET_BLOCKED keeps the ticket, so retry() sends
+// only what had not landed.
+// Oracle: the spec's conditions; the six attempts are MAX_ATTEMPTS (client/retry.ts); the Firefox pattern measured in
+// r2-spike-findings.md ("Upload progress in Firefox and WebKit, 2026-11-22"); the requests the fake XHR and the fixture
+// saw, in order.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient, type UploadJob } from "../client.ts";
@@ -69,6 +72,8 @@ const twoParts = () => new File([offsetBytes(8 * MiB + 5)], "b.bin", { type: "ap
 
 /** The page's request is refused before its body leaves, as for a preflight the bucket's CORS rule fails. */
 const refused = (call: XhrCall) => call.fail();
+/** Firefox: the body reaches the bucket, then onerror comes without any progress event (a drop, a bad signature). */
+const lostSilently = (call: XhrCall) => call.lose();
 /** The connection drops after a byte of the body was sent. */
 const dropped = (call: XhrCall) => {
   call.progress(1);
@@ -84,7 +89,7 @@ const errorOf = (job: UploadJob<unknown>) => {
   const { status, error } = job.getSnapshot().files[0] ?? {};
   return { status, code: error?.code, retryable: error?.retryable };
 };
-const BLOCKED = { status: "failed", code: "BUCKET_BLOCKED", retryable: false };
+const BLOCKED = { status: "failed", code: "BUCKET_BLOCKED", retryable: true };
 const LOST = { status: "failed", code: "NETWORK_ERROR", retryable: true };
 /** One renewal after the first failure, then the rest of the six attempts on the renewed URL. */
 const SIX_PUTS = ["POST /upload", "PUT object", "POST /sign", ...Array(5).fill("PUT object")];
@@ -101,25 +106,46 @@ afterEach(() => {
 });
 
 describe("BUCKET_BLOCKED", () => {
-  it("fails a single PUT after two refusals without progress around one renewal, before /complete", async () => {
+  it("fails a single PUT after six refusals without progress around one renewal, before /complete", async () => {
     const { log, run } = setup();
     const job = await run(small(), refused);
-    expect({ error: errorOf(job), log }).toEqual({
+    expect({ error: errorOf(job), log }).toEqual({ error: BLOCKED, log: SIX_PUTS });
+  });
+
+  it("gives Firefox's silent failures of a body the bucket received all six attempts, then BUCKET_BLOCKED", async () => {
+    // Firefox shows a dropped connection and a bad signature this way; only the budget can tell them from a CORS miss.
+    const { fixture, log, run } = setup();
+    const job = await run(small(), lostSilently);
+    expect({ error: errorOf(job), log, reached: fixture.requests.filter((r) => r.startsWith("PUT")).length }).toEqual({
       error: BLOCKED,
-      log: ["POST /upload", "PUT object", "POST /sign", "PUT object"],
+      log: SIX_PUTS,
+      reached: 6,
     });
   });
 
-  it("says what to check, without a URL", async () => {
+  it("says what to check, and what looks the same, without a URL", async () => {
     const { run } = setup();
     const job = await run(small(), refused);
     expect(job.getSnapshot().files[0]?.error?.message).toBe(
-      "The browser blocked the file's request to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension that blocks the storage service looks the same.",
+      "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a bad signature (wrong storage credentials, or the server's clock off) the same way too. Retry once it is fixed.",
     );
   });
 
   it.each([
     { name: "upload progress before each failure", fault: undefined, end: dropped, log: SIX_PUTS },
+    {
+      name: "silent failures, then one with progress, then silent ones again",
+      fault: undefined,
+      end: (call: XhrCall, nth: number) => (nth === 2 ? dropped(call) : call.lose()),
+      log: SIX_PUTS,
+    },
+    {
+      name: "a readable 503 before the silent failures",
+      fault: ((call) => (call.label === "PUT object" && call.nth === 1 ? storageBusy() : undefined)) as Fault,
+      end: (call: XhrCall, nth: number) => (nth === 1 ? call.finish() : call.lose()),
+      // A readable answer is retried on its URL; the first silent failure renews it.
+      log: ["POST /upload", "PUT object", "PUT object", "POST /sign", ...Array(4).fill("PUT object")],
+    },
     {
       name: "a /sign that answers 503 between the failures",
       fault: ((call) => (call.label === "POST /sign" && call.nth === 1 ? storageBusy() : undefined)) as Fault,
@@ -128,10 +154,10 @@ describe("BUCKET_BLOCKED", () => {
       log: ["POST /upload", "PUT object", "POST /sign", "POST /sign", ...Array(4).fill("PUT object")],
     },
     {
-      name: "a page that is offline at the second failure",
+      name: "a page that is offline at the second failure only",
       fault: undefined,
       end: (call: XhrCall, nth: number) => {
-        if (nth === 2) vi.stubGlobal("navigator", { onLine: false });
+        vi.stubGlobal("navigator", { onLine: nth !== 2 });
         call.fail();
       },
       log: SIX_PUTS,
@@ -182,12 +208,14 @@ describe("BUCKET_BLOCKED", () => {
     });
   });
 
-  it("keeps the ticket: retry() sends the PUT again without a new /upload", async () => {
+  it("is retryable and keeps the ticket: retry() sends the PUT again without a new /upload", async () => {
     const { bucket, log, run } = setup();
     const job = await run(small(), refused);
+    const { retryable } = errorOf(job);
     const before = log.length;
     bucket.end = (call) => call.finish();
-    expect({ status: (await job.files[0]?.retry())?.status, sent: log.slice(before) }).toEqual({
+    expect({ retryable, status: (await job.files[0]?.retry())?.status, sent: log.slice(before) }).toEqual({
+      retryable: true,
       status: "done",
       sent: ["PUT object", "POST /complete"],
     });
@@ -203,7 +231,7 @@ describe("BUCKET_BLOCKED", () => {
       failed: {
         error: BLOCKED,
         // Both parts start together, so their order is not part of the contract.
-        log: ["POST /sign", "POST /upload", "PUT part 1", "PUT part 2", "PUT part 2"],
+        log: ["POST /sign", "POST /upload", "PUT part 1", ...Array(6).fill("PUT part 2")],
       },
       status: "done",
       sent: ["PUT part 2", "POST /complete"],

@@ -45,8 +45,7 @@ Every notable change to the `cloudrop` package. The format follows
 - `FilesPage` is typed by its records. Before: `FilesPage` with `items: FileRecord[]`. After:
   `FilesPage<CompletedRecord<R>>` from `api.files` and `FilesPage<RecordOf<S, R>>` from `api.allFiles({ status })`;
   plain `FilesPage` still means every status (`M12-T4`).
-- The row status type is `FileRecordStatus`. Before: `import type { FileStatus } from "cloudrop"` (or
-  `"cloudrop/store"`). After: `import type { FileRecordStatus } from "cloudrop"`. `FileStatus` from `cloudrop/client`,
+- The row status type is `FileRecordStatus`. Before: `import type { FileStatus } from "cloudrop"`. After: `import type { FileRecordStatus } from "cloudrop"`. `FileStatus` from `cloudrop/client`,
   a file's state in an upload job, keeps its name (`M12-A1`).
 - The `api` calls by key end in `Object`. Before: `api.head(key)`, `api.put(key, body, options)`, `api.delete(key)`,
   `api.deleteMany(keys)`, `api.copy(from, to)`. After: `api.headObject(key)`, `api.putObject(key, body, options)`,
@@ -83,7 +82,8 @@ Every notable change to the `cloudrop` package. The format follows
   `forget()` answered `STORAGE_ERROR` when IndexedDB failed, and `discard()` when the browser refused a Web Lock.
   After: `error.code === "BROWSER_STORAGE_ERROR"`, not retryable, with the same messages. `STORAGE_ERROR` now always
   means the bucket or the server's storage. Code that maps every code, in an exhaustive `switch` or a
-  `Record<CloudropErrorCode, string>` or `Record<ClientErrorCode, string>`, handles the new code (`M12-A7`).
+  `Record<CloudropErrorCode, string>` (`CloudropErrorCode` is exported by `cloudrop` and `cloudrop/client`), handles
+  the new code (`M12-A7`).
 - The React hook continues a listed upload with `resumeUpload`. Before: `const { resume } = useUpload("files")`, then
   `resume(upload, file)`. After: `const { resumeUpload } = useUpload("files")`, then `resumeUpload(upload, file)`.
   `resume()` without arguments still un-pauses every paused file; in plain JavaScript the old `resume(upload, file)`
@@ -143,9 +143,6 @@ Every notable change to the `cloudrop` package. The format follows
   so the client's retry after the wait got `NOT_UPLOADED` (`UPLOAD_EXPIRED` with a store). After: it is answered as
   it is, the object and the row stay, no `onAbort` runs, and the retry completes the file. A plugin that means to
   refuse for good returns an error that is not retryable (`M12-R30`).
-- The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
-  600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
-  such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
 - The client no longer waits out a `Retry-After` longer than its 20-second backoff cap, at `/upload`, `/sign` or
   `/complete`. Before: a server or proxy asking for 600 seconds was asked again five times, 20 seconds apart. After:
   the file fails at once with the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when the app
@@ -153,12 +150,14 @@ Every notable change to the `cloudrop` package. The format follows
   before `retry()` yourself (`M12-E4`, `M12-R41`, `M12-R42`).
 - A bucket the browser cannot reach while the upload server answers fails the file with `BUCKET_BLOCKED`. Before: a
   CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
-  `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, two `PUT` attempts that send no byte
-  around a `/sign` that answered end it with `error.code === "BUCKET_BLOCKED"`, not retryable, within about a second;
-  `retry()` keeps the ticket. Code that shows a Retry button only for `error.retryable`, or that maps every code in an
-  exhaustive `switch` over `CloudropErrorCode` or `ClientErrorCode`, handles the new code. With a `fetch` option and
+  `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, when all six `PUT` attempts failed before
+  the browser reported a byte sent, around a `/sign` that answered, the file ends with
+  `error.code === "BUCKET_BLOCKED"`, still retryable, after the same retries; `retry()` keeps the ticket. In Firefox
+  a file whose connection keeps dropping, or whose signature is bad, ends the same way, since Firefox reports
+  no progress for a fast body whose answer is an error; the message names those causes too. Code that maps every code
+  in an exhaustive `switch` or a `Record<CloudropErrorCode, string>` handles the new code. With a `fetch` option and
   outside a browser nothing changes: the rule needs `navigator.onLine === true`, which React Native does not report
-  (`M12-E7`, `M12-R40`).
+  (`M12-E7`, `M12-R40`, `M12-R60`).
 - The usage table has two more columns and an index, for an owner's erase mark. Before: `cloudrop_usage` was
   `owner, reserved_bytes, active_bytes, files, updated_at`. After: it also has `erase_requested_at` and `erased_at`,
   and until it does, the store's first call answers `INVALID_CONFIG` with the SQL to run. On Postgres:
@@ -205,8 +204,9 @@ Every notable change to the `cloudrop` package. The format follows
 - `content.kind` on a `contentChecks()` refusal with `reason: "refused"`: `"web-page"`, `"program"`, `"installer"`,
   `"script"`, `"svg"`, `"xml"` or `"denied"`, and the type `RefusedKind` from `cloudrop` and `cloudrop/client`. A
   client drops a kind it does not know, and an older client ignores it (`M12-E6`).
-- The client error code `BUCKET_BLOCKED`, when the browser sends no byte to the bucket: its message names the bucket's
-  CORS rule and `npx cloudrop doctor --origin <origin>` (`M12-E7`).
+- The client error code `BUCKET_BLOCKED`, retryable, when the browser reports no byte sent to the bucket on any
+  attempt: its message names the bucket's CORS rule and `npx cloudrop doctor --origin <origin>`, and the look-alikes, a
+  firewall or extension and a bad signature (`M12-E7`, `M12-R60`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
@@ -245,16 +245,16 @@ Every notable change to the `cloudrop` package. The format follows
 - The refusal of a `plugins` option that is not a list suggests `[contentChecks()]`, not the removed `limits()`
   (`M12-A11`).
 - A server without a store no longer carries the store's code: it travels with the store object. The bundled server
-  is 28.25 kB instead of 34.71 kB (gzip), and a server with a SQL store 33.61 kB instead of 33.13 kB (`M12-S1`).
+  is 29.47 kB instead of 34.71 kB (gzip), and a server with a SQL store 46.4 kB, measured 2026-11-22 (`M12-S1`).
 - The size ceilings of every entry are raised for 1.0, so they guard against accidents and never block work (`M12-P1`).
   Bundle size is not covered by semver; the release notes give the sizes measured.
 - `Jsonified<any>` is `any`. Before: `unknown`. After: `any`, so an `authorize` or an `onComplete` typed `any` gives
   `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
   (`M12-T5`).
 - The plugin API is experimental, outside semver: `CloudropPlugin`, `ServerHooks`, their hooks' contexts and
-  `extendRoute` are marked `@beta` and experimental, and a minor release may change them. Using `contentChecks()` is covered as
-  before; a plugin you wrote yourself may need a change on a minor upgrade, which the changelog will say (`M12-A12`,
-  `M12-P8`).
+  `extendRoute` are marked `@beta` and experimental, and a minor release may change them. Using `contentChecks()` is
+  covered as before; a plugin you wrote yourself may need a change on a minor upgrade, which the changelog will say
+  (`M12-A12`, `M12-P8`).
 - The doc comments in the published `.d.ts` explain themselves in plain words instead of citing internal decision ids
   (`M12-P10`).
 
@@ -265,7 +265,6 @@ Every notable change to the `cloudrop` package. The format follows
   file failed at once. After: it waits the 3 seconds (`M12-R43`).
 - A bucket `PUT` through an `XMLHttpRequest` that fails inside `send()` no longer leaves a listener on the upload's
   signal (`M12-R44`).
-
 - A route whose `authorize` only refuses, such as `() => forbidden("closed")`, authorizes no one in the types. Before:
   its auth type was the refusal itself (or `AuthResult` for `() => rateLimited(30)`), so a typed plugin such as
   `CloudropPlugin<{ userId: string }>` beside it failed to compile, and `prefix`'s context offered `code` and

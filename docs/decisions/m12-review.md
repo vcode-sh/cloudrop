@@ -195,8 +195,8 @@ Entries start from 1.
 ### M12-R24: the `BROWSER_STORAGE_ERROR` upgrade entry warns about exhaustive maps
 
 - **Decision:** the changelog's `BROWSER_STORAGE_ERROR` bullet says that an exhaustive `switch`, or a
-  `Record<CloudropErrorCode, string>` or `Record<ClientErrorCode, string>`, must handle the new code, as the
-  `BUCKET_BLOCKED` bullet does.
+  `Record<CloudropErrorCode, string>`, must handle the new code, as the `BUCKET_BLOCKED` bullet does. As first written it
+  also named `Record<ClientErrorCode, string>`, a type no entry exports (amended by `M12-R64`).
 - **Why:** the code is a new member of both unions and breaks such a map at compile time (review R13 B6).
 - **If wrong:** nothing depends on the text.
 - **Status:** in force.
@@ -288,17 +288,18 @@ Entries start from 1.
 
 ### M12-R40: `BUCKET_BLOCKED` only where the runtime says it is online (amends M12-E7)
 
-- **Decision:** the fourth condition of the rule in `nextStep` (`src/client/parts.ts`) is `navigator.onLine === true`,
-  not `!== false`. Every browser on the floor (Chrome 103, Firefox 100, Safari 16) reports it, in a page and in a
-  worker; React Native and Node have a `navigator` without `onLine`, so there a PUT refused twice before any byte left
-  keeps the six attempts and ends `NETWORK_ERROR`.
+- **Decision:** the fourth condition of the rule in `src/client/parts.ts` is `navigator.onLine === true`, not
+  `!== false`, checked for each attempt since `M12-R60`. Every browser on the floor (Chrome 103, Firefox 100, Safari 16)
+  reports it, in a page and in a worker; React Native and Node have a `navigator` without `onLine`, so there a PUT
+  refused before any byte left on every attempt ends `NETWORK_ERROR`.
 - **Why:** finding D1 of the review (area D). Spec 1.0 §2d says the rule runs only in a browser, but the only gate was a
   global `XMLHttpRequest`, which React Native has. A probe with React Native's `navigator` (`{ product: "ReactNative" }`)
   and every PUT failing before progress ended in `BUCKET_BLOCKED` after two PUTs: a DNS or TLS failure of the storage
   host, or a mobile network handover, would have shown a non-retryable CORS message in an app that has no CORS. The
   `onLine` test needs no new API and no origin comparison.
 - **If wrong:** a browser-like runtime that has CORS but no `navigator.onLine` reports a blocked bucket as
-  `NETWORK_ERROR` after about 15 s, as before 1.0; none is known.
+  `NETWORK_ERROR`, as before 1.0; none is known. Since `M12-R60` both codes come after the same six attempts, so only
+  the code and the message differ.
 - **Status:** in force.
 - **Visible in:** `src/client/parts.ts`, `src/client/bucket-blocked.test.ts`, `docs/guide/errors.md`,
   `docs/guide/client.md`, spec 1.0 §2d, base spec §6.2, `M12-E7`.
@@ -447,3 +448,98 @@ Entries start from 1.
   React runs its passive effects"): red before the fix, and red again with `useEffect` put back as a fault probe.
 - **Visible in:** `src/react/use-upload.ts`, `src/react/use-upload-callbacks.test.ts`, `docs/guide/react.md` (Only
   while mounted), `docs/decisions/m12-hooks.md` (M12-H1).
+
+### M12-R60: `BUCKET_BLOCKED` only after the whole budget, and retryable (amends M12-E7)
+
+- **Decision:** `nextStep` in `src/client/parts.ts` decides `BUCKET_BLOCKED` only once a part or a single `PUT` has
+  used its six attempts (`MAX_ATTEMPTS`), and only when every attempt ended blocked: XHR `onerror` with no upload
+  progress while `navigator.onLine === true` (checked at each attempt), with at least one fresh 2xx `/sign` between
+  attempts. Any attempt with progress, a readable answer, a stall, an offline page or a failed `/sign` ends the file
+  as before, with the last attempt's error (`NETWORK_ERROR` for an opaque one). `BUCKET_BLOCKED` is now
+  `retryable: true` and stays in `KEEPS_TICKET`, so `retry()` reuses the ticket once the rule, the network or the
+  credentials are fixed. Its message names the CORS rule and `npx cloudrop doctor --origin <origin>`, and the
+  look-alikes: a firewall or extension, and a bad signature (wrong credentials, or the server's clock off), which some
+  browsers report the same way. It contains no URL.
+- **Why:** final review, finding 1 (controller's ruling, binding). Firefox reports no upload progress for a body sent
+  quickly whose answer is an error, so the progress signal cannot tell a blocked request from a sent one. Measured
+  (`r2-spike-findings.md`, "Upload progress in Firefox and WebKit, 2026-11-22"): under the two-attempt rule, Firefox 157
+  ended a dropped connection `BUCKET_BLOCKED`, not retryable, after 163 ms and two attempts, and a bad signature after
+  346 ms, where Chromium and WebKit got six attempts and `NETWORK_ERROR`; on this branch's lane, Firefox 159 ends a
+  20 MiB file whose part 2 is reset after 1 MiB `BUCKET_BLOCKED`. Waiting for the budget gives up only the fast
+  detection: a transient failure in Firefox gets the same six attempts as anywhere, and a persistent one stays
+  retryable, so an app that shows Retry for retryable errors keeps working.
+- **If wrong:** a CORS miss is reported after up to about 15 s of waits instead of about one round trip; the code and
+  the message still name the cause. In Firefox a persistent dropped connection or a bad signature ends
+  `BUCKET_BLOCKED`, not `NETWORK_ERROR`; both are retryable and keep the ticket.
+- **Status:** in force. `src/client/bucket-blocked.test.ts`: the Firefox pattern (the body reaches the bucket, then
+  `onerror` without progress, six times) ends `BUCKET_BLOCKED`, retryable; silent failures with one attempt with
+  progress between them, a readable `503` among them, a page offline at one attempt only, and a failed `/sign` end
+  `NETWORK_ERROR`. Red on the old rule (six rows), green after; a fault probe that kept only the last attempt's mark
+  turned four `NETWORK_ERROR` rows red.
+- **Visible in:** `src/client/parts.ts`, `src/client/failures.ts`, `src/client/transport.ts`,
+  `src/client/retry-step.ts`, `src/testing/fake-xhr.ts` (`lose()`), `src/client/bucket-blocked.test.ts`,
+  `examples/next/app/bucket-faults.chaos.browser.test.ts`, `examples/next/app/lab-blocked.browser.test.ts`,
+  `examples/next/app/lab/fault-panel.tsx`, `examples/next/README.md`, `docs/guide/errors.md`,
+  `docs/guide/troubleshooting.md`, `docs/guide/react.md`, `docs/guide/client.md`, `docs/guide/bucket-setup.md`,
+  `docs/guide/stability.md`, `README.md`, `packages/cloudrop/README.md`, `packages/cloudrop/CHANGELOG.md`, spec 1.0
+  §2d, base spec §6.2, `M12-E7`, `M12-R40`.
+
+### M12-R61: the browser lane runs the bucket-fault rows on Firefox and WebKit too
+
+- **Decision:** `examples/next/playwright.config.ts` adds the projects `firefox` and `webkit` to the stateless pass,
+  limited to `app/bucket-faults.chaos.browser.test.ts` and `app/lab-blocked.browser.test.ts`; a row tagged `@cdp`
+  (throttled through Chrome's DevTools Protocol) runs on Chromium alone. CI's `browser` job installs Firefox and
+  WebKit with `--with-deps`. Two rows state the engines' measured differences: part 2 reset six times ends
+  `BUCKET_BLOCKED` in Firefox and `NETWORK_ERROR` elsewhere, and a single PUT reset twice before its answer shows one
+  network error in Chromium and Firefox (each resends once by itself) and two in WebKit. The reset row no longer caps
+  how many times the browser itself resent an attempt (Firefox: 13 arrivals for six attempts); the client's six
+  attempts are pinned by the request rows.
+- **Why:** spec 1.0 §2d's gate "Firefox and Safari, measured in the browser lane before release". The rule reads the
+  engine's progress events, so the engines that differ must run its rows.
+- **If wrong:** the browser job takes about two minutes longer; an engine-specific failure in another file stays
+  unseen until that file joins the list.
+- **Status:** in force.
+- **Visible in:** `examples/next/playwright.config.ts`, `.github/workflows/ci.yml` (`browser`),
+  `examples/next/app/bucket-faults.chaos.browser.test.ts`, `examples/next/README.md`, `AGENTS.md` (Gates).
+
+### M12-R62: the `cloudrop + adapters/sql (bundled)` ceiling is 60 kB (amends M12-P1)
+
+- **Decision:** the budget's gzip ceiling in `scripts/size-limit.config.ts` goes from 50 kB to 60 kB, and the
+  changelog and the config comment give the sizes measured on this branch instead of Task 2's.
+- **Why:** final review, finding 6, and the owner's ruling. The measured size grew from 33.61 kB at Task 2 to 46.4 kB
+  at `b8491f4b`, 7 % under the old ceiling, against the 25 % headroom `M12-P1` meant; the published "33.61 kB instead
+  of 33.13 kB" was false by 13 kB.
+- **If wrong:** a slow growth of the server-with-store bundle passes unnoticed longer; the release summary reports the
+  measured size.
+- **Status:** in force.
+- **Visible in:** `scripts/size-limit.config.ts`, `packages/cloudrop/CHANGELOG.md`, `docs/decisions/m12-policy.md`
+  (`M12-P1`).
+
+### M12-R63: a route's name must not be another route's first prefix folder (amends M12-A10)
+
+- **Decision:** the `prefix` row of `docs/guide/server.md` says that a route's name must not be the first folder of
+  another route's `prefix`, with the example of routes `users` and `avatar` (prefix `users/42/avatars`), where
+  `deletePrefix("users/")` empties both. `M12-A10`'s "Why" says so too. No behaviour changes.
+- **Why:** final review, finding 8 (the second half of the area review's B2). `M12-R6` covered `erase.prefixes`;
+  `M12-A10` still promised that a whole route can be emptied by prefix without that condition.
+- **If wrong:** none; the guide matches the code.
+- **Status:** in force.
+- **Visible in:** `docs/guide/server.md` (route options), `docs/decisions/m12-api.md` (`M12-A10`).
+
+### M12-R64: the guides and the upgrade notes corrected after the final review
+
+- **Decision:** docs only, no behaviour changes:
+  - `server.md` and `store.md`: an error from a cloudrop older than 1.0 is answered `500` or counted a failure; a
+    second 1.x copy's is recognised (findings 2 and 3, after `M12-R2`);
+  - the changelog's stale first `M12-E4` entry is deleted (finding 4);
+  - the upgrade notes name `Record<CloudropErrorCode, string>`, exported by `cloudrop` and `cloudrop/client`, not the
+    internal `ClientErrorCode` (finding 5; `M12-R24` is amended so);
+  - "Before" of the `FileRecordStatus` note no longer names `cloudrop/store`, which 0.6.0 did not have (finding 7);
+  - `store.md`: a `transaction: true` store must be copied with spread (finding 9);
+  - both READMEs: "without one, uploads fail, usually with `BUCKET_BLOCKED`" (finding 10);
+  - the changelog's split "Fixed" list and its 127-column line (finding 12).
+- **Why:** final review of `release-1.0` at `b8491f4b`.
+- **If wrong:** none; the docs match the code and the 0.6.0 API reports.
+- **Status:** in force.
+- **Visible in:** `docs/guide/server.md`, `docs/guide/store.md`, `README.md`, `packages/cloudrop/README.md`,
+  `packages/cloudrop/CHANGELOG.md`, `M12-R24`.
