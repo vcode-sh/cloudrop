@@ -57,6 +57,8 @@ Load the matching skill from `.claude/skills/` before the work:
 - `bun run test:live` for server changes too: it also runs the upload protocol against real R2.
 - `scripts/check-drizzle-versions.sh` for Drizzle adapter changes: it type-checks the adapter against drizzle-orm 0.45
   in a temporary copy of the package (CI job `drizzle-0-45`); the workspace installs 1.0.0-rc.5.
+- `scripts/test-react-18.sh` for `cloudrop/react` changes: it runs the React tests on React 18.3.1 in a temporary copy
+  of the package (CI job `react-18`); the workspace installs React 19.
 - `bun run test:db` for store and adapter changes: Postgres 18 in Docker (port 19500, `CLOUDROP_POSTGRES_PORT`) and
   SQLite through `node:sqlite`; it generates the Prisma test clients and fails when Docker is missing.
 - `bun run test:chaos` for client and server changes: the upload protocol runs on RustFS (port 19300) behind a

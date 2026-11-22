@@ -10,8 +10,9 @@
 
 import { File as NodeFile } from "node:buffer";
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react";
-import { createElement, StrictMode, useRef } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement, StrictMode, useLayoutEffect, useRef } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { CloudropError } from "../client.ts";
 import type { UseUploadOptions } from "../react.ts";
 import { forbidden } from "../server/refusal.ts";
@@ -84,6 +85,20 @@ function Mover({ useUpload, log, give }: Starter) {
   if (!given.current) give(() => upload(note("alpha", "a.txt")));
   given.current = true;
   return createElement(Follower, { useUpload, route: totals.done === 0 ? "notes" : "closed", log });
+}
+
+/** A hook on the notes route that hands the test its upload() of a foreign file, which the client refuses. */
+function Keeper({ useUpload, give }: { useUpload: UseNotes; give: (upload: () => unknown) => void }) {
+  const { upload } = useUpload("notes");
+  give(() => upload(foreign()));
+  return null;
+}
+
+/** A hook on the notes route that runs `onCommit` in a layout effect: after its commit, before its passive effects. */
+function Late({ useUpload, options, onCommit }: { useUpload: UseNotes; options: Options; onCommit: () => unknown }) {
+  useUpload("notes", options);
+  useLayoutEffect(() => void onCommit(), [onCommit]);
+  return null;
 }
 
 beforeEach(() => {
@@ -252,6 +267,25 @@ describe("useUpload's startError, onUploaded and onError", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect({ shown: view.container.textContent, log }).toEqual({ shown: "arriving", log: ["leaving a.txt"] });
+  });
+
+  // In a browser React runs a commit's passive effects in a later task, and a network answer can land before it. A
+  // layout effect stands in for that answer here: it runs after the commit, before the passive effects (M12-R54).
+  it("calls a hook that has committed for an end before React runs its passive effects", async () => {
+    const { useUpload, heard, options } = setup();
+    let refuse: () => unknown = () => undefined;
+    const keeper = createElement(Keeper, { useUpload, give: (upload) => (refuse = upload) });
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+    const root = createRoot(document.createElement("div"));
+    onTestFinished(() => root.unmount());
+    root.render(keeper);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    root.render(
+      createElement("div", null, keeper, createElement(Late, { useUpload, options, onCommit: () => refuse() })),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(heard).toEqual(["failed INVALID_INPUT -"]);
   });
 
   it("tells no callback of a route the end itself moved the hook to", async () => {

@@ -28,9 +28,11 @@ the server's module graph, where React exports no `useState` or `useSyncExternal
 `createUploadHooks` takes the [client's options](client.md#create-a-client) (`basePath`, `concurrency`, `namespace`
 and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
 client is created at the first upload, the first `useResumable` read or `close()` in the browser, never while a server
-renders the page. A wrong option never throws from your code: `upload()`, `resumeUpload()` and `refresh()` resolve
-`{ data: null, error }` with its `INVALID_CONFIG` error, which also reaches the route's `startError` and `onError` (see
-[When a file ends](#when-a-file-ends-and-refused-starts)). A pick or a drop, which has no caller to resolve to, also
+renders the page. A wrong option, or options that are not an object, never throws from your code: `upload()`,
+`resumeUpload()` and `refresh()` resolve `{ data: null, error }` with its `INVALID_CONFIG` error. For `upload()` and
+`resumeUpload()`, which start an upload, it also reaches the route's `startError` and `onError` (see
+[When a file ends](#when-a-file-ends-and-refused-starts)); `refresh()` only reads the list, so its answer is the only
+place it shows. A pick or a drop, which has no caller to resolve to, also
 throws it in a separate task, so it reaches the console and your error reporting: a configuration bug stays loud on a
 page that renders no `startError`.
 
@@ -154,7 +156,8 @@ into an input inside the zone.
 [`UploadResult`](client.md#jobs-progress-pause-and-retry) once every file has first settled. It takes a `File`, an array
 or a `FileList`, checked as the client checks them: anything that is not a `File` of this page, such as one from
 another frame, resolves `INVALID_INPUT`. `null` or an empty list resolves `null` and starts nothing. The call's
-metadata replaces the hook's.
+metadata replaces the hook's; options that are not an object, such as `upload(file, null)`, resolve `INVALID_INPUT`,
+as the client's `upload()` does.
 
 ```tsx
 "use client";
@@ -214,11 +217,11 @@ export function Documents({ folderId }: { folderId: string }) {
 - **Route-wide, like `files`.** Every mounted component on the route hears every file of the route, whichever component
   started it, and two components on one route are each called once. Put the callback in the component that owns the
   reaction, or give it to one of them only.
-- **Only while mounted.** A component hears the files that ended while it was mounted, even when that end unmounts it,
-  as `{!done && <Picker onUploaded={...} />}` does. A file that ended before a component mounted is not reported to it,
-  also when the end is what mounts it, and nothing is reported late when the route's components mount again; the
-  file's row in `files` still shows how it ended. The latest render's functions are called, so a callback may read
-  current props and state, and StrictMode does not call them twice.
+- **Only while mounted.** A component hears the files that ended while it was mounted, from the moment React commits
+  it, even when that end unmounts it, as `{!done && <Picker onUploaded={...} />}` does. A file that ended before a
+  component mounted is not reported to it, also when the end is what mounts it, and nothing is reported late when the
+  route's components mount again; the file's row in `files` still shows how it ended. The latest render's functions
+  are called, so a callback may read current props and state, and StrictMode does not call them twice.
 - **A callback may start or retry an upload.** It runs after the components rendered the change, outside the client's
   own work. One that throws does not stop the others: its error is thrown again in a separate task, for the console and
   your error reporting.

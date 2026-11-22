@@ -5,9 +5,10 @@
 // file shows in the route's `startError`, and the route's store tells each mounted hook's callbacks when a file ends
 // (M12-H1 to M12-H3).
 
-import { useCallback, useEffect, useInsertionEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useInsertionEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
 import type { CloudropClient, Result, UploadJob, UploadResult } from "../client.ts";
+import { isPlainObject } from "../input.ts";
 import { createDropHandlers } from "./drop.ts";
 import type { JobTracker } from "./job-tracker.ts";
 import type { InputProps, UseUploadOptions, UseUploadResult } from "./types.ts";
@@ -64,8 +65,10 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
     // client/arguments.ts).
     if (files === null || (isList(files) && files.length === 0)) return Promise.resolve(null);
     const { route, options } = controller.latest;
-    const metadata = "metadata" in call ? call.metadata : options.metadata;
-    return start((client) => client.start(route, files, { metadata }));
+    // Options that are not an object, such as null from plain JavaScript, go to the client as they are, which refuses
+    // them with INVALID_INPUT (M12-R51).
+    const sent = isPlainObject(call) ? { metadata: "metadata" in call ? call.metadata : options.metadata } : call;
+    return start((client) => client.start(route, files, sent));
   };
   /**
    * Files from a pick or a drop: no caller sees the result, so a refusal shows in startError, and a wrong client option
@@ -115,6 +118,12 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
 }
 
 const serverView = () => EMPTY_VIEW;
+/**
+ * A layout effect in the browser, so a hook hears every end once it has committed: React runs passive effects in a
+ * later task, and an end can land before it (M12-R54). Neither runs on the server, where React 18 warns about a
+ * layout effect.
+ */
+const useCommitEffect = typeof document === "undefined" ? useEffect : useLayoutEffect;
 
 export function useUploadWith(source: HookSource, route: string, options: UseUploadOptions<unknown> = {}): Hook {
   const [isDragOver, setDragOver] = useState(false);
@@ -125,10 +134,10 @@ export function useUploadWith(source: HookSource, route: string, options: UseUpl
   const store = source.storeOf(route);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
   // In an effect, so StrictMode's second effect still leaves one listener per mounted hook, which reads the callbacks
-  // of the latest committed render (M12-H1). It keeps its own route and factory: a publish hands its events to the
-  // listeners registered then, so when the end itself moves the hook to another route or factory, the next one's
-  // callbacks must not hear this route's end.
-  useEffect(
+  // of the latest committed render (M12-H1), and hiding under <Activity> unregisters it. It keeps its own route and
+  // factory: a publish hands its events to the listeners registered then, so when the end itself moves the hook to
+  // another route or factory, the next one's callbacks must not hear this route's end.
+  useCommitEffect(
     () =>
       store.onEnd((event) => {
         const { latest } = controller;
