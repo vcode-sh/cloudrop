@@ -15,6 +15,7 @@ export type {
   FailedRecord,
   FileRecord,
   FileStatus,
+  MappedRecord,
   NewFile,
   PendingRecord,
   RecordOf,

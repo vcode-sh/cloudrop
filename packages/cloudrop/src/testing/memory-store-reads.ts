@@ -1,7 +1,7 @@
 // The memory store's methods that only read: rows as records, and the keyset pages of `stale`, `list`, `listAll` and
 // `owners`, ordered as a database orders them: ids and owners by their bytes.
 
-import type { CloudropStore, FileRecord, FileStatus } from "../server/store.ts";
+import type { CloudropStore, FileRecord, FileStatus, MappedRecord } from "../server/store.ts";
 import type { MemoryTables } from "./memory-store-methods.ts";
 import type { RawFileRow } from "./store-rows.ts";
 
@@ -18,7 +18,8 @@ const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed
 
 /** A row as its record, cast to the union by status as the SQL store casts it (M12-T1); the contract proves both. */
 export function toRecord(row: RawFileRow): FileRecord {
-  const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = structuredClone(row);
+  const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...rest } = structuredClone(row);
+  const record: MappedRecord = rest;
   return record as FileRecord;
 }
 

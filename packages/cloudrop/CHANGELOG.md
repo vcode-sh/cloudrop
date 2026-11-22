@@ -25,8 +25,12 @@ Every notable change to the `cloudrop` package. The format follows
   (`M12-S1`, `M12-S2`).
 - `api` has the store's calls only when `store` is passed. Before: a server without a store typed `api.files`,
   `api.file`, `api.allFiles`, `api.usage`, `api.revokeUploads`, `api.deleteFile`, `api.eraseOwner`, `api.reconcile`
-  and `api.sweep`, which answered `INVALID_CONFIG`. After: they are type errors there; a store that may be undefined
-  (`store: flag ? s : undefined`) counts as none. At runtime they still answer `INVALID_CONFIG` (`M12-T3`).
+  and `api.sweep`, which answered `INVALID_CONFIG`. After: they are type errors there, and a store that may be
+  undefined (`store: flag ? s : undefined`, or a spread `...(store && { store })`) counts as none. An app with an
+  opt-in store writes one view of `api` with the store's calls next to its server and calls them through it:
+  `export const storeApi = store ? (cloudrop.api as StoreFileApi<RouteName<typeof cloudrop>>) : null;` (both types
+  from `cloudrop`), then `if (storeApi) await storeApi.usage(userId)` where it wrote `cloudrop.api.usage(userId)`.
+  At runtime the calls still answer `INVALID_CONFIG` without a store (`M12-T3`).
 - `FileApi` is the storage calls alone. Before: `FileApi` had the store's calls too. After: a type holding them is
   `StoreFileApi` (or `Cloudrop<typeof routes, typeof store>["api"]`) (`M12-T3`).
 - `FileRecord` is a union by status. Before: every time field was `Date | null` whatever the status. After:

@@ -132,6 +132,19 @@ export type FailedRecord<R extends string = string> = RecordBase<R> & {
 } & ({ claimedAt: null; cleanedAt: Date | null } | { claimedAt: Date; cleanedAt: Date });
 
 /**
+ * A row as a store maps it, before the cast to `FileRecord`: every field the union has, with each status's times
+ * loose, so the compiler still checks that a store maps every field and gives each its type. No entry exports it.
+ */
+export interface MappedRecord extends RecordBase<string> {
+  status: FileStatus;
+  claimedAt: Date | null;
+  completedAt: Date | null;
+  endedAt: Date | null;
+  cleanedAt: Date | null;
+  result: string | null;
+}
+
+/**
  * A file's row as the store holds it, by status: each status fixes which times are set (spec 1.0 §3b, M12-T1), so
  * `record.status === "completed"` narrows `completedAt` to a `Date`. `endedAt` is when the row reached an ended status
  * (`deleted` included); `cleanedAt` when the sweep finished removing what the upload left in the bucket.
