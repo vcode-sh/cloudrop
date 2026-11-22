@@ -2,9 +2,12 @@
 
 Every notable change to the `cloudrop` package. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html): before 1.0, a minor version may change the API.
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). From 1.0, what semver covers is in
+the stability guide (`docs/stability.md` in the package); before 1.0, a minor version could change the API.
 
 ## Unreleased
+
+## 1.0.0 - 2026-11-22
 
 **Upgrading to 1.0.**
 
