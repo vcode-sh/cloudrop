@@ -43,7 +43,16 @@ export function pendingRow(file: NewFile, owner: string | null, changes: Partial
 }
 
 export function usageRow(owner: string, counts: Partial<RawUsageRow>): RawUsageRow {
-  return { owner, reservedBytes: 0, activeBytes: 0, files: 0, updatedAt: at(0), ...counts };
+  return {
+    owner,
+    reservedBytes: 0,
+    activeBytes: 0,
+    files: 0,
+    eraseRequestedAt: null,
+    erasedAt: null,
+    updatedAt: at(0),
+    ...counts,
+  };
 }
 
 /** A member a target must provide unless it declares the matching gap; one that does neither fails here, loudly. */

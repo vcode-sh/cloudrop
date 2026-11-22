@@ -152,7 +152,7 @@ test("refuses a file that would take a user past their quota", async () => {
   const { error } = await client.upload("files", file("second.pdf"));
 
   expect(error?.code).toBe("QUOTA_EXCEEDED");
-  expect((await cloudrop.api.usage("alice")).data).toEqual({ reservedBytes: 0, activeBytes: 600, files: 1 });
+  expect((await cloudrop.api.usage("alice")).data).toMatchObject({ reservedBytes: 0, activeBytes: 600, files: 1 });
 });
 ```
 

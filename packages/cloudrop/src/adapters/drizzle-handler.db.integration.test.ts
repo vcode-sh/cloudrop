@@ -93,7 +93,7 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect((await complete(fixture, ticket.token)).body.data).toEqual({ run: 1 });
     expect(await appRows()).toEqual([{ file_id: ticket.id, owner: "u1" }]);
     expect((await rawTables(db).files())[0]).toMatchObject({ status: "completed", result: '{"run":1}' });
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
   });
 
   test("a throw in onComplete leaves no app row and the file pending, and the retry completes it", async () => {
@@ -231,7 +231,7 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     held.open();
     expect([(await completing).status, (await deleting).error]).toEqual([200, null]);
     expect(await db.query("SELECT files FROM app_owners")).toEqual([{ files: 1 }]);
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
   });
 
   // A replacing completion runs onDelete before it records the completion, so it too takes the app's row before the
@@ -273,7 +273,7 @@ describe.for(drivers)("POST /complete on Postgres through Drizzle ($name), trans
     expect((await complete(fixture, next.token)).status).toBe(200);
     expect(fixture.logger.errors).toEqual([]);
     expect(await db.query("SELECT file_id FROM app_uploads")).toEqual([{ file_id: next.id }]);
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
   });
 
   test("onDelete's writes through tx commit with the deletion, and a throw rolls them back and keeps the file", async () => {

@@ -109,7 +109,15 @@ describe("SQLite", () => {
       await expect(store.complete("f-1", "claim-a", null, NOW)).rejects.toThrow("Injected failure of the files write.");
       const raw = rawTables(db);
       expect(await raw.usage()).toEqual([
-        { owner: "u-1", reservedBytes: 10, activeBytes: 0, files: 0, updatedAt: NOW },
+        {
+          owner: "u-1",
+          reservedBytes: 10,
+          activeBytes: 0,
+          files: 0,
+          eraseRequestedAt: null,
+          erasedAt: null,
+          updatedAt: NOW,
+        },
       ]);
       expect((await raw.files())[0]).toMatchObject({ status: "completing", claim: "claim-a", completedAt: null });
     });

@@ -63,7 +63,12 @@ describe("api.sweep: expire", () => {
       ),
     );
     expect([heads, fixture.fake.pendingUploads()]).toEqual([[undefined, 5, 5, 1], 0]);
-    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({
+      reservedBytes: 0,
+      activeBytes: 5,
+      files: 1,
+      erasure: null,
+    });
   });
 
   it("marks a row cleaned at the time its check started, not when the storage answered", async () => {

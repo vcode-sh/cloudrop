@@ -33,6 +33,8 @@ export interface UsageRow {
   reservedBytes: number;
   activeBytes: number;
   files: number;
+  eraseRequestedAt: Date | null;
+  erasedAt: Date | null;
   updatedAt: Date;
 }
 
@@ -112,6 +114,8 @@ function usageRow(row: Row): UsageRow {
     reservedBytes: integer(row, "reserved_bytes"),
     activeBytes: integer(row, "active_bytes"),
     files: integer(row, "files"),
+    eraseRequestedAt: optionalTime(row, "erase_requested_at"),
+    erasedAt: optionalTime(row, "erased_at"),
     updatedAt: time(row, "updated_at"),
   };
 }
@@ -119,7 +123,7 @@ function usageRow(row: Row): UsageRow {
 const FILE_COLUMNS =
   "id, route, key, owner, status, name, type, size, upload_id, metadata, result, claim, claimed_at, expires_at, " +
   "created_at, updated_at, completed_at, ended_at, cleaned_at, request_key";
-const USAGE_COLUMNS = "owner, reserved_bytes, active_bytes, files, updated_at";
+const USAGE_COLUMNS = "owner, reserved_bytes, active_bytes, files, erase_requested_at, erased_at, updated_at";
 
 /** A reader of the tables under these names (defaults `cloudrop_files`, `cloudrop_usage`), in their schema if given. */
 export function rawReader(db: TestDatabase, tables?: Partial<TableNames>): RawReader {

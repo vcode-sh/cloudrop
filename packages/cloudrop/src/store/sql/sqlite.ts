@@ -18,6 +18,12 @@ const NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
   const { files, usage } = tables;
 
+  /** True unless the owner's usage row carries an erase mark (M12-O2); always true without an owner. */
+  const notErased = (b: Binder, owner: string | null) =>
+    owner === null
+      ? "1"
+      : `NOT EXISTS (SELECT 1 FROM ${usage} WHERE owner = ${b.text(owner)} AND erase_requested_at IS NOT NULL)`;
+
   /** `[usage change?, files update returning its id, select]`: a transition's statements. */
   const completion = (counted: SqlStatement | null, update: SqlStatement, id: string): SqlStatement[] => [
     ...(counted ? [counted] : []),
@@ -74,7 +80,8 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
     const superseded = (b: Binder) =>
       // `IS` is SQLite's null-safe equality: a null owner matches only null.
       `request_key = ${b.text(key)} AND owner IS ${b.text(owner)}
-        AND route IN (${routes.map((route) => b.text(route)).join(", ")}) AND status = 'pending'`;
+        AND route IN (${routes.map((route) => b.text(route)).join(", ")}) AND status = 'pending'
+        AND ${notErased(b, owner)}`;
     const b = binder("sqlite");
     const end = b.statement(`UPDATE ${files} SET status = 'aborted', ended_at = ${b.time(now)},
       updated_at = ${b.time(now)} WHERE ${superseded(b)}`);
@@ -90,12 +97,13 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
   return {
     async reserve({ owner, limit, expiresAt, requestKey, files: accepted }, now) {
       // The quota check reads the usage row as the earlier files of this batch left it; the same check guards the usage
-      // write, which runs before anything else changes that row, so the two always agree.
+      // write, which runs before anything else changes that row, so the two always agree. Every statement also reads
+      // the erase mark, which nothing in the batch writes: one batch is one writer, so all of them see the same mark.
       const fits = (b: Binder, file: NewFile) =>
         owner === null || limit === null
-          ? "1"
-          : `coalesce((SELECT reserved_bytes + active_bytes FROM ${usage} WHERE owner = ${b.text(owner)}), 0)
-              + ${b.bigint(file.size)} <= ${b.bigint(limit)}`;
+          ? notErased(b, owner)
+          : `${notErased(b, owner)} AND coalesce((SELECT reserved_bytes + active_bytes FROM ${usage}
+              WHERE owner = ${b.text(owner)}), 0) + ${b.bigint(file.size)} <= ${b.bigint(limit)}`;
       const statements = accepted.flatMap((file) => {
         const row = binder("sqlite");
         const insert = row.statement(`INSERT INTO ${files} (${INSERT_COLUMNS})
@@ -115,9 +123,14 @@ export function sqliteWrites({ executor, tables }: SqlContext): GuardedWrites {
       });
       if (statements.length === 0) return [];
       const superseded = requestKey === null ? [] : supersede(requestKey, owner, accepted, now);
-      const results = (await executor.batch([...superseded, ...statements])).slice(superseded.length);
+      const m = binder("sqlite");
+      // First in the batch, so its answer tells a file refused by the mark from one over the quota.
+      const marked = m.statement(`SELECT 1 AS erased WHERE NOT ${notErased(m, owner)}`);
+      const [erased = [], ...results] = await executor.batch([marked, ...superseded, ...statements]);
+      if (erased.length > 0) return accepted.map(() => "erased");
       const step = owner === null ? 1 : 2;
-      return accepted.map((_, index) => ((results[index * step]?.length ?? 0) > 0 ? "reserved" : "over-quota"));
+      const inserted = results.slice(superseded.length);
+      return accepted.map((_, index) => ((inserted[index * step]?.length ?? 0) > 0 ? "reserved" : "over-quota"));
     },
 
     async claim(id, claim, now, leaseMs) {

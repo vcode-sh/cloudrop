@@ -102,12 +102,25 @@ export function toRecord(row: SqlRow): FileRecord {
   return record as FileRecord;
 }
 
+/** The usage columns `toUsage` reads. */
+export const USAGE_READ = "reserved_bytes, active_bytes, files, erase_requested_at, erased_at";
+
+/** An erase mark from its two columns: null when `erase_requested_at` is (M12-O1). */
+export function toErasure(row: SqlRow | undefined): OwnerUsage["erasure"] {
+  if (row?.erase_requested_at == null) return null;
+  return {
+    requestedAt: toDate(row.erase_requested_at, "erase_requested_at"),
+    erasedAt: optionalDate(row, "erased_at"),
+  };
+}
+
 export function toUsage(row: SqlRow | undefined): OwnerUsage {
-  if (!row) return { reservedBytes: 0, activeBytes: 0, files: 0 };
+  if (!row) return { reservedBytes: 0, activeBytes: 0, files: 0, erasure: null };
   return {
     reservedBytes: toSafeInteger(row.reserved_bytes, "reserved_bytes"),
     activeBytes: toSafeInteger(row.active_bytes, "active_bytes"),
     files: toSafeInteger(row.files, "files"),
+    erasure: toErasure(row),
   };
 }
 

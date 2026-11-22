@@ -76,7 +76,7 @@ describe("cloudrop.api.eraseOwner", () => {
       waiting: 0,
       done: true,
     });
-    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     expect((await api.file(theirs.id)).data?.status).toBe("completed");
   });
 

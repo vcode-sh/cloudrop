@@ -259,8 +259,8 @@ any other way, such as from `Object.entries`, does not: wrap that copy with `def
 
 Use the tool you query with:
 
-- **Prisma:** `prisma migrate dev --create-only` from the two models above, add the CHECK line (below) to the
-  generated `migration.sql`, then apply it with `prisma migrate dev`.
+- **Prisma:** `prisma migrate dev --create-only` from the two models above, add the CHECK and index lines (below) to
+  the generated `migration.sql`, then apply it with `prisma migrate dev`.
 - **Drizzle:** export the tables from your schema file and let drizzle-kit create them:
 
   ```ts
@@ -327,8 +327,12 @@ CREATE TABLE "cloudrop_usage" (
   reserved_bytes bigint NOT NULL CHECK (reserved_bytes >= 0),
   active_bytes bigint NOT NULL CHECK (active_bytes >= 0),
   files integer NOT NULL CHECK (files >= 0),
-  updated_at timestamptz(3) NOT NULL
+  updated_at timestamptz(3) NOT NULL,
+  erase_requested_at timestamptz(3),
+  erased_at timestamptz(3)
 );
+
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 SQLite and D1 store times as integer milliseconds:
@@ -377,23 +381,31 @@ CREATE TABLE "cloudrop_usage" (
   reserved_bytes INTEGER NOT NULL,
   active_bytes INTEGER NOT NULL,
   files INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  erase_requested_at INTEGER,
+  erased_at INTEGER
 );
+
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 Other table names: pass `tables: { files: "uploads", usage: "upload_usage" }` to the adapter (letters, digits and `_`)
 and rename them in the SQL, including the index and constraint names if you like.
 
-**Prisma and the CHECK constraints.** Prisma's schema language has no CHECK, so `prisma migrate` creates the usage
-table without the three `CHECK (… >= 0)` on Postgres. Run `prisma migrate dev --create-only`, add this line to the
-generated `migration.sql`, then apply it:
+**Prisma, the CHECK constraints and the erasing index.** Prisma's schema language has no CHECK, and the shipped models
+leave out the partial index on the owners being erased, so `prisma migrate` creates the usage table without either.
+Run `prisma migrate dev --create-only`, add these lines to the generated `migration.sql` (the first on Postgres only,
+the second on Postgres and SQLite), then apply it:
 
 ```sql
 ALTER TABLE cloudrop_usage ADD CONSTRAINT cloudrop_usage_reserved_bytes_check CHECK (reserved_bytes >= 0), ADD CONSTRAINT cloudrop_usage_active_bytes_check CHECK (active_bytes >= 0), ADD CONSTRAINT cloudrop_usage_files_check CHECK (files >= 0);
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 The names are the ones the plain SQL gets by default, so both routes end with the same schema. The store works without
-them; they only guard the counters against a bug or a hand edit.
+them: the CHECKs only guard the counters against a bug or a hand edit, and the index keeps the sweep's erase pass from
+reading every usage row. Prisma's `migrate diff` does not report the index missing or extra (checked with Prisma
+7.10), so it never proposes to drop it either.
 
 **Moving a SQLite database from the SQL to Prisma.** Prisma declares its `BigInt` columns `BIGINT` where the SQL says
 `INTEGER`. Both have INTEGER affinity, so storage and behaviour are the same, but Prisma's first `migrate dev` rebuilds
@@ -490,6 +502,45 @@ CREATE INDEX CONCURRENTLY "cloudrop_files_created_at_idx" ON "cloudrop_files" (c
 With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in the statements. A
 store you wrote yourself also needs the new `listAll` method before `api.allFiles` works with it; every other call
 works without.
+
+### Upgrading from 0.6
+
+1.0 keeps an owner's [erase mark](#erasing-an-owner) in two new columns of `cloudrop_usage`, with a partial index for
+the sweep's erase pass. The store needs the columns: until they exist, its first call fails with `INVALID_CONFIG`,
+which prints the SQL below for your dialect and table names. Add them before you deploy 1.0.
+
+- **Plain SQL**, on Postgres, in a migration:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at timestamptz(3), ADD COLUMN erased_at timestamptz(3);
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
+  ```
+
+  On SQLite or D1, which add one column per statement:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at INTEGER;
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erased_at INTEGER;
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
+  ```
+
+- **Drizzle:** `cloudropPgTables()` and `cloudropSqliteTables()` declare both columns and the index, so
+  `drizzle-kit generate` writes the migration, with no question to answer. For the Postgres tables:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN "erase_requested_at" timestamp(3) with time zone;
+  ALTER TABLE "cloudrop_usage" ADD COLUMN "erased_at" timestamp(3) with time zone;
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" ("owner") WHERE "erase_requested_at" IS NOT NULL AND "erased_at" IS NULL;
+  ```
+
+- **Prisma:** add the two fields to your `CloudropUsage` model, as the shipped models have them, run
+  `prisma migrate dev --create-only`, add the `CREATE INDEX` line above to the generated `migration.sql`, then apply
+  it with `prisma migrate dev`.
+
+Adding nullable columns rewrites no row on Postgres or SQLite. On a large Postgres table, build the index first with
+`CREATE INDEX CONCURRENTLY`, as [Upgrading from 0.5](#upgrading-from-05) shows. A store you wrote yourself needs
+the four new methods `markErasure`, `erased`, `reopen` and `erasing`, and `reserve`'s new `"erased"` answer, before
+`createCloudrop` accepts it.
 
 ### Tables in another schema
 

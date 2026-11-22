@@ -58,6 +58,6 @@ describe("memory store transaction handle", () => {
       throw new Error("onComplete failed");
     });
     await expect(failing).rejects.toThrow("onComplete failed");
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 12, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 12, activeBytes: 0, files: 0, erasure: null });
   });
 });

@@ -73,7 +73,7 @@ describe("a route with replace", () => {
     const { api } = fixture.cloudrop;
     expect((await api.files({ owner: "u1" })).data?.items.map((file) => file.id)).toEqual([second.id, document.id]);
     expect([(await api.file(first.id)).data?.status, await stored(fixture, first.key)]).toEqual(["deleted", false]);
-    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 10, files: 2 });
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 10, files: 2, erasure: null });
     // onComplete ran before the completion was recorded, so it still listed the first avatar; afterComplete ran after.
     expect(seen).toEqual({ listed: [[], [first.id]], previous: ["deleted"] });
   });

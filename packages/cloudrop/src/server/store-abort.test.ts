@@ -38,7 +38,7 @@ describe("POST /abort with a store", () => {
       0,
       ["aborted"],
     ]);
-    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   });
 
   it.for([
@@ -97,7 +97,7 @@ describe("POST /abort with a store", () => {
     const response = await fixture.post("abort", { token: ticket.token, keep: true });
     expect([response.status, (await fixture.storage.head(ticket.key)).data, reasons]).toEqual([200, null, ["aborted"]]);
     expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
-    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   });
 
   it("with keep: true, keeps a completed file and tells no plugin", async () => {

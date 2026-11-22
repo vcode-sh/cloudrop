@@ -91,7 +91,10 @@ export function schemaStatements(dialect: Dialect, tables?: Partial<TableNames>)
   reserved_bytes ${bigint} NOT NULL${nonNegative("reserved_bytes")},
   active_bytes ${bigint} NOT NULL${nonNegative("active_bytes")},
   files ${integer} NOT NULL${nonNegative("files")},
-  updated_at ${time} NOT NULL
+  updated_at ${time} NOT NULL,
+  erase_requested_at ${time},
+  erased_at ${time}
 )`,
+    `CREATE INDEX "${usage}_erasing_idx" ON ${qualified(schema, usage)} (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL`,
   ];
 }

@@ -4,6 +4,7 @@
 import { configError } from "../../errors.ts";
 import type { CloudropStore } from "../../server/store.ts";
 import { defineStore } from "../define-store.ts";
+import { erasureMethods } from "./erasure.ts";
 import { isLockTimeout, onceMoreAfterConflict, type SqlExecutor } from "./executor.ts";
 import { postgresWrites } from "./postgres.ts";
 import { type SqlContext, type StoreMethods, singleStatementMethods } from "./reads.ts";
@@ -35,7 +36,7 @@ const LOCK_TIMEOUT = "2s";
 
 function methodsOver(context: SqlContext): StoreMethods {
   const writes = context.dialect === "postgres" ? postgresWrites(context) : sqliteWrites(context);
-  return { ...singleStatementMethods(context), ...writes };
+  return { ...singleStatementMethods(context), ...erasureMethods(context), ...writes };
 }
 
 /**
@@ -72,11 +73,12 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
       `The executor's dialect ${JSON.stringify(dialect)} is not supported. Use "postgres" or "sqlite".`,
     );
   }
-  const tables = quoteTables(tableNames(options.tables, dialect));
+  const names = tableNames(options.tables, dialect);
+  const tables = quoteTables(names);
   let schema: Promise<void> | undefined;
   const ready = () => {
     // A failed check is not kept, so a fixed schema (or a database back up) is picked up by the next call.
-    schema ??= checkSchema(executor, tables).catch((error: unknown) => {
+    schema ??= checkSchema(executor, names).catch((error: unknown) => {
       schema = undefined;
       throw error;
     });

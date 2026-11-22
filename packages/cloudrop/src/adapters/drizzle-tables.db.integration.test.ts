@@ -15,7 +15,8 @@ import { cloudropPgTables, cloudropSqliteTables } from "./drizzle.ts";
 
 interface Shape {
   columns: { name: string; type: string; notNull: boolean; primaryKey: boolean }[];
-  indexes: { name: string; unique: boolean; columns: string[] }[];
+  /** `partial`: the index has a WHERE, as the usage table's erasing index does (M12-O1). */
+  indexes: { name: string; unique: boolean; partial: boolean; columns: string[] }[];
   checks: { name: string; expression: string }[];
 }
 
@@ -45,11 +46,12 @@ describe("Postgres", () => {
       [relation, table, tableSchema ?? null],
     );
     const indexes = await db.query(
-      `SELECT i.relname AS name, ix.indisunique AS unique, array_agg(a.attname::text ORDER BY k.ord) AS columns
+      `SELECT i.relname AS name, ix.indisunique AS unique, ix.indpred IS NOT NULL AS partial,
+         array_agg(a.attname::text ORDER BY k.ord) AS columns
        FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid
        CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
        JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum
-       WHERE ix.indrelid = $1::text::regclass AND NOT ix.indisprimary GROUP BY i.relname, ix.indisunique`,
+       WHERE ix.indrelid = $1::text::regclass AND NOT ix.indisprimary GROUP BY i.relname, ix.indisunique, ix.indpred`,
       [relation],
     );
     const checks = await db.query(
@@ -82,6 +84,7 @@ describe("Postgres", () => {
         table.indexes.map(({ config }) => ({
           name: config.name ?? "(unnamed)",
           unique: config.unique,
+          partial: config.where !== undefined,
           columns: config.columns.map((column) => ("name" in column && column.name ? column.name : "(expression)")),
         })),
       ),
@@ -120,7 +123,7 @@ describe("SQLite", () => {
   async function catalogue(table: string): Promise<Shape> {
     const columns = await db.query(`SELECT name, type, "notnull", pk FROM pragma_table_info(?) ORDER BY cid`, [table]);
     const indexes = await db.query(
-      `SELECT il.name AS name, il."unique" AS "unique", json_group_array(ii.name) AS columns
+      `SELECT il.name AS name, il."unique" AS "unique", il.partial AS partial, json_group_array(ii.name) AS columns
        FROM pragma_index_list(?) il, pragma_index_info(il.name) ii WHERE il.origin = 'c'
        GROUP BY il.name`,
       [table],
@@ -136,6 +139,7 @@ describe("SQLite", () => {
         indexes.map((index) => ({
           name: String(index.name),
           unique: index.unique === 1,
+          partial: index.partial === 1,
           columns: JSON.parse(String(index.columns)),
         })),
       ),
@@ -155,6 +159,7 @@ describe("SQLite", () => {
         table.indexes.map(({ config }) => ({
           name: config.name,
           unique: config.unique,
+          partial: config.where !== undefined,
           columns: config.columns.map((column) => ("name" in column && column.name ? column.name : "(expression)")),
         })),
       ),

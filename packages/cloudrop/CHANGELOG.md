@@ -114,6 +114,25 @@ Every notable change to the `cloudrop` package. The format follows
   such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
   `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
   compiles (`M12-T5`, `M12-T6`).
+- The usage table has two more columns and an index, for an owner's erase mark. Before: `cloudrop_usage` was
+  `owner, reserved_bytes, active_bytes, files, updated_at`. After: it also has `erase_requested_at` and `erased_at`,
+  and until it does, the store's first call answers `INVALID_CONFIG` with the SQL to run. On Postgres:
+  `ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at timestamptz(3), ADD COLUMN erased_at timestamptz(3);`
+  then `CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND
+  erased_at IS NULL;`. On SQLite and D1: `ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at INTEGER;`,
+  `ALTER TABLE "cloudrop_usage" ADD COLUMN erased_at INTEGER;` and the same `CREATE INDEX`. Drizzle: `drizzle-kit
+  generate` writes it from `cloudropPgTables()` or `cloudropSqliteTables()`. Prisma: add
+  `eraseRequestedAt DateTime? @map("erase_requested_at") @db.Timestamptz(3)` and
+  `erasedAt DateTime? @map("erased_at") @db.Timestamptz(3)` (on SQLite `BigInt?`) to `CloudropUsage`, then add the
+  `CREATE INDEX` to the migration with `--create-only` (`M12-O1`, guide: "Upgrading from 0.6").
+- A database store you wrote yourself has four more methods and a third `reserve` answer. Before: `reserve` answered
+  `"reserved"` or `"over-quota"` per file. After: it also answers `"erased"`, for every file of an owner whose usage row
+  carries an erase mark, and writes nothing then; and the store has `markErasure`, `erased`, `reopen` and `erasing`,
+  which `createCloudrop` requires ("Its markErasure method is missing."). Their contract is in `CloudropStore`'s
+  documentation and the store contract suite (`M12-O1`, `M12-O2`).
+- `api.usage(owner)` answers the erase mark. Before: `{ reservedBytes, activeBytes, files }`. After:
+  `{ reservedBytes, activeBytes, files, erasure }`, with `erasure` null unless the owner is marked; a test that
+  compares the whole object with `toEqual` adds `erasure: null` (`M12-O1`).
 
 ### Added
 
@@ -125,6 +144,7 @@ Every notable change to the `cloudrop` package. The format follows
   (`M12-T5`).
 - `DeleteContext<TDeleted, TErased>`: annotate `onDelete`'s parameter and `api.deleteFile` and `api.eraseOwner` take a
   `context` of that type, required when it does not admit `undefined` (`M12-T6`).
+- The types `OwnerErasure` and `ReserveOutcome` (`M12-O1`, `M12-O2`).
 
 ### Changed
 

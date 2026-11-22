@@ -32,7 +32,7 @@ export function driverRows(storeOver: () => CloudropStore<unknown> | Promise<Clo
       createdAt: NOW,
       key: file("f-1", 0).key,
     });
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: MAX_SAFE, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: MAX_SAFE, activeBytes: 0, files: 0, erasure: null });
   });
 
   test("concurrent reserves of one owner never overshoot the quota", async () => {
@@ -48,6 +48,6 @@ export function driverRows(storeOver: () => CloudropStore<unknown> | Promise<Clo
       ),
     );
     expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(5);
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0, erasure: null });
   });
 }

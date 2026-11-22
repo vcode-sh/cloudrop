@@ -6,6 +6,7 @@ import type { CloudropStore } from "../server/store.ts";
 import { atomicityCases } from "./store-contract/atomicity.ts";
 import { claimCases } from "./store-contract/claim.ts";
 import { endCases } from "./store-contract/end.ts";
+import { erasureCases } from "./store-contract/erasure.ts";
 import { listCases } from "./store-contract/list.ts";
 import { listAllCases } from "./store-contract/list-all.ts";
 import { listAllPageCases } from "./store-contract/list-all-pages.ts";
@@ -98,6 +99,7 @@ export function describeStoreContract(name: string, setup: SetupStore): void {
     listAllPageCases(suite);
     replaceCases(suite);
     usageCases(suite);
+    erasureCases(suite);
     atomicityCases(suite);
     transactionCases(suite);
   });

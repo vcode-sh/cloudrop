@@ -44,15 +44,19 @@ const pendingInOrder = (files: string, where: string): string =>
  * A retry of a request whose answer was lost ends that attempt's pending rows in the reserve's statement: the CTE that
  * does it, and the bytes it frees. Every CTE reads one snapshot, so the counters read beside it still hold those bytes
  * and the freed sum is taken off them. `key` and `who` are bound placeholders (`who` may be `NULL`). No key: no CTE,
- * nothing freed.
+ * nothing freed. An owner whose mark the snapshot shows supersedes nothing (M12-O2). One marked after the snapshot
+ * may still have an attempt superseded by the reserve the mark then refuses: its bytes are released with it, and the
+ * erasure would have ended that attempt anyway.
  */
-function superseding(files: string, key: string | null, who: string, at: string) {
+function superseding(tables: { files: string; usage: string }, key: string | null, who: string, at: string) {
   if (key === null) return { cte: "", freed: "0" };
+  const { files, usage } = tables;
   const cte = `, superseded AS (
     UPDATE ${files} SET status = 'aborted', ended_at = ${at}, updated_at = ${at}
     WHERE ${pendingInOrder(
       files,
-      `request_key = ${key} AND owner IS NOT DISTINCT FROM ${who} AND route IN (SELECT route FROM input)`,
+      `request_key = ${key} AND owner IS NOT DISTINCT FROM ${who} AND route IN (SELECT route FROM input)
+        AND NOT EXISTS (SELECT 1 FROM ${usage} WHERE owner = ${who} AND erase_requested_at IS NOT NULL)`,
     )}
     RETURNING size
   )`;
@@ -106,7 +110,7 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
         b.text(requestKey),
       ];
       const who = owner === null ? "NULL" : b.text(owner);
-      const { cte, freed } = superseding(files, requestKey === null ? null : key, who, at);
+      const { cte, freed } = superseding(tables, requestKey === null ? null : key, who, at);
       const head = `input AS (SELECT * FROM json_to_recordset(${input}) AS input(${INPUT_COLUMNS}))${cte}`;
       const values = `input.id, input.route, input.key, ${who}, 'pending', input.name, input.type, input.size,
         input.metadata, ${expires}, ${at}, ${at}, ${key}`;
@@ -117,23 +121,20 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
         );
         return accepted.map(() => "reserved" as const);
       }
-      const fits = limit === null ? "true" : `decided.used + input.size <= ${b.bigint(limit)}`;
-      // Without a limit, a first reserve racing another for the same new owner adds to the row the other created. With
-      // one it cannot: its quota decisions assumed no row, so the insert fails on the unique owner and is run again.
-      const onConflict =
-        limit === null
-          ? `ON CONFLICT (owner) DO UPDATE SET reserved_bytes = ${usage}.reserved_bytes + EXCLUDED.reserved_bytes,
-              updated_at = EXCLUDED.updated_at`
-          : "";
+      // An owner the locked row marks for erasure gets no file, whatever the limit (M12-O2).
+      const open = "NOT coalesce((SELECT erased FROM locked), false)";
+      const fits = limit === null ? open : `${open} AND decided.used + input.size <= ${b.bigint(limit)}`;
       // The usage row is locked before any decision, so concurrent reserves of one owner queue and each sees the
-      // counters the previous one committed. `decided` walks the files in order, adding each that fits.
+      // counters and the erase mark the previous one committed: a FOR UPDATE that waited reads the row as it is now.
+      // `decided` walks the files in order, adding each that fits.
       // Lock order: file rows, then the usage row, as in every other writer (end, complete, revoke). The freed sum sits
       // in `locked`'s projection, which the scan computes before FOR UPDATE locks the row, so `superseded` waits for a
       // row another transaction holds before this statement takes the usage row; the other order deadlocks (40P01).
       // With no usage row the owner has no reserved bytes to free.
       const sql = `WITH RECURSIVE ${head},
         locked AS (
-          SELECT reserved_bytes + active_bytes - ${freed} AS used FROM ${usage} WHERE owner = ${who} FOR UPDATE
+          SELECT reserved_bytes + active_bytes - ${freed} AS used, erase_requested_at IS NOT NULL AS erased
+          FROM ${usage} WHERE owner = ${who} FOR UPDATE
         ),
         decided (ord, used, reserved) AS (
           SELECT 0, coalesce((SELECT used FROM locked), 0), false
@@ -155,18 +156,18 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
           INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at)
           SELECT ${who}, total.bytes, 0, 0, ${at} FROM total
           WHERE total.reserved > 0 AND NOT EXISTS (SELECT 1 FROM locked)
-          ${onConflict}
         )
-        SELECT reserved FROM decided WHERE ord > 0 ORDER BY ord`;
+        SELECT reserved, coalesce((SELECT erased FROM locked), false) AS erased FROM decided WHERE ord > 0 ORDER BY ord`;
       const statement = b.statement(sql);
       const rows = await runStatement(executor, statement).catch((error: unknown) => {
-        // A first reserve of this owner raced ours and created the usage row after our snapshot (see onConflict). The
-        // failed statement rolled back whole; run again, it takes a new snapshot and its FOR UPDATE locks that row. A
-        // duplicate file id fails the same way again and is thrown.
-        if (limit === null || !isUniqueViolation(error)) throw error;
+        // Another call created this owner's usage row after our snapshot: a first reserve, or an erase mark. Our
+        // decisions assumed no row, counters or mark, so the insert fails on the unique owner instead of adding to the
+        // row (an upsert would reserve past a mark it never read). The failed statement rolled back whole; run again,
+        // it takes a new snapshot and its FOR UPDATE locks that row. A duplicate file id fails again and is thrown.
+        if (!isUniqueViolation(error)) throw error;
         return runStatement(executor, statement);
       });
-      return rows.map((row) => (row.reserved === true ? "reserved" : "over-quota"));
+      return rows.map((row) => (row.erased === true ? "erased" : row.reserved === true ? "reserved" : "over-quota"));
     },
 
     async claim(id, claim, now, leaseMs) {

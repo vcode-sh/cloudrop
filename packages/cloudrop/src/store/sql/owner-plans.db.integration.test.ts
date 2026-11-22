@@ -312,7 +312,7 @@ describe("SQLite", () => {
 
     expect(await readBy()).toEqual(expected);
     await db.query("ANALYZE");
-    expect(await db.query("SELECT count(*) AS indexes FROM sqlite_stat1")).toEqual([{ indexes: 8 }]);
+    expect(await db.query("SELECT count(*) AS indexes FROM sqlite_stat1")).toEqual([{ indexes: 9 }]);
     expect(await readBy()).toEqual(expected);
   });
 });

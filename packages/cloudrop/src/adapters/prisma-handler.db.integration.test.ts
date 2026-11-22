@@ -76,7 +76,7 @@ describe("prismaStore with transaction: true behind the handler", () => {
     expect(await state()).toEqual({
       file: [{ status: "completed", claim: expect.any(String), result: '{"run":1}' }],
       appRows: [{ file_id: ticket.id, run: 1 }],
-      usage: { reservedBytes: 0, activeBytes: 5, files: 1 },
+      usage: { reservedBytes: 0, activeBytes: 5, files: 1, erasure: null },
     });
   });
 
@@ -89,7 +89,7 @@ describe("prismaStore with transaction: true behind the handler", () => {
     expect(await state()).toEqual({
       file: [{ status: "pending", claim: null, result: null }],
       appRows: [],
-      usage: { reservedBytes: 5, activeBytes: 0, files: 0 },
+      usage: { reservedBytes: 5, activeBytes: 0, files: 0, erasure: null },
     });
     expect((await complete(fixture, ticket.token)).body.data).toEqual({ run: 2 });
     expect((await state()).appRows).toEqual([{ file_id: ticket.id, run: 2 }]);
@@ -132,7 +132,7 @@ describe("prismaStore with transaction: true behind the handler", () => {
     expect(await state()).toEqual({
       file: [{ status: "pending", claim: null, result: null }],
       appRows: [],
-      usage: { reservedBytes: 5, activeBytes: 0, files: 0 },
+      usage: { reservedBytes: 5, activeBytes: 0, files: 0, erasure: null },
     });
   });
 });

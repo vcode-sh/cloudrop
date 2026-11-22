@@ -82,6 +82,8 @@ const postgresBackend = {
     "active_bytes bigint NO",
     "files integer NO",
     "updated_at timestamp with time zone NO",
+    "erase_requested_at timestamp with time zone YES",
+    "erased_at timestamp with time zone YES",
   ],
   duplicateId: 'duplicate key value violates unique constraint "cloudrop_files_pkey"',
 };
@@ -122,6 +124,8 @@ const sqliteBackend = {
     "active_bytes INTEGER NO",
     "files INTEGER NO",
     "updated_at INTEGER NO",
+    "erase_requested_at INTEGER YES",
+    "erased_at INTEGER YES",
   ],
   duplicateId: "UNIQUE constraint failed: cloudrop_files.id",
 };
@@ -219,7 +223,15 @@ describe.each([postgresBackend, sqliteBackend])("$name", (backend) => {
       updated_at: T1,
     });
     expect(await reader.usages()).toEqual([
-      { owner: "user_7", reservedBytes: 9007199254740991, activeBytes: 0, files: 3, updatedAt: T1 },
+      {
+        owner: "user_7",
+        reservedBytes: 9007199254740991,
+        activeBytes: 0,
+        files: 3,
+        eraseRequestedAt: null,
+        erasedAt: null,
+        updatedAt: T1,
+      },
     ]);
     expect(await reader.usage("nobody")).toBeNull();
   });
@@ -240,7 +252,7 @@ describe("postgres only", () => {
     await db.createTables();
   });
 
-  test("creates the seven indexes of spec §3 and M11-L5 beside the primary key, none of them unique on key", async () => {
+  test("creates the eight indexes of spec §3, M11-L5 and M12-O1 beside the primary keys, none unique on key", async () => {
     const rows = await db.query(
       "SELECT replace(indexdef, current_schema() || '.', '') AS def FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname COLLATE \"C\"",
     );
@@ -253,6 +265,7 @@ describe("postgres only", () => {
       "CREATE INDEX cloudrop_files_status_claimed_at_idx ON cloudrop_files USING btree (status, claimed_at)",
       "CREATE INDEX cloudrop_files_status_cleaned_at_ended_at_idx ON cloudrop_files USING btree (status, cleaned_at, ended_at)",
       "CREATE INDEX cloudrop_files_status_expires_at_idx ON cloudrop_files USING btree (status, expires_at)",
+      "CREATE INDEX cloudrop_usage_erasing_idx ON cloudrop_usage USING btree (owner) WHERE ((erase_requested_at IS NOT NULL) AND (erased_at IS NULL))",
       "CREATE UNIQUE INDEX cloudrop_usage_pkey ON cloudrop_usage USING btree (owner)",
     ]);
   });
@@ -311,7 +324,7 @@ describe("sqlite only", () => {
   const db = useSqliteDatabase({ file: true });
   beforeEach(() => db.createTables());
 
-  test("creates the seven indexes of spec §3 and M11-L5 beside the primary keys, none of them unique on key", async () => {
+  test("creates the eight indexes of spec §3, M11-L5 and M12-O1 beside the primary keys, none unique on key", async () => {
     // "<index> [UNIQUE] (<columns in key order>)" from SQLite's own catalog, for both tables.
     const rows = await db.query(`SELECT list.name || iif(list."unique", ' UNIQUE', '') || ' (' ||
         (SELECT group_concat(name, ', ') FROM (SELECT name FROM pragma_index_info(list.name) ORDER BY seqno)) || ')' AS def
@@ -325,6 +338,7 @@ describe("sqlite only", () => {
       "cloudrop_files_status_claimed_at_idx (status, claimed_at)",
       "cloudrop_files_status_cleaned_at_ended_at_idx (status, cleaned_at, ended_at)",
       "cloudrop_files_status_expires_at_idx (status, expires_at)",
+      "cloudrop_usage_erasing_idx (owner)",
       "sqlite_autoindex_cloudrop_files_1 UNIQUE (id)",
       "sqlite_autoindex_cloudrop_usage_1 UNIQUE (owner)",
     ]);

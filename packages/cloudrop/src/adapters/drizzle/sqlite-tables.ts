@@ -2,6 +2,7 @@
 // times as integer milliseconds read as Dates. The types are spelled out from what drizzle-orm 0.45 and 1.0 both export,
 // as on Postgres (postgres-tables.ts).
 
+import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { FileRecordStatus } from "../../server/store.ts";
 import { type StoreTables, tableNames } from "../../store/sql/tables.ts";
@@ -47,6 +48,8 @@ type UsageColumns = {
   activeBytes: Count;
   files: Count;
   updatedAt: NotNull<Time>;
+  eraseRequestedAt: Time;
+  erasedAt: Time;
 };
 
 /** `cloudropSqliteTables()`: the files and usage tables as Drizzle `sqlite-core` tables. */
@@ -109,12 +112,24 @@ export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "sche
       index(`${names.files}_route_request_key_idx`).on(t.route, t.requestKey),
     ],
   );
-  const usage = sqliteTable(names.usage, {
-    owner: textColumn("owner").primaryKey(),
-    reservedBytes: count("reserved_bytes"),
-    activeBytes: count("active_bytes"),
-    files: count("files"),
-    updatedAt: time("updated_at").notNull(),
-  });
+  const usage = sqliteTable(
+    names.usage,
+    {
+      owner: textColumn("owner").primaryKey(),
+      reservedBytes: count("reserved_bytes"),
+      activeBytes: count("active_bytes"),
+      files: count("files"),
+      updatedAt: time("updated_at").notNull(),
+      /** The owner's erase mark (M12-O1): when `eraseOwner` first asked, and when the erasure finished. */
+      eraseRequestedAt: time("erase_requested_at"),
+      erasedAt: time("erased_at"),
+    },
+    // The sweep's erase pass reads only the owners whose erasure is unfinished.
+    (t) => [
+      index(`${names.usage}_erasing_idx`)
+        .on(t.owner)
+        .where(sql`${t.eraseRequestedAt} IS NOT NULL AND ${t.erasedAt} IS NULL`),
+    ],
+  );
   return { files, usage };
 }

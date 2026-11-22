@@ -56,7 +56,7 @@ describe("onDelete with api.deleteFile", () => {
     state.failing = true;
     expect(await api.deleteFile(ticket.id)).toEqual({ data: null, error: expect.objectContaining(kept) });
     expect([await status(ticket.id), await stored(ticket.key)]).toEqual(["completed", true]);
-    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
     expect(memory.appRows()).toEqual([]);
     expect(fixture.logger.errors).toEqual([
       {
@@ -251,7 +251,7 @@ describe("onDelete with replace", () => {
       },
     ]);
     expect([await status(previous.id), await status(next.id)]).toEqual(["completed", "pending"]);
-    expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1 });
+    expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1, erasure: null });
     expect(memory.appRows()).toEqual([]);
     state.failing = false;
     expect((await complete(fixture, next.token)).status).toBe(200);

@@ -39,7 +39,7 @@ describe("an onDelete that refuses, with api.deleteFile", () => {
     expect(refused).toEqual({ data: null, error: refusal });
     expect(refused.error).toBe(refusal);
     expect([await status(ticket.id), await stored(ticket.key)]).toEqual(["completed", true]);
-    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
     // The hook wrote through tx before it refused: rolled back with the deletion.
     expect([memory.appRows(), fixture.logger.errors]).toEqual([[], []]);
     refusing = false;
@@ -200,7 +200,7 @@ describe("an onDelete that refuses, with replace", () => {
       ]);
       // Pending, not completing: under a lease the claim was released, with a transaction it rolled back.
       expect([await status(previous.id), await status(next.id)]).toEqual(["completed", "pending"]);
-      expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1 });
+      expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1, erasure: null });
       const tx = mode === "transaction";
       // onComplete ran for the new file either way; with a transaction its write rolled back with the hook's.
       expect([completions, memory.appRows()]).toEqual([[previous.id, next.id], tx ? [`completed ${previous.id}`] : []]);

@@ -44,7 +44,7 @@ describe("POST /complete with a transactional store", () => {
     expect(store.appRows()).toEqual([`u1:${ticket.id}:1`]);
     const [row] = await store.raw.files();
     expect([row?.status, row?.result]).toEqual(["completed", '{"run":1}']);
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
   });
 
   it.for([
@@ -67,7 +67,7 @@ describe("POST /complete with a transactional store", () => {
       "pending",
       null,
       [],
-      { reservedBytes: 5, activeBytes: 0, files: 0 },
+      { reservedBytes: 5, activeBytes: 0, files: 0, erasure: null },
     ]);
     expect((await complete(fixture, ticket.token)).body.data).toEqual({ run: 2 });
     expect([runs(), store.appRows()]).toEqual([2, [`u1:${ticket.id}:2`]]);

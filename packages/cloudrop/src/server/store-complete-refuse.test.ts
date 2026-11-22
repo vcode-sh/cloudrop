@@ -58,7 +58,7 @@ describe("POST /complete with a store: a refusal of a row another request claime
     vi.setSystemTime(new Date(NOW.getTime() + LEASE_MS + 1));
     expect((await complete(fixture, ticket.token)).body.error).toEqual(refusal);
     expect(await state()).toEqual({ status: "rejected", stored: null, aborted: ["rejected"] });
-    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     // The row has ended: a retry is told so, and nothing is refused twice.
     expect((await complete(fixture, ticket.token)).body.error?.code).toBe("UPLOAD_EXPIRED");
   });

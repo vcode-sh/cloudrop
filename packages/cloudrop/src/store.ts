@@ -15,10 +15,12 @@ export type {
   FileRecord,
   FileRecordStatus,
   NewFile,
+  OwnerErasure,
   OwnerUsage,
   PendingRecord,
   RecordOf,
   RejectedRecord,
+  ReserveOutcome,
   TransactionalStore,
   Transition,
 } from "./server/store.ts";

@@ -176,7 +176,7 @@ describe("Postgres under lock contention", () => {
         ["lost", "aborted"],
         ["retry", "pending"],
       ]);
-      expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0 });
+      expect(await store.usage("u-1")).toEqual({ reservedBytes: 60, activeBytes: 0, files: 0, erasure: null });
     },
   );
 
@@ -268,7 +268,8 @@ describe("Postgres under lock contention", () => {
   test("reconcile waits for a reserve that is still open, then counts it", async () => {
     const { store, transaction } = await transactionalStore(() => pgExecutor(db.pool));
     await store.reserve({ owner: "u-1", limit: null, expiresAt: NOW, requestKey: null, files: [file("f-0", 10)] }, NOW);
-    await rawTables(db).putUsage({ owner: "u-1", reservedBytes: 999, activeBytes: 0, files: 0, updatedAt: NOW });
+    const drifted = { reservedBytes: 999, activeBytes: 0, files: 0, eraseRequestedAt: null, erasedAt: null };
+    await rawTables(db).putUsage({ owner: "u-1", ...drifted, updatedAt: NOW });
     const held = gate();
     const reserved = gate();
     let holder: unknown;
@@ -292,7 +293,7 @@ describe("Postgres under lock contention", () => {
       await reserving;
     }
     expect(await reconciling).toBe(true);
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0, erasure: null });
   });
 
   test("reconcile after the usage row was deleted by hand keeps a reserve that created it meanwhile", async () => {
@@ -322,6 +323,6 @@ describe("Postgres under lock contention", () => {
     }
     // The reserve's new row held only its own 5 bytes: the recount adds f-0's 10 and keeps f-1's 5.
     expect(await reconciling).toBe(true);
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 15, activeBytes: 0, files: 0, erasure: null });
   });
 });

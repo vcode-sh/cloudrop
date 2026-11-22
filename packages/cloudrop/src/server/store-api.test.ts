@@ -78,7 +78,7 @@ describe("cloudrop.api with a store", () => {
     expect(await api.revokeUploads("u1")).toEqual({ data: { revoked: 0 }, error: null });
     const statuses = await Promise.all([ticket.id, open.id].map(async (id) => (await api.file(id)).data?.status));
     expect(statuses).toEqual(["completed", "aborted"]);
-    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
   });
 
   it("deleteFile ends a completed file, deletes its object and releases its bytes, and says which call deleted it", async () => {
@@ -95,7 +95,7 @@ describe("cloudrop.api with a store", () => {
       null,
       null,
     ]);
-    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect((await fixture.cloudrop.api.usage("u1")).data).toMatchObject({ reservedBytes: 0, activeBytes: 0, files: 0 });
   });
 
   it("deleteFile marks a file cleaned once its URLs and the grace after them have passed, and then looks no more", async () => {
@@ -142,7 +142,7 @@ describe("cloudrop.api with a store", () => {
       (await fixture.store.raw.files())[0]?.cleanedAt,
       (await fixture.storage.head(ticket.key)).data?.size,
     ]).toEqual([null, 5]);
-    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     fixture.fake.fetch = fetch;
     expect((await api.deleteFile(id)).data).toEqual({ id, deleted: false, cleaned: true });
     expect((await fixture.storage.head(ticket.key)).data).toBeNull();
@@ -211,9 +211,9 @@ describe("cloudrop.api with a store", () => {
 
   it("reconcile repairs drifted counters for one owner, or for every owner page by page", async () => {
     const { fixture } = await completed();
-    const drifted = { reservedBytes: 99, activeBytes: 1, files: 7, updatedAt: NOW };
-    await fixture.store.raw.putUsage({ owner: "u1", ...drifted });
-    await fixture.store.raw.putUsage({ owner: "u2", ...drifted });
+    const drifted = { reservedBytes: 99, activeBytes: 1, files: 7, eraseRequestedAt: null, erasedAt: null };
+    await fixture.store.raw.putUsage({ owner: "u1", ...drifted, updatedAt: NOW });
+    await fixture.store.raw.putUsage({ owner: "u2", ...drifted, updatedAt: NOW });
     expect(await fixture.cloudrop.api.reconcile({ owner: "u1" })).toEqual({
       data: { checked: 1, repaired: 1 },
       error: null,
