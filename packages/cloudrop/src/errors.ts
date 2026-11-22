@@ -37,6 +37,8 @@ export type CloudropErrorCode =
   | "UPLOAD_REJECTED"
   | "ABORTED"
   | "NETWORK_ERROR"
+  // The browser could not reach the bucket while the upload server answers: usually its CORS rule (M12-E7).
+  | "BUCKET_BLOCKED"
   | "UPLOAD_IN_USE"
   | "CLIENT_CLOSED"
   // The browser's own storage for resume records (IndexedDB) or its Web Locks failed: never the bucket (M12-A7).
@@ -47,6 +49,7 @@ export type ClientErrorCode =
   | "UPLOAD_REJECTED"
   | "ABORTED"
   | "NETWORK_ERROR"
+  | "BUCKET_BLOCKED"
   | "UPLOAD_IN_USE"
   | "CLIENT_CLOSED"
   | "BROWSER_STORAGE_ERROR";

@@ -317,6 +317,47 @@ test("a 403 without CORS headers is opaque to the page: renewed, then sent again
   expect(await chaos.uploadsLeft()).toEqual([]);
 });
 
+// A bucket whose CORS rule misses the page: the preflight fails, so no byte of the body leaves (spec 1.0 §2d, M12-E7).
+// Measured in Playwright's Chromium headless shell, the one engine this lane runs; Firefox and Safari are not.
+test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED, and Retry keeps its ticket", async ({
+  page,
+  chaos,
+}, testInfo) => {
+  const file = await onDiskFile(testInfo, 1);
+  // Every preflight, as a rule that misses the origin refuses them all; the renewed URL needs its own.
+  const preflight = { operation: "Options", nth: "every" } as const;
+  await chaos.set([{ match: preflight, fault: { kind: "answer", status: 403, cors: false } }]);
+  await signIn(page);
+  await upload(page, file.path);
+
+  // Two round trips and one backoff, not the six attempts of a NETWORK_ERROR.
+  await expect(page.getByRole("status")).toContainText("failed with BUCKET_BLOCKED", { timeout: 5_000 });
+  const log = await chaos.log();
+  expect({ puts: bucketPuts(log), preflights: log.filter((entry) => entry.kind === "preflight").length }).toEqual({
+    puts: [],
+    preflights: 2,
+  });
+  const failed = await requestRows(page);
+  expect(failed).toEqual([
+    ["/upload", "200", ""],
+    ["PUT single", "network error", ""],
+    ["/sign", "200", "renewal"],
+    ["PUT single", "network error", "retry"],
+  ]);
+  await expect(page.getByRole("figure", { name: "Result" })).toContainText('"retryable": false');
+  await chaos.set([]);
+
+  await page.getByRole("button", { name: `Retry ${file.name}`, exact: true }).click();
+
+  await expect(page.getByRole("status")).toContainText("completed after Retry");
+  // The same ticket: no /abort and no new /upload (M12-E7, KEEPS_TICKET).
+  expect((await requestRows(page)).slice(failed.length)).toEqual([
+    ["PUT single", "200", "retry"],
+    ["/complete", "200", ""],
+  ]);
+  await expectStoredAsResult(page, file.path);
+});
+
 test("a single PUT whose answer was cut is sent again, and its 412 counts as stored", async ({
   page,
   chaos,

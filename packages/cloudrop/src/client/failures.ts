@@ -95,13 +95,24 @@ export const accountFailed = (cause: unknown): CloudropError =>
 
 // A page cannot tell a network failure from R2 refusing the URL itself (a bad signature, an expired URL): those answers
 // carry no CORS headers (docs/research/r2-spike-findings.md, "Browser refusals and checksums, 2026-11-16"). A bucket
-// CORS rule that misses the page's origin or a signed header looks the same, so for a developer this error usually
-// means: check that rule first (docs/guide/troubleshooting.md).
+// CORS rule that misses the page's origin or a signed header fails the preflight instead, before any byte leaves, and
+// ends as bucketBlocked below once it is seen twice (M12-E7); on the fetch path it still ends here.
 export const bucketUnreachable = (): CloudropError =>
   new CloudropError(
     "NETWORK_ERROR",
     "The file could not reach the storage service, or the storage service refused it. Try again, and contact the site owner if it keeps failing.",
     { retryable: true },
+  );
+
+/**
+ * Two attempts of one PUT failed before any byte left, around a renewal the upload server answered (M12-E7): not
+ * retryable, since a retry meets the same rule, and it keeps the ticket for a retry() once the rule is fixed.
+ */
+export const bucketBlocked = (): CloudropError =>
+  new CloudropError(
+    "BUCKET_BLOCKED",
+    "The browser blocked the file's request to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension that blocks the storage service looks the same.",
+    { retryable: false },
   );
 
 /** A proxy's rate-limit page in front of the app: it passes, so it is retried (rulings S-4, S-7). */

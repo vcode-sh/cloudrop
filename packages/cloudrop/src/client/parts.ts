@@ -5,7 +5,7 @@
 import { type CloudropError, fail, ok, type Result } from "../errors.ts";
 import { PARTS_PER_SIGN, type SignedPart, type SignedRequest } from "../protocol/types.ts";
 import type { BucketOutcome } from "./bucket.ts";
-import { aborted, unreadableAnswer } from "./failures.ts";
+import { aborted, bucketBlocked, unreadableAnswer } from "./failures.ts";
 import { MAX_ATTEMPTS, pause, retryAfterOf, retryDelay } from "./retry.ts";
 
 /** At most this many parts of one file in flight (spec §6.1). */
@@ -51,11 +51,20 @@ function signFailure(error: CloudropError): BucketOutcome {
   return error.retryable ? { kind: "retry", error, retryAfterMs: retryAfterOf(error) } : { kind: "rejected", error };
 }
 
-/** What to do after an attempt: `attempt` is its number, `renewed` whether this part's URL was already renewed. */
-export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boolean): Step {
+/**
+ * What to do after an attempt: `attempt` is its number, `renewed` whether this part's URL was already renewed, and
+ * `blockedBefore` whether the previous attempt was refused before any byte left and this one used a URL a /sign
+ * answered since (M12-E7).
+ */
+export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boolean, blockedBefore = false): Step {
   if (outcome.kind === "stored") return { kind: "done" };
   // Rejected or aborted: the outcomes without a wait (`kind` alone cannot narrow their shared union member).
   if (!("retryAfterMs" in outcome)) return { kind: "fail", error: outcome.error };
+  // The upload server answers and the browser still sends nothing to the bucket: a retry meets the same refusal. An
+  // offline page refuses every request the same way, so it waits as before (spec §2d).
+  if (blockedBefore && outcome.kind === "opaque" && outcome.blocked && globalThis.navigator?.onLine !== false) {
+    return { kind: "fail", error: bucketBlocked() };
+  }
   // A renewed URL refused as expired again will not get better (S11).
   if (attempt >= MAX_ATTEMPTS || (outcome.kind === "expired" && renewed)) return { kind: "fail", error: outcome.error };
   // A failure the browser hides (an expired R2 URL answers without CORS headers) or a readable expiry: new URL, once.
@@ -104,6 +113,9 @@ const stopped = (run: Run): CloudropError | null => (run.sender.signal.aborted ?
 async function sendPart(run: Run, partNumber: number): Promise<CloudropError | null> {
   let renew = false;
   let renewed = false;
+  // The previous attempt's URL, and whether the browser refused that attempt before any byte left (M12-E7).
+  let previous: SignedRequest | null = null;
+  let blocked = false;
   for (let attempt = 1; ; attempt++) {
     if (stopped(run)) return stopped(run);
     const target = await urlFor(run, partNumber, renew);
@@ -112,7 +124,10 @@ async function sendPart(run: Run, partNumber: number): Promise<CloudropError | n
     const outcome = target.error
       ? signFailure(target.error)
       : await run.sender.put(target.data, partNumber, run.stop.signal);
-    const step = nextStep(outcome, attempt, renewed);
+    // Another URL object than the last attempt's came from a /sign that answered 2xx in between.
+    const step = nextStep(outcome, attempt, renewed, blocked && target.data !== previous);
+    blocked = outcome.kind === "opaque" && outcome.blocked === true;
+    previous = target.data;
     if (step.kind === "done") return null;
     if (step.kind === "fail") return step.error;
     // A renewal whose /sign failed is still owed: the next attempt must not reuse the refused URL.

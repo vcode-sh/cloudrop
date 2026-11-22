@@ -4,14 +4,15 @@ This page is for anyone whose uploads fail, in development or in production. It 
 setting up or running cloudrop, the usual cause of each, and how to fix it. Each section starts with what you see. For
 the meaning of every error code, see [Errors](errors.md).
 
-## Every upload ends in NETWORK_ERROR
+## Uploads fail with BUCKET_BLOCKED
 
-You see `NETWORK_ERROR` with "The file could not reach the storage service, or the storage service refused it" on every
-upload, although the connection works and the calls to your server succeed.
+You see `BUCKET_BLOCKED` with "The browser blocked the file's request to the storage service, while the upload server
+answers", within a second or so of the upload's start. Your server answered `/upload` and `/sign`; the browser sent
+nothing to the bucket.
 
-**Check the bucket's CORS rule first.** A rule that misses the page's origin, or one of the headers cloudrop signs (or a
-checksum header you add), blocks every `PUT`. The browser hides the reason from the page, so the client sees a network
-failure and gives up only after its retry budget.
+**The bucket's CORS rule does not let the page through.** A rule that misses the page's origin, or one of the headers
+cloudrop signs (or a checksum header you add), fails the browser's preflight, so no byte of the file leaves the page.
+The client sees that twice, around a URL your server renewed, and stops: a retry would meet the same rule.
 
 - The browser console names what was blocked: the origin or the header.
 - `npx cloudrop doctor --origin https://app.example.com` or
@@ -19,11 +20,26 @@ failure and gives up only after its retry budget.
   it. An R2 object token cannot, and reports `unknown` ("not checked"). `npx cloudrop setup --origin <origin> --apply`
   adds the rule and keeps the bucket's others ([The cloudrop command](command.md)).
 - The rule must allow `PUT` from the exact origin of the page, with `content-type`, `content-disposition`,
-  `if-none-match` and `x-amz-meta-cloudrop-id`. The full rule: [Bucket setup](bucket-setup.md).
+  `if-none-match` and `x-amz-meta-cloudrop-id`. The full rule: [Bucket setup](bucket-setup.md). R2 may take up to 30
+  seconds to apply a changed rule.
+- Once the rule is fixed, `retry()` goes on with the file's ticket and the parts already stored.
+
+The same code comes from a firewall, proxy or browser extension that blocks the storage host while your server is
+reachable. A page that is offline gets `NETWORK_ERROR` instead.
+
+## Every upload ends in NETWORK_ERROR
+
+You see `NETWORK_ERROR` with "The file could not reach the storage service, or the storage service refused it" on every
+upload, although the connection works and the calls to your server succeed.
+
+**With a `fetch` option, or outside a browser, check the bucket's CORS rule first.** Without XMLHttpRequest the client
+cannot see that no byte left the page, so a CORS rule that blocks every `PUT` ends here, after the retry budget, rather
+than as [`BUCKET_BLOCKED`](#uploads-fail-with-bucket_blocked). Check it as that section says.
 
 Other causes that look the same from a page: R2 answers a refused upload URL (expired, or a bad signature) without CORS
-headers, so the browser cannot read that answer either. The client renews the URL once and tries again before it gives
-up.
+headers, so the browser cannot read that answer either. Its body was sent, so the client renews the URL once and tries
+again before it gives up with `NETWORK_ERROR`. When every upload ends this way with CORS in order, check the server's
+clock and the storage credentials.
 
 ## Every request gets ORIGIN_NOT_ALLOWED
 

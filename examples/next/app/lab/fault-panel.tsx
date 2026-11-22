@@ -43,7 +43,7 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "part2NetworkError",
     label: "Fail every PUT of part 2 with a network error while ticked",
     effect:
-      "A part that never gets through: the client renews its URL once and makes 6 attempts with random waits of up to 0.5, 1, 2, 4 and 8 s between them, then the file fails with NETWORK_ERROR and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M3-U31).",
+      "A part the browser never sends, as for a bucket whose CORS rule misses this page: no byte of it leaves, so after a first failure the client renews its URL once, and when the renewed URL fails the same way the file fails at once with BUCKET_BLOCKED. It keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M12-E7).",
   },
   {
     fault: "bucket400",

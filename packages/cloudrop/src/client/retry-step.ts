@@ -15,7 +15,7 @@ export type RetryStep = "same" | "resend" | "new";
  * The answers that are not retryable and still leave the ticket good: the request was refused or failed, not the
  * upload. A request the handler turned away before reading the token (the first six) may pass once a proxy, basePath
  * or trustedOrigins is fixed; a SERVER_ERROR or STORAGE_ERROR for good is the server's own failure, which its owner
- * fixes.
+ * fixes; a BUCKET_BLOCKED PUT passes once the bucket's CORS rule lets the page through (M12-E7).
  */
 const KEEPS_TICKET: ReadonlySet<string> = new Set([
   "INVALID_INPUT",
@@ -26,6 +26,7 @@ const KEEPS_TICKET: ReadonlySet<string> = new Set([
   "NOT_FOUND",
   "SERVER_ERROR",
   "STORAGE_ERROR",
+  "BUCKET_BLOCKED",
 ]);
 
 /** What a new attempt after `error` does with the upload's ticket. Any other refusal for good ends the ticket. */

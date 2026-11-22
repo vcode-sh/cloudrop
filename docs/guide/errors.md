@@ -46,9 +46,9 @@ code change, not a retry.
    one of two codes: `RATE_LIMITED` ("The storage service is busy") when the storage was throttling, otherwise
    `STORAGE_ERROR`, retryable when the storage failure was. A browser never sees `STORAGE_DENIED`,
    `STORAGE_UNREACHABLE`, `INVALID_PART` or `CHECKSUM_MISMATCH`.
-3. **Client.** The client adds six codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`, `UPLOAD_IN_USE`,
-   `CLIENT_CLOSED`, `BROWSER_STORAGE_ERROR`) and uses a few shared codes for its own failures, such as `NOT_FOUND`
-   when an upload can no longer be resumed.
+3. **Client.** The client adds seven codes of its own (`UPLOAD_REJECTED`, `ABORTED`, `NETWORK_ERROR`,
+   `BUCKET_BLOCKED`, `UPLOAD_IN_USE`, `CLIENT_CLOSED`, `BROWSER_STORAGE_ERROR`) and uses a few shared codes for its own
+   failures, such as `NOT_FOUND` when an upload can no longer be resumed.
 
 The HTTP status in the tables is what the handler answers with that code.
 
@@ -90,11 +90,12 @@ with the status this table gives its code.
 
 ## Client errors
 
-These come from `cloudrop/client`. The first six never come from the server.
+These come from `cloudrop/client`. The first seven never come from the server.
 
 | Code | Retryable | What it means | What to do |
 | --- | --- | --- | --- |
 | `NETWORK_ERROR` | Yes | No answer after every attempt: your server could not be reached, or the file could not reach the bucket. A bucket that refuses a `PUT` without CORS headers looks the same to a browser. Also when the client's `headers` or `account` function threw, rejected, gave nothing usable or did not answer in time, so the request was not sent. | Check the connection and retry: `retry()` keeps the file's ticket and the parts already stored, sends `/complete` alone after a `/complete` that left the page, and asks `/upload` again when the file had no ticket yet. If every upload ends this way, check the bucket's CORS rule first (see [Troubleshooting](troubleshooting.md#every-upload-ends-in-network_error)). |
+| `BUCKET_BLOCKED` | No | In a browser: the file's `PUT` failed twice before any byte of it left the page, while your server answered the `/sign` between the two attempts. The usual cause is the bucket's CORS rule: it misses the page's origin or a header cloudrop signs, so the browser's preflight fails. A firewall or browser extension that blocks the storage host looks the same. With a `fetch` option, or outside a browser, the client cannot tell this apart, and the file ends with `NETWORK_ERROR` instead. | Fix the rule: `npx cloudrop doctor --origin <the page's origin>` checks it (see [Troubleshooting](troubleshooting.md#uploads-fail-with-bucket_blocked)). Then `retry()`: it keeps the file's ticket and the parts already stored. |
 | `UPLOAD_REJECTED` | No | The bucket refused the bytes as signed: a different size, type or checksum, a link refused even after renewal, or another refusal. | Start a new upload: `retry()` gives the ticket up and asks for a new one. When it keeps happening, check the server's clock and the credentials' permissions. |
 | `ABORTED` | No | The upload was cancelled through `abort()` or the `signal`. | Nothing, unless the user wants to start again, with a new `start()` or `upload()`: `retry()` of a cancelled file sends nothing and answers `ABORTED`. |
 | `UPLOAD_IN_USE` | No | `resume()` or `discard()` found the upload held in this page or another tab. | Finish or cancel it there, then try again: `retry()` of the refused `resume()` job runs its checks again. |

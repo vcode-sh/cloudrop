@@ -38,8 +38,15 @@ function labelOf(method: string, url: string): string {
   return partNumber === null ? `${method} object` : `${method} part ${partNumber}`;
 }
 
-/** Without `hold`, each request reports half its body, then all of it, then finishes by itself. */
-export function fakeXhr(fetch: ClientFetch, options: { hold?: boolean } = {}): FakeXhr {
+interface FakeXhrOptions {
+  /** Leaves each request open until the test ends it through `open` or `next()`. */
+  hold?: boolean;
+  /** Called with each request once it is sent, to end it in its place (with `hold` set, never called). */
+  end?: (call: XhrCall) => void;
+}
+
+/** Without `hold` or `end`, each request reports half its body, then all of it, then finishes by itself. */
+export function fakeXhr(fetch: ClientFetch, options: FakeXhrOptions = {}): FakeXhr {
   const open: XhrCall[] = [];
   const sent: string[] = [];
   const untaken: XhrCall[] = [];
@@ -115,6 +122,11 @@ export function fakeXhr(fetch: ClientFetch, options: { hold?: boolean } = {}): F
       if (waiter) waiter(call);
       else untaken.push(call);
       if (options.hold) return;
+      const { end } = options;
+      if (end) {
+        queueMicrotask(() => end(call));
+        return;
+      }
       queueMicrotask(() => {
         call.progress(Math.floor(body.size / 2));
         call.progress(body.size);

@@ -208,8 +208,9 @@ The home page is what an app's upload UI looks like when it is built on the head
   off and retries), delay every bucket PUT (so a 100 MiB file shows four parts in flight, and Pause has PUTs to stop),
   and drop the answer of the next `/complete` (the client retries it, and from then on a cancel or failure keeps the
   file). The network error, the dropped answers and the 503 untick themselves after one hit. Two more hold until
-  unticked, to fail a file for Retry: every PUT of part 2 gets a network error (the client renews its URL once and makes
-  6 attempts, up to about 15 s of waits, then the file fails with `NETWORK_ERROR` and keeps its ticket), and the lab
+  unticked, to fail a file for Retry: every PUT of part 2 gets a network error before any byte leaves, as for a bucket
+  whose CORS rule misses the page (the client renews its URL once; when the renewed URL fails the same way the file
+  fails with `BUCKET_BLOCKED` and keeps its ticket), and the lab
   answers every bucket PUT with 400 in the bucket's place, sending nothing (the file fails at once with
   `UPLOAD_REJECTED`, which needs a new ticket). A third holds every `/complete` answer: the lab forwards the request and
   the server finishes the file, but the page hears nothing and shows the `/complete` in flight until the box is

@@ -1036,6 +1036,42 @@ documents for S3 ("uses the first `CORSRule` rule that matches"). So an earlier 
 and any header, but does not expose `ETag`, answers cloudrop's uploads instead of cloudrop's own rule stored after it.
 A changed configuration answered within 35 seconds.
 
+## Missing CORS origin and bad signature from a browser, 2026-11-22
+
+Measured 2026-11-22, 09:34:58–09:35:19 UTC, on the same test bucket and its unchanged CORS rule
+`cloudrop-browser-tests` (which lists `http://localhost:5173` and `http://127.0.0.1:5173`, not port 5174), for
+`M12-E7`. Chromium 159.0.8154.6 headless shell, driven by Playwright 1.65.1 under Bun. Method: a one-off script
+(deleted afterwards) served a blank page, the bundled `cloudrop/client` and cloudrop's handler on `r2()` from both
+`http://localhost:5174` and `http://localhost:5173`, and uploaded one `text/plain` file per case with
+`client.start()` (single PUT, `persist: false`). An init script attached listeners to each PUT's XHR and its `upload`
+before `send()`, recording event types, times from `send()` and `loaded`; the preflights and their CORS errors came
+from Chrome DevTools Protocol `Network` events. No URL was recorded. For the bad-signature cases the init script
+flipped the last hex digit of `X-Amz-Signature` in the PUT's URL. Every object went under one
+`live-test/cloudrop-<32 hex>/` prefix; `deletePrefix` deleted 1 object (case C) and the prefix then listed 0.
+
+| Case | Preflight | XHR events of each PUT (ms from `send()`) | Page ended with |
+|---|---|---|---|
+| A: origin `:5174` (not in the rule), 14 B | `403`, both times; the PUT failed `net::ERR_FAILED`, `PreflightMissingAllowOriginHeader` | `upload.loadstart` 0, `upload.error` at 67 and 23, `loaded` 0; no `upload.progress` | `BUCKET_BLOCKED`, not retryable, after 2 PUTs and one `/sign`, 456 ms from `start()` |
+| E: origin `:5174`, 1 MiB | `403`, both times, as A | `upload.error` at 50 and 24, `loaded` 0; no `upload.progress` | `BUCKET_BLOCKED` after 2 PUTs, 154 ms |
+| B: origin `:5173` (in the rule), 14 B, bad signature | `204` each time | `upload.progress` with `loaded` 14, `upload.load`, then `xhr.error`, all at 42–74 ms; the PUT failed `MissingAllowOriginHeader` | `NETWORK_ERROR`, retryable, after 6 PUTs, 9.3 s |
+| D: origin `:5173`, 1 MiB, bad signature | `204` each time | `upload.progress` with `loaded` 1,048,576, `upload.load`, `xhr.error`, all at 109–131 ms | `NETWORK_ERROR` after 6 PUTs, 9.7 s |
+| C: origin `:5173`, 14 B, good (control) | `204` | `upload.progress` 14 at 151 ms, `xhr.load` 200 at 259 ms | done |
+
+What this means for cloudrop:
+
+- **A rule that misses the origin** fails the preflight, so the body never leaves and Chromium fires no
+  `upload.progress` before the error, whatever the body's size: the `M12-E7` rule fires as designed, at about two
+  round trips plus one backoff wait.
+- **A bad signature** (R2's pre-authentication `403` without CORS headers, as in R1 of
+  [Browser refusals and checksums](#browser-refusals-and-checksums-2026-11-16)) passes the preflight and sends its
+  body; Chromium reports the whole body in `upload.progress` before `onerror`, even for 14 bytes. The rule does not
+  fire, and the client keeps its six attempts and `NETWORK_ERROR`. No time limit on the first failure is needed, so
+  `M12-E8` was not written.
+- The last PUT of each case shows no `xhr.error` in the table because the client's own `onerror` ended the job, and the
+  page read the record, before the probe's later listener on the same event ran; the CDP failure confirms the error.
+- Not measured: Firefox and Safari, a part of a multipart upload (the unit and browser-chaos lanes cover parts), and a
+  header missing from the rule rather than the origin (the same preflight `403` by the [cors] rules, not tried here).
+
 ## Not verified
 
 - **Checksum headers from a browser:** a correct CRC32C was measured in

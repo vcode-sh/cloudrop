@@ -114,10 +114,19 @@ Every notable change to the `cloudrop` package. The format follows
   such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
   `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
   compiles (`M12-T5`, `M12-T6`).
+- A bucket the browser cannot reach while the upload server answers fails the file with `BUCKET_BLOCKED`. Before: a
+  CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
+  `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, two `PUT` attempts that send no byte
+  around a `/sign` that answered end it with `error.code === "BUCKET_BLOCKED"`, not retryable, within about a second;
+  `retry()` keeps the ticket. Code that shows a Retry button only for `error.retryable`, or that maps every code in an
+  exhaustive `switch` over `CloudropErrorCode` or `ClientErrorCode`, handles the new code. With a `fetch` option and
+  outside a browser nothing changes (`M12-E7`).
 
 ### Added
 
 - `cloudrop/store`: `defineStore` and the store types, for a database store you write yourself (`M12-S2`).
+- The client error code `BUCKET_BLOCKED`, whose message names the bucket's CORS rule and
+  `npx cloudrop doctor --origin <origin>` (`M12-E7`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).

@@ -194,9 +194,10 @@ bucket-setup command shipped as `cloudrop setup` (`M9-C`, extended by `M11-C` an
   - `/complete` makes three storage calls (ListParts, CompleteMultipart, HEAD); whether one can go without weakening
     verification (spec §7) needs analysis.
 - **Unreadable R2 refusals:** a bad-signature `403` reaches the page as a network error, so the client retries for
-  about 15 s and answers a retryable `NETWORK_ERROR`. Option: stop at the second unreadable answer on a fresh URL when
-  `/sign` succeeded, with a non-retryable code (findings in `r2-spike-findings.md`, "Browser refusals and checksums,
-  2026-11-16"). Not decided; the message was reworded instead.
+  about 15 s and answers a retryable `NETWORK_ERROR`. Decided for the case that matters, a CORS rule that fails the
+  preflight: `BUCKET_BLOCKED` after two attempts that sent no byte around a successful `/sign` (`M12-E7`). A
+  bad-signature `403` sends its body, so it stays a `NETWORK_ERROR` (measured on R2, `r2-spike-findings.md`,
+  "Missing CORS origin and bad signature from a browser, 2026-11-22"). Open: Firefox and Safari.
 
 ### Small debts
 
