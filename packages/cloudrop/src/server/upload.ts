@@ -124,8 +124,10 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (new TextEncoder().encode(ownerJson).length > MAX_METADATA_JSON_BYTES) {
     throw new TypeError(`Route "${route.name}": authorize returned more than 2 KiB of JSON. Return ids, not records.`);
   }
-  // Every plugin hook sees this snapshot, as onComplete does, never the live object (M12-T5): one type is true in all.
   const owner: unknown = JSON.parse(ownerJson);
+  // Plugin hooks see the same snapshot as onComplete, never the live object (M12-T5), in a copy of their own: a hook
+  // that writes to it must not change what the token signs.
+  const pluginAuth: unknown = JSON.parse(ownerJson);
   const signedMetadata: unknown = metadataJson === undefined ? undefined : JSON.parse(metadataJson);
   const prepared = files.map((file) => prepareFile(route, file, { request, metadata, auth }));
   const accepted = prepared.filter((file): file is PluginFile => !(file instanceof CloudropError));
@@ -139,7 +141,7 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   if (accepted.length > 0) {
     const refused = await runBeforeUpload(
       plugins,
-      { request, route: route.name, accept: route.accept, files: accepted, metadata, auth: owner },
+      { request, route: route.name, accept: route.accept, files: accepted, metadata, auth: pluginAuth },
       config.logger,
     );
     if (refused) return fail(refused);
@@ -179,6 +181,6 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const unstarted = prepared.filter(
     (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
   );
-  await releaseUnstarted(config, { route: route.name, metadata, auth: owner }, unstarted, refusals);
+  await releaseUnstarted(config, { route: route.name, metadata, auth: pluginAuth }, unstarted, refusals);
   return ok({ files: tickets });
 }

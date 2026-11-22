@@ -97,8 +97,9 @@ Entries start from 1.
   beside a route with `authorize: allowAnyone` is a type error; `CloudropPlugin` alone, and `contentChecks()`, fit
   every server. `NoInfer` wraps the whole plugin type, not only `AuthOf`: inside it, an inline plugin's hook was typed
   from a merged object (`{ userId: string; since: never; teamId: never }`) instead of the union. At runtime
-  `handleUpload` passes `beforeUpload`, and the `onAbort` of files it ends, the parsed JSON it signs into the token
-  (`owner` in `upload.ts`); `afterVerify` and the `onAbort` of `/abort` and `/complete` already read it from the token.
+  `handleUpload` passes `beforeUpload`, and the `onAbort` of files it ends, a second parse of the JSON it signs into
+  the token (`pluginAuth` in `upload.ts`), so a hook that writes to `auth` cannot change the token that `afterVerify`,
+  `onComplete` and `/abort` trust; `afterVerify` and the `onAbort` of `/abort` and `/complete` already read the token.
   To make the check possible, `Jsonified<T>` now uses `T` only as the type being checked: its first branch
   `unknown extends T ? unknown` is gone (an `unknown` now reaches a last branch that answers `unknown`), and `void`
   is handled as `undefined` is, so an `onComplete` that returns nothing still sends `null`. With `T` on the other side

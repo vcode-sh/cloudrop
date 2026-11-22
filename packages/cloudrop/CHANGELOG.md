@@ -98,6 +98,22 @@ Every notable change to the `cloudrop` package. The format follows
   compiles; `eraseOwner(owner)` still compiles, as the erased context admits `undefined`. Without an annotation nothing
   changes. `interface Audit extends DeleteContext` no longer compiles: write `type Audit = DeleteContext & { ... }`.
   `request` is set only with `reason: "replaced"`, and its `context` is `undefined` (`M12-T6`).
+- `DeleteFileOptions` and `EraseOptions` are generic type aliases. Before: interfaces,
+  `interface DeleteFileOptions { context?: unknown }` and `EraseOptions` with `context?: unknown` beside `graceMs` and
+  `signal`. After: `type DeleteFileOptions<T = unknown>` and `type EraseOptions<T = unknown>`, where `context` is
+  required when `T` does not admit `undefined`. Unparameterised they mean what they meant. A module augmentation
+  (`declare module "cloudrop" { interface DeleteFileOptions { ... } }`) no longer merges into them: declare your own
+  type with `DeleteFileOptions & { ... }` (`M12-T6`).
+- `DeleteContext["request"]` depends on `reason`. Before: `request?: Request` with every reason. After:
+  `request?: undefined` unless `reason` is `"replaced"`, where it is `request: Request`. An object literal that sets
+  `request` beside `reason: "deleted"` or `"erased"`, such as a test calling an `onDelete` by hand with
+  `{ file, owner, reason: "deleted", context, request }`, no longer compiles: drop `request` there, or use
+  `reason: "replaced"` with `context: undefined` (`M12-T6`).
+- `Route` has three more type parameters: `Route<TMetadataInput, TResult, TAuth, TDeleted, TErased>`. Before: `route()`
+  returned `Route<M, R>`. After: it returns `Route<M, R, TAuth, TDeleted, TErased>`, so an exact-equality type test
+  such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
+  `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
+  compiles (`M12-T5`, `M12-T6`).
 
 ### Added
 
@@ -118,6 +134,9 @@ Every notable change to the `cloudrop` package. The format follows
   is 28.25 kB instead of 34.71 kB (gzip), and a server with a SQL store 33.61 kB instead of 33.13 kB (`M12-S1`).
 - The size ceilings of every entry are raised for 1.0, so they guard against accidents and never block work (`M12-P1`).
   Bundle size is not covered by semver; the release notes give the sizes measured.
+- `Jsonified<any>` is `any`. Before: `unknown`. After: `any`, so an `authorize` or an `onComplete` typed `any` gives
+  `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
+  (`M12-T5`).
 
 ## 0.6.0 - 2026-11-21
 

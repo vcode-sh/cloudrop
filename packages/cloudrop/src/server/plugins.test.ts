@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CloudropError } from "../errors.ts";
+import type { StorageDriver } from "../storage/driver.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import {
   type BeforeUploadContext,
@@ -127,6 +128,9 @@ describe("runAfterVerify", () => {
   });
 });
 
+const dated = route({ accept: "*/*", maxSize: 1024, authorize: () => ({ userId: "u1", at: new Date(0) }) });
+const datedAuth = { userId: "u1", at: "1970-01-01T00:00:00.000Z" };
+
 describe("the auth every hook receives", () => {
   // M12-T5: one type, Jsonified<TAuth>, is true in every hook only if each gets the token's JSON snapshot. beforeUpload
   // and the onAbort it triggers used to see the live object, with a Date where the others saw its ISO string.
@@ -164,5 +168,46 @@ describe("the auth every hook receives", () => {
         { hook: "afterVerify", auth },
       ],
     });
+  });
+
+  it("is the snapshot in the onAbort of a file that passed beforeUpload and could not start", async () => {
+    const seen: { hook: string; auth: unknown }[] = [];
+    const recorder: CloudropPlugin = {
+      id: "recorder",
+      server: {
+        beforeUpload: ({ auth }) => void seen.push({ hook: "beforeUpload", auth }),
+        onAbort: ({ auth, reason }) => void seen.push({ hook: `onAbort ${reason}`, auth }),
+      },
+    };
+    const { storage: bucket } = serverFixture({ dated });
+    const storage: StorageDriver = {
+      ...bucket,
+      presignPut: () => {
+        throw new Error("driver bug");
+      },
+    };
+    const fixture = serverFixture({ dated }, { storage, plugins: [recorder] });
+    await fixture.post("upload", { route: "dated", files: [file] });
+    expect(seen).toEqual([
+      { hook: "beforeUpload", auth: datedAuth },
+      { hook: "onAbort failed", auth: datedAuth },
+    ]);
+  });
+
+  // The hooks get their own copy: a write to it must not reach the token, which every later step trusts.
+  it("is a copy: a beforeUpload that writes to auth leaves what the token signed unchanged", async () => {
+    const writer: CloudropPlugin = {
+      id: "writer",
+      server: { beforeUpload: ({ auth }) => void Object.assign(auth as object, { userId: "mallory", quota: 5 }) },
+    };
+    const signed = route(
+      { accept: "*/*", maxSize: 1024, authorize: () => ({ userId: "u1", at: new Date(0) }) },
+      { onComplete: ({ request, file: _file, metadata, ...auth }) => auth },
+    );
+    const fixture = serverFixture({ signed }, { plugins: [writer] });
+    const ticket = await fixture.single("signed", file);
+    await fixture.send(ticket.put, new TextEncoder().encode("a"));
+    const completed = await fixture.post("complete", { token: ticket.token });
+    expect(((await completed.json()) as { data: unknown }).data).toEqual(datedAuth);
   });
 });
