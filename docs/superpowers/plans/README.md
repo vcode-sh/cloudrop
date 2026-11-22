@@ -1,7 +1,8 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.6.0, released that day (the pilot's four gaps, `api.allFiles`, a review of every area), and on
-2026-11-22 for the debts the 1.0 design settles ([plan](2026-11-22-1.0.0.md)). This file is the one place that says what
+Updated 2026-11-22 for 1.0.0, released that day from `d38f768a` (tag `v1.0.0`, npm `latest`): the API frozen under
+semver, Node 26 and TypeScript 7 floors, the pilot's workarounds turned into features, a review of every area
+([design](../specs/2026-11-22-1.0.0-design.md), [plan](2026-11-22-1.0.0.md), decisions `M12-*`). This file is the one place that says what
 is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked done, with the
 commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is in
 [`docs/decisions/`](../../decisions/README.md).
@@ -16,8 +17,8 @@ commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file
 | M3 | `engine` and `client`: scheduler, transports, retry, persistence, progress, chaos proxy | **Done** 2026-11-17: the vertical slice (`90380fb`), progress plans A and B, the resume plan and the chaos plan |
 | M4 | `cloudrop/react`, examples | **Done** 2026-11-17. M4a: audit fixes, `route(policy, callbacks)`, lazy env config, `cloudrop/react` hooks, docs. M4b: the Next home page as an upload UI, `examples/hono`, `examples/vite-react`, `discard(upload)`, npm trusted publishing; no shadcn registry (`M4-E1`) |
 | M5 | Database store and adapters (Prisma, Drizzle, SQL), [design](../specs/2026-11-17-m5-store-design.md) | **Done** 2026-11-17 (tasks C0, A–F, a whole-branch review and its fix round), merged to `main` |
-| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | Started: `contentChecks` in `cloudrop/plugins`, 0.4.0 (`M10-K`); the other three not started |
-| M7 | Docs, 0.x beta, 1.0 | Not started |
+| M6 | Plugins: `contentChecks`, `limits`, `images`, `checksums` | `contentChecks` shipped in 0.4.0 (`M10-K`); the owner cut `limits`, `images` and `checksums` from 1.0 on 2026-11-22 (spec 1.0) |
+| M7 | Docs, 0.x beta, 1.0 | **Done** 2026-11-22: 1.0.0 released (`v1.0.0`, `d38f768a`); the pilot runs it in production |
 
 ## Plans
 
@@ -153,6 +154,11 @@ because the evidence does not support them"; the documented promise `close()` la
   `context` to carry its audit event to the notification it sends after the commit.
 
 ### After 1.0: candidates
+
+The pilot's asks still open after 1.0 (its report on the candidate, 2026-11-22): `onUploaded`/`onError` do not fire on
+a cancel, so an app still tracks "uploading" itself (an `onCanceled`, deferred by the owner); `content.kind` covers
+refusals only, not mismatches (by design, `M12-E6`).
+
 
 The 1.0 design lists them (spec 1.0, "Out of scope for 1.0"), each additive, so a later minor can ship it:
 
