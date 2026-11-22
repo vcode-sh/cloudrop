@@ -288,7 +288,8 @@ describe("the sweep's erase pass", () => {
     armed = true;
     // A page of two owners, u1 and u2; the signal aborts while u1 runs, so u2 never runs.
     const stopped = await api.sweep({ all: true, limit: 2, signal: controller.signal });
-    expect(stopped.data).toMatchObject({ erasing: 1, cursor: "erase:u1" });
+    // u1 ran but did not finish: its run saw the signal abort too.
+    expect(stopped.data).toMatchObject({ erasing: 1, erased: 0, cursor: "erase:u1" });
     armed = false;
     const rest = await api.sweep({ cursor: stopped.data?.cursor, limit: 2 });
     expect(rest.data).toMatchObject({ erasing: 2, erased: 2 });

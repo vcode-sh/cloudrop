@@ -91,8 +91,8 @@ of R2's two billed operation classes.
 - **All parts there, or a `/complete` that finished before the reload:** the file ends done without a `PUT`. The route's
   `afterVerify` and `onComplete` run again then, so make them idempotent by `file.id`, as for any retried request. With
   a [database store](store.md) a finished `/complete` is answered from its row instead, and neither runs again.
-- **Parts missing:** exactly those are sent, then `/complete` again. The parts already stored in the bucket count in `bytes` from that
-  answer; before it, `bytes` is 0.
+- **Parts missing:** exactly those are sent, then `/complete` again. The parts already stored in the bucket count in
+  `bytes` from that answer; before it, `bytes` is 0.
 - **The upload is gone** (`UPLOAD_EXPIRED`, `INVALID_TOKEN` or `NO_SUCH_UPLOAD`, or parts missing in the ticket's
   last 15 minutes, when the server signs no more URLs for it): the file is `queued` again and gives the old ticket up
   with `/abort`, as a [retry that replaces a ticket](client.md#retry) does. It waits for the answer (at most 10

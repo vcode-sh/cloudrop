@@ -181,8 +181,9 @@ bucket-setup command shipped as `cloudrop setup` (`M9-C`, extended by `M11-C` an
 ### Open decisions for the owner
 
 None. Release approval, the last one, is resolved: the repository is public and the `npm` environment has a required
-reviewer, so a pushed `v*` tag publishes only after `vcode-sh` approves the run's **publish** job (checked with
-`gh api` on 2026-11-22; [`docs/releasing.md`](../../releasing.md), "The approval").
+reviewer, so a pushed `v*` tag publishes only after `vcode-sh` approves the run's **publish** job, or after a
+repository administrator bypasses the review, which the environment allows (`can_admins_bypass: true`, GitHub's
+default). Checked with `gh api` on 2026-11-22; [`docs/releasing.md`](../../releasing.md), "The approval".
 
 Still to do before 1.0 ships: `BUCKET_BLOCKED`'s rule is measured on Chromium only; Firefox and Safari, whose progress
 events may differ, are measured before release (spec 1.0 §2d, `M12-E7`).
@@ -206,8 +207,8 @@ Audited against `main` (spec 1.0 §9) and removed from the lists above:
 - **Fixed:** `Retry-After` on the `200` that refuses a file storage could not start (`M12-E5`); unreadable R2 refusals,
   for the CORS case that matters (`BUCKET_BLOCKED`, `M12-E7`; a bad-signature `403` sends its body and stays a
   `NETWORK_ERROR`); the store paths that stateless server apps paid for (`M5-T69`, fixed by `M12-S1`: the bundled
-  server went from 34.71 to 28.25 kB); the resume guide's claim that Deno has no `indexedDB`, with the Deno smoke
-  lane (spec 1.0 §8).
+  server went from 34.71 to 28.25 kB); the resume guide's claim that Deno has no `indexedDB`, measured by the Deno
+  smoke lane's `indexedDB` assertion (Task 11; spec 1.0 §8).
 - **Closed:** a retry that could not reuse a lost ask's key (`M5-T101`), resolved by `M11-R92`; an expired ticket
   that could never confirm a `/complete` that may have succeeded (`M3-U30`), resolved by `M11-R81`; the unit row for
   `job.abort()` removing the caller's listener, which exists since `d399b90` (`M3-U54`); release approval, above; the

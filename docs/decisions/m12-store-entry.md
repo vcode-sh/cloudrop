@@ -32,9 +32,8 @@ Entries start from 1.
   brings the code. A symbol from `Symbol.for` lets a store built by a second copy of cloudrop be recognised, so it is
   refused by its version (`M12-S2`) instead of reported as carrying nothing.
 - **If wrong:** a wrapper that copies a store without spread (from `Object.entries`, a class without the symbol) loses
-  the code; the server then logs that at start and answers every request with a retryable 500 and every `api` call
-  with `INVALID_CONFIG` (`M12-S2`). Moving back is the four imports in the endpoints and
-  `api.ts`.
+  the code; the server then logs that at start and answers every request with a retryable 500 and every `api` call with
+  `INVALID_CONFIG` (`M12-S2`). Moving back is the four imports in the endpoints and `api.ts`.
 - **Status:** in force.
 - **Visible in:** `src/server/store-paths.ts`, `src/store/paths.ts`, `src/store/define-store.ts`,
   `src/store/sql/store.ts`, `src/testing/memory-store.ts`, `src/server/{upload,complete,sign,abort,api}.ts`,
