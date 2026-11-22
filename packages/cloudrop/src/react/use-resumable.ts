@@ -22,7 +22,7 @@ const NOT_READ: Listed = { source: null, route: undefined, uploads: NO_UPLOADS }
 
 export function useResumableWith(source: HookSource, route?: string): UseResumableResult<string> {
   const [listed, setListed] = useState(NOT_READ);
-  const [discarding, setDiscarding] = useState(NO_IDS);
+  const [discardingIds, setDiscarding] = useState(NO_IDS);
   // Calls in flight per id: a second press, refused UPLOAD_IN_USE at once, must not end the first one's hold.
   const inFlight = useRef(new Map<string, number>());
   // What the committed render lists, and how many reads it has started.
@@ -81,5 +81,5 @@ export function useResumableWith(source: HookSource, route?: string): UseResumab
     [changeThenRead],
   );
   const forget = useCallback(() => changeThenRead((client) => client.forget()), [changeThenRead]);
-  return { uploads, discarding, refresh, discard, forget };
+  return { uploads, discardingIds, refresh, discard, forget };
 }

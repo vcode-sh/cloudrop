@@ -100,15 +100,17 @@ describe("cloudrop/react types", () => {
       const { uploads } = useResumable("notes");
       expectTypeOf(uploads).toEqualTypeOf<readonly ResumableUpload<"notes">[]>();
       const [record] = uploads;
+      if (record) void notes.resumeUpload(record, file);
+      // @ts-expect-error resume() only un-pauses; a listed upload continues through resumeUpload.
       if (record) void notes.resume(record, file);
 
       const [avatarRecord] = useResumable("avatar").uploads;
       // @ts-expect-error an avatar upload resumes into the avatar hook, whose result type it has
-      if (avatarRecord) void notes.resume(avatarRecord, file);
+      if (avatarRecord) void notes.resumeUpload(avatarRecord, file);
 
       // Every route's records narrow by `route`.
       const [any] = useResumable().uploads;
-      if (any?.route === "notes") void notes.resume(any, file);
+      if (any?.route === "notes") void notes.resumeUpload(any, file);
     };
     expectTypeOf(component).toBeFunction();
   });

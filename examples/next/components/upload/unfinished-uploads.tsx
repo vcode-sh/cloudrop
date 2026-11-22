@@ -28,9 +28,9 @@ const until = (expiresAt: string): string =>
  * Discard tells the server to abort the upload, without the file, and deletes the browser's record of it.
  */
 export function UnfinishedUploads() {
-  // `discarding`: the ids being discarded, whose second press would find the first one's lock (UPLOAD_IN_USE).
-  const { uploads, discarding, discard } = useResumable("files");
-  const { resume } = useUpload("files");
+  // `discardingIds`: the ids being discarded, whose second press would find the first one's lock (UPLOAD_IN_USE).
+  const { uploads, discardingIds, discard } = useResumable("files");
+  const { resumeUpload } = useUpload("files");
   // The message of the last discard that failed, such as an unreachable server: its upload stays listed for a retry.
   const [problem, setProblem] = useState<string | null>(null);
   if (uploads.length === 0) return null;
@@ -92,14 +92,14 @@ export function UnfinishedUploads() {
                       // Cleared, so that picking the same file after a refused resume fires `change` again.
                       event.currentTarget.value = "";
                       // Another file than the upload's own is refused before any request, and shows as a failed file.
-                      if (file) void resume(upload, file);
+                      if (file) void resumeUpload(upload, file);
                     }}
                   />
                 </label>
                 <AttachmentAction
                   id={discardId(upload)}
                   aria-label={`Discard ${upload.name}`}
-                  disabled={discarding.has(upload.id)}
+                  disabled={discardingIds.has(upload.id)}
                   onClick={() => void discardEach([upload])}
                 >
                   <IconTrash />
@@ -109,7 +109,7 @@ export function UnfinishedUploads() {
           </li>
         ))}
       </ul>
-      <Button variant="ghost" size="sm" disabled={discarding.size > 0} onClick={() => void discardEach(uploads)}>
+      <Button variant="ghost" size="sm" disabled={discardingIds.size > 0} onClick={() => void discardEach(uploads)}>
         Discard all
       </Button>
     </section>

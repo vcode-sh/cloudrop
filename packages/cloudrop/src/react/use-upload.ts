@@ -5,7 +5,7 @@
 
 import { useCallback, useInsertionEffect, useState, useSyncExternalStore } from "react";
 import { isList } from "../client/arguments.ts";
-import type { CloudropClient, Result, ResumableUpload, UploadJob, UploadResult } from "../client.ts";
+import type { CloudropClient, Result, UploadJob, UploadResult } from "../client.ts";
 import { createDropHandlers } from "./drop.ts";
 import type { JobTracker } from "./job-tracker.ts";
 import type { InputProps, UseUploadOptions, UseUploadResult } from "./types.ts";
@@ -17,7 +17,7 @@ export interface HookSource extends JobTracker {
   storeOf(route: string): UploadStore<unknown>;
   /**
    * The client, created on the first call: in a handler or an effect, so never during a server render. A wrong option
-   * gives its INVALID_CONFIG error, which upload(), resume() and refresh() resolve with.
+   * gives its INVALID_CONFIG error, which upload(), resumeUpload() and refresh() resolve with.
    */
   client(): Result<CloudropClient>;
 }
@@ -58,12 +58,6 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
     const metadata = "metadata" in call ? call.metadata : options.metadata;
     return start((client) => client.start(route, files, { metadata }));
   };
-  function resume(): void;
-  function resume(upload: ResumableUpload, file: File): Promise<UploadResult<unknown>>;
-  function resume(...record: [] | [ResumableUpload, File]): Promise<UploadResult<unknown>> | undefined {
-    if (record.length === 2) return start((client) => client.resume(...record));
-    for (const job of jobs()) job.resume();
-  }
   /** Files from a pick or a drop: no caller sees the result, so a wrong client option is thrown in a task (M3-U8). */
   const take = (files: File[]) => {
     const { error } = controller.latest.source.client();
@@ -83,12 +77,18 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
   const dropProps = createDropHandlers(setDragOver, (files) =>
     take(controller.latest.options.multiple ? files : files.slice(0, 1)),
   );
-  const actions: Pick<Hook, "upload" | "pause" | "resume" | "abort" | "retry" | "clear" | "getDropProps"> = {
+  const actions: Pick<
+    Hook,
+    "upload" | "pause" | "resume" | "resumeUpload" | "abort" | "retry" | "clear" | "getDropProps"
+  > = {
     upload,
     pause: () => {
       for (const job of jobs()) job.pause();
     },
-    resume,
+    resume: () => {
+      for (const job of jobs()) job.resume();
+    },
+    resumeUpload: (record, file) => start((client) => client.resume(record, file)),
     abort: () => {
       for (const job of jobs()) job.abort();
     },

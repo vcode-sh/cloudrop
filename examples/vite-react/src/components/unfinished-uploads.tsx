@@ -19,9 +19,9 @@ const discardId = (upload: Unfinished): string => `discard-${upload.id}`;
  */
 export function UnfinishedUploads() {
   const { useResumable, useUpload } = useUploads();
-  // `discarding`: the ids being discarded, whose second press would find the first one's lock (UPLOAD_IN_USE).
-  const { uploads, discarding, discard } = useResumable("attachments");
-  const { resume } = useUpload("attachments");
+  // `discardingIds`: the ids being discarded, whose second press would find the first one's lock (UPLOAD_IN_USE).
+  const { uploads, discardingIds, discard } = useResumable("attachments");
+  const { resumeUpload } = useUpload("attachments");
   // The message of the last discard that failed, such as an unreachable API: its upload stays listed for a retry.
   const [problem, setProblem] = useState<string | null>(null);
   if (uploads.length === 0) return null;
@@ -69,7 +69,7 @@ export function UnfinishedUploads() {
                     const file = event.currentTarget.files?.[0];
                     // Cleared, so that picking the same file after a refused resume fires `change` again.
                     event.currentTarget.value = "";
-                    if (file) void resume(upload, file);
+                    if (file) void resumeUpload(upload, file);
                   }}
                 />
               </label>
@@ -78,7 +78,7 @@ export function UnfinishedUploads() {
                 size="icon-sm"
                 variant="ghost"
                 aria-label={`Discard ${upload.name}`}
-                disabled={discarding.has(upload.id)}
+                disabled={discardingIds.has(upload.id)}
                 onClick={() => void discardEach([upload])}
               >
                 <IconTrash />
@@ -89,7 +89,7 @@ export function UnfinishedUploads() {
         <Button
           variant="ghost"
           className="self-start"
-          disabled={discarding.size > 0}
+          disabled={discardingIds.size > 0}
           onClick={() => void discardEach(uploads)}
         >
           Discard all

@@ -130,7 +130,7 @@ describe("useUpload", () => {
     const answers = await act(() =>
       Promise.all([
         result.current.hook.upload(note("alpha", "a.txt")),
-        result.current.hook.resume(record, note("alpha", "a.txt")),
+        result.current.hook.resumeUpload(record, note("alpha", "a.txt")),
         result.current.resumable.refresh(),
       ]),
     );

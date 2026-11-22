@@ -28,7 +28,7 @@ the server's module graph, where React exports no `useState` or `useSyncExternal
 `createUploadHooks` takes the [client's options](client.md#create-a-client) (`basePath`, `concurrency`, `namespace`
 and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
 client is created at the first upload, the first `useResumable` read or `close()` in the browser, never while a server
-renders the page. A wrong option never throws from your code: `upload()`, `resume()` and `refresh()` resolve
+renders the page. A wrong option never throws from your code: `upload()`, `resumeUpload()` and `refresh()` resolve
 `{ data: null, error }` with its `INVALID_CONFIG` error, and a pick or a drop, which has no caller to resolve to, throws
 it in a separate task, so it reaches the console and your error reporting.
 
@@ -172,7 +172,8 @@ export function PasteTarget() {
 }
 ```
 
-`upload`, `pause`, `resume`, `abort`, `retry`, `clear` and `getDropProps` keep their identity across renders, and
+`upload`, `pause`, `resume`, `resumeUpload`, `abort`, `retry`, `clear` and `getDropProps` keep their identity across
+renders, and
 `getInputProps` keeps it while `multiple` and `accept` stay the same, so an effect that lists one of them in its
 dependencies does not run again on every render.
 
@@ -184,7 +185,7 @@ import { useResumable, useUpload } from "../lib/upload";
 
 export function Unfinished() {
   const { uploads } = useResumable("documents");
-  const { files, resume, clear } = useUpload("documents", { metadata: { folderId: "inbox" } });
+  const { files, resumeUpload, clear } = useUpload("documents", { metadata: { folderId: "inbox" } });
   return (
     <ul>
       {uploads.map((upload) => (
@@ -195,7 +196,7 @@ export function Unfinished() {
             aria-label={`Pick ${upload.name} again`}
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
-              if (file) void resume(upload, file);
+              if (file) void resumeUpload(upload, file);
             }}
           />
         </li>
@@ -217,10 +218,10 @@ export function Unfinished() {
 }
 ```
 
-`useResumable(route?)` returns `{ uploads, discarding, refresh, discard, forget }`. `uploads` is the client's `resumable()` list, of
+`useResumable(route?)` returns `{ uploads, discardingIds, refresh, discard, forget }`. `uploads` is the client's `resumable()` list, of
 one route or of every route, newest first. It leaves out the uploads this page holds: a file that is running, paused, or
 failed and kept for `retry()`, and an upload while its resume runs. A failed file is continued with `files[n].retry()`,
-never `resume()`, which would be refused. A listed upload leaves the list as soon as its resume starts.
+never `resumeUpload()`, which would be refused. A listed upload leaves the list as soon as its resume starts.
 
 A refused resume, `UPLOAD_IN_USE` while another tab sends the upload or `INVALID_INPUT` for a different file, stays in
 `files` as a failed file with its error, and the upload is listed again: `retry()` checks again, and `abort()` ends the
@@ -236,7 +237,7 @@ when it settles, so a record the client deletes, for a file that ends done or is
 is `[]` on the server, before the first read and when the read failed. An upload started on a shared client directly,
 not through the hooks, is not followed: call `refresh()` after it.
 
-`resume(upload, file)` continues a record with the file the user picked again, as one more upload in the hook's
+`resumeUpload(upload, file)` continues a record with the file the user picked again, as one more upload in the hook's
 `files`, which every component on the hook's route shows. A browser never gives a page a file back after a reload, so
 the user has to pick it. What counts as the same file, and what the server is asked first:
 [Resume after reload](resume.md).
@@ -244,8 +245,8 @@ the user has to pick it. What counts as the same file, and what the server is as
 `discard(upload)` drops a listed upload without its file: the client's
 [`discard()`](resume.md#discard-one-upload) tells the server to abort it and deletes its record, and the list is read
 again. It resolves `{ data: { aborted }, error }`; on an error, such as no connection, the upload stays listed.
-Meanwhile `discarding` holds the upload's id, until the list is read again: a second `discard()` of it would answer
-`UPLOAD_IN_USE`, so disable its button while `discarding.has(upload.id)`.
+Meanwhile `discardingIds` holds the upload's id, until the list is read again: a second `discard()` of it would answer
+`UPLOAD_IN_USE`, so disable its button while `discardingIds.has(upload.id)`.
 `forget()` is the client's `forget()`: it deletes every record of the client's namespace, of every route, sending no
 `/abort`, and reads the list again; call it at sign-out. Either one also makes every other `useResumable` of the
 factory read its list again, such as a badge that counts every route's uploads. Neither needs the client itself.
@@ -345,7 +346,7 @@ async function signOut() {
   sends in between, for a queued file or a retry, goes with the new user's session. On a route with a store and
   `owner`, `account` makes the server refuse it with `ACCOUNT_CHANGED` (see [Errors to show](#errors-to-show)), so
   the file never becomes the other user's; on a route without `owner`, nothing tells the two users apart.
-- **After `close()`** every `upload()` and `resume()` of the hooks resolves `CLIENT_CLOSED` without a request.
+- **After `close()`** every `upload()` and `resumeUpload()` of the hooks resolves `CLIENT_CLOSED` without a request.
   `useResumable()` and `forget()` keep working. The first `close()` decides: a later one, with or without options,
   changes nothing. A sign-out that fails leaves the page on a closed client, so reload then, as the example's
   `src/components/auth-panel.tsx` does after every sign-out.
@@ -437,14 +438,14 @@ keep a visually hidden `role="status"` line rendered from the start, and change 
 `totals.progress` down to 10 %): a polite region fed every progress event would never stop talking.
 
 **Unfinished uploads.** After a reload, `useResumable("files").uploads` lists what can be continued. A browser never
-hands a file back, so each row has a file input; the picked file goes to `resume(upload, file)` and the resumed upload
+hands a file back, so each row has a file input; the picked file goes to `resumeUpload(upload, file)` and the resumed upload
 joins `files` like any other. A different file is refused before any request and shows as a failed row. Each row's
 Discard calls `discard(upload)`, which needs no file, and is disabled while it runs; on an error the upload stays
 listed, so show the error's message.
 
 ```tsx
-const { uploads, discarding, discard } = useResumable("files");
-const { resume } = useUpload("files");
+const { uploads, discardingIds, discard } = useResumable("files");
+const { resumeUpload } = useUpload("files");
 const [problem, setProblem] = useState<string | null>(null);
 const discardEach = async (chosen: readonly ResumableUpload<"files">[]) => {
   // The example first moves focus to the row that stays.
@@ -460,20 +461,20 @@ const discardEach = async (chosen: readonly ResumableUpload<"files">[]) => {
   onChange={(event) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
-    if (file) void resume(upload, file);
+    if (file) void resumeUpload(upload, file);
   }}
 />
 <AttachmentAction
   id={discardId(upload)}
   aria-label={`Discard ${upload.name}`}
-  disabled={discarding.has(upload.id)}
+  disabled={discardingIds.has(upload.id)}
   onClick={() => void discardEach([upload])}
 >
   <IconTrash />
 </AttachmentAction>
 ```
 
-`discarding` is the hook's own: the component keeps no list of the ids it is discarding.
+`discardingIds` is the hook's own: the component keeps no list of the ids it is discarding.
 
 The example's **Discard all** discards every listed upload the same way, so each is aborted on the server. `forget()`
 deletes the records alone and suits sign-out.
@@ -540,9 +541,9 @@ Every other code and what it means: [Errors](errors.md).
 | `upload(files, { metadata }?)` | Starts one upload; resolves with its `UploadResult`, or `null` for no file. |
 | `getInputProps()` | `type`, `multiple`, `accept` and `onChange` for an `<input>`. |
 | `getDropProps()` | `onDragEnter`, `onDragOver`, `onDragLeave` and `onDrop` for any element. |
-| `pause()`, `resume()`, `abort()` | Pause, resume or cancel every file in `files`, as each file's own control does. |
+| `pause()`, `resume()`, `abort()` | Pause, un-pause or cancel every file in `files`, as each file's own control does. |
 | `retry()` | Sends every failed file again; resolves once they have settled. |
-| `resume(upload, file)` | Continues a record from `useResumable`; resolves with its `UploadResult`. |
+| `resumeUpload(upload, file)` | Continues a record from `useResumable`; resolves with its `UploadResult`. |
 | `clear()` | Removes the uploads whose every file ended done or cancelled, for every component on the route. |
 
 `useResumable(route?)`:
@@ -550,7 +551,7 @@ Every other code and what it means: [Errors](errors.md).
 | Field | What it is |
 | --- | --- |
 | `uploads` | The unfinished uploads this browser can continue, newest first, without those this page holds. |
-| `discarding` | The ids of the listed uploads this hook's `discard()` is dropping: disable their buttons meanwhile. |
+| `discardingIds` | The ids of the listed uploads this hook's `discard()` is dropping: disable their buttons meanwhile. |
 | `refresh()` | Reads the list again; resolves with the client's `Result`. |
 | `discard(upload)` | Aborts one listed upload without its file and deletes its record; resolves `{ aborted }` or the error. |
 | `forget()` | Deletes every record of the client's namespace, of every route, sending no `/abort`. |
@@ -561,7 +562,7 @@ Every other code and what it means: [Errors](errors.md).
   constant empty state there (no files, zero totals, no resumable uploads) and never create the client, so nothing
   touches `fetch`, IndexedDB or the page's lifecycle on the server, and the first browser render matches.
 - **StrictMode.** No upload starts in an effect or during render, only in `upload()`, the input's `onChange`, a drop
-  and `resume()`. StrictMode's second render and second effect start nothing; `useResumable` only reads once more.
+  and `resumeUpload()`. StrictMode's second render and second effect start nothing; `useResumable` only reads once more.
 - **Hooks from a context.** A component whose `useUpload` or `useResumable` comes from a context follows the context
   without a remount: once it renders with another factory's hooks, it shows that factory's list and uploads through
   its client. Uploads started through the previous factory stay on its client and its list; they are cancelled only

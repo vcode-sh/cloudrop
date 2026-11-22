@@ -146,3 +146,29 @@ Entries start from 1.
 - **Visible in:** `src/errors.ts`, `src/client/failures.ts`, `src/client/records.test.ts`,
   `src/client/forget.test.ts`, `src/client/discard.test.ts`, `src/client/resume-checks.test.ts`,
   `docs/guide/errors.md`, `docs/guide/client.md`, `docs/guide/resume.md`.
+
+### M12-A5: `useUpload().resumeUpload(upload, file)`; `resume()` only un-pauses
+
+- **Decision:** the hook's two-argument `resume(upload, file)` is `resumeUpload(upload, file)`, with the same answer and
+  types: a listed upload of the hook's route continues as one more upload in `files`. `resume()` takes no arguments
+  and un-pauses every paused file, as before; passing it a record is a type error. Both keep their identity across
+  renders. The client's `client.resume(upload, file)` and a job's `resume()` keep their names: on the client, the
+  two meanings live on different objects (a client, a job), so nothing reads two ways there.
+- **Why:** spec 1.0 §6: one name with two meanings on one object, told apart only by the argument count; a page that
+  wrote `resume(upload)` without the file un-paused everything and resumed nothing.
+- **If wrong:** the names are frozen at 1.0; the changelog gives the rename.
+- **Status:** in force.
+- **Visible in:** `src/react/types.ts`, `src/react/use-upload.ts`, `src/react/types.test.ts`,
+  `src/react/use-upload.test.ts`, `src/react/use-resumable.test.ts`, `docs/guide/react.md`, both examples'
+  `unfinished-uploads.tsx`.
+
+### M12-A6: `useResumable().discardingIds`
+
+- **Decision:** `discarding: ReadonlySet<string>` is `discardingIds`, the same set: the ids of the listed uploads the
+  hook's `discard()` is dropping, from the call until the list is read again.
+- **Why:** spec 1.0 §6: `discarding` reads as a boolean, and `if (discarding)` compiles and is always true, since a
+  set is truthy even when empty.
+- **If wrong:** the names are frozen at 1.0.
+- **Status:** in force.
+- **Visible in:** `src/react/types.ts`, `src/react/use-resumable.ts`, `src/react/use-resumable.test.ts`,
+  `docs/guide/react.md`, both examples' `unfinished-uploads.tsx`.

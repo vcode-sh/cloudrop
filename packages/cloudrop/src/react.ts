@@ -29,7 +29,7 @@ export type {
  * Creates `useUpload` and `useResumable` for one server's routes: `createUploadHooks<typeof cloudrop>()`, with a type
  * import of the server's `cloudrop`. Takes the client's options, or `{ client }` to share a client. The client is
  * created at the first upload, resumable read or close() in the browser, never during a server render; a wrong option
- * makes upload(), resume() and refresh() resolve with its INVALID_CONFIG error.
+ * makes upload(), resumeUpload() and refresh() resolve with its INVALID_CONFIG error.
  */
 export function createUploadHooks<TCloudrop extends InferableCloudrop = InferableCloudrop>(
   options: UploadHooksOptions<TCloudrop> = {},

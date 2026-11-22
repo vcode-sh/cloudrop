@@ -86,10 +86,10 @@ export interface UseUploadResult<R, TName extends string, TMetadata> {
   getDropProps(): DropProps;
   /** Pauses every queued or uploading file in `files`. */
   pause(): void;
-  /** Resumes every paused file in `files`. */
+  /** Un-pauses every paused file in `files`. */
   resume(): void;
   /** Continues an upload useResumable listed, with the file the user picked again, as one more upload in `files`. */
-  resume(upload: ResumableUpload<TName>, file: File): Promise<UploadResult<R>>;
+  resumeUpload(upload: ResumableUpload<TName>, file: File): Promise<UploadResult<R>>;
   /** Cancels every file in `files` that has not ended done. */
   abort(): void;
   /** Sends every failed file in `files` again; resolves once they have settled. */
@@ -114,7 +114,7 @@ export interface UseResumableResult<TName extends string> {
    * The ids of the listed uploads this hook's discard() is dropping, from the call until the list is read again: a
    * second discard() of one of them would answer UPLOAD_IN_USE, so a page disables its button meanwhile.
    */
-  discarding: ReadonlySet<string>;
+  discardingIds: ReadonlySet<string>;
   /** Reads the list again; resolves with the client's answer, whose error says why the list is empty. */
   refresh(): Promise<Result<ResumableOf<TName>[]>>;
   /**

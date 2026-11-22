@@ -54,7 +54,7 @@ describe("useResumable", () => {
     const [record] = result.current.resumable.uploads;
     if (!record) throw new Error("useResumable listed no upload.");
 
-    const answer = await act(() => result.current.hook.resume(record, fourParts()));
+    const answer = await act(() => result.current.hook.resumeUpload(record, fourParts()));
     await setup.drained();
     await waitFor(() => expect(result.current.resumable.uploads).toEqual([]), fast);
 
@@ -139,7 +139,7 @@ describe("useResumable", () => {
 
     let resumed: Promise<unknown> = Promise.resolve();
     act(() => {
-      resumed = result.current.hook.resume(record, fourParts());
+      resumed = result.current.hook.resumeUpload(record, fourParts());
     });
     await act(() => resumedPart.reached);
     await waitFor(() => expect(result.current.resumable.uploads).toEqual([]), fast);
@@ -228,7 +228,7 @@ describe("useResumable", () => {
     if (!record) throw new Error("useResumable listed no upload.");
 
     const resumed = act(() => {
-      const answer = result.current.hook.resume(record, fourParts());
+      const answer = result.current.hook.resumeUpload(record, fourParts());
       // Ends the file at once (M4-F2); the checks still run, and let the upload go when they end.
       result.current.hook.abort();
       return answer;
@@ -251,7 +251,7 @@ describe("useResumable", () => {
     const [record] = result.current.resumable.uploads;
     if (!record) throw new Error("useResumable listed no upload.");
 
-    const refused = (await act(() => result.current.hook.resume(record, fourParts()))).error?.code;
+    const refused = (await act(() => result.current.hook.resumeUpload(record, fourParts()))).error?.code;
     await waitFor(() => expect(ids(result.current.resumable.uploads)).toEqual([setup.upload.id]), fast);
     otherTabLetsGo();
     const retried = await act(() => result.current.hook.files[0]?.retry());
@@ -321,14 +321,14 @@ describe("useResumable's discard() and forget()", () => {
   });
 });
 
-describe("useResumable's discarding", () => {
+describe("useResumable's discardingIds", () => {
   it("holds a listed upload's id from discard() until the list is read again, through a refused second press", async () => {
     const held = gate((call) => call.label === "POST /abort");
     const setup = await reloaded(gate(partThree), held.fault);
     const { useResumable } = createUploadHooks({ client: setup.client });
     const { result } = renderHook(() => useResumable("files"));
     await waitFor(() => expect(ids(result.current.uploads)).toEqual([setup.upload.id]), fast);
-    const before = [...result.current.discarding];
+    const before = [...result.current.discardingIds];
     const record = result.current.uploads[0] as ResumableUpload<"files">;
 
     let answer: Promise<unknown> = Promise.resolve();
@@ -338,7 +338,7 @@ describe("useResumable's discarding", () => {
     await act(() => held.reached);
     // The first discard holds the upload's lock, so a second press is refused at once.
     const second = await act(() => result.current.discard(record));
-    const during = { discarding: [...result.current.discarding], listed: ids(result.current.uploads) };
+    const during = { discardingIds: [...result.current.discardingIds], listed: ids(result.current.uploads) };
     held.open();
     await act(() => answer);
 
@@ -346,13 +346,13 @@ describe("useResumable's discarding", () => {
       before,
       second: second.error?.code,
       during,
-      after: [...result.current.discarding],
+      after: [...result.current.discardingIds],
       listed: result.current.uploads,
     }).toEqual({
       before: [],
       second: "UPLOAD_IN_USE",
       // The refused press read the list again, which leaves out the upload the first one claimed (M4-F22).
-      during: { discarding: [setup.upload.id], listed: [] },
+      during: { discardingIds: [setup.upload.id], listed: [] },
       after: [],
       listed: [],
     });
