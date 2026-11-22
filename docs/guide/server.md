@@ -792,9 +792,11 @@ deno run --allow-net --allow-env=NODE_ENV,CLOUDROP_SECRET,CLOUDROP_R2_ACCOUNT_ID
 ```
 
 `--allow-net` lets the server listen and reach the bucket. `--allow-env` lets it read its settings: `r2()` and the
-secret come from the `CLOUDROP_*` variables, and `NODE_ENV` decides whether it checks them at start. Without that
-permission, reading a variable throws Deno's `NotCapable` and every request fails. Name the variables, as above, or
-pass a plain `--allow-env`; with `s3()`, name the `CLOUDROP_S3_*` variables instead.
+secret come from the `CLOUDROP_*` variables, and `NODE_ENV` decides whether it checks them at start. `r2()` reads
+`NODE_ENV` as it is built, so without that permission a run with no terminal, or under `--no-prompt`, stops at start
+with Deno's `NotCapable`, before `Deno.serve` is reached. In a terminal Deno asks first, and a denial stops it the
+same way. Name the variables, as above, or pass a plain `--allow-env`; with `s3()`, name the `CLOUDROP_S3_*`
+variables instead.
 
 ```ts
 // src/index.ts, a Cloudflare Worker
