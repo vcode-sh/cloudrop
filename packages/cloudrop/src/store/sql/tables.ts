@@ -80,11 +80,13 @@ async function findMissing(missing: MissingRead, table: string, columns: readonl
 
 /**
  * The SQL that adds the erase mark to a usage table of 0.6 or earlier, for this dialect and these names: the `columns`
- * it lacks, then the index, which cannot exist while either is missing.
+ * it lacks, then the index, which cannot exist while either is missing. No `columns` (a migration added them while the
+ * check read the table) leaves the index alone.
  */
 export function eraseMarkUpgrade(dialect: SqlDialect, names: TableNames, columns: readonly string[]): string {
   const usage = quoteTables(names).usage;
   const index = `CREATE INDEX "${names.usage}_erasing_idx" ON ${usage} (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;`;
+  if (columns.length === 0) return index;
   // SQLite adds one column per statement.
   const added =
     dialect === "postgres"
