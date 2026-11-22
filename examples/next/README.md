@@ -207,16 +207,18 @@ The home page is what an app's upload UI looks like when it is built on the head
   then gets `412`, which the client counts as stored), answer the next `/upload` or `/sign` with 503 (the client backs
   off and retries), delay every bucket PUT (so a 100 MiB file shows four parts in flight, and Pause has PUTs to stop),
   and drop the answer of the next `/complete` (the client retries it, and from then on a cancel or failure keeps the
-  file). Each network error comes after half the PUT's body was sent, as a lost connection does. The network error,
+  file). Through the lab's XMLHttpRequest each network error comes after half the PUT's body was sent, as a lost
+  connection does; with **Send PUTs with fetch** it comes with no progress, since fetch reports none. The network error,
   the dropped answers and the 503 untick themselves after one hit. Three more hold until unticked, to fail a file for
-  Retry: every PUT of part 2 gets a network error (the client renews its URL once and makes 6 attempts, up to about
-  15 s of waits, then the file fails with `NETWORK_ERROR` and keeps its ticket); every bucket PUT is blocked before any
-  byte leaves, as by a CORS rule that misses the page (the client renews the URL once, then the file fails with
-  `BUCKET_BLOCKED` and keeps its ticket); and the lab answers every bucket PUT with 400 in the bucket's place, sending
-  nothing (the file fails at once with `UPLOAD_REJECTED`, which needs a new ticket). A fourth holds every `/complete` answer: the lab forwards the request and
-  the server finishes the file, but the page hears nothing and shows the `/complete` in flight until the box is
-  unticked; a reload before then drops the answer unheard and leaves the file stored, for a resume to find. Each line on
-  the page names the decision behind the behaviour.
+  Retry: every PUT of part 2 gets a network error (the client renews its URL once and makes 6 attempts, up to about 15 s
+  of waits, then the file fails with `NETWORK_ERROR` and keeps its ticket); every bucket PUT is blocked before any byte
+  leaves, as by a CORS rule that misses the page (the client renews the URL once, then the file fails with
+  `BUCKET_BLOCKED` and keeps its ticket, or, with fetch, with `NETWORK_ERROR` after its attempts); and the lab answers
+  every bucket PUT with 400 in the bucket's place, sending nothing (the file fails at once with `UPLOAD_REJECTED`, which
+  needs a new ticket). A fourth holds every `/complete` answer: the lab forwards the request and the server finishes the
+  file, but the page hears nothing and shows the `/complete` in flight until the box is unticked; a reload before then
+  drops the answer unheard and leaves the file stored, for a resume to find. Each line on the page names the decision
+  behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
   `/upload` for a new ticket, a `412` PUT whose object was already stored, a resume's first `/complete` and the `/sign`

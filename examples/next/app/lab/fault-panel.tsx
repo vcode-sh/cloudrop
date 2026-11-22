@@ -20,7 +20,7 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "bucketNetworkError",
     label: "Fail the next bucket PUT with a network error",
     effect:
-      "What a browser shows for an answer it may not read, such as an expired R2 URL, after half the body was sent. The client waits a random time of up to 0.5 s after a first attempt, renews that URL once through /sign and sends it again (decisions M3-S10, M3-S11).",
+      "What a browser shows for an answer it may not read, such as an expired R2 URL: after half the body was sent, or with no progress at all when PUTs are sent with fetch. The client waits a random time of up to 0.5 s after a first attempt, renews that URL once through /sign and sends it again (decisions M3-S10, M3-S11).",
   },
   {
     fault: "dropBucketAnswer",
@@ -44,7 +44,7 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "part2NetworkError",
     label: "Fail every PUT of part 2 with a network error while ticked",
     effect:
-      "A part that never gets through, its connection lost after half its body was sent: the client renews its URL once and makes 6 attempts with random waits of up to 0.5, 1, 2, 4 and 8 s between them, then the file fails with NETWORK_ERROR and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M3-U31).",
+      "A part that never gets through, its connection lost after half its body was sent (with no progress at all when PUTs are sent with fetch): the client renews its URL once and makes 6 attempts with random waits of up to 0.5, 1, 2, 4 and 8 s between them, then the file fails with NETWORK_ERROR and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M3-U31).",
   },
   {
     fault: "bucketBlocked",
