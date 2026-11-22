@@ -502,9 +502,9 @@ keep a visually hidden `role="status"` line rendered from the start, and change 
 `totals.progress` down to 10 %): a polite region fed every progress event would never stop talking.
 
 **Unfinished uploads.** After a reload, `useResumable("files").uploads` lists what can be continued. A browser never
-hands a file back, so each row has a file input; the picked file goes to `resumeUpload(upload, file)` and the resumed upload
-joins `files` like any other. A different file is refused before any request and shows as a failed row. Each row's
-Discard calls `discard(upload)`, which needs no file, and is disabled while it runs; on an error the upload stays
+hands a file back, so each row has a file input; the picked file goes to `resumeUpload(upload, file)` and the resumed
+upload joins `files` like any other. A different file is refused before any request and shows as a failed row. Each
+row's Discard calls `discard(upload)`, which needs no file, and is disabled while it runs; on an error the upload stays
 listed, so show the error's message.
 
 ```tsx
