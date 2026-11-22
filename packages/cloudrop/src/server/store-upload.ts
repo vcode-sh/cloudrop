@@ -4,7 +4,7 @@
 import { CloudropError, fail, ok, quotaExceeded, type Result } from "../errors.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import { isOwnerOrId, MAX_OWNER_LENGTH } from "./owner-files.ts";
-import { abortContexts, type PluginFile, runOnAbort } from "./plugins.ts";
+import type { PluginFile } from "./plugins.ts";
 import type { OwnerContext } from "./route-context.ts";
 import type { CloudropStore } from "./store.ts";
 import { cancelled, storeCall } from "./store-calls.ts";
@@ -103,29 +103,13 @@ export async function attachUpload(
   return attached.data ? null : cancelled();
 }
 
-/**
- * Releases what was reserved for accepted files that were not started. Their plugins hear "rejected" for a file over
- * its quota and "failed" otherwise; a reserved row whose upload could not start ends as failed, best effort.
- */
-export async function releaseUnstarted(
-  config: ServerConfig,
-  shared: { route: string; metadata: unknown; auth: unknown },
-  unstarted: readonly PluginFile[],
-  refusals: ReadonlyMap<string, CloudropError>,
-): Promise<void> {
-  const { store, plugins, logger } = config;
-  const overQuota = unstarted.filter((file) => refusals.get(file.id)?.code === "QUOTA_EXCEEDED");
-  const failed = unstarted.filter((file) => !overQuota.includes(file));
-  if (store) {
-    const reserved = failed.filter(({ id }) => !refusals.has(id));
-    await Promise.all(
-      reserved.map((file) =>
-        storeCall(logger, `end the unstarted file ${file.id}`, () =>
-          store.end(file.id, "pending", "failed", new Date()),
-        ),
-      ),
-    );
-  }
-  await runOnAbort(plugins, abortContexts(shared, overQuota, "rejected"), logger);
-  await runOnAbort(plugins, abortContexts(shared, failed, "failed"), logger);
+/** Ends the rows of reserved files whose uploads could not start, as failed, best effort. */
+export async function endUnstarted(config: ServerConfig, reserved: readonly PluginFile[]): Promise<void> {
+  const { store, logger } = config;
+  if (!store) return;
+  await Promise.all(
+    reserved.map((file) =>
+      storeCall(logger, `end the unstarted file ${file.id}`, () => store.end(file.id, "pending", "failed", new Date())),
+    ),
+  );
 }

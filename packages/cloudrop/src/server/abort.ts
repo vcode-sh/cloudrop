@@ -11,7 +11,6 @@ import { storageFailure } from "./http.ts";
 import { runOnAbort } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
 import type { FileStatus } from "./store.ts";
-import { fileCalls } from "./store-calls.ts";
 import { isMultipart, type UploadTokenPayload } from "./token.ts";
 import { readToken, tokenAbortContexts } from "./token-request.ts";
 
@@ -57,8 +56,11 @@ export async function handleAbort({ body, config }: EndpointInput): Promise<Resu
   // A single PUT may have landed, and a multipart upload may have completed: without a row, this upload's own object
   // is deleted only while the token is valid, and never when the client asked to keep it, since nothing here can tell
   // whether onComplete ran.
-  if (!config.store || !token.stored) return abortAndDelete(config, token, keep === true || nowSeconds() >= token.exp);
-  const ended = await fileCalls(config.store, config.logger, token).end("pending", "aborted");
+  const { store, paths } = config;
+  if (!store || !paths || !token.stored) {
+    return abortAndDelete(config, token, keep === true || nowSeconds() >= token.exp);
+  }
+  const ended = await paths.calls.fileCalls(store, config.logger, token).end("pending", "aborted");
   if (ended.error) return ended;
   const { changed, record } = ended.data;
   // A completed or completing file is kept, and so is anything the sweep has already settled (cleaned_at): a

@@ -1,11 +1,12 @@
 // createCloudrop's store options (M5 spec §5.1), checked once at construction like every other option: a mistake
 // throws INVALID_CONFIG naming the option and the fix.
 
-import { configError } from "../errors.ts";
+import { configError, fail, ok, type Result } from "../errors.ts";
 import type { RouteConfig } from "./config.ts";
 import type { Awaitable } from "./route.ts";
 import { isFunction } from "./route-config.ts";
 import type { CloudropStore } from "./store.ts";
+import { STORE_PATHS, type StorePaths } from "./store-paths.ts";
 import { storeOfRoute } from "./store-route.ts";
 
 /** An owner's limit in bytes, or null for no limit. */
@@ -135,6 +136,23 @@ export function readStoreConfig(options: StoreOptions, routes: readonly RouteCon
   }
   checkRoutes(routes, store);
   return { store, quota, completionLeaseMs: leaseMs };
+}
+
+/**
+ * The code the server runs with a store, which the store object carries (M12-S1); undefined without a store. A store
+ * without it, or with another copy's, is reported by every request and api call, as a missing environment setting is.
+ */
+export function readStorePaths(store: CloudropStore<unknown> | undefined): Result<StorePaths | undefined> {
+  if (!store) return ok(undefined);
+  const paths = (store as { [STORE_PATHS]?: Partial<StorePaths> })[STORE_PATHS];
+  if (paths?.version === 1) return ok(paths as StorePaths);
+  return fail(
+    configError(
+      paths === undefined
+        ? 'The store carries none of the store code the server runs. If you wrote it yourself, wrap it with defineStore from "cloudrop/store"; if you wrapped an adapter\'s store, copy it with spread ({ ...store }), which keeps that code.'
+        : "cloudrop is installed twice: the store's adapter comes from another copy. Install cloudrop once.",
+    ),
+  );
 }
 
 /** The routes whose uploads a quota cannot count, because they name no owner. */

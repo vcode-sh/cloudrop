@@ -236,6 +236,25 @@ and round-trips, so they match the store:
 The model and field names are yours to change. The column names (`@map`) are fixed; so are the table names
 (`@@map`), unless you pass the same names to `prismaStore` as `tables`.
 
+### A store you write yourself: `cloudrop/store`
+
+The adapters cover Postgres and SQLite. For another database, write the `CloudropStore` methods yourself and wrap the
+object with `defineStore`. It attaches the code the server runs with a store, which a server without one never loads:
+
+```ts
+import { type CloudropStore, defineStore } from "cloudrop/store";
+
+const methods: CloudropStore = {
+  /* reserve, attach, get, claim, release, complete, end, revoke, stale, list, cleaned, usage, reconcile, owners */
+};
+export const store = defineStore(methods);
+```
+
+`defineStore` returns the same object, so a class instance keeps its methods and `this`. Without it, every request and
+every `api` call answers `INVALID_CONFIG` saying so. An adapter's store needs no `defineStore`, and a copy made with
+spread (`{ ...store, get: logged(store.get) }`) keeps what it carries; a copy made any other way, such as from
+`Object.entries`, does not.
+
 ## Create the tables
 
 Use the tool you query with:

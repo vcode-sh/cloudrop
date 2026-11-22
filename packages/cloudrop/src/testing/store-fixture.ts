@@ -42,20 +42,23 @@ export function leaseStore(store: MemoryStore = memoryStore()): Omit<MemoryStore
   return rest;
 }
 
-/** The store with each method call recorded by name, before it runs. */
+/** The store with each method call recorded by name, before it runs. A spread copy, so it keeps the store's code. */
 export function recordCalls<TStore extends object>(store: TStore): { store: TStore; calls: string[] } {
   const calls: string[] = [];
-  const recorded = Object.fromEntries(
-    Object.entries(store).map(([name, value]) => [
-      name,
-      typeof value === "function"
-        ? (...args: unknown[]) => {
-            calls.push(name);
-            return value(...args);
-          }
-        : value,
-    ]),
-  );
+  const recorded = {
+    ...store,
+    ...Object.fromEntries(
+      Object.entries(store).map(([name, value]) => [
+        name,
+        typeof value === "function"
+          ? (...args: unknown[]) => {
+              calls.push(name);
+              return value(...args);
+            }
+          : value,
+      ]),
+    ),
+  };
   return { store: recorded as TStore, calls };
 }
 

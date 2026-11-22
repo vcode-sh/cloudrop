@@ -7,7 +7,6 @@ import type { CompleteResponse } from "../protocol/types.ts";
 import { checkAfterVerify, completeContext, runOnComplete, uploadedFile } from "./complete-steps.ts";
 import { cleanUpRefused, verifyUpload } from "./complete-verify.ts";
 import type { EndpointInput } from "./config.ts";
-import { completeStored } from "./store-complete.ts";
 import { readTokenRequest } from "./token-request.ts";
 
 export async function handleComplete(input: EndpointInput): Promise<Result<CompleteResponse>> {
@@ -16,7 +15,8 @@ export async function handleComplete(input: EndpointInput): Promise<Result<Compl
   const verified = await readTokenRequest(body, config, { storedAfterExpiry: true });
   if (verified.error) return verified;
   const { token, route } = verified.data;
-  if (config.store && token.stored) return completeStored(input, config.store, token, route);
+  const { store, paths } = config;
+  if (store && paths && token.stored) return paths.complete.completeStored(input, store, token, route);
   const stored = await verifyUpload(config, token);
   if (stored.kind === "failed") return fail(stored.error);
   if (stored.kind === "refused") return cleanUpRefused(config, token, stored);

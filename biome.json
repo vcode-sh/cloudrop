@@ -68,7 +68,7 @@
       }
     },
     {
-      "includes": ["packages/cloudrop/src/store/**", "!**/*.test.ts"],
+      "includes": ["packages/cloudrop/src/store/sql/**", "!**/*.test.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -100,7 +100,7 @@
                       "cloudrop",
                       "cloudrop/*"
                     ],
-                    "message": "The SQL core must not import an adapter, an entry, or server, client, storage or test code. It may import the store types (server/store) and errors."
+                    "message": "The SQL core must not import an adapter, an entry, or server, client, storage or test code. It may import the store types (server/store), errors and defineStore (store/define-store), which carries the store code."
                   }
                 ]
               }

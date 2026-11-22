@@ -10,6 +10,7 @@ const library = {
     node: "src/node.ts",
     client: "src/client.ts",
     react: "src/react.ts",
+    store: "src/store.ts",
     "adapters/sql": "src/adapters/sql.ts",
     "adapters/drizzle": "src/adapters/drizzle.ts",
     "adapters/prisma": "src/adapters/prisma.ts",
@@ -27,6 +28,8 @@ const library = {
 const PUBLISHED = new Map([
   [join(import.meta.dirname, "src/index.ts"), "./index.js"],
   [join(import.meta.dirname, "src/client.ts"), "./client.js"],
+  // memoryStore gets the store's code through defineStore, from the library's own build (M12-S1).
+  [join(import.meta.dirname, "src/store.ts"), "./store.js"],
 ]);
 
 // cloudrop/testing and cloudrop/plugins are each built on their own, so the library's entries are built exactly as

@@ -13,9 +13,20 @@ Every notable change to the `cloudrop` package. The format follows
   active LTS from October 2026 (`M12-P2`).
 - TypeScript 7.0 or newer for cloudrop's types. Before: the README said 5.4 or newer. After: 7.0 or newer. Why: the
   owner's floor for 1.0; the workspace and every lane already compile with TypeScript 7 (`M12-P3`).
+- A database store you wrote yourself is wrapped with `defineStore` from the new entry `cloudrop/store`. Before:
+  `createCloudrop({ store: myStore, ... })`. After: `import { defineStore } from "cloudrop/store"` and
+  `createCloudrop({ store: defineStore(myStore), ... })`. Without it every request answers a retryable 500 and every
+  `api` call `INVALID_CONFIG` saying so. The adapters' stores (`sqlStore`, `drizzleStore`, `prismaStore`) and
+  `memoryStore` need nothing, and neither does a store copied from one with spread (`M12-S1`, `M12-S2`).
+
+### Added
+
+- `cloudrop/store`: `defineStore` and the store types, for a database store you write yourself (`M12-S2`).
 
 ### Changed
 
+- A server without a store no longer carries the store's code: it travels with the store object. The bundled server
+  is 28.23 kB instead of 34.71 kB (gzip), and a server with a SQL store 33.58 kB instead of 33.13 kB (`M12-S1`).
 - The size ceilings of every entry are raised for 1.0, so they guard against accidents and never block work (`M12-P1`).
   Bundle size is not covered by semver; the release notes give the sizes measured.
 

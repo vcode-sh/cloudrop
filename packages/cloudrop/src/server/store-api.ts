@@ -1,7 +1,7 @@
-// The file API's store operations (M5 spec §6): rows, usage, revocation, deletion, repair and the sweep. Without a
-// store each one answers INVALID_CONFIG.
+// The file API's store operations (M5 spec §6): rows, usage, revocation, deletion, repair and the sweep. The server
+// reaches them through the store object (M12-S1); without a store, api.ts answers each one INVALID_CONFIG.
 
-import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
+import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject, optionsOf } from "../input.ts";
 import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
 import type { ServerConfig } from "./config.ts";
@@ -128,28 +128,21 @@ async function reconcile(
 /** The store operations, each waiting for the environment like every api call (`whenReady`). */
 export function storeApi(
   config: ServerConfig,
+  store: CloudropStore<unknown>,
   whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>,
 ): StoreFileApi {
   const { logger } = config;
-  const withStore = <T>(name: keyof StoreFileApi, call: (store: CloudropStore<unknown>) => Promise<Result<T>>) =>
-    whenReady(() =>
-      config.store
-        ? call(config.store)
-        : Promise.resolve(fail(configError(`api.${name} needs a database store. Pass store to createCloudrop.`))),
-    );
   return {
     file: (id) =>
-      withStore("file", async (store) =>
-        isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId(),
-      ),
-    files: (options) => withStore("files", (store) => listFiles(config, store, options)),
-    allFiles: (options) => withStore("allFiles", (store) => listAllFiles(config, store, options)),
+      whenReady(async () => (isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId())),
+    files: (options) => whenReady(() => listFiles(config, store, options)),
+    allFiles: (options) => whenReady(() => listAllFiles(config, store, options)),
     usage: (owner) =>
-      withStore("usage", async (store) =>
+      whenReady(async () =>
         isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
       ),
     revokeUploads: (options) =>
-      withStore("revokeUploads", async (store) => {
+      whenReady(async () => {
         const owner = isPlainObject(options) ? options.owner : undefined;
         if (!isOwnerOrId(owner)) return badOwner();
         const revoked = await storeCall(logger, `revoke the uploads of ${owner}`, () =>
@@ -158,9 +151,9 @@ export function storeApi(
         return revoked.error ? revoked : ok({ revoked: revoked.data });
       }),
     deleteFile: (id, options) =>
-      withStore("deleteFile", async (store) => (isOwnerOrId(id) ? deleteFile(config, store, id, options) : badId())),
-    eraseOwner: (owner, options) => withStore("eraseOwner", (store) => eraseOwner(config, store, owner, options)),
-    reconcile: (options) => withStore("reconcile", (store) => reconcile(config, store, options)),
-    sweep: (options) => withStore("sweep", (store) => sweep(config, store, options)),
+      whenReady(async () => (isOwnerOrId(id) ? deleteFile(config, store, id, options) : badId())),
+    eraseOwner: (owner, options) => whenReady(() => eraseOwner(config, store, owner, options)),
+    reconcile: (options) => whenReady(() => reconcile(config, store, options)),
+    sweep: (options) => whenReady(() => sweep(config, store, options)),
   };
 }

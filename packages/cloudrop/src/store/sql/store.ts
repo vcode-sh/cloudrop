@@ -3,6 +3,7 @@
 
 import { configError } from "../../errors.ts";
 import type { CloudropStore } from "../../server/store.ts";
+import { defineStore } from "../define-store.ts";
 import { isLockTimeout, onceMoreAfterConflict, type SqlExecutor } from "./executor.ts";
 import { postgresWrites } from "./postgres.ts";
 import { type SqlContext, type StoreMethods, singleStatementMethods } from "./reads.ts";
@@ -81,7 +82,8 @@ export function sqlStore<TTx = never>(executor: SqlExecutor<TTx>, options: SqlSt
     });
     return schema;
   };
-  const store: CloudropStore<TTx> = afterCheck(methodsOver({ executor, dialect, tables }), ready);
+  // The store's code travels on the store object, so a copy with spread, the transaction's below included, keeps it.
+  const store: CloudropStore<TTx> = defineStore(afterCheck(methodsOver({ executor, dialect, tables }), ready));
   if (!options.transaction) return store;
   if (dialect !== "postgres") throw configError(NEEDS_POSTGRES);
   if (!executor.transaction) throw configError(NEEDS_TRANSACTION);

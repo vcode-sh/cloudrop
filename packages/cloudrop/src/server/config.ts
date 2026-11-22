@@ -2,7 +2,7 @@
 // name and the fix, so a misconfigured server fails at startup instead of on a user's first upload. Settings from the
 // environment are the exception: environment.ts reads them on the first request.
 
-import { CloudropError, configError, type Result } from "../errors.ts";
+import { CloudropError, configError, fail, type Result } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { environmentReader } from "./environment.ts";
 import { readOrigins } from "./origins.ts";
@@ -10,7 +10,8 @@ import type { CloudropPlugin, Logger } from "./plugins.ts";
 import type { Route, RouteDefinition } from "./route.ts";
 import { isFunction, readRoute } from "./route-config.ts";
 import { parseSize, type Size } from "./size.ts";
-import { readStoreConfig, type StoreConfig, type StoreOptions, unownedRoutes } from "./store-config.ts";
+import { readStoreConfig, readStorePaths, type StoreConfig, type StoreOptions, unownedRoutes } from "./store-config.ts";
+import type { StorePaths } from "./store-paths.ts";
 import type { TokenKeys } from "./token.ts";
 
 export interface CloudropOptions<TRoutes extends Record<string, Route>> extends StoreOptions {
@@ -51,6 +52,11 @@ export interface RouteConfig {
 }
 
 export interface ServerConfig extends StoreConfig {
+  /**
+   * The store's code, carried by the store object (M12-S1): set with a store, so the endpoints call it, never import
+   * it. A store without it makes `ready` fail.
+   */
+  paths: StorePaths | undefined;
   storage: StorageDriver;
   routes: ReadonlyMap<string, RouteConfig>;
   /**
@@ -185,11 +191,25 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
   const multipartThreshold = readThreshold(options.multipartThreshold);
   const plugins = readPlugins(options.plugins);
   const logger = readLogger(options.logger);
-  const ready = environmentReader(options.secret, storage);
+  const environment = environmentReader(options.secret, storage);
   const trustedOrigins = readTrustedOrigins(options.trustedOrigins);
   const routes = new Map(entries.map(([name, route]) => [name, readRoute(name, route, storage)]));
   const store = readStoreConfig(options, [...routes.values()]);
-  const config = { storage, routes, ready, basePath, trustedOrigins, multipartThreshold, plugins, logger, ...store };
+  const paths = readStorePaths(store.store);
+  // A store without its code fails like a missing setting: every request and api call answers it (M12-S2).
+  const ready = paths.error ? async () => fail(paths.error) : environment;
+  const config = {
+    storage,
+    routes,
+    ready,
+    basePath,
+    trustedOrigins,
+    multipartThreshold,
+    plugins,
+    logger,
+    ...store,
+    paths: paths.data ?? undefined,
+  };
   announce(config);
   return config;
 }

@@ -3,6 +3,9 @@
 // nothing interleaves inside it, and keeps an undo list so a failure, injected or real, leaves nothing written.
 
 import type { CloudropStore } from "../server/store.ts";
+// The published entry, not src/store/define-store.ts: cloudrop/testing imports ./store.js, so the store's code, and
+// the CloudropError it raises, are the library's own (tsdown.config.ts).
+import { defineStore } from "../store.ts";
 import { type MemoryTables, storeMethods, type Write } from "./memory-store-methods.ts";
 import type { RawFileRow, RawTables, RawUsageRow } from "./store-rows.ts";
 
@@ -155,7 +158,7 @@ export function memoryStore(): MemoryStore {
   const sorted = <V>(map: Map<string, V>): V[] =>
     [...map.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, row]) => structuredClone(row));
 
-  return {
+  return defineStore({
     ...store,
     transaction,
     raw: {
@@ -171,5 +174,5 @@ export function memoryStore(): MemoryStore {
       usageFault = true;
     },
     appRows: () => app.map((row) => row.entry),
-  };
+  });
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
 # README, LICENSE and CHANGELOG, the repository that trusted publishing checks and the Node 26 floor in engines.node
-# (M12-P2), the built bin must run, publint and attw read the tarball, and size-limit reads the built entries. The
+# (M12-P2), index.js must load none of the store's code (M12-S1), the built bin must run, publint and attw read the
+# tarball, and size-limit reads the built entries. The
 # tarball goes to a scratch directory that the trap removes on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -59,6 +60,42 @@ for entry in testing plugins; do
   fi
   if ! grep -q 'from "./index.js"' "dist/$entry.js"; then
     echo "dist/$entry.js does not import ./index.js. Build it apart, importing src/index.ts (tsdown.config.ts)." >&2
+    exit 1
+  fi
+done
+# A server without a store must not load the store's code (M12-S1). One message per module of StorePaths stands for
+# it: each must be in the files dist/store.js loads, so a reworded message cannot pass unseen, and none in the files
+# dist/index.js loads, each entry followed through its static imports as the size budgets follow them.
+STORE_MARKERS=(
+  "could not check your storage limit"        # src/server/store-upload.ts
+  "returned more than 16 KiB of JSON"         # src/server/store-complete.ts
+  "could not reach its upload records"        # src/server/store-calls.ts
+  "eraseOwner takes options such as"          # src/server/erase.ts, behind src/server/store-api.ts
+)
+loaded_files() {
+  local -A seen=(["$1"]=1)
+  local queue=("$1") file chunk
+  while [ ${#queue[@]} -gt 0 ]; do
+    file="${queue[0]}"
+    queue=("${queue[@]:1}")
+    echo "dist/$file"
+    for chunk in $(grep -oE '(import|from) *"\./[^"]+\.js"' "dist/$file" | grep -oE '[^"/]+\.js'); do
+      if [ -z "${seen[$chunk]:-}" ]; then
+        seen[$chunk]=1
+        queue+=("$chunk")
+      fi
+    done
+  done
+}
+mapfile -t SERVER_FILES < <(loaded_files index.js)
+mapfile -t STORE_FILES < <(loaded_files store.js)
+for marker in "${STORE_MARKERS[@]}"; do
+  if ! grep -qF "$marker" "${STORE_FILES[@]}"; then
+    echo "No file dist/store.js loads says \"$marker\". Update STORE_MARKERS in scripts/check-package.sh to a message of that module." >&2
+    exit 1
+  fi
+  if found="$(grep -lF "$marker" "${SERVER_FILES[@]}")"; then
+    echo "$found, which dist/index.js loads, carries the store's code (\"$marker\"). An endpoint must reach it through config.paths (src/store/paths.ts), never import it." >&2
     exit 1
   fi
 done

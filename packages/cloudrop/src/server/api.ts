@@ -1,6 +1,6 @@
 // cloudrop.api (spec §9): server-side file operations on the configured storage, all returning { data, error }.
 
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
 import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
@@ -10,7 +10,7 @@ import type { ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";
 import { readOrigins } from "./origins.ts";
 import { nowSeconds } from "./presign.ts";
-import { type StoreFileApi, storeApi } from "./store-api.ts";
+import type { StoreFileApi } from "./store-api.ts";
 
 /**
  * Every key and prefix is read in NFC, the Unicode form `/upload` stores keys in. An object another tool wrote under a
@@ -158,6 +158,25 @@ async function deletePrefix(
  */
 const nfc = (key: string): string => (typeof key === "string" ? key.normalize("NFC") : key);
 
+/** The store's api calls on a server without a store: each answers INVALID_CONFIG once the environment is read. */
+function withoutStore(whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>): StoreFileApi {
+  const refuse =
+    (name: keyof StoreFileApi) =>
+    <T>(): Promise<Result<T>> =>
+      whenReady<T>(async () => fail(configError(`api.${name} needs a database store. Pass store to createCloudrop.`)));
+  return {
+    file: refuse("file"),
+    files: refuse("files"),
+    allFiles: refuse("allFiles"),
+    usage: refuse("usage"),
+    revokeUploads: refuse("revokeUploads"),
+    deleteFile: refuse("deleteFile"),
+    eraseOwner: refuse("eraseOwner"),
+    reconcile: refuse("reconcile"),
+    sweep: refuse("sweep"),
+  };
+}
+
 export function createFileApi(config: ServerConfig): FileApi {
   const { storage } = config;
   // Every call waits for the environment's settings, so a server missing one answers INVALID_CONFIG everywhere.
@@ -167,7 +186,9 @@ export function createFileApi(config: ServerConfig): FileApi {
   };
   // Arrow wrappers, not storage.head and friends: an unbound driver method would lose a `this` it relies on.
   return {
-    ...storeApi(config, whenReady),
+    ...(config.store && config.paths
+      ? config.paths.api.storeApi(config, config.store, whenReady)
+      : withoutStore(whenReady)),
     getUrl: (key, options) => whenReady(() => getUrl(storage, nfc(key), options)),
     head: (key) => whenReady(() => storage.head(nfc(key))),
     put: (key, body, options) =>

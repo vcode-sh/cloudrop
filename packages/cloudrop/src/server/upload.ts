@@ -5,13 +5,12 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
-import type { EndpointConfig, EndpointInput } from "./config.ts";
+import type { EndpointConfig, EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
-import { type PluginFile, runBeforeUpload } from "./plugins.ts";
+import { abortContexts, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
 import { nowSeconds, objectOptions, presignParts, presignSingle, TOKEN_LIFETIME_SECONDS } from "./presign.ts";
 import { isRefusal, refusalError } from "./route.ts";
 import { MAX_METADATA_JSON_BYTES, validateMetadata } from "./schema.ts";
-import { attachUpload, readOwner, releaseUnstarted, reserveFiles } from "./store-upload.ts";
 import { type MultipartToken, signToken, type UploadTokenPayload } from "./token.ts";
 import { accountChanged, prepareFile, readRequest } from "./upload-request.ts";
 
@@ -39,7 +38,8 @@ async function startFile(
   const first = Array.from({ length: Math.min(PARTS_PER_SIGN, plan.partCount) }, (_, index) => index + 1);
   const abort = () => storage.abortMultipart(token.key, token.uploadId);
   // A row that cannot record the upload could never abort it later: abort it now and start nothing.
-  const unattached = config.store && token.stored ? await attachUpload(config, config.store, token) : null;
+  const { store, paths } = config;
+  const unattached = store && paths && token.stored ? await paths.upload.attachUpload(config, store, token) : null;
   if (unattached) {
     await abort();
     return { kind: "rejected", error: errorBody(unattached) };
@@ -63,6 +63,27 @@ async function startFile(
     partCount: plan.partCount,
     parts: parts.data,
   };
+}
+
+/**
+ * Releases what was reserved for accepted files that were not started. Their plugins hear "rejected" for a file over
+ * its quota and "failed" otherwise; a reserved row whose upload could not start ends as failed, best effort.
+ */
+async function releaseUnstarted(
+  config: ServerConfig,
+  shared: { route: string; metadata: unknown; auth: unknown },
+  unstarted: readonly PluginFile[],
+  refusals: ReadonlyMap<string, CloudropError>,
+): Promise<void> {
+  const { plugins, logger } = config;
+  const overQuota = unstarted.filter((file) => refusals.get(file.id)?.code === "QUOTA_EXCEEDED");
+  const failed = unstarted.filter((file) => !overQuota.includes(file));
+  await config.paths?.upload.endUnstarted(
+    config,
+    failed.filter(({ id }) => !refusals.has(id)),
+  );
+  await runOnAbort(plugins, abortContexts(shared, overQuota, "rejected"), logger);
+  await runOnAbort(plugins, abortContexts(shared, failed, "failed"), logger);
 }
 
 /** A custom StorageDriver may throw: that file is rejected and released like a storage failure, and the others go on. */
@@ -107,9 +128,10 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
   const signedMetadata: unknown = metadataJson === undefined ? undefined : JSON.parse(metadataJson);
   const prepared = files.map((file) => prepareFile(route, file, { request, metadata, auth }));
   const accepted = prepared.filter((file): file is PluginFile => !(file instanceof CloudropError));
-  const { plugins, store } = config;
+  const { plugins, store, paths } = config;
   // Like prefix, a bad owner is the route's bug, found before any plugin reserves anything.
-  const rowOwner = store && accepted.length > 0 ? await readOwner(route, { ...auth, request, metadata }) : null;
+  const rowOwner =
+    paths && accepted.length > 0 ? await paths.upload.readOwner(route, { ...auth, request, metadata }) : null;
   // Only an owner a store records can be compared: without one the header is ignored.
   const changed = rowOwner === null ? null : accountChanged(request, rowOwner);
   if (changed) return fail(changed);
@@ -122,14 +144,15 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     if (refused) return fail(refused);
   }
   const exp = nowSeconds() + TOKEN_LIFETIME_SECONDS;
-  const refusals = await reserveFiles(config, {
-    route,
-    owner: rowOwner,
-    files: accepted,
-    metadataJson,
-    exp,
-    requestKey: parsed.data.idempotencyKey,
-  });
+  const refusals =
+    (await paths?.upload.reserveFiles(config, {
+      route,
+      owner: rowOwner,
+      files: accepted,
+      metadataJson,
+      exp,
+      requestKey: parsed.data.idempotencyKey,
+    })) ?? new Map<string, CloudropError>();
   const tickets = await Promise.all(
     prepared.map((file): FileTicket | Promise<FileTicket> => {
       if (file instanceof CloudropError) return { kind: "rejected", error: errorBody(file) };

@@ -8,7 +8,6 @@ import { PARTS_PER_SIGN, type SignResponse } from "../protocol/types.ts";
 import type { EndpointInput } from "./config.ts";
 import { storageFailure } from "./http.ts";
 import { presignParts, presignSingle } from "./presign.ts";
-import { cancelled, fileCalls } from "./store-calls.ts";
 import { isMultipart } from "./token.ts";
 import { readTokenRequest } from "./token-request.ts";
 
@@ -27,10 +26,11 @@ export async function handleSign({ body, config }: EndpointInput): Promise<Resul
   if (request.error) return request;
   const { token } = request.data;
   // After the token verifies, never before: only a pending row may get new URLs (M5 spec §5.4).
-  if (config.store && token.stored) {
-    const row = await fileCalls(config.store, config.logger, token).get();
+  const { store, paths } = config;
+  if (store && paths && token.stored) {
+    const row = await paths.calls.fileCalls(store, config.logger, token).get();
     if (row.error) return row;
-    if (row.data?.status !== "pending") return fail(cancelled());
+    if (row.data?.status !== "pending") return fail(paths.calls.cancelled());
   }
   // readTokenRequest has checked that the body is an object.
   const { parts } = body as { parts?: unknown };

@@ -205,6 +205,7 @@ failure never throws: `error.code` is for your code to branch on (`UNAUTHORIZED`
 | `cloudrop/adapters/sql` | `sqlStore` with node-postgres, postgres.js, `node:sqlite` and Cloudflare D1 executors |
 | `cloudrop/adapters/drizzle` | `drizzleStore` and the table definitions for Drizzle on Postgres and SQLite (drizzle-orm 0.45 or later) |
 | `cloudrop/adapters/prisma` | `prismaStore` for Prisma 7 |
+| `cloudrop/store` | `defineStore` and the store types, for a database store you write yourself |
 | `cloudrop/testing` | `testBucket`, `testClient` and `memoryStore`: your routes and a whole upload in your tests, with no bucket or browser |
 | `cloudrop/plugins` | `contentChecks`: the server reads each file's first bytes and refuses one whose content is not what it claims |
 
