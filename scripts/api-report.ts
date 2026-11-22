@@ -4,7 +4,7 @@
 // signature or type changes without a reviewed diff. Run after `bun run build`. api-extractor reads one entry per run,
 // so this loops over the package's exports, writes each report to a scratch folder (api-extractor.json) and compares
 // it with etc/ itself. api-extractor bundles its own TypeScript 6 compiler, which reads the .d.ts only (M12-P3).
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,12 @@ for (const [entry, { types }] of Object.entries(manifest.exports)) {
     changed.push(`etc/${reportName(entry)}.api.md`);
     if (!check) writeFileSync(file, report);
   }
+}
+// A report whose entry left the exports map would otherwise stay in etc/ and look reviewed.
+const expected = new Set(Object.keys(manifest.exports).map((entry) => `${reportName(entry)}.api.md`));
+for (const name of readdirSync(REPORTS).filter((name) => name.endsWith(".api.md") && !expected.has(name))) {
+  changed.push(`etc/${name} (no such entry)`);
+  if (!check) rmSync(join(REPORTS, name));
 }
 if (failed.length > 0) {
   console.error(`api-extractor could not read ${failed.join(", ")}. The errors above say why.`);

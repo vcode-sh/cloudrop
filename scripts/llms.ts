@@ -35,7 +35,8 @@ const RULES = `## Rules for coding agents
   \`ORIGIN_NOT_ALLOWED\`.
 - \`cloudrop.api.*\`, \`client.upload()\` and the other calls that do work answer \`{ data, error }\` instead of
   throwing: check \`error\`, branch on \`error.code\` (never on the message), and keep a \`default\` branch, since a
-  minor release may add codes. Only a wrong setting throws, from \`createCloudrop\` or \`createCloudropClient\`.
+  minor release may add codes. Only a wrong setting throws, when the server, its routes, its storage or the client
+  are built (\`createCloudrop\`, \`route\`, \`r2\`, \`s3\`, \`createCloudropClient\`).
 - With a database store, delete an uploaded file with \`api.deleteFile(id)\`. \`api.deleteObject(key)\` removes the
   object only and leaves the row and the quota as they were.
 `;
@@ -48,7 +49,8 @@ function header({ version, description }: LlmsInput): string {
 This is cloudrop ${version}. The browser uploads straight to the bucket with URLs the server signs, so the bytes never
 pass through the server; \`/complete\` checks the stored object before anything is recorded. The package is ESM only
 and has no runtime dependencies. It needs Node.js 26 or newer, Bun, Deno or Cloudflare Workers on the server, and
-TypeScript 7.0 or newer for its types.
+TypeScript 7.0 or newer for its types. On Deno, run with \`--allow-env\` for \`NODE_ENV\` and \`CLOUDROP_*\`:
+cloudrop reads them through \`process.env\`.
 
 ${RULES}`;
 }

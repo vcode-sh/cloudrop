@@ -4,7 +4,9 @@
 // the floor of the shipped types (M12-P3), has no such API. The package installs TypeScript 6 under the alias
 // `typescript-6`, and the hook below hands it to TypeDoc's `import "typescript"`; nothing else in this process loads
 // TypeScript, and the workspace's TypeScript stays 7.
+import { readFileSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // The part of TypeDoc's API used here, described by hand: the scripts compile without TypeDoc's types.
@@ -14,7 +16,7 @@ interface Reflection {
 }
 interface TypeDoc {
   Application: {
-    bootstrapWithPlugins(options: { options: string }): Promise<{
+    bootstrapWithPlugins(options: { options: string; entryPoints: string[] }): Promise<{
       logger: { hasErrors(): boolean; hasWarnings(): boolean };
       convert(): Promise<Reflection | undefined>;
       validate(project: Reflection): void;
@@ -23,7 +25,11 @@ interface TypeDoc {
   };
 }
 
-const fromPackage = createRequire(fileURLToPath(new URL("../packages/cloudrop/package.json", import.meta.url)));
+const PACKAGE_JSON = fileURLToPath(new URL("../packages/cloudrop/package.json", import.meta.url));
+const fromPackage = createRequire(PACKAGE_JSON);
+// One module per entry of the package's exports map, so a new entry is in the reference without a second list.
+const { exports } = JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as { exports: Record<string, { types: string }> };
+const entryPoints = Object.values(exports).map(({ types }) => join(PACKAGE_JSON, "..", types));
 // A path, not a file URL: TypeDoc loads TypeScript through require() as well as import, and require() takes no URL.
 const TYPESCRIPT_6 = fromPackage.resolve("typescript-6");
 registerHooks({
@@ -34,6 +40,7 @@ registerHooks({
 const { Application } = (await import(pathToFileURL(fromPackage.resolve("typedoc")).href)) as TypeDoc;
 const app = await Application.bootstrapWithPlugins({
   options: fileURLToPath(new URL("../typedoc.json", import.meta.url)),
+  entryPoints,
 });
 const project = await app.convert();
 if (project === undefined || app.logger.hasErrors()) process.exit(1);

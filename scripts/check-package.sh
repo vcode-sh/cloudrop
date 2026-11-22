@@ -46,7 +46,7 @@ for guide in $(grep -oE '^package/docs/[^/]+\.md$' <<<"$CONTENTS" | grep -v '/RE
 done
 # The doc comments an app's editor shows come from the .d.ts, and an app cannot look up a decision id or the design
 # spec's sections (M12-P10). Write the reason in plain words in the source's doc comment; a // comment keeps its id.
-if leaked="$(grep -rnE 'M[0-9]+-[A-Z][0-9]*|spec §' dist --include='*.d.ts')"; then
+if leaked="$(grep -rnE 'M[0-9]+-[A-Z][0-9]*|§' dist --include='*.d.ts')"; then
   echo "The shipped .d.ts cite internal decisions or the spec, which an app cannot look up:" >&2
   echo "$leaked" >&2
   echo "Rewrite those doc comments in src/ in plain words." >&2

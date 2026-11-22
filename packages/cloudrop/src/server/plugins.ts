@@ -9,7 +9,9 @@ import type { Awaitable, RouteDefinition } from "./route.ts";
 /**
  * A file the server has accepted and given a key, before any byte is uploaded.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface PluginFile {
   id: string;
@@ -22,7 +24,9 @@ export interface PluginFile {
 /**
  * What `beforeUpload` receives.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface BeforeUploadContext<TAuth = unknown> {
   /** The `/upload` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
@@ -39,7 +43,9 @@ export interface BeforeUploadContext<TAuth = unknown> {
 /**
  * What `afterVerify` receives.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface AfterVerifyContext<TAuth = unknown> {
   /** The `/complete` request, for its headers and `url`. Its body is already read: `request.json()` throws. */
@@ -57,7 +63,9 @@ export interface AfterVerifyContext<TAuth = unknown> {
 /**
  * What `onAbort` receives.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface AbortContext<TAuth = unknown> {
   route: string;
@@ -72,7 +80,9 @@ export interface AbortContext<TAuth = unknown> {
 /**
  * The server hooks a plugin can use.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface ServerHooks<TAuth = unknown> {
   /** Runs in `/upload` after authorization and policy, before anything is signed. Return an error to refuse every file. */
@@ -91,7 +101,9 @@ export interface ServerHooks<TAuth = unknown> {
   /**
    * Runs once per route in `createCloudrop`; throw a CloudropError with INVALID_CONFIG to refuse the route.
    *
-   * @experimental Outside semver, with the rest of the plugin API.
+   * Experimental, outside semver, with the rest of the plugin API.
+   *
+   * @beta
    */
   extendRoute?(route: { name: string; definition: RouteDefinition }): void;
 }
@@ -101,7 +113,9 @@ export interface ServerHooks<TAuth = unknown> {
  * refuses it beside a route whose `authorize` can answer without that shape. `CloudropPlugin` alone reads
  * `auth` as unknown and fits every server.
  *
- * @experimental Outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ * Experimental, outside semver: a minor release may change the plugin API (docs/stability.md in this package).
+ *
+ * @beta
  */
 export interface CloudropPlugin<TAuth = unknown> {
   id: string;

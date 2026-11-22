@@ -4,7 +4,7 @@
 
 ```ts
 
-// @public
+// @beta
 export interface AbortContext<TAuth = unknown> {
     // Warning: (ae-forgotten-export) The symbol "Jsonified" needs to be exported by the entry point index.d.ts
     auth: Jsonified<TAuth>;
@@ -40,7 +40,7 @@ export type AfterCompleteContext<TAuth, TMetadata, TResult> = CompleteContext<TA
     data: CompleteData<Awaited<TResult>>;
 };
 
-// @public
+// @beta
 export interface AfterVerifyContext<TAuth = unknown> {
     accept: readonly string[];
     auth: Jsonified<TAuth>;
@@ -83,7 +83,7 @@ type AuthResult = object & { [K in ReservedName]?: never; };
 // @public (undocumented)
 type Awaitable<T> = T | Promise<T>;
 
-// @public
+// @beta
 export interface BeforeUploadContext<TAuth = unknown> {
     accept: readonly string[];
     auth: Jsonified<TAuth>;
@@ -208,6 +208,7 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> extends 
     logger?: Logger;
     multipartThreshold?: Size;
     // Warning: (ae-forgotten-export) The symbol "AuthOf" needs to be exported by the entry point index.d.ts
+    // Warning: (ae-incompatible-release-tags) The symbol "plugins" is marked as @public, but its signature references "CloudropPlugin" which is marked as @beta
     plugins?: readonly NoInfer<CloudropPlugin<AuthOf<TRoutes>>>[];
     // (undocumented)
     routes: TRoutes;
@@ -216,7 +217,7 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> extends 
     trustedOrigins?: readonly string[];
 }
 
-// @public
+// @beta
 export interface CloudropPlugin<TAuth = unknown> {
     readonly "~auth"?: (auth: Jsonified<TAuth>) => void;
     // (undocumented)
@@ -695,7 +696,7 @@ export interface PendingRecord<R extends string = string> extends RecordBase<R> 
     status: "pending";
 }
 
-// @public
+// @beta
 export interface PluginFile {
     // (undocumented)
     id: string;
@@ -945,7 +946,7 @@ type SchemaInput<TSchema> = TSchema extends StandardSchema<infer Input, unknown>
 // @public (undocumented)
 type SchemaOutput<TSchema> = TSchema extends StandardSchema<unknown, infer Output> ? Output : undefined;
 
-// @public
+// @beta
 export interface ServerHooks<TAuth = unknown> {
     afterVerify?(context: AfterVerifyContext<TAuth>): Awaitable<CloudropError | null | undefined>;
     beforeUpload?(context: BeforeUploadContext<TAuth>): Awaitable<CloudropError | null | undefined>;

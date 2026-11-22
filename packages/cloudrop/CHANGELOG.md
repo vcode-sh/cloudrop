@@ -212,7 +212,7 @@ Every notable change to the `cloudrop` package. The format follows
   `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
   (`M12-T5`).
 - The plugin API is experimental, outside semver: `CloudropPlugin`, `ServerHooks`, their hooks' contexts and
-  `extendRoute` are marked `@experimental`, and a minor release may change them. Using `contentChecks()` is covered as
+  `extendRoute` are marked `@beta` and experimental, and a minor release may change them. Using `contentChecks()` is covered as
   before; a plugin you wrote yourself may need a change on a minor upgrade, which the changelog will say (`M12-A12`,
   `M12-P8`).
 - The doc comments in the published `.d.ts` explain themselves in plain words instead of citing internal decision ids

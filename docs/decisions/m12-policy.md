@@ -103,6 +103,12 @@ Entries start from 1.
   Deno grants no env access by default, and cloudrop reads `process.env.NODE_ENV` when `r2()` is built (and
   `CLOUDROP_*` when a setting is left out): without `--allow-env` the first run failed with Deno's `NotCapable`,
   "Requires env access to "NODE_ENV"". An app on Deno grants the same access.
+- **The fixture's other types float:** only `typescript`, `@types/react` and `drizzle-orm` are pinned; what they
+  depend on (`csstype` for `@types/react`, for one) resolves to the newest matching version at each run. They are types
+  only, so a new release can fail the job but never reaches an app; the ruling keeps them floating (coordinator,
+  fix round 1).
+- **Deno and IndexedDB:** the smoke test also asserts `typeof indexedDB === "undefined"`, which the resume guide
+  states for Deno; it passed on Deno 2.9.8.
 - **Local runs, 2026-11-22:** `CLOUDROP_TS_FLOOR_DIR=~/projects/.worktrees/cloudrop/ts-floor
   scripts/check-ts-floor.sh` passed, "The packed types of every entry type-check with TypeScript 7.0.2."; with a line
   `export declare const probeBroken: NotAType;` appended to `dist/index.d.ts` it failed with TS2304 in
@@ -124,7 +130,9 @@ Entries start from 1.
   in `package.json`'s `exports` order, and writes `packages/cloudrop/etc/<entry>.api.md` (`cloudrop.api.md`,
   `cloudrop-client.api.md`, ..., `cloudrop-adapters-prisma.api.md`), reviewed and under git. `bun run api:report`
   rewrites them; `bun run api:check` (CI's `api-report` job) writes each report to a scratch folder under
-  `node_modules/.api-extractor/` and fails when one differs from `etc/`, naming the files and what to do. The reports
+  `node_modules/.api-extractor/` and fails when one differs from `etc/`, or when `etc/` holds a report for an entry the
+  exports map no longer has (`api:report` deletes it), naming the files and what to do. `bun run verify` runs
+  `api:check` after the build, so a local gate catches drift before CI. The reports
   set `includeForgottenExports`: a type a public signature uses but no entry exports (`DeleteBase`, `ContextOption`,
   `RecordBase`, `StoreErasure` and the rest) is written out in full, unexported, so a change to its shape fails the
   guard too. A type another entry exports appears in each entry's report that uses it. The warnings api-extractor
@@ -161,7 +169,10 @@ Entries start from 1.
   and `ContextOf` from `cloudrop`; `Account`, `ServerHeaders`, `ClientFetch` and `TicketFields` from `cloudrop/client`;
   `UseUploadArguments` and `ResumableOf` from `cloudrop/react`. Their shapes are frozen through the report (`M12-P6`).
   The plugin API's types (`CloudropPlugin`, `ServerHooks`, `BeforeUploadContext`, `AfterVerifyContext`,
-  `AbortContext`, `PluginFile` and `extendRoute`) are marked `@experimental` in their doc comments, as `M12-A12` rules.
+  `AbortContext`, `PluginFile` and `extendRoute`) are marked experimental in their doc comments, as `M12-A12` rules, with
+  the tag `@beta`, the release tag api-extractor knows, so the reports show the tier (TypeDoc refuses `@beta` beside
+  `@experimental` as two release stages, so the word stays in the prose); the `plugins` option of
+  `CloudropOptions` carries api-extractor's warning that a public signature uses a beta type, which is the case.
 - **Why:** every export is a semver promise (`M2-X38`), and adding one later is not breaking. None of the five is a
   type an app needs to write:
   - an app annotates `onDelete`'s parameter with `DeleteContext<FileDeleter, undefined>`, not with `DeleteBase`;
@@ -181,7 +192,7 @@ Entries start from 1.
 - **Status:** in force. Settles the controller's deferred ruling on `AuthOf`, `DeletedOf`, `ErasedOf`, `DeleteBase` and
   `ContextOption`.
 - **Visible in:** `packages/cloudrop/etc/*.api.md` (each as an unexported declaration with its warning),
-  `src/server/plugins.ts` (`@experimental`).
+  `src/server/plugins.ts` (`@beta`).
 
 ### M12-P8: the stability policy as written for 1.0
 
@@ -233,13 +244,13 @@ Entries start from 1.
     in full. Their links are relative to the package root. `check-package.sh` fails when the tarball lacks either file,
     when `llms.txt` does not link a shipped guide, or when `llms-full.txt` does not carry it.
   - `bun run docs:reference` (`scripts/api-reference.ts`, run by Node) builds the TypeDoc 0.28 reference from the built
-    `.d.ts` into `docs/reference/` (git-ignored), names each module as an app imports it (`cloudrop/adapters/sql`), and
-    fails on any TypeDoc warning. TypeDoc gets TypeScript 6.0.3 through the dev dependency alias
+    `.d.ts` of every entry in the exports map into `docs/reference/` (git-ignored), names each module as an app imports
+    it (`cloudrop/adapters/sql`), and fails on any TypeDoc warning. TypeDoc gets TypeScript 6.0.3 through the dev dependency alias
     `typescript-6@npm:typescript@6.0.3` and a `module.registerHooks` resolve hook, in that process only.
   - The doc comments the build ships carry no decision id or spec section: 36 lines in the built `.d.ts` cited one
     (34 found by `grep -nE "M[0-9]+-[A-Z][0-9]+|spec §"` over `dist/`, where the plan counted 16; two more cited a series,
     `M10-A` and `M11-L`), and each was rewritten in plain words in its source's doc comment. `check-package.sh` fails
-    when one comes back. `//` comments keep their ids.
+    when one comes back, or when any `§` does. `//` comments keep their ids.
 - **Why:** spec 1.0 §8. An agent with the package installed reads `node_modules/cloudrop/llms.txt` with no network, so
   the links point into the package. TypeDoc peers on TypeScript 6.0 at most, and TypeScript 7's package has no
   JavaScript API (its main export is `lib/version.cjs`): without the hook TypeDoc stops with "Cannot read properties of

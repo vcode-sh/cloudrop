@@ -29,7 +29,9 @@ A change to any of these is a major release, unless the next section allows it i
   `error.code`, never on the message.
 - **Bundle size.** The release notes give the sizes measured.
 - **Anything undocumented:** a field, export path or behaviour no guide or doc comment describes, such as the files
-  under `dist/` or a type a public signature uses but no entry exports.
+  under `dist/`.
+- **The name of a type no entry exports,** such as the base every `FileRecord` status builds on. You cannot import it,
+  so it may be renamed; its shape is covered through the exported signatures that use it.
 - **The plugin API** (below), which is experimental.
 
 ## What a minor release may add
@@ -59,7 +61,7 @@ What semver promises depends on who writes the code on each side of a type.
   optional member to one of them, never a required one. A required member waits for a major release. A store you wrote
   yourself and wrapped with `defineStore` keeps compiling and working across minor releases.
 - **The plugin API:** `CloudropPlugin`, `ServerHooks` with its contexts (`BeforeUploadContext`, `AfterVerifyContext`,
-  `AbortContext`, `PluginFile`) and `extendRoute` are marked `@experimental` and are **outside semver**: a minor
+  `AbortContext`, `PluginFile`) and `extendRoute` are marked `@beta` and experimental in their doc comments, and are **outside semver**: a minor
   release may change them. The API has one user, and the plugins it was designed for were cut before 1.0. Using a
   plugin cloudrop ships, such as `contentChecks()` from `cloudrop/plugins`, is covered like any other call; writing
   your own plugin is what may need a change on upgrade. The changelog says when it does.
@@ -83,8 +85,11 @@ so uploads in flight during the upgrade finish.
 Before anything covered here is removed in a major release, it is deprecated in a minor one:
 
 - the doc comment gets `@deprecated` with what to use instead, so your editor strikes it through;
-- the server logs one warning through your `logger` the first time the deprecated thing is used;
+- on the server, one warning goes to your `logger` the first time the deprecated thing is used;
 - the changelog says what to change, with the exact before and after.
+
+In the browser (`cloudrop/client`, `cloudrop/react`) cloudrop has no logger, so a deprecated client API logs nothing:
+`@deprecated` and the changelog are the notice.
 
 A deprecated API stays for at least one minor release and at least six months before the major release that removes
 it.
@@ -95,13 +100,15 @@ it.
 | --- | --- | --- |
 | Node.js | 26 or newer | every job runs on Node 26 |
 | Bun | 1.4 or newer | the built command's checks, and the Hono example's API in the browser lane |
-| Deno | 2 | a smoke job: the packed package answers an `/upload` on a fake bucket |
+| Deno | 2, with `--allow-env` for `NODE_ENV` and `CLOUDROP_*` | a smoke job: the packed package uploads a file to a fake bucket |
 | Cloudflare Workers | current | the store on Wrangler's local D1 and the storage driver on its local R2 |
 | Browsers | Chrome 103, Firefox 100, Safari 16 or newer | headless Chromium uploads the examples; client code uses no web API newer than these |
 | React | 18 and 19 | the hooks' tests and the examples, on React 19 |
-| TypeScript | 7.0 or newer, for the shipped types | a job type-checks the packed `.d.ts` with TypeScript 7.0.0 |
+| TypeScript | 7.0 or newer, for the shipped types | a job type-checks the packed `.d.ts` with TypeScript 7.0.2, the oldest 7.0 release npm published |
 
-Raising a floor in this table is a major release; supporting an older version is a minor one.
+Raising a floor in this table is a major release; supporting an older version is a minor one. On Deno, cloudrop reads
+`NODE_ENV` and its own `CLOUDROP_*` settings through `process.env`, so without that access `r2()` throws Deno's
+`NotCapable`.
 
 ## How the API is kept frozen
 

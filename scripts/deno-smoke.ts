@@ -29,6 +29,12 @@ function expect(condition: boolean, what: string): void {
   if (!condition) throw new Error(`Deno smoke test: ${what}`);
 }
 
+// The resume guide says Deno has no IndexedDB, so a client there keeps nothing for resuming: measured here.
+expect(
+  typeof indexedDB === "undefined",
+  "this Deno has an indexedDB global, so the resume guide's claim that Deno has none is wrong: change the guide",
+);
+
 const bytes = new TextEncoder().encode("hello");
 const upload = await post("upload", {
   route: "notes",
@@ -49,4 +55,4 @@ expect(
   `/complete answered ${JSON.stringify(completed)}`,
 );
 expect(bucket.object(ticket.key)?.size === bytes.length, "the bucket does not hold the uploaded file");
-console.log(`${navigator.userAgent}: /upload answered one ticket, and /complete stored ${ticket.key}.`);
+console.log(`${navigator.userAgent}: no indexedDB; /upload answered one ticket, and /complete stored ${ticket.key}.`);

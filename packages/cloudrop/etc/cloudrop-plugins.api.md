@@ -4,7 +4,7 @@
 
 ```ts
 
-// @public
+// @beta
 interface AbortContext<TAuth = unknown> {
     // Warning: (ae-forgotten-export) The symbol "Jsonified" needs to be exported by the entry point plugins.d.ts
     auth: Jsonified<TAuth>;
@@ -37,7 +37,7 @@ interface AbortedRecord<R extends string = string> extends RecordBase<R> {
     status: "aborted";
 }
 
-// @public
+// @beta
 interface AfterVerifyContext<TAuth = unknown> {
     accept: readonly string[];
     auth: Jsonified<TAuth>;
@@ -66,7 +66,7 @@ interface AuthorizeContext<TMetadata> {
 // @public (undocumented)
 type Awaitable<T> = T | Promise<T>;
 
-// @public
+// @beta
 interface BeforeUploadContext<TAuth = unknown> {
     accept: readonly string[];
     auth: Jsonified<TAuth>;
@@ -146,7 +146,7 @@ interface CloudropErrorOptions {
     storageCode?: string;
 }
 
-// @public
+// @beta
 interface CloudropPlugin<TAuth = unknown> {
     readonly "~auth"?: (auth: Jsonified<TAuth>) => void;
     // (undocumented)
@@ -404,7 +404,7 @@ interface PendingRecord<R extends string = string> extends RecordBase<R> {
     status: "pending";
 }
 
-// @public
+// @beta
 interface PluginFile {
     // (undocumented)
     id: string;
@@ -524,7 +524,7 @@ interface RouteDefinition {
     visibility?: "public" | "private";
 }
 
-// @public
+// @beta
 interface ServerHooks<TAuth = unknown> {
     // Warning: (ae-forgotten-export) The symbol "AfterVerifyContext" needs to be exported by the entry point plugins.d.ts
     afterVerify?(context: AfterVerifyContext<TAuth>): Awaitable<CloudropError | null | undefined>;
