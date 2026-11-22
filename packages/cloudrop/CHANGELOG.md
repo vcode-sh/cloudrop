@@ -65,6 +65,11 @@ Every notable change to the `cloudrop` package. The format follows
   type error. Before: `authorize: () => ({ userId, route: "admin" })` compiled, and cloudrop's own `request`,
   `metadata` and `file` replaced fields of those names. After: wrap the value, such as
   `authorize: () => ({ userId, scope: { route: "admin" } })`. The runtime is unchanged (`M12-A8`).
+- The client's `namespace` defaults to `account` when `account` is a string. Before:
+  `createCloudropClient({ namespace: userId, account: userId })`, and `{ account: userId }` alone kept records under
+  `""`. After: `createCloudropClient({ account: userId })` keeps them under `userId`. A function `account` keeps `""`,
+  and an explicit `namespace` wins. A page that passed `account` alone stops listing the unfinished uploads it saved
+  under `""` before the upgrade; pass `namespace: ""` for a day to keep them resumable (`M12-A4`).
 
 ### Added
 

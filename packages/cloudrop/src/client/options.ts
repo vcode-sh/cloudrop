@@ -36,7 +36,7 @@ export interface ClientOptions {
   persist?: boolean;
   /**
    * Keeps one signed-in user's unfinished uploads apart from another's in the same browser: pass the user's id. At most
-   * 256 characters; default "".
+   * 256 characters. Default: `account` when it is a string, otherwise "".
    */
   namespace?: string;
 }
@@ -89,7 +89,10 @@ export function readOptions(
 ): Connection & Required<Omit<ClientOptions, keyof Connection>> {
   // null counts as no options, as createCloudrop reads its own (readConfig in server/config.ts).
   const given = options ?? {};
-  const { concurrency = "auto", order = "added", persist = true, namespace = "" } = given;
+  // A signed-in user's id given as account keeps their records apart without saying it twice (M12-A4). A function's
+  // value is known only at /upload, after records were listed, so it keeps the shared default.
+  const { concurrency = "auto", order = "added", persist = true, account } = given;
+  const { namespace = typeof account === "string" ? account : "" } = given;
   const connection = readConnection(given);
   if (concurrency !== "auto" && !(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16)) {
     throw configError('concurrency must be "auto" or a whole number from 1 to 16.');

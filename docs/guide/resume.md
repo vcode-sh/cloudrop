@@ -182,8 +182,9 @@ its `/abort`, or at once when no `/abort` is sent.
 
 ## Namespace and sign-out
 
-Pass the signed-in user's id as `namespace` (a string of up to 256 characters, `""` by default). A client sees only its
-namespace's records. The namespace is fixed when the client is created, so create a new client when the user changes.
+Pass the signed-in user's id as `namespace` (a string of up to 256 characters). It defaults to `account` when that is a
+string, so a client created with `account: user.id` needs no `namespace`; otherwise the default is `""`. A function
+`account` keeps `""`: its value is known only at `/upload`. A client sees only its namespace's records. The namespace is fixed when the client is created, so create a new client when the user changes.
 
 At sign-out, close the client, then call `forget()`:
 

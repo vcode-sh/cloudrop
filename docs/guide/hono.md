@@ -170,11 +170,8 @@ import { API_ORIGIN } from "./api"; // the API's origin, such as "https://api.ex
 
 function createUploads(userId: string) {
   // account: what the routes' owner returns for this user ("" signed out); the server compares the two at /upload.
-  const client = createCloudropClient<Server>({
-    basePath: `${API_ORIGIN}/api/cloudrop`,
-    namespace: userId,
-    account: userId,
-  });
+  // It is also the namespace that keeps this user's unfinished uploads apart from the next user's.
+  const client = createCloudropClient<Server>({ basePath: `${API_ORIGIN}/api/cloudrop`, account: userId });
   return { client, ...createUploadHooks<Server>({ client }) };
 }
 export type Uploads = ReturnType<typeof createUploads>;
@@ -216,7 +213,8 @@ const { files, getInputProps } = useUpload("attachments", { multiple: true });
 - **Clients are cached in a browser only.** `useCloseOtherUsers` empties `byUser` in an effect, and no effect runs on
   a server, so an app that also renders there would keep one client per user for good; `uploadsFor` returns an
   uncached one there ([Signed-in users](react.md#signed-in-users)).
-- **One client per user, with the user's id as `namespace`** ([Resume](resume.md#namespace-and-sign-out)). A client
+- **One client per user, with the user's id as `account`, which is also its `namespace`**
+  ([Resume](resume.md#namespace-and-sign-out)). A client
   lists and resumes only its namespace's records, so the next user of the browser never sees the last one's
   unfinished uploads, even when that user closed the tab or let the session expire without signing out, and the first
   user still finds them on their next sign-in. The namespace is fixed when the client is created, which is why the app

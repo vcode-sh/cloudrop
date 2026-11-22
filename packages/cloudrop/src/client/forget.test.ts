@@ -8,7 +8,7 @@
 // Oracle: what the fake IndexedDB holds, the requests the fixture saw, literal records and literal messages.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ResumableUpload } from "../client.ts";
+import type { ClientOptions, ResumableUpload } from "../client.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
 import {
   fourParts,
@@ -192,8 +192,8 @@ describe("resumable() and the uploads this client holds (M4-F22)", () => {
 });
 
 describe("forget()", () => {
-  async function seeded() {
-    const setup = persistFixture({ options: { namespace: "user-1" } });
+  async function seeded(options: ClientOptions = { namespace: "user-1" }) {
+    const setup = persistFixture({ options });
     const seed = createRecords(true);
     seed.save(recordOf("a", { namespace: "user-1" }));
     seed.save(recordOf("b", { namespace: "user-1" }));
@@ -213,6 +213,25 @@ describe("forget()", () => {
       all: { data: { forgotten: 1 }, error: null },
       stored: {},
     });
+  });
+
+  // Records are kept and forgotten under one namespace: account's, when it is a string and no namespace is given.
+  it.each<{ name: string; options: ClientOptions; left: string[] }>([
+    { name: "account as a string", options: { account: "user-1" }, left: ["c"] },
+    {
+      name: "account as a function, which keeps the default",
+      options: { account: () => "user-1" },
+      left: ["a", "b", "c"],
+    },
+    {
+      name: "an explicit namespace beside account",
+      options: { account: "user-1", namespace: "user-12" },
+      left: ["a", "b"],
+    },
+  ])("forgets the namespace chosen by $name", async ({ options, left }) => {
+    const { client, db } = await seeded(options);
+    await client.forget();
+    expect(Object.keys(db.stored())).toEqual(left);
   });
 
   it.each([

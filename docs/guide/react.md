@@ -253,10 +253,10 @@ factory read its list again, such as a badge that counts every route's uploads. 
 ## Signed-in users
 
 The module-level factory of [Set up](#set-up) suits an app without accounts. An app where users sign in needs a client
-per user, created with the user's id as its `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client
-for everyone would list one user's unfinished uploads to the next user of the browser. The same id as its
-[`account`](client.md#guard-against-a-changed-account) lets the server refuse an upload that a sign-in in another tab
-would make someone else's. Create each user's client and hooks once, provide them in a context keyed by the user, and
+per user, created with the user's id as its [`account`](client.md#guard-against-a-changed-account), which lets the
+server refuse an upload that a sign-in in another tab would make someone else's. A string `account` is also the
+client's `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client for everyone would list one user's
+unfinished uploads to the next user of the browser. Create each user's client and hooks once, provide them in a context keyed by the user, and
 close the other users' clients when the user changes:
 
 ```tsx
@@ -269,7 +269,7 @@ import type { cloudrop } from "./cloudrop"; // a type import
 
 function createUploads(userId: string) {
   // account: what the routes' owner returns for this user ("" signed out); the server compares the two at /upload.
-  const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId });
+  const client = createCloudropClient<typeof cloudrop>({ account: userId }); // also the namespace
   return { client, ...createUploadHooks<typeof cloudrop>({ client }) };
 }
 export type Uploads = ReturnType<typeof createUploads>;

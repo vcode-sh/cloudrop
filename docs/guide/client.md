@@ -29,7 +29,7 @@ each route's `onComplete` returns.
 | `concurrency` | How many bucket `PUT`s the client sends at once, across all its uploads: `"auto"` or a whole number from 1 to 16 (see [Concurrency and order](#concurrency-and-order)). | `"auto"` |
 | `order` | Which `PUT`s go first when they wait for a connection: `"added"` or `"smallest-first"`. | `"added"` |
 | `persist` | Keeps unfinished multipart uploads in IndexedDB so they can resume after a reload. `false` keeps nothing on disk. | `true` |
-| `namespace` | Keeps one signed-in user's unfinished uploads apart from another's: pass the user's id. At most 256 characters. | `""` |
+| `namespace` | Keeps one signed-in user's unfinished uploads apart from another's: pass the user's id. At most 256 characters. | `account` when it is a string, otherwise `""` |
 
 A wrong option throws `INVALID_CONFIG` when the client is created. Wire types (`UploadRequest`, `FileTicket`,
 `ErrorBody` and the rest) and the route inference types (`RouteName`, `RouteMetadata`, `RouteResult`,
@@ -77,7 +77,7 @@ client who this page belongs to, and the server refuses that upload:
 
 ```ts
 // account: the user this page shows, as the routes' owner returns it
-const client = createCloudropClient<typeof cloudrop>({ namespace: userId, account: userId });
+const client = createCloudropClient<typeof cloudrop>({ account: userId }); // also the namespace
 ```
 
 - **What is compared.** On a route with a [store](store.md) and `owner`, the server compares `account` with what

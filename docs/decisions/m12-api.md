@@ -108,3 +108,20 @@ Entries start from 1.
 - **Visible in:** `src/server/route-context.ts`, `src/server/route.ts`, `src/server/store-route.ts`,
   `src/server/types.test.ts`, `src/server/store-types.test.ts`, `src/server/store-transaction.test.ts`,
   `docs/guide/server.md`.
+
+### M12-A4: `namespace` defaults to `account` when it is a string
+
+- **Decision:** `createCloudropClient`'s `namespace` defaults to `account` when `account` is a string, so a client
+  created with `{ account: userId }` keeps, lists, resumes and forgets its records under `userId`. An explicit
+  `namespace` wins, `""` included. A function `account` keeps the default `""`: its value is read before each
+  `/upload`, after the client has already listed its records, and may change between calls, while a namespace is fixed
+  when the client is created. `namespace: null` is still refused as before, not read as "use the default". The examples
+  and guides pass `account` alone where they passed both.
+- **Why:** spec 1.0 §6: the examples passed the same id twice. It must land before 1.0 because it moves where a
+  client finds resume records: a client of 0.6 that passed only `account` kept them under `""`.
+- **If wrong:** an app that passes `account` alone and upgrades no longer lists the unfinished uploads it saved under
+  `""` before; they expire within 24 hours, and a page that must keep them passes `namespace: ""` until then. The
+  changelog says so.
+- **Status:** in force.
+- **Visible in:** `src/client/options.ts`, `src/client/forget.test.ts`, `docs/guide/client.md`,
+  `docs/guide/resume.md`, `docs/guide/react.md`, `docs/guide/hono.md`, `examples/vite-react/src/lib/upload.ts`.
