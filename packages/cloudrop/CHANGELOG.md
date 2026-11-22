@@ -23,7 +23,8 @@ Every notable change to the `cloudrop` package. The format follows
   `Object.fromEntries(Object.entries(store).map(...))` or a class that copies the methods, loses the store code and
   answers as above. Before: `createCloudrop({ store: logged(sqlStore(executor)), ... })`. After: copy with spread
   (`{ ...store, get: logged(store.get) }`), or wrap the result: `store: defineStore(logged(sqlStore(executor)))`
-  (`M12-S1`, `M12-S2`).
+  (`M12-S1`, `M12-S2`). A `transaction: true` store is copied with spread only: its `route()` ties each route to a
+  property of the store that only spread keeps, so `createCloudrop` refuses the routes of any other copy (`M12-R1`).
 - `api` has the store's calls only when `store` is passed. Before: a server without a store typed `api.files`,
   `api.file`, `api.allFiles`, `api.usage`, `api.revokeUploads`, `api.deleteFile`, `api.eraseOwner`, `api.reconcile`
   and `api.sweep`, which answered `INVALID_CONFIG`. After: they are type errors there, and a store that may be
@@ -241,6 +242,31 @@ Every notable change to the `cloudrop` package. The format follows
   driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
   After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the
   client waits it out for each of them (`M12-E5`).
+- A spread copy of a `transaction: true` store, such as the store guide's logging wrapper, keeps its routes. Before:
+  `createCloudrop({ store: { ...store, get: logged(store.get) }, routes: { avatar: copy.route(...) } })` threw
+  `Route "avatar" was made by another store's route()`, even with the copy's own `route()`. After: it is accepted; a
+  route from another store is still refused, and the message names the spread copy (`M12-R1`).
+- A `CloudropError` from a second installed copy of cloudrop 1.x refuses as the server's own. Before: returned from
+  `authorize`, a plugin's `beforeUpload` or `onDelete` (or the app's error read by a store from the other copy), it
+  answered a 500 and logged "from the same cloudrop the server uses", and a second copy's `rateLimited(30)` lost its
+  `Retry-After`. After: every `CloudropError` carries the registered brand `Symbol.for("cloudrop.error")` and is
+  recognised, with its wait; only an error from a cloudrop older than 1.0 is not, and the logged message says so
+  (`M12-R2`).
+- `defineStore` refuses what it cannot wrap with `INVALID_CONFIG`. Before: `defineStore(undefined)` threw a raw
+  `TypeError`, a string came back as a `String` object, and a frozen store threw `object is not extensible`. After:
+  each throws `INVALID_CONFIG` naming the fix (`M12-R4`).
+- The sweep never marks an owner for erasure. Before: an owner the app reopened with `reopenOwner` while the sweep was
+  erasing an earlier owner of the same page was marked again, had their files deleted, and ended erased for good.
+  After: the sweep reads each owner's mark and carries on only that one; an owner without a mark is skipped and not
+  counted in `erasing` (`M12-R3`).
+- `erase.prefixes` refuses a folder that starts in the folder of a route without its own `prefix`. Before: with a route
+  `docs`, `(owner) => [owner + "/"]` and an owner named `docs`, `eraseOwner("docs")` emptied every owner's files of
+  that route. After: it answers `INVALID_CONFIG` naming the route, before the owner is marked (`M12-R6`).
+- A sweep whose erasure of an owner fails logs one warning for that owner, saying that the owner holds a row of every
+  sweep's `limit` ahead of the owners after it until the cause is fixed or the sweep continues from its cursor. Before:
+  an error was logged with `logger.error` and a run with failed files said nothing more (`M12-R5`).
+- The `erase.prefixes` refusal says to use `encodeURIComponent(owner)` when owner ids can contain `/`: with owners
+  `acme` and `acme/alice`, `exports/acme/` also holds `exports/acme/alice/` (`M12-R7`).
 
 ## 0.6.0 - 2026-11-21
 

@@ -83,7 +83,7 @@ describe("an onDelete that refuses, with api.deleteFile", () => {
       {
         message: `cloudrop: onDelete failed for route "files" while deleting file ${ticket.id}.`,
         error: new TypeError(
-          `onDelete returned a value of type ${type}. To keep the file, return a CloudropError from the same cloudrop the server uses; otherwise return nothing.`,
+          `onDelete returned a value of type ${type}. To keep the file, return a CloudropError (one from a cloudrop older than 1.0 is not recognised: install cloudrop once); otherwise return nothing.`,
         ),
       },
     ]);

@@ -5,7 +5,7 @@
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import type { ServerConfig } from "./config.ts";
-import { eraseRun } from "./erase.ts";
+import { continueErasure } from "./erase.ts";
 import { removeLeftovers, settledAt } from "./leftovers.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
@@ -70,26 +70,38 @@ async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<void> {
 }
 
 /**
- * The erasures of one page of marked owners, each run as `eraseOwner` runs it, with the sweep's grace, signal and
- * context. One that fails is logged and counted, and the next sweep runs it again. Answers how many owners it ran.
+ * An owner whose run failed is warned about once per sweep (M12-R5): it is not finished, so the next sweep runs it
+ * again, and a sweep without a cursor starts the pass at the first owner, so it holds a row of the limit each time.
+ */
+function warnUnfinished(config: ServerConfig, owner: string, why: string): void {
+  config.logger.warn(
+    `cloudrop: the sweep could not finish erasing ${owner} (${why}). The next sweep tries again, and until one succeeds this owner takes one row of each sweep's limit ahead of the owners after it: fix the cause, or continue each sweep from the cursor the last one answered.`,
+  );
+}
+
+/**
+ * The erasures of one page of marked owners, each carried on with the sweep's grace, signal and context. One that
+ * fails is counted and warned about, and the next sweep runs it again. Answers how many owners it ran.
  */
 async function eraseEach({ config, store, report, run }: Sweeper, owners: readonly string[]): Promise<number> {
   const { graceMs, signal, context } = run;
   for (const [ran, owner] of owners.entries()) {
     // Stopped: the owners left on this page stay marked, and the cursor continues after the last one that ran.
     if (signal?.aborted) return ran;
-    report.erasing += 1;
-    const erased = await eraseRun(config, store, owner, { graceMs, signal, context });
-    if (erased.error) {
-      config.logger.error(
-        `cloudrop: the sweep could not go on erasing ${owner}. The next sweep tries again.`,
-        erased.error,
-      );
+    const { data: erased, error } = await continueErasure(config, store, owner, { graceMs, signal, context });
+    if (error) {
+      report.erasing += 1;
       report.failed += 1;
+      warnUnfinished(config, owner, error.message);
       continue;
     }
-    report.failed += erased.data.failed;
-    if (erased.data.done) report.erased += 1;
+    // Reopened since the page was read: not erased, and still one owner of the page's limit.
+    if (erased === null) continue;
+    report.erasing += 1;
+    report.failed += erased.failed;
+    if (erased.done) report.erased += 1;
+    else if (erased.failed > 0)
+      warnUnfinished(config, owner, `${erased.failed} of its files or folders failed, as logged`);
   }
   return owners.length;
 }

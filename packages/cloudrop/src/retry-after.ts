@@ -1,16 +1,18 @@
 // How long a refused request must wait before it is sent again, shared by the server, which answers it as Retry-After,
 // and the client, which honours it (spec 1.0 §2a). 0 means no wait throughout.
 
-// Kept beside the value rather than as a field of CloudropError, which is public and would promise it. An answer body
-// carries one too: the 200 of /upload, with the longest wait of the files storage could not start (spec 1.0 §2b).
-const waits = new WeakMap<object, number>();
+// A hidden property rather than a field of CloudropError, which is public and would promise it. An answer body carries
+// one too: the 200 of /upload, with the longest wait of the files storage could not start (spec 1.0 §2b). A registered
+// symbol, so the server reads the wait of a rateLimited() from a second installed copy of cloudrop (M12-R2).
+const WAIT: unique symbol = Symbol.for("cloudrop.retry-after");
 
 /** The wait recorded for `target`, in milliseconds; 0 when none was. */
-export const retryAfterOf = (target: object): number => waits.get(target) ?? 0;
+export const retryAfterOf = (target: object): number => (target as { [WAIT]?: number })[WAIT] ?? 0;
 
 /** Records that `target`'s request must not be sent again for `ms`; a wait of 0 or less records nothing. */
 export function waitAtLeast<T extends object>(target: T, ms: number): T {
-  if (ms > 0) waits.set(target, ms);
+  // Not enumerable, so the wait never reaches JSON, logs or a spread copy.
+  if (ms > 0) Object.defineProperty(target, WAIT, { value: ms, configurable: true, writable: true });
   return target;
 }
 

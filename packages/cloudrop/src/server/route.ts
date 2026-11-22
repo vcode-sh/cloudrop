@@ -22,6 +22,11 @@ export type Awaitable<T> = T | Promise<T>;
 // Symbol.for, not Symbol(): an adapter may come from another copy of cloudrop than the server, and the server must still
 // recognise the routes it marks.
 export const STORE: unique symbol = Symbol.for("cloudrop.store");
+/**
+ * The brand a transactional store carries, which its route() puts on each route under STORE. It is a property of the
+ * store, so a spread copy of the store (a logging wrapper) keeps it and its routes stay its own.
+ */
+export const STORE_BRAND: unique symbol = Symbol.for("cloudrop.store-brand");
 
 /** `authorize: allowAnyone` makes a route public. It must be written out: public uploads are never a default. */
 export function allowAnyone(): object {
@@ -155,7 +160,7 @@ export interface RouteDefinition {
   onComplete?(context: { request: Request; file: UploadedFile; metadata: unknown }): unknown;
   afterComplete?(context: { request: Request; file: UploadedFile; metadata: unknown; data: unknown }): unknown;
   onDelete?(context: DeleteContext): unknown;
-  /** The store whose `route()` made this route, whose `tx` its `onComplete` expects. */
+  /** The brand of the store whose `route()` made this route, whose `tx` its `onComplete` expects. */
   readonly [STORE]?: object;
 }
 
@@ -226,11 +231,12 @@ export function route<
 }
 
 /**
- * For store adapters: a route() whose routes belong to `store`, so their `onComplete` and `onDelete` are typed with
- * `TExtra` (the store's `tx`). createCloudrop refuses such a route unless `store` is its store and has a transaction.
+ * For store adapters: a route() whose routes carry `brand`, the store's STORE_BRAND, so their `onComplete` and
+ * `onDelete` are typed with `TExtra` (the store's `tx`). createCloudrop refuses such a route unless its store carries
+ * that brand and has a transaction.
  */
-export function routeFor<TExtra extends object>(store: object): RouteFunction<TExtra> {
+export function routeFor<TExtra extends object>(brand: object): RouteFunction<TExtra> {
   return (policy, callbacks) => ({
-    definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: store },
+    definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: brand },
   });
 }

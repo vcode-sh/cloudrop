@@ -2,8 +2,10 @@
 // a spread copy; and code from another copy of cloudrop is refused.
 
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sqliteExecutor, sqlStore } from "../adapters/sql.ts";
+import { CloudropError } from "../errors.ts";
+import { route } from "../server/route.ts";
 import type { CloudropStore } from "../server/store.ts";
 import { STORE_PATHS } from "../server/store-paths.ts";
 import { complete } from "../testing/complete-fixture.ts";
@@ -53,5 +55,49 @@ describe("defineStore", () => {
         message: "cloudrop is installed twice: the store's adapter comes from another copy. Install cloudrop once.",
       }),
     });
+  });
+
+  // Every other construction-time mistake answers INVALID_CONFIG naming the fix; defineStore did not (M12-R4).
+  it.for([
+    { name: "undefined", given: undefined },
+    { name: "null", given: null },
+    { name: "a string", given: "store" },
+  ])("refuses $name with INVALID_CONFIG", ({ given }) => {
+    expect(() => defineStore(given as never)).toThrow(
+      expect.objectContaining({
+        code: "INVALID_CONFIG",
+        message: "defineStore takes the store object, with the CloudropStore methods, such as defineStore(myStore).",
+      }),
+    );
+  });
+
+  it("refuses a frozen store with INVALID_CONFIG, naming the fix", () => {
+    expect(() => defineStore(Object.freeze({ ...memoryStore() }))).toThrow(
+      expect.objectContaining({
+        code: "INVALID_CONFIG",
+        message:
+          "defineStore cannot attach the store code to a frozen or sealed store. Pass the store before freezing it, or a copy made with spread ({ ...store }).",
+      }),
+    );
+  });
+
+  // A store from a second installed copy of the same version runs that copy's deletion code, which must still read the
+  // app's CloudropError as a refusal (M12-R2).
+  it("lets a store from a second copy of cloudrop keep a file whose onDelete refuses with the app's CloudropError", async () => {
+    vi.resetModules();
+    const secondCopy: typeof import("../testing.ts") = await import("../testing.ts");
+    const refusal = new CloudropError("FORBIDDEN", "Keep it.");
+    const kept = route(
+      { accept: "*/*", maxSize: 1024, authorize: () => ({ userId: "u1" }) },
+      { owner: ({ userId }) => userId, onDelete: () => refusal },
+    );
+    const fixture = serverFixture({ kept }, { store: secondCopy.memoryStore() });
+    const ticket = await fixture.single("kept", TEXT);
+    await fixture.send(ticket.put, hello);
+    await complete(fixture, ticket.token);
+    expect([await fixture.cloudrop.api.deleteFile(ticket.id), fixture.logger.errors]).toEqual([
+      { data: null, error: refusal },
+      [],
+    ]);
   });
 });

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { withRoute } from "../adapters/transactional.ts";
 import { complete } from "../testing/complete-fixture.ts";
-import { type MemoryTx, memoryStore } from "../testing/memory-store.ts";
+import { memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, NOW, storeFixture, TEXT } from "../testing/store-fixture.ts";
-import { route, routeFor } from "./route.ts";
+import { route } from "./route.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -15,7 +16,7 @@ afterEach(() => {
 /** A store with a transaction and a route whose onComplete writes an app row through `tx`, then runs `after`. */
 async function transactional(after: (run: number) => unknown = (run) => ({ run })) {
   const store = memoryStore();
-  const txRoute = routeFor<{ tx: MemoryTx }>(store);
+  const txRoute = withRoute(store).route;
   const seen: string[][] = [];
   let runs = 0;
   const files = txRoute(

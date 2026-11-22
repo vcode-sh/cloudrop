@@ -97,11 +97,13 @@ Entries start from 1.
 - **If wrong:** a key layout that puts the owner inside a segment (`user-42/`) cannot use `prefixes` and erases those
   folders itself. `deletePrefix` lists objects only: an untracked multipart upload under a prefix is the lifecycle
   rule's to abort, as the guide says.
-- **Status:** in force. `src/server/erase-mark.test.ts`: the folder stays until the rows are done, then goes, and
+- **Status:** in force; amended by `M12-R6` (no prefix in the folder of a route without its own `prefix`) and
+  `M12-R7` (the raw form is safe only for owner ids without `/`). `src/server/erase-mark.test.ts`: the folder stays
+  until the rows are done, then goes, and
   another owner's stays (fault probe: emptied before the rows were done, seen failing); the encoded owner; the seven
   unsafe prefixes (fault probe: the rule always passing, seen failing; the four key-rule rows failed before the fix);
   an erased owner answers done while `erase.prefixes` throws (failed before the fix).
-- **Visible in:** `src/server/erase.ts`, `src/server/store-config.ts`,
+- **Visible in:** `src/server/erase.ts`, `src/server/erase-prefixes.ts`, `src/server/store-config.ts`,
   `docs/guide/store.md#folders-no-row-tracks-eraseprefixes`.
 
 ### M12-O4: the sweep carries every unfinished erasure on
@@ -122,12 +124,14 @@ Entries start from 1.
   is removed, not kept for the app to check.
 - **If wrong:** a sweep with many marked owners does more work per call than `limit` rows suggest, since each owner's
   run pages its own rows; D1 apps keep `limit` low, as the guide says for the sweep.
-- **Status:** in force. `src/server/erase-mark.test.ts`: an erasure stopped by its signal is finished by the next
-  sweep (`erasing: 1, erased: 1`), and the sweep after has nobody to erase; an erasure the storage cannot finish is
-  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing. A sweep
-  stopped after the first owner of a page of two answers `erase:u1`, and continuing from it runs u2 and u3 (it
-  answered `erase:u2`, skipping u2, before the fix); stopped before the first owner it answers `erase:` (fault probe:
-  without the fallback it answered no cursor, seen failing).
+- **Status:** in force; amended by `M12-R3` (the pass never marks: it carries on the mark the owner has, and skips an
+  owner reopened since its page was read) and `M12-R5` (a warning per owner whose run fails). The sweep's rows below
+  moved to `src/server/sweep-erase.test.ts`. There: an erasure stopped by its signal is finished by the next sweep
+  (`erasing: 1, erased: 1`), and the sweep after has nobody to erase; an erasure the storage cannot finish is counted
+  failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing. A sweep stopped
+  after the first owner of a page of two answers `erase:u1`, and continuing from it runs u2 and u3 (it answered
+  `erase:u2`, skipping u2, before the fix); stopped before the first owner it answers `erase:` (fault probe: without
+  the fallback it answered no cursor, seen failing).
   `src/server/erase.test.ts`: the sweep that ends a stuck completion of an owner being erased removes its object.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `docs/guide/store.md#the-sweep`.
 

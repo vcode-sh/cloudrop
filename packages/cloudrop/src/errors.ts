@@ -95,6 +95,12 @@ export interface CloudropErrorOptions {
   cause?: unknown;
 }
 
+/**
+ * Every CloudropError carries this registered symbol, so the server reads an error built by a second installed copy of
+ * cloudrop (an adapter's or a plugin's own) as one of its own (M12-R2).
+ */
+const BRAND: unique symbol = Symbol.for("cloudrop.error");
+
 export class CloudropError extends Error {
   readonly code: CloudropErrorCode;
   readonly retryable: boolean;
@@ -125,7 +131,14 @@ export class CloudropError extends Error {
     this.parts = options.parts;
     this.content = code === "FILE_TYPE_NOT_ALLOWED" ? options.content : undefined;
     this.file = options.file;
+    // Not enumerable, so logs, JSON and equality checks see the error's fields only.
+    Object.defineProperty(this, BRAND, { value: true });
   }
+}
+
+/** A CloudropError of this copy of cloudrop or of another copy from 1.0 on: `instanceof` sees only this copy's. */
+export function isCloudropError(value: unknown): value is CloudropError {
+  return value instanceof Error && (value as { [BRAND]?: true })[BRAND] === true;
 }
 
 export type Result<T> = { data: T; error: null } | { data: null; error: CloudropError };

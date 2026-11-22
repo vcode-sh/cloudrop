@@ -4,7 +4,7 @@
 import postgres from "postgres";
 import { describe, expect, expectTypeOf, test } from "vitest";
 import type { CloudropStore } from "../server/store.ts";
-import { storeOfRoute } from "../server/store-route.ts";
+import { brandOf, storeOfRoute } from "../server/store-route.ts";
 import { type PgQueryable, pgExecutor, postgresJsExecutor, type SqlExecutor, sqliteExecutor, sqlStore } from "./sql.ts";
 
 const executor = (dialect: string): SqlExecutor =>
@@ -92,7 +92,7 @@ describe("store.route", () => {
         await tx`SELECT 1`;
       },
     });
-    expect(storeOfRoute(pgRoute.definition)).toBe(pgStore);
+    expect(storeOfRoute(pgRoute.definition)).toBe(brandOf(pgStore));
   });
 
   test("without transaction: true even a Postgres store has no transaction and no route, so completions use a lease", () => {

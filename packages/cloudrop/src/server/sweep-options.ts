@@ -48,7 +48,8 @@ export interface SweepReport {
   failed: number;
   /**
    * Completions stuck past their lease and deadline, now ended as failed. Their objects are kept, because their
-   * onComplete may have recorded them: check each one. A row is reported once.
+   * onComplete may have recorded them: check each one. A row is reported once. The exception is an owner being erased:
+   * the same sweep removes the object of their stuck completion.
    */
   reported: FileRecord[];
   /** Owners whose erasure `eraseOwner` started and this sweep carried on, each counting as one row of `limit`. */

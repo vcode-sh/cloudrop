@@ -7,7 +7,7 @@ import type { Awaitable } from "./route.ts";
 import { isFunction } from "./route-config.ts";
 import type { CloudropStore } from "./store.ts";
 import { STORE_PATHS, type StorePaths } from "./store-paths.ts";
-import { storeOfRoute } from "./store-route.ts";
+import { brandOf, storeOfRoute } from "./store-route.ts";
 
 /** An owner's limit in bytes, or null for no limit. */
 export type Quota = (owner: string) => Awaitable<number | null>;
@@ -16,8 +16,10 @@ export type Quota = (owner: string) => Awaitable<number | null>;
 export interface EraseSettings {
   /**
    * Folders of the owner's that no row tracks, such as files your app wrote with `putObject`, emptied with
-   * `deletePrefix` once the owner's rows are erased: `(owner) => ["exports/" + owner + "/"]`. Each must end in "/" and
-   * have the owner, as it is or URI-encoded, as one whole segment between slashes; any other answers INVALID_CONFIG.
+   * `deletePrefix` once the owner's rows are erased: `(owner) => ["exports/" + owner + "/"]`. Each must end in "/",
+   * have the owner, as it is or URI-encoded, as one whole segment between slashes, and not start in the folder of a
+   * route without its own `prefix`, which holds every owner's files; any other answers INVALID_CONFIG. When owner ids
+   * can contain "/", use `encodeURIComponent(owner)`: "exports/acme/" also holds an owner "acme/alice"'s folder.
    */
   prefixes?: (owner: string) => readonly string[];
 }
@@ -118,11 +120,11 @@ function checkRoutes(routes: readonly RouteConfig[], store: CloudropStore<unknow
         `Route "${name}": ${needsStore} needs a database store. Pass store to createCloudrop, or remove ${needsStore}.`,
       );
     }
-    const routeStore = storeOfRoute(definition);
-    if (routeStore === undefined) continue;
-    if (routeStore !== store) {
+    const brand = storeOfRoute(definition);
+    if (brand === undefined) continue;
+    if (brand !== brandOf(store)) {
       throw configError(
-        `Route "${name}" was made by another store's route(), so its onComplete expects that store's tx. Pass that store to createCloudrop, or build the route with route().`,
+        `Route "${name}" was made by another store's route(), so its onComplete expects that store's tx. Pass that store, or a copy of it made with spread ({ ...store }), to createCloudrop, or build the route with route().`,
       );
     }
     if (!store?.transaction) {
