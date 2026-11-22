@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/cloudrop)](https://www.npmjs.com/package/cloudrop)
 [![CI](https://github.com/vcode-sh/cloudrop/actions/workflows/ci.yml/badge.svg)](https://github.com/vcode-sh/cloudrop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-24+-339933)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-26+-339933)](https://nodejs.org/)
 
 **Resumable file uploads from the browser straight to Cloudflare R2 or any S3-compatible bucket.**
 
@@ -25,7 +25,7 @@ what fails, shows progress, and picks up where it left off after a reload.
   SQLite, Cloudflare D1, Drizzle and Prisma.
 - **Headless React hooks.** `useUpload` and `useResumable` give you state and controls, typed from your server's
   routes; you bring the UI.
-- **Zero runtime dependencies.** Only web-platform APIs, so the server runs on Node.js 24+, Bun, Deno and Cloudflare
+- **Zero runtime dependencies.** Only web-platform APIs, so the server runs on Node.js 26+, Bun, Deno and Cloudflare
   Workers. React and drizzle-orm are optional peer dependencies.
 
 ## Install
@@ -282,10 +282,10 @@ Start at the [documentation index](docs/README.md). The guides:
 
 ## Requirements
 
-- **Server:** Node.js 24+, Bun, Deno or Cloudflare Workers.
+- **Server:** Node.js 26+, Bun, Deno or Cloudflare Workers.
 - **Client:** a browser with `fetch` and `AbortSignal`. The browser tests run in Chromium.
 - **React:** 18 or 19, only for `cloudrop/react`.
-- **TypeScript:** 5.4 or newer for cloudrop's types.
+- **TypeScript:** 7.0 or newer for cloudrop's types.
 
 ## Status
 
@@ -302,7 +302,7 @@ and checksums. Where the project stands: [plans and roadmap](docs/superpowers/pl
 ## Contributing
 
 Bug reports, fixes and documentation are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup (Bun and
-Node 24), the gates every change passes, the test lanes and how decisions are recorded.
+Node 26), the gates every change passes, the test lanes and how decisions are recorded.
 
 ## Security
 

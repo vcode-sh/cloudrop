@@ -43,6 +43,13 @@ if [ "$REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
     "and repository.directory to packages/cloudrop." >&2
   exit 1
 fi
+# Node 26 is the floor (M12-P2): npm warns an app on an older Node at install from this field.
+READ_ENGINES='JSON.parse(require("fs").readFileSync(0, "utf8")).engines?.node ?? "none"'
+ENGINES="$(tar -xzOf "${TARBALL[0]}" package/package.json | node -p "$READ_ENGINES")"
+if [ "$ENGINES" != ">=26" ]; then
+  echo "packages/cloudrop/package.json has engines.node \"$ENGINES\". Set it to \">=26\" (M12-P2)." >&2
+  exit 1
+fi
 # cloudrop/testing and cloudrop/plugins must use the server's own CloudropError (M9-T2, M10-K5): a copy of the class
 # fails the server's instanceof check, and every refusal from a plugin would reach the client as a server error.
 for entry in testing plugins; do

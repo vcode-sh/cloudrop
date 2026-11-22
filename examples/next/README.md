@@ -17,7 +17,7 @@ Files up to 8 MiB go in one PUT; larger files go in parts of 8 MiB, so a 20 MiB 
 The demo sign-in must never ship: any visitor can set that cookie to any name and upload under that user's prefix. A
 real application reads its own signed session in `authorize`.
 
-Prerequisites: Docker (for RustFS), Bun and Node.js 24 (Next.js runs on the `node` on your `PATH`). Run every command
+Prerequisites: Docker (for RustFS), Bun and Node.js 26 (Next.js runs on the `node` on your `PATH`). Run every command
 below from this directory unless it says otherwise.
 
 The settings come from `.env.local` or the environment; exported variables win over `.env.local`. `next build` needs

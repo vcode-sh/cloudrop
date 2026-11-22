@@ -18,5 +18,5 @@ Read `packages/cloudrop/tsconfig.json` for the rest rather than trusting this pa
 | MUST | Results that can fail in expected ways are discriminated unions (`{ data, error: null } \| { data: null, error }`), handled with an exhaustive `switch` ending in a `never` check. Public calls return `Result<T>` and do not throw for expected failures. |
 | SHOULD | `satisfies` for config objects and lookup maps, so literal types survive and typos fail: `const statusLabel = { … } satisfies Record<Status, string>`. `as const` objects instead of enums. |
 | SHOULD | `interface … extends` over large intersections: cached and flatter for the checker. |
-| SHOULD | `await using` for resources acquired and released in one scope (test fixtures, scripts), when the resource implements `Symbol.asyncDispose` and every supported runtime has it [works on Node 24.22, measured 2026-11-16; unverified for Workers]. |
+| SHOULD | `await using` for resources acquired and released in one scope (test fixtures, scripts), when the resource implements `Symbol.asyncDispose` and every supported runtime has it [works on Node 24.22, measured 2026-11-16, and on Node 26.13, the floor, measured 2026-11-22; unverified for Workers]. |
 | AVOID | Exporting a type only to name an internal intermediate; every exported type is public API. |

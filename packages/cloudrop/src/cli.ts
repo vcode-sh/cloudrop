@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The `cloudrop` bin (Node 24+ and Bun). No library entry imports it. The library compiles without Node's types, so the
+// The `cloudrop` bin (Node 26+ and Bun). No library entry imports it. The library compiles without Node's types, so the
 // few members of `process` used here are described by hand, as src/node.ts describes Node's request and response;
 // cli.test.ts runs this file under Node and Bun. Files are read through process.getBuiltinModule, which both provide
 // (M9-C9).

@@ -36,6 +36,15 @@ uses one of these prefixes instead.
 | `M11-C<n>` | 0.6.0: `--var`, the command reading an app's own variable names. | [m11-command.md](m11-command.md) |
 | `M11-L<n>` | 0.6.0: `api.allFiles`, the files of every owner, and its index. | [m11-listing.md](m11-listing.md) |
 | `M11-R<n>` | 0.6.0: the review of every area before release. | [m11-review.md](m11-review.md) |
+| `M12-S<n>` | 1.0.0: the store's code ships with the store object and the `cloudrop/store` entry. | [m12-store-entry.md](m12-store-entry.md) |
+| `M12-T<n>` | 1.0.0: records as a union by status, route names and store methods in the types, typed plugin `auth` and deletion `context`. | [m12-types.md](m12-types.md) |
+| `M12-A<n>` | 1.0.0: the public names and defaults frozen at 1.0. | [m12-api.md](m12-api.md) |
+| `M12-E<n>` | 1.0.0: server refusals (`authorize` errors, `rateLimited`, `Retry-After`, `content.kind`) and `BUCKET_BLOCKED`. | [m12-errors.md](m12-errors.md) |
+| `M12-H<n>` | 1.0.0: React start errors and completion callbacks. | [m12-hooks.md](m12-hooks.md) |
+| `M12-O<n>` | 1.0.0: erasing an owner in one call. | [m12-erasure.md](m12-erasure.md) |
+| `M12-Q<n>` | 1.0.0: the columns of the tables that semver covers. | [m12-tables.md](m12-tables.md) |
+| `M12-P<n>` | 1.0.0: the release policy, the Node and TypeScript floors, the size ceilings, the reference and the freeze guard. | [m12-policy.md](m12-policy.md) |
+| `M12-R<n>` | 1.0.0: the review of every area before release. | [m12-review.md](m12-review.md) |
 
 What the M2 reviews found and what changed: [reviews-m2.md](reviews-m2.md).
 

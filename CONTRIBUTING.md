@@ -16,8 +16,9 @@ bun run build
 
 - **Bun 1.4.4**, the version in `package.json`'s `packageManager` and in CI. This is a Bun workspace: the library in
   `packages/cloudrop`, the examples in `examples/*`.
-- **Node.js 24.** CI runs on Node 24, and the database lane's native SQLite module is built for the Node that runs
-  `bun install`. If your default `node` is newer, put Node 24 first on your `PATH` before installing.
+- **Node.js 26**, the minimum cloudrop supports. CI runs on Node 26, and the database lane's native SQLite module is
+  built for the Node that runs `bun install`. If your default `node` is another version, put Node 26 first on your
+  `PATH` before installing.
 - **Docker**, for the RustFS, database, chaos and browser lanes. The unit lane and `bun run verify` need none.
 - **Playwright's Chromium headless shell**, for the browser lanes only: run
   `bunx playwright install --only-shell chromium` once in `examples/next`.

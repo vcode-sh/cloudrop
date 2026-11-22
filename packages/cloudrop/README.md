@@ -148,7 +148,7 @@ Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudr
 The same guides ship inside the package, for this exact version: `node_modules/cloudrop/docs/README.md` lists them, so
 your editor and your coding agent can read them offline.
 
-Runs on Node.js 24+, Bun, Deno and Cloudflare Workers, with zero runtime dependencies. `cloudrop/react` needs React 18
+Runs on Node.js 26+, Bun, Deno and Cloudflare Workers, with zero runtime dependencies. `cloudrop/react` needs React 18
 or 19, an optional peer dependency.
 
 ## License

@@ -29,7 +29,7 @@ that as it is.
 
 ## Run with RustFS
 
-Prerequisites: Docker, Bun and Node.js 24. From this directory:
+Prerequisites: Docker, Bun and Node.js 26. From this directory:
 
 ```sh
 (cd ../.. && bun install && bun run build)   # once, after cloning: builds the cloudrop package

@@ -35,7 +35,7 @@ shape, public surface, waterfalls, allocations on hot paths and bundle cost.
 - **Zero runtime dependencies.** A new dependency in `packages/cloudrop` needs owner approval
   ([references/dependencies.md](references/dependencies.md)).
 - **Web-platform APIs only** in library source (`fetch`, `crypto.subtle`, `TextEncoder`, `URL`): no `node:` imports,
-  no `process`, no `Buffer`, so it runs in Node 24+, Bun, Deno, Workers and browsers. The compiler enforces it; the
+  no `process`, no `Buffer`, so it runs in Node 26+, Bun, Deno, Workers and browsers. The compiler enforces it; the
   guarded `fromEnv` in `src/env.ts` is the library's only access to the environment.
 - **Errors tell a person what to do.** `message` says what happened and what to do next; programs branch on `code`
   and `retryable`. A message never carries credentials, signed URLs or raw storage bodies.

@@ -6,6 +6,19 @@ Every notable change to the `cloudrop` package. The format follows
 
 ## Unreleased
 
+**Upgrading to 1.0.**
+
+- Node.js 26 or newer. Before: `"engines": { "node": ">=24" }`. After: `"engines": { "node": ">=26" }`, and CI tests
+  Node 26 only. On Node 24 npm warns at install (`EBADENGINE`). Why: the owner's floor for 1.0, and Node 26 is the
+  active LTS from October 2026 (`M12-P2`).
+- TypeScript 7.0 or newer for cloudrop's types. Before: the README said 5.4 or newer. After: 7.0 or newer. Why: the
+  owner's floor for 1.0; the workspace and every lane already compile with TypeScript 7 (`M12-P3`).
+
+### Changed
+
+- The size ceilings of every entry are raised for 1.0, so they guard against accidents and never block work (`M12-P1`).
+  Bundle size is not covered by semver; the release notes give the sizes measured.
+
 ## 0.6.0 - 2026-11-21
 
 In short: four things the first production app could not do with 0.5.0 are now built in (a deletion says what it

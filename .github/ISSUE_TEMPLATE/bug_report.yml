@@ -40,7 +40,7 @@ body:
     attributes:
       label: Runtime and browser versions
       description: The server runtime's version, and the browser if the client is involved.
-      placeholder: "Node.js 24.11.0, Chrome 142"
+      placeholder: "Node.js 26.13.0, Chrome 142"
     validations:
       required: true
 

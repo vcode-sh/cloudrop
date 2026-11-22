@@ -2,7 +2,7 @@
 
 This page is for whoever sets up an app's storage. The package ships a `cloudrop` command with two subcommands:
 `doctor` tells you in plain words what is missing in your settings and your bucket, and `setup` gives you the bucket's
-CORS and lifecycle rules, or adds them to the bucket for you. It runs on Node 24 or later and on Bun.
+CORS and lifecycle rules, or adds them to the bucket for you. It runs on Node 26 or later and on Bun.
 
 ```bash
 npx cloudrop doctor --origin https://app.example.com --origin http://localhost:5173

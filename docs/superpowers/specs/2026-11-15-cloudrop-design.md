@@ -70,7 +70,7 @@ One npm package, `cloudrop`, with subpath exports. One install and one version; 
 
 | Import | Contents | Runtime |
 |---|---|---|
-| `cloudrop` | `createCloudrop`, `route`, `r2`, `s3`, `allowAnyone`, `unauthorized`, types, `CloudropError` | Node 24+, Bun, Deno, Workers |
+| `cloudrop` | `createCloudrop`, `route`, `r2`, `s3`, `allowAnyone`, `unauthorized`, types, `CloudropError` | Node 26+ (`M12-P2`), Bun, Deno, Workers |
 | `cloudrop/next`, `cloudrop/node` | `toNextHandler`, `toNodeHandler` | Server |
 | `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence; wire and route inference types | Browser, React Native |
 | `cloudrop/react` | `useUpload`, `useDropzone` | React 18 and 19 (optional peer) |
