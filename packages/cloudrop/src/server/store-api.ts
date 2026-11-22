@@ -2,7 +2,7 @@
 // reaches them through the store object (M12-S1); without a store, api.ts answers each one INVALID_CONFIG.
 
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
-import { invalidInput, isPlainObject, optionsOf } from "../input.ts";
+import { invalidInput, optionsOf } from "../input.ts";
 import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
 import type { FileApi } from "./api.ts";
 import type { ServerConfig } from "./config.ts";
@@ -34,7 +34,7 @@ export interface StoreFileApi<R extends string = string> extends FileApi {
   /** An owner's counters, with or without a quota. */
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
-  revokeUploads(options: { owner: string }): Promise<Result<{ revoked: number }>>;
+  revokeUploads(owner: string): Promise<Result<{ revoked: number }>>;
   /**
    * Deletes a completed file: its route's `onDelete` runs, with `context` if you pass one (such as who asked and why),
    * its row becomes `deleted`, its bytes are released and its object removed. Idempotent: `deleted` says whether this
@@ -152,9 +152,8 @@ export function storeApi(
       whenReady(async () =>
         isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),
       ),
-    revokeUploads: (options) =>
+    revokeUploads: (owner) =>
       whenReady(async () => {
-        const owner = isPlainObject(options) ? options.owner : undefined;
         if (!isOwnerOrId(owner)) return badOwner();
         const revoked = await storeCall(logger, `revoke the uploads of ${owner}`, () =>
           store.revoke(owner, new Date()),

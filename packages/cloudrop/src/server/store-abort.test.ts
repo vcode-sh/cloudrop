@@ -77,7 +77,7 @@ describe("POST /abort with a store", () => {
     const reasons: AbortContext["reason"][] = [];
     const fixture = storeFixture({ owned }, { plugins: [recorder(reasons)] });
     const ticket = await fixture.single("owned", TEXT);
-    await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
+    await fixture.cloudrop.api.revokeUploads("u1");
     // The PUT was signed before the revoke and lands after it.
     await fixture.send(ticket.put, hello);
     vi.setSystemTime(AFTER_DEADLINE);
@@ -158,7 +158,7 @@ describe("POST /sign with a store", () => {
   it("refuses a revoked upload, a completed one and one whose row is missing", async () => {
     const fixture = storeFixture({ owned });
     const revoked = await fixture.single("owned", TEXT);
-    await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
+    await fixture.cloudrop.api.revokeUploads("u1");
     const done = await fixture.single("owned", TEXT);
     await fixture.send(done.put, hello);
     await complete(fixture, done.token);

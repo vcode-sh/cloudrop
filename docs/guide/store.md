@@ -856,7 +856,7 @@ file removed with `deleteFile` is `deleted`.
 
 ```ts
 // At sign-out, or when an account is suspended:
-const { data, error } = await cloudrop.api.revokeUploads({ owner: userId });
+const { data, error } = await cloudrop.api.revokeUploads(userId);
 // data.revoked: how many unfinished uploads were ended
 ```
 
@@ -1011,7 +1011,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `allFiles({ owner?, status?, route?, name?, type?, order?, limit?, cursor? })` | The files of every owner, in any status, a page at a time, for your admin tools ([above](#list-every-owners-files)). It crosses owners: call it behind your own admin check. |
 | `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
-| `revokeUploads({ owner })` | Ends the owner's unfinished uploads (above). |
+| `revokeUploads(owner)` | Ends the owner's unfinished uploads (above). |
 | `deleteFile(id, { context? })` | Deletes a completed file and answers `{ id, deleted, cleaned }` ([below](#what-deletefile-answers)): the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Idempotent. `NOT_FOUND` for a file that never completed, and for one whose completion is recorded while the call runs: that file stays completed, with its object, and a second call deletes it. The hook's own error when [`onDelete` refuses](#refuse-a-deletion). |
 | `eraseOwner(owner, { graceMs?, signal?, context? })` | Removes everything an owner uploaded, and reports `{ revoked, deleted, refused, cleaned, failed, waiting, done }`: when that is proven, and which files an `onDelete` refused ([above](#erase-an-owner)); `context` reaches each file's [`onDelete`](#ondelete). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |

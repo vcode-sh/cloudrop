@@ -110,7 +110,7 @@ describe("POST /complete with a store: once", () => {
   it("refuses a revoked upload and one whose row is missing, without touching storage", async () => {
     const { definition, runs } = counted();
     const { fixture, ticket } = await uploaded(definition);
-    await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
+    await fixture.cloudrop.api.revokeUploads("u1");
     // A server with the same secret but another database: the token verifies, the row is not there.
     const elsewhere = storeFixture({ files: definition }, { store: leaseStore() });
     const callsBefore = fixture.storageCalls.length;

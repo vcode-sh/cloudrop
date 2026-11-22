@@ -171,7 +171,7 @@ describe("api.sweep: cleanup", () => {
   it("removes a revoked upload's late PUTs until none can land, and only then marks it cleaned", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await fixture.single("owned", TEXT);
-    await fixture.cloudrop.api.revokeUploads({ owner: "u1" });
+    await fixture.cloudrop.api.revokeUploads("u1");
     await fixture.send(ticket.put, hello);
     const sweep = async () => (await fixture.cloudrop.api.sweep({ graceMs: 15 * 60_000 })).data?.cleaned;
     /** A sweep's count, then what the key holds and the row's status and cleaned_at after it. */

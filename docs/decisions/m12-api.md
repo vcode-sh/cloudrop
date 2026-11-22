@@ -34,3 +34,17 @@ Entries start from 1.
 - **Status:** in force.
 - **Visible in:** `src/server/api.ts`, `docs/guide/server.md` ("File API"), `docs/guide/store.md`,
   `docs/guide/errors.md`.
+
+### M12-A3: `revokeUploads` takes the owner itself
+
+- **Decision:** `api.revokeUploads(owner: string)`, like `usage(owner)` and `eraseOwner(owner)`. Anything but a valid
+  owner, 0.6's `{ owner }` included, answers `INVALID_INPUT` with `usage`'s message ("Pass the owner, a string of 1
+  to 255 characters ...") before the store is called. The old object form is not read as a fallback.
+- **Why:** spec 1.0 §6: one convention for the three calls that act on one owner. Refusing the old form, instead of
+  reading `.owner` from it, keeps one shape and tells a JavaScript caller that skipped the changelog what to pass;
+  silently revoking nothing would leave a signed-out user's uploads open.
+- **If wrong:** a JavaScript caller still on `{ owner }` gets `INVALID_INPUT` at sign-out, which the guides tell apps
+  to check; TypeScript names it at compile time.
+- **Status:** in force.
+- **Visible in:** `src/server/store-api.ts`, `src/server/store-api.test.ts`, `docs/guide/store.md`,
+  `docs/guide/resume.md`.

@@ -51,6 +51,9 @@ Every notable change to the `cloudrop` package. The format follows
   `api.deleteObject(key)`, `api.deleteObjects(keys)`, `api.copyObject(from, to)`, with the same answers. They never
   touch the store: with a store, delete an uploaded file with `api.deleteFile(id)`. The storage driver keeps `head`,
   `put`, `delete`, `deleteMany` and `copy` (`M12-A2`).
+- `revokeUploads` takes the owner itself. Before: `api.revokeUploads({ owner: userId })`. After:
+  `api.revokeUploads(userId)`, like `usage(owner)` and `eraseOwner(owner)`. The old form answers `INVALID_INPUT`
+  (`M12-A3`).
 
 ### Added
 

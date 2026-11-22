@@ -37,7 +37,7 @@ describe("cloudrop.api without a store", () => {
   const calls: [string, (api: StoreFileApi) => Promise<unknown>][] = [
     ["file", (api) => api.file("id")],
     ["usage", (api) => api.usage("u1")],
-    ["revokeUploads", (api) => api.revokeUploads({ owner: "u1" })],
+    ["revokeUploads", (api) => api.revokeUploads("u1")],
     ["files", (api) => api.files({ owner: "u1" })],
     ["allFiles", (api) => api.allFiles()],
     ["deleteFile", (api) => api.deleteFile("id")],
@@ -67,12 +67,15 @@ describe("cloudrop.api with a store", () => {
 
   it("revokeUploads ends the owner's unfinished uploads only, and answers how many", async () => {
     const { fixture, ticket } = await completed();
+    const { api } = fixture.cloudrop;
     const open = await fixture.single("owned", TEXT);
-    expect(await fixture.cloudrop.api.revokeUploads({ owner: "u1" })).toEqual({ data: { revoked: 1 }, error: null });
-    expect(await fixture.cloudrop.api.revokeUploads({ owner: "u1" })).toEqual({ data: { revoked: 0 }, error: null });
-    const statuses = Object.fromEntries((await fixture.store.raw.files()).map((row) => [row.id, row.status]));
-    expect(statuses).toEqual({ [ticket.id]: "completed", [open.id]: "aborted" });
-    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    // 0.6's { owner } is refused with usage's message and revokes nothing: the next call still finds the upload.
+    expect(await api.revokeUploads({ owner: "u1" } as never)).toEqual(await api.usage(""));
+    expect(await api.revokeUploads("u1")).toEqual({ data: { revoked: 1 }, error: null });
+    expect(await api.revokeUploads("u1")).toEqual({ data: { revoked: 0 }, error: null });
+    const statuses = await Promise.all([ticket.id, open.id].map(async (id) => (await api.file(id)).data?.status));
+    expect(statuses).toEqual(["completed", "aborted"]);
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
   });
 
   it("deleteFile ends a completed file, deletes its object and releases its bytes, and says which call deleted it", async () => {
@@ -229,7 +232,6 @@ describe("cloudrop.api with a store", () => {
   it.for([
     { name: "file with an empty id", call: (api: StoreFileApi) => api.file("") },
     { name: "usage with an owner over 255 characters", call: (api: StoreFileApi) => api.usage("x".repeat(256)) },
-    { name: "revokeUploads without an owner", call: (api: StoreFileApi) => api.revokeUploads({} as { owner: string }) },
     { name: "reconcile with an empty owner", call: (api: StoreFileApi) => api.reconcile({ owner: "" }) },
     // Postgres text cannot hold U+0000: the store would fail, and a retryable SERVER_ERROR would ask for retries.
     { name: "deleteFile with a NUL character in the id", call: (api: StoreFileApi) => api.deleteFile("f\u0000") },
@@ -250,7 +252,7 @@ describe("cloudrop.api with a store", () => {
     const [owner, id] = ["u\ud800", "f\udfff"];
     const answers = await Promise.all([
       api.usage(owner),
-      api.revokeUploads({ owner }),
+      api.revokeUploads(owner),
       api.eraseOwner(owner),
       api.reconcile({ owner }),
       api.files({ owner }),

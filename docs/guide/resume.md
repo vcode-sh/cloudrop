@@ -243,7 +243,7 @@ A tab closed while its `/abort` is on the way keeps the record, so the upload is
 harmless.
 `forget()` deletes every record of the namespace at once but sends no `/abort`: use it at sign-out, and `discard()` when
 the user drops an upload. With a database store, the uploads it forgets keep the bytes they reserved until their
-tokens expire and the sweep ends their rows: call `cloudrop.api.revokeUploads({ owner })` in your sign-out handler to
+tokens expire and the sweep ends their rows: call `cloudrop.api.revokeUploads(owner)` in your sign-out handler to
 free them at once.
 
 ## When persistence is off or unavailable

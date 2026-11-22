@@ -134,7 +134,7 @@ test("a revoke while a part is on its way stops the upload at its next call, and
 
   const uploaded = chaos.client().upload("files", file);
   await vi.waitFor(() => expect(chaos.bucketRequests()).toContain("PUT part 2 held"), { timeout: 10_000 });
-  expect(await chaos.api.revokeUploads({ owner: CHAOS_OWNER })).toEqual({ data: { revoked: 1 }, error: null });
+  expect(await chaos.api.revokeUploads(CHAOS_OWNER)).toEqual({ data: { revoked: 1 }, error: null });
   chaos.proxy.release();
   const { data, error } = await uploaded;
 
