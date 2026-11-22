@@ -145,11 +145,11 @@ Entries start from 1.
   just signed). As first decided, two such attempts in a row ended the file at once, not retryable; Firefox made that
   unsafe (`M12-R60`). Only on the XHR path: with a `fetch` option, or where there is no XMLHttpRequest, nothing
   changes. cloudrop's own stall abort and `ontimeout` are never counted, nor is an XHR whose `open()` or `send()`
-  throws, nor an empty body: a 0-byte file has no byte to report, so a bad signature or an expired URL on it would look blocked, and it
-  keeps the six attempts and `NETWORK_ERROR`. The code is in `ClientErrorCode`, so the server's status table cannot hold
-  it, and in `KEEPS_TICKET`: `retry()` after the rule is fixed sends only what had not landed. The message names the
-  CORS rule and `npx cloudrop doctor --origin <origin>`, and says that a firewall or extension, and a bad signature
-  in some browsers, look the same.
+  throws, nor an empty body: a 0-byte file has no byte to report, so a bad signature or an expired URL on it would look
+  blocked, and it keeps the six attempts and `NETWORK_ERROR`. The code is in `ClientErrorCode`, so the server's status
+  table cannot hold it, and in `KEEPS_TICKET`: `retry()` after the rule is fixed sends only what had not landed. The
+  message names the CORS rule and `npx cloudrop doctor --origin <origin>`, and says that a firewall or extension, a
+  connection that keeps dropping and a bad signature look the same in some browsers.
 - **Why:** spec 1.0 §2d. A missing or wrong CORS rule is the most common newcomer mistake, and it showed as a
   retryable `NETWORK_ERROR` after about 15 s. A rule that misses the origin or a signed header fails the preflight, so
   the body never leaves. Measured on R2 from Chromium 159 (`r2-spike-findings.md`, "Missing CORS origin and bad
@@ -158,13 +158,17 @@ Entries start from 1.
   14-byte body reported `upload.progress` of 14 before its `onerror`, so it keeps the old six attempts and
   `NETWORK_ERROR`. No condition on the time to the first failure is needed, so there is no `M12-E8`.
 - **False positives:** a firewall, proxy or extension that blocks only the storage host fires the rule, correctly:
-  retrying cannot help, and the message names that cause. A connection refused or reset before the first progress
-  event, twice in a row around a successful `/sign`, also fires it, while a later attempt might have passed: the
-  browser lane's reset rows (reset after 1 MiB) still end `NETWORK_ERROR` after six attempts, so Chromium reports
-  progress first there, but a bucket host that refuses connections outright looks like a blocked host. The example
-  lab's network-error faults report half the body as sent before the error, so they keep the six-attempt demo, and a
-  separate held fault, "Block every bucket PUT as a CORS rule that misses this page would", sends no byte and ends in
-  `BUCKET_BLOCKED` (coordinator's ruling, fix round 1).
+  retrying cannot help, and the message names that cause. Since `M12-R60` the rule fires only after the six attempts,
+  each blocked, so a transient failure gets the whole budget as anywhere, and the code is retryable with the ticket
+  kept. What still fires it, while a later retry might pass, is a failure every attempt reports without progress: a
+  bucket host that refuses connections outright, and in Firefox, which reports no upload progress for a body sent
+  quickly whose answer is an error, a connection that keeps dropping or a bad signature. The browser lane measured it
+  (`r2-spike-findings.md`, "Upload progress in Firefox and WebKit, 2026-11-22"): part 2 of a 20 MiB file, reset after
+  1 MiB of its 8 MiB body on every attempt, ends `BUCKET_BLOCKED` in Firefox and `NETWORK_ERROR` in Chromium and
+  WebKit, which report the first MiB; the lab's network-error faults report half the body as sent before the error, so
+  they keep `NETWORK_ERROR` everywhere. A separate held fault, "Block every bucket PUT as a CORS rule that misses this
+  page would", sends no byte and ends in `BUCKET_BLOCKED` after the six attempts (coordinator's ruling, fix round 1;
+  `M12-R60`).
 - **If wrong:** a page whose bucket is reachable but flaky in that way gets `BUCKET_BLOCKED` where `NETWORK_ERROR` was
   meant; since `M12-R60` it has had the same six attempts and stays retryable, with the same ticket. Measured on
   Firefox and WebKit on 2026-11-22 (`r2-spike-findings.md`, "Upload progress in Firefox and WebKit, 2026-11-22"):

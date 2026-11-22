@@ -195,8 +195,8 @@ Entries start from 1.
 ### M12-R24: the `BROWSER_STORAGE_ERROR` upgrade entry warns about exhaustive maps
 
 - **Decision:** the changelog's `BROWSER_STORAGE_ERROR` bullet says that an exhaustive `switch`, or a
-  `Record<CloudropErrorCode, string>`, must handle the new code, as the `BUCKET_BLOCKED` bullet does. As first written it
-  also named `Record<ClientErrorCode, string>`, a type no entry exports (amended by `M12-R64`).
+  `Record<CloudropErrorCode, string>`, must handle the new code, as the `BUCKET_BLOCKED` bullet does. As first written
+  it also named `Record<ClientErrorCode, string>`, a type no entry exports (amended by `M12-R64`).
 - **Why:** the code is a new member of both unions and breaks such a map at compile time (review R13 B6).
 - **If wrong:** nothing depends on the text.
 - **Status:** in force.
@@ -457,9 +457,12 @@ Entries start from 1.
   attempts. Any attempt with progress, a readable answer, a stall, an offline page or a failed `/sign` ends the file
   as before, with the last attempt's error (`NETWORK_ERROR` for an opaque one). `BUCKET_BLOCKED` is now
   `retryable: true` and stays in `KEEPS_TICKET`, so `retry()` reuses the ticket once the rule, the network or the
-  credentials are fixed. Its message names the CORS rule and `npx cloudrop doctor --origin <origin>`, and the
-  look-alikes: a firewall or extension, and a bad signature (wrong credentials, or the server's clock off), which some
-  browsers report the same way. It contains no URL.
+  credentials are fixed. Being retryable, a multipart `BUCKET_BLOCKED` file is now given up like a network failure
+  (`giveUp`, `M4-F1`): a failure of `upload()` and `pagehide` keep its resume record and send no `/abort`, where the
+  non-retryable code of `M12-E7` dropped the record and sent one. Its message names the CORS rule and `npx cloudrop
+  doctor --origin <origin>`, and the look-alikes: a firewall or extension, a connection that keeps dropping, and a bad
+  signature (wrong credentials, or the server's clock off), which some browsers report the same way. It contains no
+  URL.
 - **Why:** final review, finding 1 (controller's ruling, binding). Firefox reports no upload progress for a body sent
   quickly whose answer is an error, so the progress signal cannot tell a blocked request from a sent one. Measured
   (`r2-spike-findings.md`, "Upload progress in Firefox and WebKit, 2026-11-22"): under the two-attempt rule, Firefox 157
@@ -475,9 +478,11 @@ Entries start from 1.
   `onerror` without progress, six times) ends `BUCKET_BLOCKED`, retryable; silent failures with one attempt with
   progress between them, a readable `503` among them, a page offline at one attempt only, and a failed `/sign` end
   `NETWORK_ERROR`. Red on the old rule (six rows), green after; a fault probe that kept only the last attempt's mark
-  turned four `NETWORK_ERROR` rows red.
+  turned four `NETWORK_ERROR` rows red. `src/client/persist.test.ts` ("pagehide gives a BUCKET_BLOCKED file up without
+  an /abort"): the record stays and nothing is sent, red with `retryable: false`.
 - **Visible in:** `src/client/parts.ts`, `src/client/failures.ts`, `src/client/transport.ts`,
   `src/client/retry-step.ts`, `src/testing/fake-xhr.ts` (`lose()`), `src/client/bucket-blocked.test.ts`,
+  `src/client/persist.test.ts`, `docs/guide/resume.md`,
   `examples/next/app/bucket-faults.chaos.browser.test.ts`, `examples/next/app/lab-blocked.browser.test.ts`,
   `examples/next/app/lab/fault-panel.tsx`, `examples/next/README.md`, `docs/guide/errors.md`,
   `docs/guide/troubleshooting.md`, `docs/guide/react.md`, `docs/guide/client.md`, `docs/guide/bucket-setup.md`,
@@ -506,9 +511,10 @@ Entries start from 1.
 
 - **Decision:** the budget's gzip ceiling in `scripts/size-limit.config.ts` goes from 50 kB to 60 kB, and the
   changelog and the config comment give the sizes measured on this branch instead of Task 2's.
-- **Why:** final review, finding 6, and the owner's ruling. The measured size grew from 33.61 kB at Task 2 to 46.4 kB
-  at `b8491f4b`, 7 % under the old ceiling, against the 25 % headroom `M12-P1` meant; the published "33.61 kB instead
-  of 33.13 kB" was false by 13 kB.
+- **Why:** final review, finding 6, and the controller's ruling under the owner's standing policy that ceilings never
+  block work (`M12-P1`); the owner did not set this number. The measured size grew from 33.61 kB at Task 2 to 46.4 kB at
+  `b8491f4b`, 7 % under the old ceiling, against the 25 % headroom `M12-P1` meant; the published "33.61 kB instead of
+  33.13 kB" was false by 13 kB.
 - **If wrong:** a slow growth of the server-with-store bundle passes unnoticed longer; the release summary reports the
   measured size.
 - **Status:** in force.

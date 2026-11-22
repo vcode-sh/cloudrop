@@ -327,7 +327,7 @@ test("a 403 without CORS headers is opaque to the page: renewed, then sent again
 
 // A bucket whose CORS rule misses the page: the preflight fails, so no byte of the body leaves (spec 1.0 §2d, M12-E7).
 // The rule decides only after the whole budget, since Firefox reports a fast failed body the same way (M12-R60).
-test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED after six attempts, and Retry keeps its ticket", async ({
+test("a preflight the bucket refuses fails the file with BUCKET_BLOCKED after six attempts; Retry keeps it", async ({
   page,
   chaos,
 }, testInfo) => {
@@ -386,7 +386,7 @@ test("a single PUT whose answer was cut is sent again, and its 412 counts as sto
     ["PUT object", "reset"],
     ["PUT object", 412],
   ]);
-  // Unlike Chromium and Firefox, WebKit does not resend the first PUT itself: the client's second attempt meets reset 2.
+  // Unlike Chromium and Firefox, WebKit does not resend the first PUT itself: the client's next attempt meets reset 2.
   const unheard = browserName === "webkit" ? [["PUT single", "network error", "retry"]] : [];
   expect(await requestRows(page)).toEqual([
     ["/upload", "200", ""],

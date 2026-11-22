@@ -103,7 +103,7 @@ export default [
   },
   // Bundled and minified, what a server with a SQL store ships: createCloudrop and sqlStore (M12-S1). Measured
   // 2026-11-22: 33.61 kB when it was added, 46.4 kB at the end of the 1.0 branch, so the ceiling went from 50 to 60 kB
-  // (owner, M12-R62).
+  // (the controller's ruling under the owner's policy that ceilings never block work, M12-R62).
   {
     name: "cloudrop + adapters/sql (bundled)",
     path: [join(dist, "index.js"), join(dist, "adapters/sql.js")],

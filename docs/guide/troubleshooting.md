@@ -26,9 +26,9 @@ The client sees that on every attempt, around a URL your server renewed, and rep
 
 The same code comes from a firewall, proxy or browser extension that blocks the storage host while your server is
 reachable. In Firefox it also comes from a connection that keeps dropping and from a bad signature: Firefox reports no
-upload progress for a body sent quickly whose answer is an error, so wrong storage credentials or a server clock that is off
-look like a block there (Chromium and Safari report the body first, and end those with `NETWORK_ERROR`). When the rule
-checks out, check the credentials and the server's clock. A page that is offline gets `NETWORK_ERROR` instead.
+upload progress for a body sent quickly whose answer is an error, so wrong storage credentials or a server clock that is
+off look like a block there (Chromium and Safari report the body first, and end those with `NETWORK_ERROR`). When the
+rule checks out, check the credentials and the server's clock. A page that is offline gets `NETWORK_ERROR` instead.
 
 ## Every upload ends in NETWORK_ERROR
 

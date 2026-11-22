@@ -14,9 +14,10 @@ Entries start from 1.
   `cloudrop/adapters/prisma` 32 kB (16, 12.59), `cloudrop/testing` 30 kB (16, 14.17), `cloudrop/plugins` 9 kB (7, 6.46),
   `cloudrop (bundled)` 40 kB (36, 34.71), `cloudrop/client` 18 kB (15, 13.48), `cloudrop/react` 4 kB (3, 2.26). Two new
   budgets come with the store entry (`M12-S`): `cloudrop/store` summed 20 kB and `cloudrop + adapters/sql (bundled)`
-  50 kB, raised to 60 kB by the owner once it measured 46.4 kB (`M12-R62`). Each ceiling is about 25 % over the size the entry is expected to reach once the store's code moves behind the
-  store object. The size measured is still noted beside each budget, and the release summary reports the sizes measured
-  for 1.0.
+  50 kB, raised to 60 kB once it measured 46.4 kB, by the controller's ruling under the owner's standing policy that
+  ceilings never block work (`M12-R62`). Each ceiling is about 25 % over the size the entry is expected to reach once
+  the store's code moves behind the store object. The size measured is still noted beside each budget, and the release
+  summary reports the sizes measured for 1.0.
 - **Why:** the owner, 2026-11-22: raise the ceilings so they never block work. Since `M4-F24` a ceiling was meant as a
   guard against accidents, yet 0.4.0 and 0.6.0 each spent an owner decision on a raise (`M10-D10`, `M11-R100`,
   `M11-R220`). The store entry moves code between budgets (the adapters and `cloudrop/store` carry the store paths,

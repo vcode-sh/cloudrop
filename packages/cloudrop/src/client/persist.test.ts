@@ -8,9 +8,11 @@
 // answered and the requests the fixture saw. The fingerprint is hashed independently, with node:crypto.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCloudropClient } from "../client.ts";
 import { MiB } from "../rules.ts";
 import type { Fault } from "../testing/client-fixture.ts";
 import { errorResponse } from "../testing/fake-r2/responses.ts";
+import { fakeXhr } from "../testing/fake-xhr.ts";
 import { pageEvents } from "../testing/page-events.ts";
 import {
   edgeHash,
@@ -267,6 +269,31 @@ describe("the record and the lock go when the page gives the ticket up", () => {
       kept: { code: "UPLOAD_REJECTED", stored: [id], locks: [lockOf(id)] },
       sent: ["POST /abort"],
       stored: {},
+      locks: [],
+    });
+  });
+
+  it("pagehide gives a BUCKET_BLOCKED file up without an /abort: it is retryable, so its record stays", async () => {
+    const page = pageEvents();
+    const setup = persistFixture();
+    // A browser on the XHR path whose bucket refuses every PUT before a byte leaves, as a missed CORS rule does.
+    vi.stubGlobal("navigator", { locks: setup.locks.locks, onLine: true });
+    vi.stubGlobal("XMLHttpRequest", fakeXhr(setup.fixture.fetch, { end: (call) => call.fail() }).XMLHttpRequest);
+    vi.stubGlobal("fetch", setup.fixture.fetch);
+    const client = createCloudropClient({ basePath: setup.fixture.basePath });
+    const job = client.start("files", threeParts());
+    const { error } = await job.done;
+    await setup.drained();
+    const id = setup.issued[0]?.id;
+    const kept = { code: error?.code, stored: Object.keys(setup.db.stored()), locks: setup.locks.held() };
+    const sent = setup.from();
+    page.fire("pagehide");
+    await setup.drained();
+
+    expect({ kept, sent: sent(), stored: Object.keys(setup.db.stored()), locks: setup.locks.held() }).toEqual({
+      kept: { code: "BUCKET_BLOCKED", stored: [id], locks: [lockOf(id)] },
+      sent: [],
+      stored: [id],
       locks: [],
     });
   });

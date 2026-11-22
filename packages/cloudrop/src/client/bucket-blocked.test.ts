@@ -1,9 +1,9 @@
 // Contract: spec 1.0 §2d (M12-E7, M12-R40, M12-R60): in a browser on the XHR path, a single PUT or a part that used up
-// its six attempts fails with BUCKET_BLOCKED, retryable, when every attempt ended in XHR onerror without upload progress
-// while the page was online and a /sign of that part answered 2xx between attempts; any other mix ends NETWORK_ERROR as
-// before. Firefox reports no progress for a fast body whose answer is an error, so a dropped connection or a bad
-// signature looks blocked there, and the budget is never cut short. BUCKET_BLOCKED keeps the ticket, so retry() sends
-// only what had not landed.
+// its six attempts fails with BUCKET_BLOCKED, retryable, when every attempt ended in XHR onerror without upload
+// progress while the page was online and a /sign of that part answered 2xx between attempts; any other mix ends
+// NETWORK_ERROR as before. Firefox reports no progress for a fast body whose answer is an error, so a dropped
+// connection or a bad signature looks blocked there, and the budget is never cut short. BUCKET_BLOCKED keeps the
+// ticket, so retry() sends only what had not landed.
 // Oracle: the spec's conditions; the six attempts are MAX_ATTEMPTS (client/retry.ts); the Firefox pattern measured in
 // r2-spike-findings.md ("Upload progress in Firefox and WebKit, 2026-11-22"); the requests the fake XHR and the fixture
 // saw, in order.
@@ -112,7 +112,7 @@ describe("BUCKET_BLOCKED", () => {
     expect({ error: errorOf(job), log }).toEqual({ error: BLOCKED, log: SIX_PUTS });
   });
 
-  it("gives Firefox's silent failures of a body the bucket received all six attempts, then BUCKET_BLOCKED", async () => {
+  it("gives Firefox's silent failures of a body the bucket received six attempts, then BUCKET_BLOCKED", async () => {
     // Firefox shows a dropped connection and a bad signature this way; only the budget can tell them from a CORS miss.
     const { fixture, log, run } = setup();
     const job = await run(small(), lostSilently);
@@ -127,7 +127,7 @@ describe("BUCKET_BLOCKED", () => {
     const { run } = setup();
     const job = await run(small(), refused);
     expect(job.getSnapshot().files[0]?.error?.message).toBe(
-      "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a bad signature (wrong storage credentials, or the server's clock off) the same way too. Retry once it is fixed.",
+      "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a connection that keeps dropping, or a bad signature (wrong storage credentials, or the server's clock off), the same way too. Retry once it is fixed.",
     );
   });
 

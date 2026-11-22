@@ -154,11 +154,11 @@ the metadata can be read from it.
 - on `discard()` of its upload, once the server answered its `/abort` (see [Discard one upload](#discard-one-upload));
 - on `forget()`.
 
-Any other failed file keeps its record, such as one the network failed: a failure of `upload()` and `pagehide` give its
-ticket up without `/abort`, so a reload lists it and `resume()` sends only the parts the bucket lacks. So after a
-reload, the uploads left to resume are those that were still uploading, paused or failed for a reason a resume can
-fix. A file given up this way is not cancelled by a later `abort()` from the same page, which sends nothing: another
-tab may have resumed it.
+Any other failed file keeps its record, such as one the network failed or one that ended `BUCKET_BLOCKED`, which is
+retryable since 1.0 (`M12-R60`): a failure of `upload()` and `pagehide` give its ticket up without `/abort`, so a reload
+lists it and `resume()` sends only the parts the bucket lacks. So after a reload, the uploads left to resume are those
+that were still uploading, paused or failed for a reason a resume can fix. A file given up this way is not cancelled by
+a later `abort()` from the same page, which sends nothing: another tab may have resumed it.
 
 A delete issued just before the page unloads (a cancel, then the tab closes) may not commit, so the next page still
 lists that upload. Resuming it finds the upload gone when the `/abort` reached the server, and starts over with a new

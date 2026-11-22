@@ -213,12 +213,12 @@ The home page is what an app's upload UI looks like when it is built on the head
   Retry: every PUT of part 2 gets a network error (the client renews its URL once and makes 6 attempts, up to about 15 s
   of waits, then the file fails with `NETWORK_ERROR` and keeps its ticket); every bucket PUT is blocked before any byte
   leaves, as by a CORS rule that misses the page (the client renews the URL once and makes the same 6 attempts, then the
-  file fails with `BUCKET_BLOCKED`, retryable, and keeps its ticket, or, with fetch, with `NETWORK_ERROR`); and the lab answers
-  every bucket PUT with 400 in the bucket's place, sending nothing (the file fails at once with `UPLOAD_REJECTED`, which
-  needs a new ticket). A fourth holds every `/complete` answer: the lab forwards the request and the server finishes the
-  file, but the page hears nothing and shows the `/complete` in flight until the box is unticked; a reload before then
-  drops the answer unheard and leaves the file stored, for a resume to find. Each line on the page names the decision
-  behind the behaviour.
+  file fails with `BUCKET_BLOCKED`, retryable, and keeps its ticket, or, with fetch, with `NETWORK_ERROR`); and the lab
+  answers every bucket PUT with 400 in the bucket's place, sending nothing (the file fails at once with
+  `UPLOAD_REJECTED`, which needs a new ticket). A fourth holds every `/complete` answer: the lab forwards the request
+  and the server finishes the file, but the page hears nothing and shows the `/complete` in flight until the box is
+  unticked; a reload before then drops the answer unheard and leaves the file stored, for a resume to find. Each line on
+  the page names the decision behind the behaviour.
 - **Requests:** one row per request in the order they started (`/upload`, `/sign`, `PUT single`, `PUT part n`,
   `/complete`, `/abort`), with its status, time, body size, a note for retries, renewals, PUTs resumed after a pause, an
   `/upload` for a new ticket, a `412` PUT whose object was already stored, a resume's first `/complete` and the `/sign`
@@ -284,11 +284,11 @@ user's usage grows by the file's size once, and `onComplete` recorded it once. A
 `QUOTA_EXCEEDED` after `/upload` alone, and the usage does not change. `app/upload.store.browser.test.ts`, in the same
 pass, leaves a 20 MiB upload unfinished on the home page, whose reserved bytes then show in the usage, and **Discard**
 frees them: the usage equals what it was before, and focus is on the drop zone. The first pass runs every other file on
-the stateless example. The same pass runs `app/bucket-faults.chaos.browser.test.ts` and `app/lab-blocked.browser.test.ts`
-on Firefox and WebKit too, since how an engine reports upload progress decides between `BUCKET_BLOCKED` and
-`NETWORK_ERROR` (`M12-R60`, `M12-R61`); the row that throttles through Chromium's DevTools protocol (tagged `@cdp`) runs
-on Chromium alone. Run them from the repository root; install the browsers once from this directory with `bunx
-playwright install --only-shell chromium` and `bunx playwright install firefox webkit`.
+the stateless example. The same pass runs `app/bucket-faults.chaos.browser.test.ts` and
+`app/lab-blocked.browser.test.ts` on Firefox and WebKit too, since how an engine reports upload progress decides between
+`BUCKET_BLOCKED` and `NETWORK_ERROR` (`M12-R60`, `M12-R61`); the row that throttles through Chromium's DevTools protocol
+(tagged `@cdp`) runs on Chromium alone. Run them from the repository root; install the browsers once from this directory
+with `bunx playwright install --only-shell chromium` and `bunx playwright install firefox webkit`.
 
 - `bun run test:browser` starts its own RustFS container (port 19100, `CLOUDROP_RUSTFS_PORT` changes it), builds and
   serves this example on port 5173 once per pass, and removes the container and the store pass's database afterwards.

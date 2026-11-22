@@ -112,7 +112,7 @@ export const bucketUnreachable = (): CloudropError =>
 export const bucketBlocked = (): CloudropError =>
   new CloudropError(
     "BUCKET_BLOCKED",
-    "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a bad signature (wrong storage credentials, or the server's clock off) the same way too. Retry once it is fixed.",
+    "The browser blocked every attempt to send the file to the storage service, while the upload server answers. The usual cause is the bucket's CORS rule: it must allow PUT from this page's origin with the headers cloudrop signs (run npx cloudrop doctor --origin <this origin>). A firewall or browser extension can block it the same way, and some browsers report a connection that keeps dropping, or a bad signature (wrong storage credentials, or the server's clock off), the same way too. Retry once it is fixed.",
     { retryable: true },
   );
 

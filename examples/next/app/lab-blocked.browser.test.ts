@@ -1,7 +1,7 @@
 // The lab's "blocked as by a CORS rule" fault in a real browser against a real S3 API, run by scripts/test-browser.sh
-// (RustFS) or scripts/test-browser-live.ts (R2), in Chromium, Firefox and WebKit. The lab fails each PUT before any byte
-// leaves, as a preflight the bucket's rule refuses would. The oracle is spec 1.0 §2d (M12-E7, M12-R60): six attempts
-// around one renewal, then BUCKET_BLOCKED, retryable, and a Retry on the same ticket.
+// (RustFS) or scripts/test-browser-live.ts (R2), in Chromium, Firefox and WebKit. The lab fails each PUT before any
+// byte leaves, as a preflight the bucket's rule refuses would. The oracle is spec 1.0 §2d (M12-E7, M12-R60): six
+// attempts around one renewal, then BUCKET_BLOCKED, retryable, and a Retry on the same ticket.
 import { expect, test } from "@playwright/test";
 import { fileRows, requestRows, signIn } from "./lab-page";
 

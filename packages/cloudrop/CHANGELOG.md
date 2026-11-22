@@ -45,8 +45,9 @@ Every notable change to the `cloudrop` package. The format follows
 - `FilesPage` is typed by its records. Before: `FilesPage` with `items: FileRecord[]`. After:
   `FilesPage<CompletedRecord<R>>` from `api.files` and `FilesPage<RecordOf<S, R>>` from `api.allFiles({ status })`;
   plain `FilesPage` still means every status (`M12-T4`).
-- The row status type is `FileRecordStatus`. Before: `import type { FileStatus } from "cloudrop"`. After: `import type { FileRecordStatus } from "cloudrop"`. `FileStatus` from `cloudrop/client`,
-  a file's state in an upload job, keeps its name (`M12-A1`).
+- The row status type is `FileRecordStatus`. Before: `import type { FileStatus } from "cloudrop"`. After:
+  `import type { FileRecordStatus } from "cloudrop"`. `FileStatus` from `cloudrop/client`, a file's state in an upload
+  job, keeps its name (`M12-A1`).
 - The `api` calls by key end in `Object`. Before: `api.head(key)`, `api.put(key, body, options)`, `api.delete(key)`,
   `api.deleteMany(keys)`, `api.copy(from, to)`. After: `api.headObject(key)`, `api.putObject(key, body, options)`,
   `api.deleteObject(key)`, `api.deleteObjects(keys)`, `api.copyObject(from, to)`, with the same answers. They never
@@ -152,7 +153,8 @@ Every notable change to the `cloudrop` package. The format follows
   CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
   `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, when all six `PUT` attempts failed before
   the browser reported a byte sent, around a `/sign` that answered, the file ends with
-  `error.code === "BUCKET_BLOCKED"`, still retryable, after the same retries; `retry()` keeps the ticket. In Firefox
+  `error.code === "BUCKET_BLOCKED"`, still retryable, after the same retries; `retry()` keeps the ticket, and a
+  multipart file keeps its resume record at a failed `upload()` or `pagehide`, sending no `/abort`. In Firefox
   a file whose connection keeps dropping, or whose signature is bad, ends the same way, since Firefox reports
   no progress for a fast body whose answer is an error; the message names those causes too. Code that maps every code
   in an exhaustive `switch` or a `Record<CloudropErrorCode, string>` handles the new code. With a `fetch` option and
@@ -206,7 +208,7 @@ Every notable change to the `cloudrop` package. The format follows
   client drops a kind it does not know, and an older client ignores it (`M12-E6`).
 - The client error code `BUCKET_BLOCKED`, retryable, when the browser reports no byte sent to the bucket on any
   attempt: its message names the bucket's CORS rule and `npx cloudrop doctor --origin <origin>`, and the look-alikes, a
-  firewall or extension and a bad signature (`M12-E7`, `M12-R60`).
+  firewall or extension, a connection that keeps dropping and a bad signature (`M12-E7`, `M12-R60`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
