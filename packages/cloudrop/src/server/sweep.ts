@@ -76,6 +76,8 @@ async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<void> {
 async function eraseEach({ config, store, report, run }: Sweeper, owners: readonly string[]): Promise<void> {
   const { graceMs, signal, context } = run;
   for (const owner of owners) {
+    // Stopped: the owners left on this page stay marked, and the next sweep that starts over runs them.
+    if (signal?.aborted) return;
     report.erasing += 1;
     const erased = await eraseRun(config, store, owner, { graceMs, signal, context });
     if (erased.error) {

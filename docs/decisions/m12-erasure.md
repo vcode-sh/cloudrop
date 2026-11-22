@@ -19,8 +19,9 @@ Entries start from 1.
   limit })` pages the marked, unfinished owners by keyset in byte order, as `owners` does, through one shared
   statement in `src/store/sql/reads.ts`. `OwnerUsage` gains `erasure: { requestedAt, erasedAt } | null`, which
   `api.usage` answers; `EraseReport` gains `requestedAt`. `checkSchema` requires both columns; a usage table without
-  them fails the first call with `INVALID_CONFIG` naming the missing column and the exact `ALTER TABLE` and
-  `CREATE INDEX` for the dialect and the configured names (`eraseMarkUpgrade` in `src/store/sql/tables.ts`). The
+  them fails the first call with `INVALID_CONFIG` naming the missing column and the exact `ALTER TABLE` for the
+  columns it lacks, then the `CREATE INDEX`, for the dialect and the configured names (`eraseMarkUpgrade` in
+  `src/store/sql/tables.ts`). The
   Drizzle tables declare the columns and the index; the Prisma models declare the columns only, and the guide adds
   the index with `--create-only`, as for the CHECKs. `createCloudrop` refuses a store without the four methods.
 - **Why:** spec 1.0 §4. The pilot kept a marker table of its own and compared a usage watermark across two
@@ -81,20 +82,25 @@ Entries start from 1.
 - **Decision:** `createCloudrop({ erase: { prefixes: (owner) => readonly string[] } })` (`EraseSettings`), with a store
   only (`INVALID_CONFIG` without one, or when `prefixes` is not a function). Each run calls it first, before the mark,
   and refuses the whole call with `INVALID_CONFIG` unless every answer is a string ending in `/` with the owner, raw or
-  `encodeURIComponent`-encoded, as one whole `/` segment, compared in NFC; a throw is `INVALID_CONFIG` with it as the
-  cause. Once the row passes report nothing failed and nothing waiting, the folders are emptied in order with the
+  `encodeURIComponent`-encoded, as one whole `/` segment, compared in NFC, and that some key can start with:
+  `keyProblem` of its NFC form is null, the rule `deletePrefix` applies (no leading slash, no `.` or `..` segment, no
+  control character, at most 1024 bytes); a throw is `INVALID_CONFIG` with it as the cause. An owner whose erasure
+  already finished answers done even when `erase.prefixes` fails now: the mark is read only on that error path. Once the row passes report nothing failed and nothing waiting, the folders are emptied in order with the
   `deletePrefix` of `api.deletePrefix`; `prefixed` counts the objects deleted, and a folder that fails is logged and
   counted in `failed`, so the run is not done. Only then is `erased_at` set.
 - **Why:** spec §4: the pilot emptied one folder per use case with its own `deletePrefix` loop. A segment rule makes a
   mistake such as `() => ["avatars/"]` fail loudly instead of emptying every owner's files; `exports/u10/` is not
   `u1`'s. Prefixes go last, so a folder is not emptied while a file of the owner's may still complete into it, and
-  checked first, so a misconfigured app marks nobody.
+  checked first, so a misconfigured app marks nobody. Review of the first version found a prefix that holds the owner
+  but that no key can start with (a leading slash, an owner `..`) passed the check, marked the owner and then failed
+  every run, so `erased_at` was never set; the key rules close that.
 - **If wrong:** a key layout that puts the owner inside a segment (`user-42/`) cannot use `prefixes` and erases those
   folders itself. `deletePrefix` lists objects only: an untracked multipart upload under a prefix is the lifecycle
   rule's to abort, as the guide says.
 - **Status:** in force. `src/server/erase-mark.test.ts`: the folder stays until the rows are done, then goes, and
-  another owner's stays (fault probe: emptied before the rows were done, seen failing); the encoded owner; the three
-  unsafe prefixes (fault probe: the rule always passing, seen failing).
+  another owner's stays (fault probe: emptied before the rows were done, seen failing); the encoded owner; the seven
+  unsafe prefixes (fault probe: the rule always passing, seen failing; the four key-rule rows failed before the fix);
+  an erased owner answers done while `erase.prefixes` throws (failed before the fix).
 - **Visible in:** `src/server/erase.ts`, `src/server/store-config.ts`, `docs/guide/store.md#folders-no-row-tracks-eraseprefixes`.
 
 ### M12-O4: the sweep carries every unfinished erasure on
@@ -103,7 +109,8 @@ Entries start from 1.
   owner, each owner counting as one row of `limit`, and runs the same erasure as `eraseOwner` for each, with the
   sweep's `graceMs`, `signal` and `context`. `SweepReport` gains `erasing` (owners it ran) and `erased` (owners it
   finished); an owner whose run answers an error is logged and counted in `failed`, and the files a run counts in
-  `failed` are added there. The sweep cursor names the pass, `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6
+  `failed` are added there. Once the signal aborts, the pass starts no further owner; those left on the page stay
+  marked for the next sweep that starts over. The sweep cursor names the pass, `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6
   stay valid. `SweepOptions<TErased>` is a type alias with `ContextOption<TErased>`, and `api.sweep` takes its options
   as `eraseOwner` does: required when the routes' `onDelete` declare an erased context that does not admit
   `undefined`, so a file the sweep deletes never reaches an `onDelete` without the context its type promises
@@ -127,7 +134,10 @@ Entries start from 1.
   new `requestedAt`, so a run that began before the reopen cannot finish the new mark (`erased` is guarded on it).
 - **Why:** spec §4.6: an owner id used again, or an erasure started by mistake.
 - **If wrong:** an app that reopens an owner whose account is still gone lets uploads of that id back in; the
-  anti-join of the guide finds them again.
+  anti-join of the guide finds them again. A run already under way at the reopen, an `eraseOwner` or a sweep's, is not
+  stopped: it keeps deleting the owner's completed files it reads, which can include one uploaded after the reopen,
+  and only `erased`'s guard on `requestedAt` keeps it from recording the erasure as finished. The guide says to reopen
+  when no run for that owner is under way.
 - **Status:** in force. `src/server/erase-mark.test.ts` (an upload refused, reopened, then accepted; a second reopen
   answers false); store contract row "reopen clears the mark and keeps the counters, and reserve reserves again".
 - **Visible in:** `src/server/store-api.ts`, `docs/guide/store.md#erasing-an-owner`.

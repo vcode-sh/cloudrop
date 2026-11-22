@@ -537,8 +537,9 @@ which prints the SQL below for your dialect and table names. Add them before you
   `prisma migrate dev --create-only`, add the `CREATE INDEX` line above to the generated `migration.sql`, then apply
   it with `prisma migrate dev`.
 
-Adding nullable columns rewrites no row on Postgres or SQLite. On a large Postgres table, build the index first with
-`CREATE INDEX CONCURRENTLY`, as [Upgrading from 0.5](#upgrading-from-05) shows. A store you wrote yourself needs
+Adding nullable columns rewrites no row on Postgres or SQLite, and is quick. On a large Postgres table, add the two
+columns first, then build the index by hand with `CREATE INDEX CONCURRENTLY` before the migration's `CREATE INDEX`
+(made `IF NOT EXISTS`) runs, as [Upgrading from 0.5](#upgrading-from-05) shows: the index needs the columns. A store you wrote yourself needs
 the four new methods `markErasure`, `erased`, `reopen` and `erasing`, and `reserve`'s new `"erased"` answer, before
 `createCloudrop` accepts it.
 
@@ -1044,7 +1045,7 @@ A report counts files, and a file can count twice: one deleted in this run is in
 | `failed` | Files this run could not handle, and folders it could not empty; each is logged. | After a storage or database error, not known: the object may still be there. A file whose `onDelete` threw is still completed, with its object, and counts in `waiting` too. |
 | `waiting` | Files not proven gone yet. | **Still there** for a file that is still live: a completed file its `onDelete` kept, or a completion under way. **Removed, but not for good** for an ended upload whose URLs, or the grace after them, have not run out: this run removed its object, a `PUT` already signed can still put one back, and a later run checks the key again. |
 | `prefixed` | Objects deleted from the `erase.prefixes` folders, which run only once nothing else is left. | Nothing under those folders. |
-| `done` | The erasure is finished, by this run or an earlier one. | Nothing of the owner's uploads or folders, and nothing can arrive any more. |
+| `done` | The erasure is finished, by this run or an earlier one. | Nothing of the owner's uploads or folders, and no upload of theirs can arrive any more. The mark refuses uploads only: an object your own code writes into one of the folders afterwards, such as with `api.putObject`, stays until you delete it. |
 
 - **It needs the sweep for a stuck completion.** `eraseOwner` never ends a completion that is under way, since it may
   still record the file; one whose server died in the middle of `/complete` stays `completing` until the sweep ends
@@ -1061,7 +1062,10 @@ A report counts files, and a file can count twice: one deleted in this run is in
 - **`api.usage(owner)`** answers the mark as `erasure: { requestedAt, erasedAt }`, null for an owner not being erased.
 - **`api.reopenOwner(owner)`** clears the mark, for an owner id used again or an erasure started by mistake, and
   answers `{ reopened }`, false when there was no mark. The owner's uploads are accepted again and the sweep stops
-  erasing them. What was deleted stays deleted; the rows stay as they are.
+  erasing them. What was deleted stays deleted; the rows stay as they are. A run already under way when you reopen,
+  an `eraseOwner` or a sweep's, goes on to its end: it keeps deleting the owner's completed files it reads, which can
+  include one uploaded after the reopen, but it cannot record the erasure as finished, as it finishes only the mark it
+  started with. Reopen when no run for that owner is under way.
 - The usage row stays, at zeros and with its mark: never delete it. The rows stay too, as `deleted` and the other ended
   statuses, which name the file (`name`, `key`); once `done`, delete them with your own SQL if your erasure policy
   requires it.

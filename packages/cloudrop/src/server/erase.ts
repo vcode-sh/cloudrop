@@ -6,6 +6,7 @@
 
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
+import { keyProblem } from "../storage/validate.ts";
 import { deletePrefix } from "./api.ts";
 import type { ServerConfig } from "./config.ts";
 import type { ContextOption } from "./delete-context.ts";
@@ -106,6 +107,16 @@ function ownsPrefix(prefix: unknown, owner: string): prefix is string {
 const PREFIX_RULE =
   'It must answer a list of folders that end in "/" and each have the owner, as it is or URI-encoded, as one whole segment between slashes, such as "exports/<owner>/", so that no prefix reaches another owner\'s files.';
 
+/**
+ * Why `erase.prefixes` must not answer `prefix`, or null when it may: it must hold the owner as a segment, and be a
+ * prefix some key can start with, or deletePrefix would refuse it on every run and the erasure would never finish.
+ */
+function prefixProblem(prefix: unknown, owner: string): string | null {
+  if (!ownsPrefix(prefix, owner)) return PREFIX_RULE;
+  const problem = keyProblem(prefix.normalize("NFC"));
+  return problem === null ? null : `No key can start with it: ${problem}`;
+}
+
 /** `erase.prefixes(owner)`, each checked before any is emptied. */
 function readPrefixes(config: ServerConfig, owner: string): Result<readonly string[]> {
   if (!config.erasePrefixes) return ok([]);
@@ -116,10 +127,13 @@ function readPrefixes(config: ServerConfig, owner: string): Result<readonly stri
     return fail(new CloudropError("INVALID_CONFIG", "erase.prefixes threw; its cause says why. Fix it.", { cause }));
   }
   if (!Array.isArray(prefixes)) return fail(configError(`erase.prefixes answered no list. ${PREFIX_RULE}`));
-  const unsafe = prefixes.findIndex((prefix) => !ownsPrefix(prefix, owner));
-  if (unsafe === -1) return ok(prefixes);
-  const shown: unknown = prefixes[unsafe];
-  return fail(configError(`erase.prefixes answered ${JSON.stringify(shown) ?? String(shown)}. ${PREFIX_RULE}`));
+  for (const prefix of prefixes as unknown[]) {
+    const problem = prefixProblem(prefix, owner);
+    if (problem !== null) {
+      return fail(configError(`erase.prefixes answered ${JSON.stringify(prefix) ?? String(prefix)}. ${problem}`));
+    }
+  }
+  return ok(prefixes);
 }
 
 /** Empties each prefix in turn, counting what it deleted; a folder that fails is logged and counted in `failed`. */
@@ -137,6 +151,34 @@ async function emptyPrefixes({ config, signal, report }: Eraser, prefixes: reado
   return report.failed === 0;
 }
 
+const emptyReport = (requestedAt: Date, done: boolean): EraseReport => ({
+  requestedAt,
+  revoked: 0,
+  deleted: 0,
+  refused: 0,
+  cleaned: 0,
+  failed: 0,
+  waiting: 0,
+  prefixed: 0,
+  done,
+});
+
+/**
+ * `erase.prefixes` is broken now. An owner whose erasure finished before still answers done: their folders were
+ * emptied then, and nothing of theirs can be stored since. Any other owner gets the configuration error, and is not
+ * marked. A failed read of the mark answers that error too.
+ */
+async function finishedBefore(
+  config: ServerConfig,
+  store: CloudropStore<unknown>,
+  owner: string,
+  problem: CloudropError,
+): Promise<Result<EraseReport>> {
+  const usage = await storeCall(config.logger, `read the usage of ${owner}`, () => store.usage(owner));
+  const erasure = usage.data?.erasure;
+  return erasure?.erasedAt ? ok(emptyReport(erasure.requestedAt, true)) : fail(problem);
+}
+
 /**
  * One run for an owner the options were read for: also the sweep's, for each marked owner (M12-O4). The mark comes
  * first. Every reserve of the owner either committed before it, and the row passes see its rows, or reads it and
@@ -149,14 +191,13 @@ export async function eraseRun(
   run: Run,
 ): Promise<Result<EraseReport>> {
   const prefixes = readPrefixes(config, owner);
-  if (prefixes.error) return prefixes;
+  if (prefixes.error) return finishedBefore(config, store, owner, prefixes.error);
   const marked = await storeCall(config.logger, `mark ${owner} for erasure`, () =>
     store.markErasure({ owner, now: new Date() }),
   );
   if (marked.error) return marked;
   const { requestedAt, erasedAt } = marked.data;
-  const counts = { revoked: 0, deleted: 0, refused: 0, cleaned: 0, failed: 0, waiting: 0, prefixed: 0 };
-  const report: EraseReport = { requestedAt, ...counts, done: erasedAt !== null };
+  const report = emptyReport(requestedAt, erasedAt !== null);
   if (report.done || run.signal?.aborted) return ok(report);
   const startedAt = Date.now();
   const revoked = await storeCall(config.logger, `revoke the uploads of ${owner}`, () =>

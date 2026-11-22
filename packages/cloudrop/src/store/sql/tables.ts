@@ -78,24 +78,30 @@ async function findMissing(missing: MissingRead, table: string, columns: readonl
   return null;
 }
 
-/** The SQL that adds the erase mark to a usage table of 0.6 or earlier, for this dialect and these names. */
-export function eraseMarkUpgrade(dialect: SqlDialect, names: TableNames): string {
+/**
+ * The SQL that adds the erase mark to a usage table of 0.6 or earlier, for this dialect and these names: the `columns`
+ * it lacks, then the index, which cannot exist while either is missing.
+ */
+export function eraseMarkUpgrade(dialect: SqlDialect, names: TableNames, columns: readonly string[]): string {
   const usage = quoteTables(names).usage;
   const index = `CREATE INDEX "${names.usage}_erasing_idx" ON ${usage} (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;`;
   // SQLite adds one column per statement.
-  const columns =
+  const added =
     dialect === "postgres"
-      ? `ALTER TABLE ${usage} ADD COLUMN erase_requested_at timestamptz(3), ADD COLUMN erased_at timestamptz(3);`
-      : `ALTER TABLE ${usage} ADD COLUMN erase_requested_at INTEGER; ALTER TABLE ${usage} ADD COLUMN erased_at INTEGER;`;
-  return `${columns} ${index}`;
+      ? `ALTER TABLE ${usage} ${columns.map((column) => `ADD COLUMN ${column} timestamptz(3)`).join(", ")};`
+      : columns.map((column) => `ALTER TABLE ${usage} ADD COLUMN ${column} INTEGER;`).join(" ");
+  return `${added} ${index}`;
 }
 
 /** What to do about the first missing piece: the upgrade's SQL for the erase mark, else the tables from the docs. */
-function remedy(dialect: SqlDialect, names: TableNames, table: string, found: string): string {
+async function remedy(dialect: SqlDialect, names: TableNames, missing: MissingRead, table: string, found: string) {
   const eraseMark =
     table === quoteTables(names).usage && ERASE_COLUMNS.some((column) => found.endsWith(`"${column}".`));
   if (!eraseMark) return "Create the store's tables as the cloudrop docs show, or pass their names in { tables }.";
-  return `cloudrop 1.0 keeps an owner's erase mark in that table. Run, in a migration: ${eraseMarkUpgrade(dialect, names)}`;
+  const absent: string[] = [];
+  for (const column of ERASE_COLUMNS) if ((await missing(table, column)) !== null) absent.push(column);
+  const upgrade = eraseMarkUpgrade(dialect, names, absent);
+  return `cloudrop 1.0 keeps an owner's erase mark in that table. Run, in a migration: ${upgrade}`;
 }
 
 /**
@@ -130,6 +136,7 @@ export async function checkSchema(executor: Reader, names: TableNames): Promise<
     const found = await findMissing(missing, table, columns);
     // Nothing is missing any more: the schema was fixed between the two reads, and the next call passes.
     if (found === null) throw cause;
-    throw new CloudropError("INVALID_CONFIG", `${found} ${remedy(executor.dialect, names, table, found)}`, { cause });
+    const fix = await remedy(executor.dialect, names, missing, table, found);
+    throw new CloudropError("INVALID_CONFIG", `${found} ${fix}`, { cause });
   }
 }

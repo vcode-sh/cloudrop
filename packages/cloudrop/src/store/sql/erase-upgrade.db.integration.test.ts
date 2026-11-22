@@ -72,4 +72,16 @@ describe("SQLite, a usage table from 0.6 with its own name", () => {
       [{ name: "sqlite_autoindex_upload_usage_1" }, { name: "upload_usage_erasing_idx" }],
     );
   });
+
+  // A migration that stopped half way: only the missing column is added, so the printed SQL runs without an error.
+  test("a table with one of the two columns gets only the other", async () => {
+    await db.createTables();
+    await db.query('DROP INDEX "cloudrop_usage_erasing_idx"');
+    await db.query("ALTER TABLE cloudrop_usage DROP COLUMN erased_at");
+    await upgradesWith(
+      db,
+      sqlStore(sqliteExecutor(db.database)),
+      'The table "cloudrop_usage" has no column "erased_at". cloudrop 1.0 keeps an owner\'s erase mark in that table. Run, in a migration: ALTER TABLE "cloudrop_usage" ADD COLUMN erased_at INTEGER; CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;',
+    );
+  });
 });

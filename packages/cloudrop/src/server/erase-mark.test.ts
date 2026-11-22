@@ -131,21 +131,68 @@ describe("eraseOwner's prefixes", () => {
     expect(await keys(fixture)).toEqual([]);
   });
 
+  it("answers done for an owner already erased even when erase.prefixes now throws", async () => {
+    let broken = false;
+    const prefixes = (owner: string) => {
+      if (broken) throw new Error("the export folder setting is gone");
+      return [`exports/${owner}/`];
+    };
+    const fixture = storeFixture({ owned }, { erase: { prefixes } });
+    const { api } = fixture.cloudrop;
+    expect((await api.eraseOwner("u1")).data?.done).toBe(true);
+    broken = true;
+    expect((await api.eraseOwner("u1")).data).toMatchObject({ requestedAt: NOW, done: true });
+    // An owner not erased yet is refused, and not marked.
+    expect((await api.eraseOwner("u2")).error).toMatchObject({
+      code: "INVALID_CONFIG",
+      message: "erase.prefixes threw; its cause says why. Fix it.",
+    });
+    expect((await api.usage("u2")).data?.erasure).toBeNull();
+  });
+
+  const RULE =
+    'It must answer a list of folders that end in "/" and each have the owner, as it is or URI-encoded, as one whole segment between slashes, such as "exports/<owner>/", so that no prefix reaches another owner\'s files.';
+  const long = "é".repeat(255);
   it.for([
-    { name: "a folder without the owner", prefix: "avatars/" },
-    { name: "the owner inside a longer segment", prefix: "exports/u10/" },
-    { name: "no trailing slash", prefix: "exports/u1" },
-  ])("refuses $name with INVALID_CONFIG, before it marks the owner", async ({ prefix }) => {
+    { name: "a folder without the owner", owner: "u1", prefix: "avatars/", why: RULE },
+    { name: "the owner inside a longer segment", owner: "u1", prefix: "exports/u10/", why: RULE },
+    { name: "no trailing slash", owner: "u1", prefix: "exports/u1", why: RULE },
+    // The rows below hold the owner as a segment, but no key can start with them, so deletePrefix never empties them.
+    {
+      name: "a leading slash",
+      owner: "u1",
+      prefix: "/u1/",
+      why: "No key can start with it: The object key starts with a slash. Remove the leading slash.",
+    },
+    {
+      name: "an owner that is a dot segment",
+      owner: "..",
+      prefix: "exports/../",
+      why: "No key can start with it: The object key contains a '.' or '..' segment. Use plain path segments.",
+    },
+    {
+      name: "a control character",
+      owner: "u\u00011",
+      prefix: "exports/u\u00011/",
+      why: "No key can start with it: The object key contains control characters. Remove them.",
+    },
+    {
+      name: "more than 1024 bytes",
+      owner: long,
+      prefix: `${"x".repeat(600)}/${long}/`,
+      why: "No key can start with it: The object key is longer than 1024 bytes. Use a shorter key.",
+    },
+  ])("refuses $name with INVALID_CONFIG, before it marks the owner", async ({ owner, prefix, why }) => {
     const fixture = storeFixture({ owned }, { erase: { prefixes: () => [prefix] } });
     const { api } = fixture.cloudrop;
-    expect(await api.eraseOwner("u1")).toEqual({
+    expect(await api.eraseOwner(owner)).toEqual({
       data: null,
       error: expect.objectContaining({
         code: "INVALID_CONFIG",
-        message: `erase.prefixes answered ${JSON.stringify(prefix)}. It must answer a list of folders that end in "/" and each have the owner, as it is or URI-encoded, as one whole segment between slashes, such as "exports/<owner>/", so that no prefix reaches another owner's files.`,
+        message: `erase.prefixes answered ${JSON.stringify(prefix)}. ${why}`,
       }),
     });
-    expect((await api.usage("u1")).data?.erasure).toBeNull();
+    expect((await api.usage(owner)).data?.erasure).toBeNull();
   });
 
   it.for([
@@ -166,18 +213,58 @@ describe("eraseOwner's prefixes", () => {
 });
 
 describe("the sweep's erase pass", () => {
-  it("finishes an erasure its call stopped, with the sweep's grace", async () => {
-    const fixture = storeFixture({ owned });
-    const ticket = await completed(fixture);
+  it("finishes an erasure its call stopped after the first file, with the sweep's grace", async () => {
+    const base = memoryStore();
+    const controller = new AbortController();
+    const fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...base,
+          // The signal aborts as the run records its first deletion; the run handles no file after it.
+          end: async (...call) => {
+            const ended = await base.end(...call);
+            controller.abort();
+            return ended;
+          },
+        },
+      },
+    );
+    const tickets = [await completed(fixture), await completed(fixture)];
     const { api } = fixture.cloudrop;
-    // Stopped before its first file: the mark is set, nothing else is done.
-    expect((await api.eraseOwner("u1", { signal: AbortSignal.abort() })).data).toMatchObject({ done: false });
+    const stopped = await api.eraseOwner("u1", { signal: controller.signal });
+    expect(stopped.data).toMatchObject({ deleted: 1, done: false });
     at(2 * HOUR);
     expect((await api.sweep()).data).toMatchObject({ erasing: 1, erased: 1, failed: 0, cursor: null });
-    expect((await fixture.storage.head(ticket.key)).data).toBeNull();
+    const left = await Promise.all(tickets.map(async (ticket) => (await fixture.storage.head(ticket.key)).data));
+    expect(left).toEqual([null, null]);
     expect((await api.usage("u1")).data?.erasure).toEqual({ requestedAt: NOW, erasedAt: time(2 * HOUR) });
     // Finished: the next sweep has nobody to erase.
     expect((await api.sweep()).data).toMatchObject({ erasing: 0, erased: 0 });
+  });
+
+  it("starts no further owner once its signal aborts", async () => {
+    const base = memoryStore();
+    const controller = new AbortController();
+    let armed = false;
+    const fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...base,
+          // The signal aborts while the sweep runs its first owner.
+          markErasure: (input) => {
+            if (armed) controller.abort();
+            return base.markErasure(input);
+          },
+        },
+      },
+    );
+    const { api } = fixture.cloudrop;
+    for (const owner of ["u1", "u2"]) await api.eraseOwner(owner, { signal: AbortSignal.abort() });
+    armed = true;
+    const swept = await api.sweep({ all: true, signal: controller.signal });
+    expect(swept.data).toMatchObject({ erasing: 1, erased: 0 });
   });
 
   it("counts an erasure it cannot finish as failed, logs it, and finishes it once storage is back", async () => {
