@@ -3,6 +3,7 @@ export {
   type CloudropErrorCode,
   type CloudropErrorOptions,
   type ContentRefusal,
+  type RefusedKind,
   type Result,
 } from "./errors.ts";
 export type {
@@ -38,6 +39,7 @@ export {
   type RouteCallbacks,
   type RouteDefinition,
   type RoutePolicy,
+  rateLimited,
   route,
   unauthorized,
 } from "./server/route.ts";

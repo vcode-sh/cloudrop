@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CloudropError, fail, ok } from "../errors.ts";
-import { parseRetryAfter, retryDelay, withRetry } from "./retry.ts";
+import { retryDelay, withRetry } from "./retry.ts";
 
 const busy = () => fail(new CloudropError("RATE_LIMITED", "Busy.", { retryable: true }));
 
@@ -24,26 +24,6 @@ describe("retryDelay", () => {
     vi.spyOn(Math, "random").mockReturnValue(random);
     expect(retryDelay(attempt, retryAfterMs)).toBe(expected);
   });
-});
-
-describe("parseRetryAfter", () => {
-  const now = Date.parse("Sun, 15 Nov 2026 12:00:00 GMT");
-
-  it("reads Retry-After seconds", () => {
-    expect(parseRetryAfter("3", now)).toBe(3000);
-  });
-
-  it("reads Retry-After as an HTTP date", () => {
-    expect(parseRetryAfter("Sun, 15 Nov 2026 12:00:10 GMT", now)).toBe(10_000);
-  });
-
-  // NaN or a negative number would reach setTimeout, which treats both as 0 only by accident.
-  it.each([{ value: "Thu, 01 Jan 1970 00:00:00 GMT" }, { value: "soon" }, { value: "-1" }])(
-    "treats a past date, garbage or a negative number as no Retry-After: $value",
-    ({ value }) => {
-      expect(parseRetryAfter(value, now)).toBe(0);
-    },
-  );
 });
 
 describe("withRetry", () => {

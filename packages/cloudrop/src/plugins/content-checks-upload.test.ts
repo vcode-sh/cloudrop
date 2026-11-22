@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RefusedKind } from "../errors.ts";
 import type { FileDescriptor } from "../protocol/types.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
@@ -20,14 +21,14 @@ async function ask(accept: string | string[], files: Omit<FileDescriptor, "size"
   };
 }
 
-const refused = (type: string) => ({
+const refused = (type: string, kind: RefusedKind) => ({
   status: 400,
   error: {
     code: "FILE_TYPE_NOT_ALLOWED",
     message: `One of the files was sent as ${type}, which this upload does not accept. Pick another file.`,
     retryable: false,
-    // No bytes exist yet, so the declared type is all a refusal names (M11-K2).
-    content: { declared: type, reason: "refused" },
+    // No bytes exist yet, so the declared type is all a refusal names (M11-K2), with its kind (M12-E6).
+    content: { declared: type, reason: "refused", kind },
   },
   tickets: [],
 });
@@ -39,37 +40,47 @@ describe("contentChecks at /upload: the declared type, before anything is signed
       name: "a web page on a route that accepts anything",
       accept: "*/*",
       type: "text/html",
-      expected: refused("text/html"),
+      expected: refused("text/html", "web-page"),
     },
     {
       name: "an SVG on a route that accepts every image",
       accept: "image/*",
       type: "image/svg+xml",
-      expected: refused("image/svg+xml"),
+      expected: refused("image/svg+xml", "svg"),
     },
     { name: "an SVG on a route that names its type", accept: "image/svg+xml", type: "image/svg+xml", expected: signed },
-    { name: "an XSLT style sheet", accept: "*/*", type: "text/xsl", expected: refused("text/xsl") },
+    { name: "an XSLT style sheet", accept: "*/*", type: "text/xsl", expected: refused("text/xsl", "xml") },
     {
       name: "an old JavaScript type",
       accept: "*/*",
       type: "text/x-javascript",
-      expected: refused("text/x-javascript"),
+      expected: refused("text/x-javascript", "script"),
     },
     // A browser sniffs a file of this type, and may render it as a web page (WHATWG MIME Sniffing §7).
-    { name: "the unknown type", accept: "*/*", type: "unknown/unknown", expected: refused("unknown/unknown") },
-    { name: "a Windows installer", accept: "*/*", type: "application/x-msi", expected: refused("application/x-msi") },
+    {
+      name: "the unknown type",
+      accept: "*/*",
+      type: "unknown/unknown",
+      expected: refused("unknown/unknown", "web-page"),
+    },
+    {
+      name: "a Windows installer",
+      accept: "*/*",
+      type: "application/x-msi",
+      expected: refused("application/x-msi", "installer"),
+    },
     {
       name: "a program by shared-mime-info's type for .exe",
       accept: "*/*",
       type: "application/x-ms-dos-executable",
-      expected: refused("application/x-ms-dos-executable"),
+      expected: refused("application/x-ms-dos-executable", "program"),
     },
     // Firefox renders each part of it by the part's own type, an HTML part as a web page.
     {
       name: "a multipart replacing stream",
       accept: "*/*",
       type: "multipart/x-mixed-replace",
-      expected: refused("multipart/x-mixed-replace"),
+      expected: refused("multipart/x-mixed-replace", "web-page"),
     },
     { name: "a PDF", accept: "*/*", type: "application/pdf", expected: signed },
   ])("$name", async ({ accept, type, expected }) => {
@@ -81,7 +92,7 @@ describe("contentChecks at /upload: the declared type, before anything is signed
       { name: "a.png", type: "image/png" },
       { name: "a.html", type: "text/html" },
     ];
-    expect(await ask("*/*", files)).toEqual(refused("text/html"));
+    expect(await ask("*/*", files)).toEqual(refused("text/html", "web-page"));
   });
 
   it.for([
@@ -89,7 +100,7 @@ describe("contentChecks at /upload: the declared type, before anything is signed
     {
       name: "deny wins over allow",
       options: { allow: ["text/html"], deny: ["text/*"] },
-      expected: refused("text/html"),
+      expected: refused("text/html", "web-page"),
     },
   ])("$name on a route that accepts it", async ({ options, expected }) => {
     expect(await ask("text/html", [{ name: "a.html", type: "text/html" }], options)).toEqual(expected);
@@ -97,6 +108,8 @@ describe("contentChecks at /upload: the declared type, before anything is signed
 
   it("deny refuses a type by its declared type alone", async () => {
     const options = { deny: ["application/zip"] };
-    expect(await ask("*/*", [{ name: "a.zip", type: "application/zip" }], options)).toEqual(refused("application/zip"));
+    expect(await ask("*/*", [{ name: "a.zip", type: "application/zip" }], options)).toEqual(
+      refused("application/zip", "denied"),
+    );
   });
 });

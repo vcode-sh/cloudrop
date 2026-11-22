@@ -113,3 +113,64 @@ describe("POST /upload: storage failures and plugins", () => {
     },
   );
 });
+
+// Spec 1.0 §2b (M12-E5): the bucket's Retry-After reaches the client on the 200 that refuses the files storage could
+// not start, as the longest of their waits; the client applies it to each such file. Oracle: R2's throttle answer
+// (503 SlowDown with Retry-After) and RFC 9110's whole seconds.
+describe("POST /upload: the bucket's Retry-After on the 200", () => {
+  const OTHER_ORIGIN = "https://admin.example.com";
+
+  /** A fixture whose bucket throttles each multipart start with the next of `retryAfters` (null: no header). */
+  function throttled(retryAfters: (string | null)[]) {
+    const { fake } = serverFixture({ files });
+    const pending = [...retryAfters];
+    const fetch: FetchLike = (input, init) => {
+      if (!new URL(String(input)).searchParams.has("uploads")) return fake.fetch(input, init);
+      const retryAfter = pending.shift() ?? null;
+      const headers: Record<string, string> = retryAfter === null ? {} : { "retry-after": retryAfter };
+      return Promise.resolve(new Response("<Error><Code>SlowDown</Code></Error>", { status: 503, headers }));
+    };
+    const storage = r2({
+      bucket: "uploads",
+      accountId: "0123456789abcdef0123456789abcdef",
+      accessKeyId: "k",
+      secretAccessKey: "s",
+      fetch,
+    });
+    return serverFixture({ files }, { storage, multipartThreshold: MiB, trustedOrigins: [OTHER_ORIGIN] });
+  }
+
+  async function answer(retryAfters: (string | null)[], headers: Record<string, string> = {}) {
+    const body = { route: "files", files: retryAfters.map((_, index) => png(2 * MiB, `${index}.png`)) };
+    const response = await throttled(retryAfters).post("upload", body, headers);
+    const { files: tickets } = (await response.json()) as UploadResponse;
+    return {
+      status: response.status,
+      retryAfter: response.headers.get("retry-after"),
+      exposed: response.headers.get("access-control-expose-headers"),
+      codes: tickets.map((ticket) => (ticket.kind === "rejected" ? ticket.error.code : ticket.kind)),
+    };
+  }
+
+  it("answers the longest wait of the files it refused", async () => {
+    expect(await answer(["3", "9"])).toEqual({
+      status: 200,
+      retryAfter: "9",
+      exposed: null,
+      codes: ["RATE_LIMITED", "RATE_LIMITED"],
+    });
+  });
+
+  it("sends no Retry-After when the bucket gave none", async () => {
+    expect(await answer([null])).toEqual({ status: 200, retryAfter: null, exposed: null, codes: ["RATE_LIMITED"] });
+  });
+
+  it("exposes it to a page on a trusted origin", async () => {
+    expect(await answer(["3"], { origin: OTHER_ORIGIN })).toEqual({
+      status: 200,
+      retryAfter: "3",
+      exposed: "Retry-After",
+      codes: ["RATE_LIMITED"],
+    });
+  });
+});

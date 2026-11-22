@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { retryAfterOf } from "../retry-after.ts";
 import { storageError } from "./storage-error.ts";
 
 const xml = (code: string) => `<?xml version="1.0"?><Error><Code>${code}</Code><Message>raw text</Message></Error>`;
@@ -49,6 +50,18 @@ describe("storageError", () => {
     expect(error.retryable).toBe(retryable);
     expect(error.status).toBe(status);
     expect(error.storageCode).toBe(storageCode);
+  });
+
+  // M12-E3: the wait travels on the error, so the handler answers it and the client honours it. A refusal that is final
+  // has nothing to wait for.
+  it.each([
+    { status: 503, retryAfter: "7", waitMs: 7000 },
+    { status: 429, retryAfter: "7", waitMs: 7000 },
+    { status: 500, retryAfter: "7", waitMs: 7000 },
+    { status: 503, retryAfter: null, waitMs: 0 },
+    { status: 403, retryAfter: "7", waitMs: 0 },
+  ])("records a wait of $waitMs ms for HTTP $status with Retry-After $retryAfter", ({ status, retryAfter, waitMs }) => {
+    expect(retryAfterOf(storageError(status, xml("SlowDown"), 0, retryAfter))).toBe(waitMs);
   });
 
   it("never copies the storage service's message or code into the error message", () => {

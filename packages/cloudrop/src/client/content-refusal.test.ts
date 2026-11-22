@@ -1,7 +1,8 @@
 // Contract: M11-K1 to M11-K5. A FILE_TYPE_NOT_ALLOWED from contentChecks() reaches the page with `content`: on the
 // job's error, on each failed file's and in the snapshot, whether /upload refused the whole request or /complete one
 // file. The answer is untrusted: a `content` of another shape is dropped and the error kept; a field this client does
-// not know is ignored, as an older client ignores `content`; a server that sends none leaves it undefined.
+// not know is ignored, as an older client ignores `content`; a server that sends none leaves it undefined. A `kind`
+// outside the closed set, or beside a reason other than "refused", is dropped alone (M12-E6).
 // Oracle: the server's verdicts for the files below (content-checks.test.ts pins each one) and literal answers.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,7 @@ import { createEndpoints } from "./endpoints.ts";
 const files = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone });
 const KEY = "0123456789abcdef0123456789abcdef";
 const MISMATCH = { declared: "image/png", detected: "image/jpeg", reason: "mismatch" };
-const PAGE_REFUSED = { declared: "text/html", reason: "refused" };
+const PAGE_REFUSED = { declared: "text/html", reason: "refused", kind: "web-page" };
 
 function setup(fault?: Fault) {
   const fixture = clientFixture({ files }, { plugins: [contentChecks()], fault });
@@ -105,7 +106,13 @@ describe("reading `content` from an answer", () => {
 
   it.for([
     { name: "all three fields", content: MISMATCH, expected: MISMATCH },
-    { name: "no detected type", content: PAGE_REFUSED, expected: PAGE_REFUSED },
+    { name: "no detected type, with the refused kind", content: PAGE_REFUSED, expected: PAGE_REFUSED },
+    // What a server before 1.0 sends (M12-E6).
+    {
+      name: "a refusal without a kind",
+      content: { declared: "text/html", reason: "refused" },
+      expected: { declared: "text/html", reason: "refused" },
+    },
     {
       name: "only its three fields, whatever else the answer adds",
       content: { ...MISMATCH, key: "uploads/photo.png", name: "photo.png" },
@@ -132,6 +139,18 @@ describe("reading `content` from an answer", () => {
       file: undefined,
       content: undefined,
     });
+  });
+
+  // A newer server's kind, or a kind beside a reason that has none: the rest of `content` still says what was found.
+  it.for([
+    {
+      name: "a kind this client does not know",
+      content: { ...PAGE_REFUSED, kind: "nope" },
+      expected: { declared: "text/html", reason: "refused" },
+    },
+    { name: "a kind on a mismatch", content: { ...MISMATCH, kind: "web-page" }, expected: MISMATCH },
+  ])("drops $name alone and keeps the rest", async ({ content, expected }) => {
+    expect((await completeError(refusal({ content })))?.content).toStrictEqual(expected);
   });
 
   it("leaves it undefined for a server that sends none, as before 0.6.0", async () => {

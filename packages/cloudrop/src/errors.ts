@@ -51,6 +51,12 @@ export type ClientErrorCode =
   | "CLIENT_CLOSED"
   | "BROWSER_STORAGE_ERROR";
 
+/**
+ * What a file `contentChecks()` refused is (M12-E6): a web page, a program, a Windows installer, a script, an SVG image
+ * or another XML type the route does not name, or "denied" for a type only the app's `deny` refuses.
+ */
+export type RefusedKind = "web-page" | "program" | "installer" | "script" | "svg" | "xml" | "denied";
+
 /** What a type check found in a file it refused (M11-K1). The two types are MIME types, never a name, key or byte. */
 export interface ContentRefusal {
   /** The type the file was sent as. */
@@ -66,6 +72,11 @@ export interface ContentRefusal {
    * "not-accepted": the file was sent untyped and its content's type is not in the route's `accept`.
    */
   reason: "mismatch" | "refused" | "not-accepted";
+  /**
+   * With "refused" only: what the refused type is, for an app that words the refusal itself. A newer server may name a
+   * kind this client does not know: it is left out, and `message` still explains the refusal.
+   */
+  kind?: RefusedKind;
 }
 
 export interface CloudropErrorOptions {

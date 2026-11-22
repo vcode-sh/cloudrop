@@ -238,7 +238,7 @@ link.
 ## Authorize uploads
 
 Every route needs `authorize`. It receives `{ request, metadata }` and returns either a plain object with the facts
-later steps need, or `unauthorized()` or `forbidden()`:
+later steps need, or a refusal: `unauthorized()`, `forbidden()`, `rateLimited(seconds)` or a `CloudropError`:
 
 ```ts
 authorize: async ({ request }) => {
@@ -269,6 +269,50 @@ authorize: async ({ request }) => {
   return { userId: user.id };
 },
 ```
+
+### Refuse with a wait or another code
+
+`rateLimited(seconds, message?)` refuses with `RATE_LIMITED`, retryable, answered `429` with a `Retry-After` of
+`seconds` rounded up, at least 1. The default message is "Too many upload requests. Try again in 30 seconds.". The
+client waits that long before it asks again; a wait longer than its 20-second backoff cap is not waited for, and the
+file fails with the retryable `RATE_LIMITED`, which `retry()` asks again for later. A `seconds` that is negative or
+not a finite number is your bug: the handler logs the `TypeError` and answers `500`.
+
+```ts
+import { CloudropError, rateLimited, route, unauthorized } from "cloudrop";
+
+authorize: async ({ request }) => {
+  const user = await getUser(request);
+  if (!user) return unauthorized();
+  const wait = await uploadLimiter.secondsUntilFree(user.id); // your app's rate limiter
+  if (wait > 0) return rateLimited(wait);
+  if (await maintenance()) {
+    return new CloudropError("SERVER_ERROR", "Uploads are paused for an hour.", { retryable: true });
+  }
+  return { userId: user.id };
+},
+```
+
+`authorize`, and a plugin's `beforeUpload`, may refuse with a `CloudropError` of these codes, answered with this
+status:
+
+| Code | Status |
+| --- | --- |
+| `UNAUTHORIZED` | 401 |
+| `FORBIDDEN`, `QUOTA_EXCEEDED` | 403 |
+| `RATE_LIMITED` | 429, with `Retry-After` when it came from `rateLimited()` |
+| `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `TOO_MANY_FILES`, `INVALID_METADATA`, `INVALID_INPUT` | 400 |
+| `SERVER_ERROR` (your `retryable` is kept) | 500 |
+
+- The client gets the error's code, message and `retryable` (and a type refusal's `content`). Its `parts`, `file` and
+  `cause` stay on the server.
+- `RATE_LIMITED` is always sent retryable, even from `new CloudropError("RATE_LIMITED", "...")` without
+  `retryable: true`. Its `Retry-After` is at most 86400 (a day).
+- Any other code is a bug: the client gets the generic, non-retryable `SERVER_ERROR` and the log names the code and
+  the list above.
+- A refusal is not a failure: nothing is logged.
+- Import `CloudropError` from the same `cloudrop` the server uses. One from a second installed copy is answered `500`,
+  and the log says to install cloudrop once.
 
 ### Read the session
 

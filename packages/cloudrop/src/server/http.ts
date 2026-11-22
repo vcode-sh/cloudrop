@@ -3,7 +3,8 @@
 
 import { type ClientErrorCode, CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
-import { type ErrorBody, MAX_BODY_BYTES } from "../protocol/types.ts";
+import { type ErrorBody, isRefusedKind, MAX_BODY_BYTES } from "../protocol/types.ts";
+import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
 import type { Logger } from "./plugins.ts";
 
 type ServerErrorCode = Exclude<CloudropErrorCode, ClientErrorCode>;
@@ -14,7 +15,7 @@ const STATUS = {
   STORAGE_UNREACHABLE: 502,
   STORAGE_DENIED: 502,
   STORAGE_ERROR: 502,
-  RATE_LIMITED: 503,
+  RATE_LIMITED: 429,
   NOT_FOUND: 404,
   ALREADY_EXISTS: 409,
   NO_SUCH_UPLOAD: 410,
@@ -50,8 +51,9 @@ const isType = (value: unknown): boolean => typeof value === "string" && value.l
 
 /**
  * Only the code, message, retryable flag, part numbers and a type refusal's `content` leave the server: never a cause,
- * stack or storage code. `content` is sent as two MIME types and one of three reasons, copied field by field, or not
- * at all: a plugin in plain JavaScript can put a file's key or a whole object there (M11-K3, M11-R137).
+ * stack or storage code. `content` is sent as two MIME types, one of three reasons and, with "refused", a kind of the
+ * closed set, copied field by field, or not at all: a plugin in plain JavaScript can put a file's key or a whole object
+ * there (M11-K3, M11-R137, M12-E6). A kind alone that does not fit is dropped and the rest kept.
  */
 export function errorBody(error: CloudropError): ErrorBody {
   const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable };
@@ -60,7 +62,9 @@ export function errorBody(error: CloudropError): ErrorBody {
   // The types say what these fields are; a plugin in plain JavaScript is not held to them.
   const typed = content && isType(content.declared) && (content.detected === undefined || isType(content.detected));
   if (typed && REASONS.includes(content.reason)) {
-    body.content = { declared: content.declared, detected: content.detected, reason: content.reason };
+    const { declared, detected, reason, kind } = content;
+    body.content = { declared, detected, reason };
+    if (reason === "refused" && isRefusedKind(kind)) body.content.kind = kind;
   }
   return body;
 }
@@ -86,30 +90,43 @@ export const serverError = (): CloudropError =>
 export const hasKnownCode = (error: CloudropError): error is CloudropError & { code: ServerErrorCode } =>
   Object.hasOwn(STATUS, error.code);
 
-// The busy answers, recognised by identity: the wire format has no field for "another request holds this file".
-const BUSY = new WeakSet<CloudropError>();
-
 /**
  * Another `/complete` is running this file's onComplete. Retryable SERVER_ERROR, the one retryable server answer
  * after which the client never sends /abort for a file that may be complete (M3-H16), with `Retry-After: 2`.
  */
-export function busy(): CloudropError {
-  const error = new CloudropError("SERVER_ERROR", "Another request is completing this upload. Try again in a moment.", {
-    retryable: true,
-  });
-  BUSY.add(error);
-  return error;
+export const busy = (): CloudropError =>
+  waitAtLeast(
+    new CloudropError("SERVER_ERROR", "Another request is completing this upload. Try again in a moment.", {
+      retryable: true,
+    }),
+    2000,
+  );
+
+/** A day: no wait longer is sent, so a mistaken one cannot park the client for good (M12-E3). */
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+/**
+ * Retry-After for the wait recorded on `answer`, in whole seconds and at most a day, or nothing when there is none. The
+ * cap also keeps the value a plain integer: String() writes 1e21 and above in exponent form, which RFC 9110 forbids.
+ */
+export function retryAfterHeaders(answer: object, cors: ResponseHeaders): ResponseHeaders {
+  const waitMs = retryAfterOf(answer);
+  if (waitMs === 0) return {};
+  // A cross-origin page reads Retry-After only when CORS exposes it.
+  const exposed: ResponseHeaders = cors["access-control-allow-origin"]
+    ? { "access-control-expose-headers": "Retry-After" }
+    : {};
+  const seconds = Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(waitMs / 1000));
+  return { ...exposed, "retry-after": String(seconds) };
 }
 
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {
   // An unknown code would otherwise answer 200.
   if (!hasKnownCode(error)) return errorResponse(serverError(), headers);
-  // A cross-origin page reads Retry-After only when CORS exposes it.
-  const exposed: ResponseHeaders = headers["access-control-allow-origin"]
-    ? { "access-control-expose-headers": "Retry-After" }
-    : {};
-  const busyHeaders: ResponseHeaders = BUSY.has(error) ? { ...exposed, "retry-after": "2" } : {};
-  return jsonResponse({ error: errorBody(error) }, STATUS[error.code], { ...headers, ...busyHeaders });
+  return jsonResponse({ error: errorBody(error) }, STATUS[error.code], {
+    ...headers,
+    ...retryAfterHeaders(error, headers),
+  });
 }
 
 /**
@@ -118,15 +135,18 @@ export function errorResponse(error: CloudropError, headers: ResponseHeaders = {
  */
 export function storageFailure(error: CloudropError, logger: Logger): CloudropError {
   logger.error("cloudrop: a storage request failed.", error);
+  // The wait the storage asked for is kept: the client honours it before it tries again (M12-E3).
   if (error.code === "RATE_LIMITED") {
-    return new CloudropError("RATE_LIMITED", "The storage service is busy. Try again in a moment.", {
+    const throttled = new CloudropError("RATE_LIMITED", "The storage service is busy. Try again in a moment.", {
       retryable: true,
     });
+    return waitAtLeast(throttled, retryAfterOf(error));
   }
   return error.retryable
-    ? new CloudropError("STORAGE_ERROR", "The storage service failed. Try again in a moment.", {
-        retryable: true,
-      })
+    ? waitAtLeast(
+        new CloudropError("STORAGE_ERROR", "The storage service failed. Try again in a moment.", { retryable: true }),
+        retryAfterOf(error),
+      )
     : new CloudropError(
         "STORAGE_ERROR",
         "The storage service refused the request. Contact the site owner if this keeps happening.",

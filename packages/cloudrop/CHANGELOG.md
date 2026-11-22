@@ -114,15 +114,35 @@ Every notable change to the `cloudrop` package. The format follows
   such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
   `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
   compiles (`M12-T5`, `M12-T6`).
+- `RATE_LIMITED` answers HTTP 429 from every source. Before: storage throttling, and a plugin's `RATE_LIMITED`,
+  answered 503. After: 429, with `Retry-After` when the bucket or `rateLimited()` gave a wait. A proxy, monitor or
+  custom client that keyed on 503 from the upload server keys on 429 (`M12-E3`).
+- A plugin's `beforeUpload` refuses only with the codes `authorize` may use. Before: any server code was sent as
+  returned, such as `NOT_FOUND` with 404 or `STORAGE_ERROR` with 502. After: such a refusal answers the generic,
+  non-retryable `SERVER_ERROR` with 500, and the log says `cloudrop: a plugin's beforeUpload returned NOT_FOUND, which
+  /upload cannot send. Return one of …`. Return one of the listed codes, such as `FORBIDDEN` (`M12-E1`).
+- The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
+  600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
+  such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
 
 ### Added
 
 - `cloudrop/store`: `defineStore` and the store types, for a database store you write yourself (`M12-S2`).
+- `content.kind` on a `contentChecks()` refusal with `reason: "refused"`: `"web-page"`, `"program"`, `"installer"`,
+  `"script"`, `"svg"`, `"xml"` or `"denied"`, and the type `RefusedKind` from `cloudrop` and `cloudrop/client`. A
+  client drops a kind it does not know, and an older client ignores it (`M12-E6`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
 - `CloudropPlugin<TAuth>` types `auth` in every hook of a plugin, checked against the routes' authorize results
   (`M12-T5`).
+- `rateLimited(seconds, message?)` from `cloudrop`: `authorize` refuses with `RATE_LIMITED`, answered 429 with
+  `Retry-After`, at most 86400 seconds (`M12-E2`, `M12-E3`). A `RATE_LIMITED` returned from `authorize` or
+  `beforeUpload` is always sent retryable (`M12-E1`).
+- `authorize` may return a `CloudropError`, and it and a plugin's `beforeUpload` refuse `/upload` with any of
+  `UNAUTHORIZED`, `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`,
+  `TOO_MANY_FILES`, `INVALID_METADATA`, `INVALID_INPUT` and `SERVER_ERROR`, sent without its `parts`, `file` or
+  `cause`. Any other code answers the generic 500 and is logged with that list (`M12-E1`).
 - `DeleteContext<TDeleted, TErased>`: annotate `onDelete`'s parameter and `api.deleteFile` and `api.eraseOwner` take a
   `context` of that type, required when it does not admit `undefined` (`M12-T6`).
 
@@ -137,6 +157,13 @@ Every notable change to the `cloudrop` package. The format follows
 - `Jsonified<any>` is `any`. Before: `unknown`. After: `any`, so an `authorize` or an `onComplete` typed `any` gives
   `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
   (`M12-T5`).
+
+### Fixed
+
+- The bucket's `Retry-After` reaches the client when `/upload` refuses a file storage could not start. Before: the
+  driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
+  After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the
+  client waits it out for each of them (`M12-E5`).
 
 ## 0.6.0 - 2026-11-21
 

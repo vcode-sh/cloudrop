@@ -155,21 +155,21 @@ describe("contentChecks: an untyped script is judged as a script on a route that
       name: "is refused where only web pages are allowed",
       accept: ["text/html", UNTYPED],
       allow: ["text/html"],
-      reason: "refused",
+      content: { reason: "refused", kind: "script" },
     },
     {
       name: "is not accepted where scripts are allowed and the route names no script type",
       accept: ["text/plain", UNTYPED],
       allow: ["text/x-shellscript"],
-      reason: "not-accepted",
+      content: { reason: "not-accepted" },
     },
-  ])("$name", async ({ accept, allow, reason }) => {
+  ])("$name", async ({ accept, allow, content }) => {
     const outcome = await contentOutcome({ accept, file: { name: "run", type: "" }, body: SCRIPT, options: { allow } });
     expect(outcome.error).toEqual({
       code: "FILE_TYPE_NOT_ALLOWED",
       message: "This file is a script, which this upload does not accept. Pick another file.",
       retryable: false,
-      content: { declared: UNTYPED, detected: "text/x-shellscript", reason },
+      content: { declared: UNTYPED, detected: "text/x-shellscript", ...content },
     });
   });
 });

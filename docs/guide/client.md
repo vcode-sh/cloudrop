@@ -362,7 +362,9 @@ server has answered which parts the bucket lacks: the page before the reload may
 - Every part except the last has exactly the same size. R2 requires equal part sizes in a multipart upload, so the
   server plans one part size per file and the client cuts the file by that plan.
 - A request is tried up to 6 times with backoff: a random wait up to 0.5 s, then up to 1 s, 2 s and so on, at most 20 s.
-  When the answer carries `Retry-After`, the wait is at least that long (at most 20 s).
+  When the answer carries `Retry-After`, the wait is at least that long. A bucket `PUT` waits at most 20 s. When your
+  server asks for more than 20 s, the client does not wait: the file fails with the retryable error, such as
+  `RATE_LIMITED`, and `retry()` asks again when your app chooses.
 - An expired upload URL is renewed once.
 - Parts that `/complete` reports missing are sent again, at most twice.
 - Calls to your server send cookies (`credentials: "include"`), so `authorize` can read the session. Uploads to the

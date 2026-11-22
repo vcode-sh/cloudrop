@@ -1,6 +1,7 @@
 // The retry budget every client request shares (spec §6.2's first row, decision S9).
 
 import { type CloudropError, fail, type Result } from "../errors.ts";
+import { retryAfterOf } from "../retry-after.ts";
 import { aborted } from "./failures.ts";
 
 /** Attempts per request, the first one included. */
@@ -15,24 +16,11 @@ export function retryDelay(failedAttempts: number, retryAfterMs = 0): number {
   return Math.min(MAX_DELAY_MS, Math.max(retryAfterMs, Math.random() * ceiling));
 }
 
-/** A Retry-After header in milliseconds: delay seconds or an HTTP date. 0 when absent, past or unreadable. */
-export function parseRetryAfter(value: string | null, now: number = Date.now()): number {
-  if (value === null) return 0;
-  const waitMs = /^\d+$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value) - now;
-  return Number.isFinite(waitMs) ? Math.max(waitMs, 0) : 0;
-}
-
-// Kept beside the error rather than as a field of CloudropError, which is public and would promise it.
-const retryAfters = new WeakMap<CloudropError, number>();
-
-/** The Retry-After recorded for `error`'s answer, 0 when none. */
-export const retryAfterOf = (error: CloudropError): number => retryAfters.get(error) ?? 0;
-
-/** Records that `error`'s request must not be tried again before `retryAfterMs` (its answer's Retry-After). */
-export function waitAtLeast(error: CloudropError, retryAfterMs: number): CloudropError {
-  retryAfters.set(error, retryAfterMs);
-  return error;
-}
+/**
+ * Whether `error` asks for a longer wait than the backoff's cap: such a request is not waited for, and the retryable
+ * error goes back to the app, whose retry() asks again later (M12-E4).
+ */
+export const waitsTooLong = (error: CloudropError): boolean => retryAfterOf(error) > MAX_DELAY_MS;
 
 /** Waits `ms`, or less when the signal fires. Never rejects: the caller checks `signal.aborted` afterwards. */
 export function pause(ms: number, signal: AbortSignal): Promise<void> {
@@ -49,10 +37,10 @@ export function pause(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Calls `run` until it succeeds, fails with an error that is not retryable, or has used MAX_ATTEMPTS. A cancel before
- * an attempt or during a pause returns ABORTED; an answer that arrives after a cancel is returned as it is, since a
- * request that finished must not be reported as cancelled. `first` continues a budget earlier attempts used, and `run`
- * hears which attempt it makes.
+ * Calls `run` until it succeeds, fails with an error that is not retryable or asks to wait too long, or has used
+ * MAX_ATTEMPTS. A cancel before an attempt or during a pause returns ABORTED; an answer that arrives after a cancel is
+ * returned as it is, since a request that finished must not be reported as cancelled. `first` continues a budget
+ * earlier attempts used, and `run` hears which attempt it makes.
  */
 export async function withRetry<T>(
   run: (attempt: number) => Promise<Result<T>>,
@@ -63,7 +51,7 @@ export async function withRetry<T>(
     if (signal.aborted) return fail(aborted());
     const result = await run(attempt);
     const { error } = result;
-    if (!error?.retryable || attempt === MAX_ATTEMPTS) return result;
+    if (!error?.retryable || attempt === MAX_ATTEMPTS || waitsTooLong(error)) return result;
     await pause(retryDelay(attempt, retryAfterOf(error)), signal);
   }
 }

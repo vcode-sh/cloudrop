@@ -17,6 +17,7 @@ import {
   originNotAllowed,
   preflight,
   readJson,
+  retryAfterHeaders,
   serverError,
 } from "./http.ts";
 import { isExactOrigin } from "./origins.ts";
@@ -24,7 +25,7 @@ import type { Logger } from "./plugins.ts";
 import { handleSign } from "./sign.ts";
 import { handleUpload } from "./upload.ts";
 
-type EndpointHandler = (input: EndpointInput) => Promise<Result<unknown>>;
+type EndpointHandler = (input: EndpointInput) => Promise<Result<object>>;
 
 const ENDPOINTS = {
   upload: handleUpload,
@@ -113,7 +114,10 @@ async function answer(request: Request, config: ServerConfig, report: Reporters)
       body: body.data,
       config: { ...config, tokenKeys: ready.data },
     });
-    if (!result.error) return jsonResponse(result.data, 200, origin.cors);
+    // An /upload that refused files storage could not start answers the wait the storage asked for (M12-E5).
+    if (!result.error) {
+      return jsonResponse(result.data, 200, { ...origin.cors, ...retryAfterHeaders(result.data, origin.cors) });
+    }
     if (!hasKnownCode(result.error)) {
       config.logger.error(
         `cloudrop: /${endpoint} failed with an error code the server cannot send, so the client got a generic 500. Return a CloudropError with one of cloudrop's server codes, not a client-only code such as ABORTED.`,

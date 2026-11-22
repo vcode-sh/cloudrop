@@ -7,7 +7,7 @@ import type { RouteMetadata, RouteName, RouteResult } from "../protocol/types.ts
 import { r2 } from "../storage/presets.ts";
 import { memoryStore } from "../testing.ts";
 import { createCloudrop } from "./cloudrop.ts";
-import { allowAnyone, type Route, route, unauthorized } from "./route.ts";
+import { allowAnyone, type Route, rateLimited, route, unauthorized } from "./route.ts";
 import type { StandardSchema } from "./schema.ts";
 import type { AbortedRecord, CompletedRecord, ExpiredRecord, FailedRecord, FileRecord, RecordOf } from "./store.ts";
 
@@ -60,6 +60,17 @@ const avatar = route(
 );
 
 const notes = route({ accept: "text/plain", maxSize: 1024, authorize: allowAnyone });
+
+// M12-E1: a CloudropError among authorize's answers refuses, so the callbacks and the route type see only the user.
+const limited = route(
+  {
+    accept: "*/*",
+    maxSize: 1,
+    authorize: ({ request }) => (request.headers.has("cookie") ? { userId: "42" } : rateLimited(30)),
+  },
+  { prefix: ({ userId }) => userId },
+);
+expectTypeOf(limited).toEqualTypeOf<Route<undefined, null, { userId: string }>>();
 
 const optional = route(
   {

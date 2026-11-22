@@ -1,7 +1,7 @@
-// The upload protocol (spec §5): the only module the client and the server share. Types and constants only, so the
-// client bundle never pulls in server code.
+// The upload protocol (spec §5): the only module the client and the server share. Types, constants and one guard
+// both sides read the wire with, so the client bundle never pulls in server code.
 
-import type { CloudropErrorCode, ContentRefusal } from "../errors.ts";
+import type { CloudropErrorCode, ContentRefusal, RefusedKind } from "../errors.ts";
 
 /** The four JSON endpoints, each at `<basePath>/<endpoint>`, all `POST`. */
 export type Endpoint = "upload" | "sign" | "complete" | "abort";
@@ -141,6 +141,21 @@ export interface ErrorBody {
   /** FILE_TYPE_NOT_ALLOWED from a type check only: what it found in the file (M11-K1). */
   content?: ContentRefusal;
 }
+
+// A record, so a kind added to RefusedKind and not here fails to compile.
+const REFUSED_KINDS: Readonly<Record<RefusedKind, true>> = {
+  "web-page": true,
+  program: true,
+  installer: true,
+  script: true,
+  svg: true,
+  xml: true,
+  denied: true,
+};
+
+/** Whether `value` is a RefusedKind: the server sends and the client keeps only a kind of the closed set (M12-E6). */
+export const isRefusedKind = (value: unknown): value is RefusedKind =>
+  typeof value === "string" && Object.hasOwn(REFUSED_KINDS, value);
 
 /** Every non-2xx response has this body. */
 export interface ErrorResponse {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type ContentCase, contentOutcome } from "../testing/content-check-fixture.ts";
 import { bytes, zipEntry } from "../testing/file-samples.ts";
 
-const refused = (message: string, content: { declared: string; detected: string; reason: string }) => ({
+const refused = (message: string, content: { declared: string; detected: string; reason: string; kind?: string }) => ({
   status: 400,
   error: { code: "FILE_TYPE_NOT_ALLOWED", message, retryable: false, content },
   kept: false,
@@ -91,6 +91,7 @@ describe("contentChecks: a container's bytes do not say audio or video (M11-R133
         declared: UNTYPED,
         detected: "video/webm",
         reason: "refused",
+        kind: "denied",
       }),
     },
   ])("$name", async ({ input, expected }) => {
@@ -178,6 +179,7 @@ describe("contentChecks: a ZIP whose entries name no package (M11-R133)", () => 
         declared: "application/pdf",
         detected: "application/zip",
         reason: "refused",
+        kind: "denied",
       }),
     },
     {
