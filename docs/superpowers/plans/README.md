@@ -1,9 +1,10 @@
 # Plans: where cloudrop stands
 
-Updated 2026-11-21 for 0.6.0, released that day (the pilot's four gaps, `api.allFiles`, a review of every area). This file
-is the one place that says what is done and what comes next. The code is the truth: an executed plan is kept as a short
-stub marked done, with the commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every
-decision is in [`docs/decisions/`](../../decisions/README.md).
+Updated 2026-11-21 for 0.6.0, released that day (the pilot's four gaps, `api.allFiles`, a review of every area), and on
+2026-11-22 for the debts the 1.0 design settles ([plan](2026-11-22-1.0.0.md)). This file is the one place that says what
+is done and what comes next. The code is the truth: an executed plan is kept as a short stub marked done, with the
+commit that holds its full text (`git show <commit>:docs/superpowers/plans/<file>`); every decision is in
+[`docs/decisions/`](../../decisions/README.md).
 
 ## Milestones (spec §14)
 
@@ -140,7 +141,8 @@ each now decided:
 
 ### For 0.7: what the pilot's move to 0.6.0 asked for (deferred by the owner, 2026-11-21)
 
-None of these is a gap in 0.6.0; each is a feature the pilot still writes around:
+Withdrawn by the 1.0 design: there is no 0.7, and the evidence does not support these three (spec 1.0, "Withdrawn
+because the evidence does not support them"; the documented promise `close()` lacked is spec 1.0 §3c).
 
 - `close()` with a timeout the app sets, so a sign-out never waits the full 40 seconds for a server that does not
   answer (`M11-R261`, `M11-R264`).
@@ -150,76 +152,67 @@ None of these is a gap in 0.6.0; each is a feature the pilot still writes around
 - A value `onDelete` hands back to the caller of `api.deleteFile`: the pilot still passes a mutable slot through
   `context` to carry its audit event to the notification it sends after the commit.
 
-### After 0.4.0: candidates, none decided
+### After 1.0: candidates
 
-- The pilot can adopt 0.4.0: `account` instead of its `x-upload-user` header, `onDelete` for its audit trail, the
-  `api.files` filters for its search, and `contentChecks()`.
-- The remaining plugins: `limits()`, `images()`, `checksums()`; quarantine and virus scanning.
+The 1.0 design lists them (spec 1.0, "Out of scope for 1.0"), each additive, so a later minor can ship it:
+
 - "Attach on submit" (an upload kept pending until the form that holds it is saved) and a server-side upload with a
-  row. The listing across owners that stood here is built for 0.6.0: `api.allFiles`, with its index (`M11-L`).
-- The store paths behind their own entry (`M5-T69`): the bundled server measured 34.71 kB on 2026-11-21, under the
-  36 kB ceiling the owner set for 0.6.0 (`M10-D10`, `M11-R100`).
+  row. The listing across owners that stood here shipped in 0.6.0: `api.allFiles`, with its index (`M11-L`).
+- Several buckets per server, and Vue, Svelte and Solid bindings.
+- Upload speed tuning, which changes no API: a bucket created with a location hint near its users (`EEUR` for Europe);
+  parts for files of 64 to 256 MiB, which were not measured and keep 8 MiB (`M3-U40`); the automatic pool's start of
+  4 although 6 measured faster on this machine (`M3-U41`); whether `/complete`'s three storage calls can lose one
+  without weakening verification (base spec §7). The measurements are above and in `r2-spike-findings.md`.
 
 ### M6: the plugins
 
-`contentChecks` shipped in 0.4.0; `limits`, `images` and `checksums` remain (base spec §8). `limits()` keeps rate limits and the quotas a store
-does not count; a storage quota is the store's `quota` (M5). Still recorded from the product-fit review of
+`contentChecks` shipped in 0.4.0. The owner cut `limits()`, `images()` and `checksums()` from 1.0, and the scan and
+quarantine plugin with them: a ten-line `afterVerify` recipe in the plugins guide covers scanning (spec 1.0, "Why this
+release", and §8). A storage quota is the store's `quota` (M5). Still recorded from the product-fit review of
 2026-11-17: a React Native client with background transfer, per-route `Cache-Control`, batches over 100 files. Its
 bucket-setup command shipped as `cloudrop setup` (`M9-C`, extended by `M11-C` and `M11-R`).
 
-### After M5 (from its tasks' concerns)
-
-- The store paths behind their own entry, if the 4.93 kB they add to stateless server apps matters (`M5-T69`).
-- A retry of exactly the failed ask's files could reuse its key, so an ask whose every attempt lost its answer stops
-  holding its last attempt's reservation until the sweep (`M5-T101`).
-
 ### Owner steps
 
-- The release's one-time setup above ([`docs/releasing.md`](../../releasing.md)).
+- The release's one-time setup is done: the repository is public, the `npm` environment requires `vcode-sh`'s review
+  and takes only `v*` tags, and `main` has an active ruleset ([`docs/releasing.md`](../../releasing.md)).
 - The live bucket's rule `cloudrop-browser-tests` exposes `Retry-After` since 2026-11-17 (`M3-K8`).
 
 ### Open decisions for the owner
 
-- **Release approval while the repository is private:** GitHub's required reviewers work only in public repositories
-  on Free, Pro and Team, so a pushed `v*` tag publishes as soon as `build` passes. `npm stage publish`, approved on
-  npmjs.com with two-factor authentication, is the plan-independent gate (`docs/releasing.md`, "If the repository stays
-  private").
+None. Release approval, the last one, is resolved: the repository is public and the `npm` environment has a required
+reviewer, so a pushed `v*` tag publishes only after `vcode-sh` approves the run's **publish** job (checked with
+`gh api` on 2026-11-22; [`docs/releasing.md`](../../releasing.md), "The approval").
 
-- **Faster uploads to R2** (measured above, none decided):
-  - bucket location: a bucket created with a location hint near its users (`EEUR` for Europe) cuts the round trip
-    and with it the server's per-file cost and each connection's ramp-up; an infrastructure choice, no code;
-  - part size: decided by measurement (`M3-U40`); files from 64 to 256 MiB were not measured and keep 8 MiB parts;
-  - the automatic pool still starts at 4 although 6 measured faster on this machine (`M3-U41`); revisit with data
-    from other links;
-  - `/complete` makes three storage calls (ListParts, CompleteMultipart, HEAD); whether one can go without weakening
-    verification (spec §7) needs analysis.
-- **Unreadable R2 refusals:** a bad-signature `403` reaches the page as a network error, so the client retries for
-  about 15 s and answers a retryable `NETWORK_ERROR`. Decided for the case that matters, a CORS rule that fails the
-  preflight: `BUCKET_BLOCKED` after two attempts that sent no byte around a successful `/sign` (`M12-E7`). A
-  bad-signature `403` sends its body, so it stays a `NETWORK_ERROR` (measured on R2, `r2-spike-findings.md`,
-  "Missing CORS origin and bad signature from a browser, 2026-11-22"). Open: Firefox and Safari.
+Still to do before 1.0 ships: `BUCKET_BLOCKED`'s rule is measured on Chromium only; Firefox and Safari, whose progress
+events may differ, are measured before release (spec 1.0 §2d, `M12-E7`).
 
-### Small debts
+### Known costs at 1.0
 
-- Chaos plan follow-ups:
-  - The server sends no `Retry-After` on the `200` that refuses a file it could not start in storage, so the client's
-    re-ask (`M3-U92`) waits only its own backoff. The fix needs no wire change: the storage driver keeps the bucket's
-    `Retry-After` on its error, and `handleUpload` sets the `200`'s `Retry-After` to the largest among its rejected
-    tickets, which the client already honours.
-  - A soak seed replays the files and the fault stream, not which request draws which fault (requests draw in arrival
-    order, `M3-K7`); exact replay needs a per-request draw key in the proxy.
-  - `client/job-run.ts` and `client/launch.ts` were split at 249 lines; `resume.test.ts` is at 400 of 400, so its next
-    row needs a split first.
+Accepted, each in force in its decision:
 
-- The findings' "Browser, 2026-11-16" row U2 was measured the same way as the section with the erratum (a routed
-  page), so its preflight `204` may be Playwright's too; its conclusion (the expired URL's answer is opaque) stands.
-- The resume guide says Deno has no `indexedDB`; not measured on this machine (no Deno installed).
-- Wording: the slice plan quotes the old `NETWORK_ERROR` message (around line 551), a historical plan left as
-  written.
-- Plan B, parked: no unit row observes that `job.abort()` removes the listener on the caller's signal (`M3-U54`);
-  that listener stays after `pagehide` or a ticket's expiry until the next run ends or an `abort()` (`M3-U54`); an
-  expired ticket can never confirm a `/complete` that may have succeeded (`M3-U30`). The cost of urgent publishes for
-  large jobs is now measured and left uncoalesced while a route allows at most 100 files (`M3-U11`).
-- Plan A, parked: one PUT can still start after a part fails its file (`M3-U15`); no unit row for a pause and a pool
-  grant in the same microtask (`M3-U21`) or for a failure that wins the race with a pause (`M3-U22`); a long pause
-  may cost one extra `/sign` (`M3-U20`); the lab's notes name a part without its file.
+- A job keeps the listener on the caller's `signal` after `pagehide` or a ticket's expiry, until its next run ends or
+  an `abort()`: the job's memory while a long-lived signal lives (`M3-U54`).
+- One PUT can still start after a part fails its file (`M3-U15`).
+- A long pause may cost one extra `/sign` (`M3-U20`).
+- Urgent snapshot publishes are not coalesced, a measured cost while a route allows at most 100 files (`M3-U11`).
+- No unit row of its own for a pause and a pool grant in the same microtask (`M3-U21`), or for a failure that wins the
+  race with a pause (`M3-U22`); both cases are guarded in the code.
+
+### Debts settled for 1.0 (2026-11-22)
+
+Audited against `main` (spec 1.0 §9) and removed from the lists above:
+
+- **Fixed:** `Retry-After` on the `200` that refuses a file storage could not start (`M12-E5`); unreadable R2 refusals,
+  for the CORS case that matters (`BUCKET_BLOCKED`, `M12-E7`; a bad-signature `403` sends its body and stays a
+  `NETWORK_ERROR`); the store paths that stateless server apps paid for (`M5-T69`, fixed by `M12-S1`: the bundled
+  server went from 34.71 to 28.25 kB); the resume guide's claim that Deno has no `indexedDB`, with the Deno smoke
+  lane (spec 1.0 §8).
+- **Closed:** a retry that could not reuse a lost ask's key (`M5-T101`), resolved by `M11-R92`; an expired ticket
+  that could never confirm a `/complete` that may have succeeded (`M3-U30`), resolved by `M11-R81`; the unit row for
+  `job.abort()` removing the caller's listener, which exists since `d399b90` (`M3-U54`); release approval, above; the
+  pilot adopting 0.4.0, done (and 0.6.0 since).
+- **Closed as test tooling or wording only:** exact soak replay, which needs a per-request draw key in the proxy
+  (`M3-K7`); `resume.test.ts` at 398 of 400 lines, split when a row needs room; row U2's caveat in the findings, whose
+  conclusion stands; the slice plan's old `NETWORK_ERROR` message, a historical plan left as written; the lab's notes
+  naming a part without its file.

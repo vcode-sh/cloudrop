@@ -16,14 +16,23 @@ The workflow has two jobs:
    or its dependencies runs while the publish permission exists. A prerelease version (`1.0.0-beta.1`, `0.2.0-rc.1`)
    is published under the dist-tag `next`; every other version under `latest`.
 
+**The approval:** the `npm` environment has one required reviewer, `vcode-sh`, and accepts only tags matching `v*`. A
+run's **publish** job waits until that reviewer approves it ([Release a version](#release-a-version), step 4); nothing
+is published before. **Prevent self-review** is off, so the maintainer who pushed the tag approves it, and GitHub's
+default **Allow administrators to bypass configured protection rules** is on, so a repository administrator can also
+start the job without the review. Because the repository is public, npm adds a provenance statement to each version on
+its own (a signed link from the version to this repository, commit and workflow run); the workflow never passes
+`--provenance`. Checked 2026-11-22 (`gh api repos/vcode-sh/cloudrop/environments/npm`, the run's approvals and
+`npm view cloudrop@0.6.0 dist.attestations`): this workflow published 0.1.1 to 0.6.0, 0.6.0's **publish** was approved
+by `vcode-sh` in `npm`, and 0.6.0 carries provenance.
+
 ## First release, in order
 
-The recommended path makes the repository public first: GitHub's approval step, npm's provenance and the README's
-links all need a public repository. Do the steps in this order. The trusted publisher (step 5) must publish
-successfully within **2 days** of being created, or it expires and must be deleted and created again.
+The one-time setup below is done for `vcode-sh/cloudrop`. This order is for doing it again, for a renamed repository
+or a new owner. The trusted publisher (step 5) must publish successfully within **2 days** of being created, or it
+expires and must be deleted and created again.
 
-1. **Make the repository public:** in `vcode-sh/cloudrop`, **Settings → General → Danger Zone → Change
-   visibility**.
+1. **Make the repository public:** in the repository, **Settings → General → Danger Zone → Change visibility**.
 2. **Create the environment `npm` with required reviewers:** [The GitHub environment](#the-github-environment-npm).
 3. **Turn on two-factor authentication** for the npm account: [npm account](#npm-account).
 4. **Prepare the release commit** and push it to `main` without a tag: steps 1 and 2 of
@@ -34,41 +43,15 @@ successfully within **2 days** of being created, or it expires and must be delet
 7. **Disallow tokens** for the package: [Disallow tokens](#disallow-tokens).
 8. **Revoke every npm token:** [Revoke tokens](#revoke-tokens).
 
-### If the repository stays private
-
-Trusted publishing works from a private repository, with these differences:
-
-- **The environment depends on the plan.** On GitHub Free, a private repository has no environments. Leave the trusted
-  publisher's **Environment name** empty (the field is optional) and delete the line `environment: npm` from the
-  `publish` job in `release.yml`, in a commit on `main` before you tag: a run uses the workflow file of the tagged
-  commit. The two must agree, or npm refuses the publish. On GitHub Pro or Team, create the
-  environment with its tag rule (step 2) and keep both as they are, but its required reviewers do nothing.
-- **No approval step.** Either way, **publish** starts as soon as **build** passes: pushing a `v*` tag on `main` is the
-  release. For a human check that does not depend on GitHub's plan, use npm's
-  [staged publishing](https://docs.npmjs.com/staged-publishing): in the last line of `release.yml`, change
-  `npm publish` to `npm stage publish`, and in the trusted publisher allow only **npm stage publish**. Each version
-  then waits until a maintainer approves it on npmjs.com (the package's **Staged Packages** tab) with two-factor
-  authentication.
-- **No provenance.** npm adds a provenance statement (a signed link from the published version to this repository,
-  commit and workflow run) on its own only when the repository is public, so a version published from a private
-  repository has none. npm does not support provenance from a private repository, which is why the workflow never
-  passes `--provenance` and `package.json` has no `publishConfig.provenance`. Once the repository is public, the next
-  release gets provenance with no change to the workflow.
-- **Links that 404.** The package README links its guides at `https://github.com/vcode-sh/cloudrop/blob/main/...`,
-  and `repository`, `homepage` and `bugs` in `package.json` point at the repository. For anyone without access, every
-  one of those links is a GitHub 404, on npmjs.com and in editors that show the README. The quickstart and the bucket
-  rules in the README are complete without them.
-
 ## Release a version
 
-1. On `main`, with CI green, set `version` in `packages/cloudrop/package.json` (for example `0.1.0`) and turn the
-   `## Unreleased` heading of `packages/cloudrop/CHANGELOG.md` into `## 0.1.0 - YYYY-MM-DD`, with a new empty
-   `## Unreleased` above it. For 0.1.0 only, the same commit also deletes the root `README.md` paragraph that begins
-   "Until 0.1.0 is published", and stages `README.md` with the others. Commit them in one commit and push it:
+1. On `main`, with CI green, set `version` in `packages/cloudrop/package.json` (for example `1.0.0`) and turn the
+   `## Unreleased` heading of `packages/cloudrop/CHANGELOG.md` into `## 1.0.0 - YYYY-MM-DD`, with a new empty
+   `## Unreleased` above it. Commit them in one commit and push it:
 
    ```bash
-   git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md README.md   # README.md for 0.1.0 only
-   git commit -m "chore(release): 0.1.0"
+   git add packages/cloudrop/package.json packages/cloudrop/CHANGELOG.md
+   git commit -m "chore(release): 1.0.0"
    git push origin main
    ```
 
@@ -76,18 +59,18 @@ Trusted publishing works from a private repository, with these differences:
 3. Tag that commit and push the tag:
 
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v1.0.0
+   git push origin v1.0.0
    ```
 
-4. Open the run under **Actions → release**. When **build** passes, **publish** waits for the `npm` environment:
-   choose **Review deployments**, tick `npm` and choose **Approve and deploy**. (While the repository is private there
-   is no approval step and **publish** starts on its own.)
+4. Open the run under **Actions → release**. When **build** passes, **publish** waits for the `npm` environment and
+   GitHub notifies its required reviewer: choose **Review deployments**, tick `npm` and choose **Approve and deploy**.
+   **Reject** instead ends **publish** without publishing anything.
 
 ## If a release fails
 
 **build fails** on the tag check: the tag and the version disagree, or the tag points at a commit that is not on
-`main`. Delete the tag (`git push origin :v0.1.0` and `git tag -d v0.1.0`), fix the version or tag the right commit on
+`main`. Delete the tag (`git push origin :v1.0.0` and `git tag -d v1.0.0`), fix the version or tag the right commit on
 `main`, and push the tag again. A failed `bun run verify` is fixed the same way, with a new commit on `main`.
 
 **publish fails:** first check whether the version reached npm: `npm view cloudrop versions`.
@@ -118,13 +101,10 @@ In the repository `vcode-sh/cloudrop`: **Settings → Environments → New envir
   type **Tag** and pattern `v*`. Nothing but a release tag can then run in this environment.
 - Add no secrets and no variables to it.
 
-In a private repository, GitHub limits these rules by plan: see
-[If the repository stays private](#if-the-repository-stays-private).
-
 ### Branch protection on `main`
 
-**Settings → Branches → Add branch ruleset** (or a classic branch protection rule) for `main`. GitHub enforces either
-only in a public repository, or in a private one on GitHub Pro or above.
+**Settings → Rules → Rulesets → New branch ruleset** for `main`. The repository has one, named `main` and active,
+with the rules below (checked 2026-11-22 with `gh api repos/vcode-sh/cloudrop/rulesets`).
 
 - **Require status checks to pass:** `check`, `rustfs`, `wrangler`, `chaos`, `db`, `drizzle-0-45` and `browser`, the
   CI job names. `chaos-soak` and `live-r2` run only on a schedule or by hand; never require them, or no pull request
@@ -136,7 +116,7 @@ only in a public repository, or in a private one on GitHub Pro or above.
 ### npm account
 
 On npmjs.com, **Account → Two-Factor Authentication** must be on (an authenticator app or a security key). It is
-required to disallow tokens and to approve a staged version.
+required to disallow tokens.
 
 ### The trusted publisher
 
@@ -148,7 +128,7 @@ Trusted publishing**, choose **GitHub Actions** and fill in, exactly:
 | Organization or user | `vcode-sh` |
 | Repository | `cloudrop` |
 | Workflow filename | `release.yml` (the file name only, not the path) |
-| Environment name | `npm` (empty on GitHub Free with a private repository) |
+| Environment name | `npm` |
 | Allowed actions | tick **npm publish** (a new configuration allows only `npm stage publish` until you do) |
 
 Leave **npm dist-tag** unticked: the workflow sets the dist-tag while publishing and never runs `npm dist-tag`. A
@@ -179,8 +159,7 @@ changes. If the repository is renamed or moves to another owner, change both fie
 ## References
 
 - npm: [Trusted publishing for npm packages](https://docs.npmjs.com/trusted-publishers),
-  [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements),
-  [Staged publishing](https://docs.npmjs.com/staged-publishing).
+  [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements).
 - GitHub: [OpenID Connect](https://docs.github.com/en/actions/concepts/security/openid-connect),
   [Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments),
   [Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
