@@ -63,6 +63,8 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
     xhr.onerror = () => settle(unreachable(signal, !sending && body.size > 0));
     xhr.ontimeout = lost;
     xhr.onabort = lost;
+    // Before send(), which may settle at once: settle() then removes it (M12-R44).
+    signal.addEventListener("abort", cancel, { once: true });
     try {
       xhr.open("PUT", target.url);
       for (const [name, value] of Object.entries(target.headers)) xhr.setRequestHeader(name, value);
@@ -71,9 +73,8 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       xhr.send(body);
     } catch {
       // A URL or header the browser refuses throws here, as fetch throws a TypeError for it: the same outcome.
-      return settle(unreachable(signal));
+      settle(unreachable(signal));
     }
-    signal.addEventListener("abort", cancel, { once: true });
   });
 
 /** XMLHttpRequest when there is one and no fetch option was passed; otherwise `send` (ruling M3-U6). */

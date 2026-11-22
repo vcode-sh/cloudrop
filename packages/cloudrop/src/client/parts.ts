@@ -7,7 +7,7 @@ import { PARTS_PER_SIGN, type SignedPart, type SignedRequest } from "../protocol
 import { retryAfterOf } from "../retry-after.ts";
 import type { BucketOutcome } from "./bucket.ts";
 import { aborted, bucketBlocked, unreadableAnswer } from "./failures.ts";
-import { MAX_ATTEMPTS, pause, retryDelay } from "./retry.ts";
+import { MAX_ATTEMPTS, pause, retryDelay, waitsTooLong } from "./retry.ts";
 
 /** At most this many parts of one file in flight (spec §6.1). */
 const PARTS_IN_FLIGHT = 4;
@@ -46,10 +46,14 @@ interface Run {
 
 const expiresSoon = (target: SignedRequest): boolean => Date.parse(target.expiresAt) - Date.now() < RENEW_MARGIN_MS;
 
-/** A /sign failure, seen as the outcome of a part's attempt so one budget covers both. */
+/**
+ * A /sign failure, seen as the outcome of a part's attempt so one budget covers both. A wait past the backoff's cap
+ * fails the part with the retryable error, as withRetry does, for the app's retry() (M12-E4, M12-R41).
+ */
 function signFailure(error: CloudropError): BucketOutcome {
   if (error.code === "ABORTED") return { kind: "aborted", error };
-  return error.retryable ? { kind: "retry", error, retryAfterMs: retryAfterOf(error) } : { kind: "rejected", error };
+  if (!error.retryable || waitsTooLong(error)) return { kind: "rejected", error };
+  return { kind: "retry", error, retryAfterMs: retryAfterOf(error) };
 }
 
 /**
@@ -62,8 +66,9 @@ export function nextStep(outcome: BucketOutcome, attempt: number, renewed: boole
   // Rejected or aborted: the outcomes without a wait (`kind` alone cannot narrow their shared union member).
   if (!("retryAfterMs" in outcome)) return { kind: "fail", error: outcome.error };
   // The upload server answers and the browser still sends nothing to the bucket: a retry meets the same refusal. An
-  // offline page refuses every request the same way, so it waits as before (spec §2d).
-  if (blockedBefore && outcome.kind === "opaque" && outcome.blocked && globalThis.navigator?.onLine !== false) {
+  // offline page refuses every request the same way, so it waits as before (spec §2d). Only a browser says it is online:
+  // React Native has XMLHttpRequest but no CORS and no `onLine`, so a refusal there is a lost connection (M12-R40).
+  if (blockedBefore && outcome.kind === "opaque" && outcome.blocked && globalThis.navigator?.onLine === true) {
     return { kind: "fail", error: bucketBlocked() };
   }
   // A renewed URL refused as expired again will not get better (S11).

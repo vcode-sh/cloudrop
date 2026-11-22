@@ -363,9 +363,12 @@ server has answered which parts the bucket lacks: the page before the reload may
 - Every part except the last has exactly the same size. R2 requires equal part sizes in a multipart upload, so the
   server plans one part size per file and the client cuts the file by that plan.
 - A request is tried up to 6 times with backoff: a random wait up to 0.5 s, then up to 1 s, 2 s and so on, at most 20 s.
-  When the answer carries `Retry-After`, the wait is at least that long. A bucket `PUT` waits at most 20 s. When your
-  server asks for more than 20 s, the client does not wait: the file fails with the retryable error, such as
-  `RATE_LIMITED`, and `retry()` asks again when your app chooses.
+  When the answer carries `Retry-After`, the wait is at least that long; an HTTP date counts from the answer's own
+  `Date` header when the client can read it. A bucket `PUT` waits at most 20 s. When your server (or a proxy in front
+  of it) asks for more than 20 s at `/upload`, `/sign` or `/complete`, the client does not wait: the file fails with
+  the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when your app chooses. The error has no field
+  for the wait. Only the default message of `rateLimited(seconds)` names it ("Try again in 600 seconds."); a proxy's
+  `429`, storage throttling and your own message do not, so choose the delay before `retry()` yourself.
 - An expired upload URL is renewed once.
 - Parts that `/complete` reports missing are sent again, at most twice.
 - Calls to your server send cookies (`credentials: "include"`), so `authorize` can read the session. Uploads to the
@@ -500,7 +503,7 @@ Seven codes come from the client and never from the server:
 - `UPLOAD_REJECTED`: the bucket refused the bytes as signed (a different size, type or checksum).
 - `ABORTED`: a cancel.
 - `NETWORK_ERROR`: no answer after every attempt. Retryable.
-- `BUCKET_BLOCKED`: in a browser, the bucket's CORS rule (or a firewall or extension) let no byte of the file leave,
+- `BUCKET_BLOCKED`: only in a browser (never in React Native), the bucket's CORS rule (or a firewall or extension) let no byte of the file leave,
   while your server answers. Not retryable as it is; `retry()` once the rule is fixed (see
   [Troubleshooting](troubleshooting.md#uploads-fail-with-bucket_blocked)).
 - `UPLOAD_IN_USE`: `resume()` or `discard()` found the upload held in this browser (see
