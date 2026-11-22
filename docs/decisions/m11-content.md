@@ -66,7 +66,8 @@ Entries start from 1.
   must name `content`.
 - **Status:** in force; `src/server/handler-failures.test.ts` (extra fields of a plugin's object are not sent). Amended
   by `M11-R137`: `content` is checked before it is sent, and left out whole when it is not a refusal's ("a plugin that
-  sets a value outside the three reasons sends it" no longer holds).
+  sets a value outside the three reasons sends it" no longer holds). Amended by `M12-E6`: a fourth field, `kind`, is
+  sent from the closed set with "refused" only.
 - **Visible in:** `src/protocol/types.ts`, `src/server/http.ts`, `docs/guide/errors.md`, `docs/guide/server.md`.
 
 ### M11-K4: the client reads `content` by shape and drops any other shape
@@ -82,7 +83,8 @@ Entries start from 1.
   like `message` they are text the page shows, and a wrong one misleads no more than a wrong message.
 - **If wrong:** a newer server's fourth reason reaches an older client as no `content` at all; the app shows the
   message.
-- **Status:** in force; `src/client/content-refusal.test.ts` (kept, absent, eight malformed shapes).
+- **Status:** in force; `src/client/content-refusal.test.ts` (kept, absent, eight malformed shapes). Amended by
+  `M12-E6`: a `kind` from the closed set is read with "refused", and any other is dropped alone.
 - **Visible in:** `src/client/answers.ts`.
 
 ### M11-K5: where the page reads it, and what retry and resume do with it

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type ContentCase, contentOutcome } from "../testing/content-check-fixture.ts";
 import { bytes } from "../testing/file-samples.ts";
 
-const refused = (message: string, content: { declared: string; detected: string; reason: string }) => ({
+const refused = (message: string, content: { declared: string; detected: string; reason: string; kind?: string }) => ({
   status: 400,
   error: { code: "FILE_TYPE_NOT_ALLOWED", message, retryable: false, content },
   kept: false,
@@ -49,6 +49,7 @@ describe("contentChecks: OLE compound files, documents, messages and installers 
         declared: UNTYPED,
         detected: OLE_TYPE,
         reason: "refused",
+        kind: "denied",
       }),
     },
     {
@@ -86,6 +87,7 @@ describe("contentChecks: a spreadsheet that is HTML or XML inside (M11-R136)", (
         declared: EXCEL,
         detected: "text/html",
         reason: "refused",
+        kind: "web-page",
       }),
     },
     {
@@ -95,6 +97,7 @@ describe("contentChecks: a spreadsheet that is HTML or XML inside (M11-R136)", (
         declared: EXCEL,
         detected: "application/xml",
         reason: "refused",
+        kind: "xml",
       }),
     },
     {

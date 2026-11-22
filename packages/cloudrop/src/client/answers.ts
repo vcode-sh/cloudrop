@@ -5,14 +5,15 @@
 import type { CloudropErrorCode, ContentRefusal } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { countParts } from "../part-size.ts";
-import type {
-  CompleteResponse,
-  ErrorBody,
-  MultipartTicket,
-  SignedPart,
-  SignedRequest,
-  SingleTicket,
-  UploadedFile,
+import {
+  type CompleteResponse,
+  type ErrorBody,
+  isRefusedKind,
+  type MultipartTicket,
+  type SignedPart,
+  type SignedRequest,
+  type SingleTicket,
+  type UploadedFile,
 } from "../protocol/types.ts";
 import type { Ticket } from "./endpoints.ts";
 
@@ -97,16 +98,17 @@ const isReason = (value: unknown): value is ContentRefusal["reason"] =>
   value === "mismatch" || value === "refused" || value === "not-accepted";
 
 /**
- * A type refusal's `content` (M11-K4): its three fields and nothing else the answer holds, or undefined for any other
- * shape. A reason this client does not know drops it too, since the type promises one of three; `message` still
- * explains the refusal.
+ * A type refusal's `content` (M11-K4): its fields and nothing else the answer holds, or undefined for any other shape.
+ * A reason this client does not know drops it too, since the type promises one of three; `message` still explains the
+ * refusal. A kind is kept only with "refused" and from the closed set: any other drops the kind alone (M12-E6).
  */
 function readContent(value: unknown): ContentRefusal | undefined {
   if (!isPlainObject(value)) return undefined;
-  const { declared, detected, reason } = value;
-  if (!isString(declared) || !isReason(reason)) return undefined;
-  if (detected === undefined) return { declared, reason };
-  return isString(detected) ? { declared, detected, reason } : undefined;
+  const { declared, detected, reason, kind } = value;
+  if (!isString(declared) || !isReason(reason) || (detected !== undefined && !isString(detected))) return undefined;
+  const content: ContentRefusal = detected === undefined ? { declared, reason } : { declared, detected, reason };
+  if (reason === "refused" && isRefusedKind(kind)) content.kind = kind;
+  return content;
 }
 
 function readError(value: unknown): ErrorBody | null {

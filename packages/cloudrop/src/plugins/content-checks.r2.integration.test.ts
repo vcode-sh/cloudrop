@@ -77,7 +77,7 @@ it("refuses a web page sent as a PNG, says what it found and deletes it from the
     status: 400,
     code: "FILE_TYPE_NOT_ALLOWED",
     // Read from the bytes R2 served for the ranged GET (M11-K1).
-    content: { declared: "image/png", detected: "text/html", reason: "refused" },
+    content: { declared: "image/png", detected: "text/html", reason: "refused", kind: "web-page" },
     kept: null,
   });
 });

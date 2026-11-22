@@ -99,3 +99,27 @@ Entries start from 1.
 - **Visible in:** `src/server/upload.ts`, `src/server/handler.ts`, `src/server/http.ts`,
   `src/server/upload-storage.test.ts`, `src/client/upload-rate-limited.test.ts`,
   `src/chaos/server-faults.chaos.integration.test.ts`.
+
+### M12-E6: a content refusal names its kind (amends M11-K3 and M11-K4)
+
+- **Decision:** `ContentRefusal` gains `kind?: RefusedKind`, `"web-page" | "program" | "installer" | "script" | "svg" |
+  "xml" | "denied"`, exported from `cloudrop` and `cloudrop/client`. `contentChecks()` sets it only with
+  `reason: "refused"`, at its three refusal sites, from `kindOf` over the lists `content-checks.ts` already holds: web
+  pages (HTML's names, the unknown types, `multipart/x-mixed-replace`), programs (Windows, Linux, macOS), installers,
+  scripts (JavaScript, shell, VBScript, and the sniffer's script names), then `image/svg+xml` as `svg`, any other XML
+  type as `xml`, and `denied` for the rest. A kind wins over `denied`, so `deny: ["text/html"]` still says `web-page`.
+  At `/complete` the kind is the first judged type that was refused, so an untyped WebM file refused by
+  `deny: ["video/*"]` says `denied`. `REFUSED` is built from the same lists, unchanged in members. The server's
+  `errorBody` and the client's `readContent` copy `kind` only when it is in the closed set (`isRefusedKind`, in
+  `src/protocol/types.ts`, a record so a new kind that is not listed fails to compile) and the reason is "refused";
+  otherwise the kind alone is dropped and the rest of `content` kept. This amends M11-K3 (the wire carries a fourth
+  field) and M11-K4 (the client reads it by the same rule).
+- **Why:** spec 1.0 §2c: the pilot re-derived "program", "script" and "web page" from MIME types with a copy of the
+  plugin's private lists, which had already drifted.
+- **If wrong:** a new refused category needs a new member, a minor change for the type; until a client knows it, the
+  client drops it and the page falls back to `message`, as an older client does with the whole field.
+- **Status:** in force.
+- **Visible in:** `src/errors.ts`, `src/protocol/types.ts`, `src/plugins/content-checks.ts`, `src/server/http.ts`,
+  `src/client/answers.ts`, `src/index.ts`, `src/client.ts`, `src/plugins/content-checks*.test.ts`,
+  `src/server/handler-failures.test.ts`, `src/client/content-refusal.test.ts`, `docs/guide/plugins.md`,
+  `docs/guide/errors.md`.

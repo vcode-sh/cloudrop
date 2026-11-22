@@ -100,6 +100,7 @@ error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mism
 | `declared` | The type the file was sent as: the browser's type for it, or `application/octet-stream` when the browser had none. |
 | `detected` | The type the file's first bytes show, from the [table below](#what-it-recognises): for a container, the first of its types (`video/webm` for any WebM file). Present when the bytes decided; absent when the declared type alone was refused. |
 | `reason` | Why the file was refused: one of the three below. |
+| `kind` | With `reason: "refused"` only: what the refused type is, one of the kinds below. Absent with the other reasons. |
 
 | `reason` | Rules | What it means | `detected` |
 | --- | --- | --- | --- |
@@ -107,9 +108,28 @@ error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mism
 | `"mismatch"` | 4 | The content is `detected`, but the file was sent as `declared`. | Always. |
 | `"not-accepted"` | 5 | The browser could not type the file, and its content, `detected`, is not a type the route accepts. | Always. |
 
+| `kind` | The refused type is |
+| --- | --- |
+| `"web-page"` | A web page or what a browser may render as one: HTML, XHTML, an HTML application, `unknown/unknown`, `multipart/x-mixed-replace`. |
+| `"program"` | A Windows, Linux or macOS program. |
+| `"installer"` | A Windows installer (`application/x-msi`). |
+| `"script"` | JavaScript, a shell script or VBScript. |
+| `"svg"` | An SVG image on a route that does not name `image/svg+xml`. |
+| `"xml"` | Another XML type the route does not name. |
+| `"denied"` | None of the above: refused only because it is in `deny`. |
+
+A kind wins over `"denied"`: with `deny: ["text/html"]`, a web page is still `"web-page"`. Word a refusal from it
+instead of from MIME types, such as `content.kind === "program" ? "Programs can't be uploaded." : error.message`. A
+newer server may name a kind this client does not know, which the client leaves out, and a server before 1.0 sends
+none, so keep `error.message` as the fallback.
+
+```ts
+error.content; // { declared: "application/pdf", detected: "application/vnd.microsoft.portable-executable", reason: "refused", kind: "program" }
+```
+
 A refusal at `/upload` refuses the whole request, so there `declared` is the type of the first refused file in it, not
-of each file that failed with it; the error then has no `error.file`. `content` holds these three values and nothing
-else: never a file name, a key or a byte of the file. An older client ignores it, and the route's own `accept` refusal
+of each file that failed with it; the error then has no `error.file`. `content` holds these values and nothing else:
+never a file name, a key or a byte of the file. An older client ignores it, and the route's own `accept` refusal
 (a type not in `accept`, without the plugin) carries none, so keep `error.message` as the fallback. Building your own
 copy from it in React: [Errors to show](react.md#errors-to-show).
 

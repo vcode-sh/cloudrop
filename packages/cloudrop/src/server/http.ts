@@ -3,7 +3,7 @@
 
 import { type ClientErrorCode, CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
-import { type ErrorBody, MAX_BODY_BYTES } from "../protocol/types.ts";
+import { type ErrorBody, isRefusedKind, MAX_BODY_BYTES } from "../protocol/types.ts";
 import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
 import type { Logger } from "./plugins.ts";
 
@@ -51,8 +51,9 @@ const isType = (value: unknown): boolean => typeof value === "string" && value.l
 
 /**
  * Only the code, message, retryable flag, part numbers and a type refusal's `content` leave the server: never a cause,
- * stack or storage code. `content` is sent as two MIME types and one of three reasons, copied field by field, or not
- * at all: a plugin in plain JavaScript can put a file's key or a whole object there (M11-K3, M11-R137).
+ * stack or storage code. `content` is sent as two MIME types, one of three reasons and, with "refused", a kind of the
+ * closed set, copied field by field, or not at all: a plugin in plain JavaScript can put a file's key or a whole object
+ * there (M11-K3, M11-R137, M12-E6). A kind alone that does not fit is dropped and the rest kept.
  */
 export function errorBody(error: CloudropError): ErrorBody {
   const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable };
@@ -61,7 +62,9 @@ export function errorBody(error: CloudropError): ErrorBody {
   // The types say what these fields are; a plugin in plain JavaScript is not held to them.
   const typed = content && isType(content.declared) && (content.detected === undefined || isType(content.detected));
   if (typed && REASONS.includes(content.reason)) {
-    body.content = { declared: content.declared, detected: content.detected, reason: content.reason };
+    const { declared, detected, reason, kind } = content;
+    body.content = { declared, detected, reason };
+    if (reason === "refused" && isRefusedKind(kind)) body.content.kind = kind;
   }
   return body;
 }

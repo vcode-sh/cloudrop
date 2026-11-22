@@ -15,7 +15,7 @@ Every public call returns `{ data, error }` instead of throwing for an expected 
 | `message` | One or two sentences for a person: what happened and what to do next. Show this; never parse it. |
 | `retryable` | `true` when the same request may succeed later. |
 | `parts` | `PARTS_MISSING` only: the part numbers to send again. |
-| `content` | `FILE_TYPE_NOT_ALLOWED` from [`contentChecks()`](plugins.md#what-a-refusal-carries), or from a plugin of your own that sets it: `{ declared, detected?, reason }`, the type the file was sent as, the type its bytes show and why it was refused. Word the refusal from it in your own language. |
+| `content` | `FILE_TYPE_NOT_ALLOWED` from [`contentChecks()`](plugins.md#what-a-refusal-carries), or from a plugin of your own that sets it: `{ declared, detected?, reason, kind? }`, the type the file was sent as, the type its bytes show, why it was refused and, for a refused type, what it is (`"web-page"`, `"program"`, `"script"`…). Word the refusal from it in your own language. |
 | `file` | In a job, the file the error belongs to: `{ id, name }`. |
 | `status`, `storageCode` | On the server only: the storage service's HTTP status and own error code, for logs. Never shown to users. |
 

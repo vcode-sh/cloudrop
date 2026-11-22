@@ -8,7 +8,7 @@ import { serverFixture } from "../testing/server-fixture.ts";
 import { contentChecks } from "./content-checks.ts";
 
 /** A refusal as the client is sent it: `content` says in data what `message` says in English (M11-K1, M11-K2). */
-const refused = (message: string, content: { declared: string; detected: string; reason: string }) => ({
+const refused = (message: string, content: { declared: string; detected: string; reason: string; kind?: string }) => ({
   status: 400,
   error: { code: "FILE_TYPE_NOT_ALLOWED", message, retryable: false, content },
   kept: false,
@@ -46,6 +46,7 @@ describe("contentChecks: the file's content against its declared type and the ro
         declared: "image/png",
         detected: "text/html",
         reason: "refused",
+        kind: "web-page",
       }),
     },
     {
@@ -55,6 +56,7 @@ describe("contentChecks: the file's content against its declared type and the ro
         declared: "application/pdf",
         detected: PE,
         reason: "refused",
+        kind: "program",
       }),
     },
     {
@@ -64,6 +66,7 @@ describe("contentChecks: the file's content against its declared type and the ro
         declared: "text/plain",
         detected: "text/x-shellscript",
         reason: "refused",
+        kind: "script",
       }),
     },
     {
@@ -117,6 +120,7 @@ describe("contentChecks: the file's content against its declared type and the ro
         declared: "application/pdf",
         detected: PE,
         reason: "refused",
+        kind: "program",
       }),
     },
     {
@@ -219,6 +223,7 @@ describe("contentChecks: XML and SVG by content", () => {
         declared: "image/png",
         detected: "image/svg+xml",
         reason: "refused",
+        kind: "svg",
       }),
     },
     {
@@ -233,6 +238,7 @@ describe("contentChecks: XML and SVG by content", () => {
         declared: UNTYPED,
         detected: "application/xml",
         reason: "refused",
+        kind: "xml",
       }),
     },
     {
@@ -256,6 +262,7 @@ describe("contentChecks: XML and SVG by content", () => {
         declared: "text/plain",
         detected: "image/svg+xml",
         reason: "refused",
+        kind: "svg",
       }),
     },
     {
@@ -265,6 +272,7 @@ describe("contentChecks: XML and SVG by content", () => {
         declared: "text/plain",
         detected: "application/xml",
         reason: "refused",
+        kind: "xml",
       }),
     },
     {
@@ -319,6 +327,7 @@ describe("contentChecks: allow and deny", () => {
         declared: UNTYPED,
         detected: "image/png",
         reason: "refused",
+        kind: "denied",
       }),
     },
   ])("$name", async ({ input, expected }) => {
@@ -352,7 +361,7 @@ it("judges the declared type at /complete too, for a token signed before the plu
     code: "FILE_TYPE_NOT_ALLOWED",
     message: "This file was sent as text/html, which this upload does not accept. Pick another file.",
     retryable: false,
-    content: { declared: "text/html", reason: "refused" },
+    content: { declared: "text/html", reason: "refused", kind: "web-page" },
   });
   expect(before.fake.keys()).toEqual([]);
 });

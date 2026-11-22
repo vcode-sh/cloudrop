@@ -9,6 +9,7 @@ import {
   CloudropError,
   type CloudropPlugin,
   type ContentRefusal,
+  type RefusedKind,
   type StorageDriver,
 } from "../index.ts";
 import { acceptsType, isAcceptEntry } from "../server/accept-entry.ts";
@@ -47,22 +48,37 @@ const JAVASCRIPT = [
   "text/javascript1.5",
 ];
 
-/** Refused by default, whatever the route accepts (M10-K3). */
-const REFUSED: ReadonlySet<string> = new Set([
-  // Web pages, HTML applications among them, and programs: the types the sniffer gives them and their aliases.
-  ...HTML.agrees,
-  ...UNKNOWN,
-  // A browser navigated to it renders each body part by the part's own type, text/html among them (HTML Standard
-  // §7.5.5, Loading multipart/x-mixed-replace documents, and §17.2).
-  "multipart/x-mixed-replace",
-  ...WINDOWS.agrees,
-  ...LINUX.agrees,
-  ...MAC.agrees,
-  ...INSTALLER,
-  // Scripts: JavaScript, shell scripts and VBScript.
+// Web pages, HTML applications among them, and programs: the types the sniffer gives them and their aliases. A browser
+// navigated to multipart/x-mixed-replace renders each body part by the part's own type, text/html among them (HTML
+// Standard §7.5.5, Loading multipart/x-mixed-replace documents, and §17.2).
+const WEB_PAGES = [...HTML.agrees, ...UNKNOWN, "multipart/x-mixed-replace"];
+const PROGRAMS = [...WINDOWS.agrees, ...LINUX.agrees, ...MAC.agrees];
+/** Scripts: JavaScript, shell scripts and VBScript. */
+const SCRIPTS = [
   ...JAVASCRIPT,
   ..."text/x-shellscript application/x-sh application/x-shellscript text/x-sh text/vbscript".split(" "),
-]);
+];
+
+/** Refused by default, whatever the route accepts (M10-K3). */
+const REFUSED: ReadonlySet<string> = new Set([...WEB_PAGES, ...PROGRAMS, ...INSTALLER, ...SCRIPTS]);
+
+/**
+ * What a refused type is, for `content.kind` (M12-E6). A kind wins over "denied": `deny: ["text/html"]` still refuses
+ * a web page. A script refused by `deny` under its sniffer's names (application/x-perl) is a script too.
+ */
+const NAMED_KINDS: readonly (readonly [RefusedKind, readonly string[]])[] = [
+  ["web-page", WEB_PAGES],
+  ["program", PROGRAMS],
+  ["installer", INSTALLER],
+  ["script", [...SCRIPTS, ...SCRIPT.agrees]],
+];
+
+function kindOf(type: string): RefusedKind {
+  const named = NAMED_KINDS.find(([, types]) => types.includes(type));
+  if (named) return named[0];
+  if (type === "image/svg+xml") return "svg";
+  return isXml(type) ? "xml" : "denied";
+}
 
 /**
  * The refused kinds that go by several names. `allow` lets a kind through by any of them (M11-R134): a browser picks
@@ -127,7 +143,7 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
   // /upload refused these already; a token signed before the plugin or its lists changed was not judged there. The
   // declared type decides, so `detected` is left out whatever the bytes show (M11-K2).
   if (isRefused(declared, declared, accept, lists)) {
-    return notAccepted(`This file was sent as ${declared}`, { declared, reason: "refused" });
+    return notAccepted(`This file was sent as ${declared}`, { declared, reason: "refused", kind: kindOf(declared) });
   }
   if (!sniffed) return undefined;
   const detected = sniffed.type;
@@ -148,7 +164,8 @@ function checkContent(declared: string, sniffed: Sniffed | null, accept: readonl
   // Sent as one of its types, a container is that one, judged above; sent untyped, nobody said which, so one refused
   // type refuses it (M11-R136).
   if (typed ? !open.length : open.length < judged.length) {
-    return notAccepted(what, { declared, detected, reason: "refused" });
+    const refused = judged.find((type) => !open.includes(type)) ?? detected;
+    return notAccepted(what, { declared, detected, reason: "refused", kind: kindOf(refused) });
   }
   // The content's own type must be accepted. A compound file has none: untyped, it is what it was sent as (M11-R254).
   if (!typed && sniffed !== OLE && !can.some((type) => acceptsType(accept, type))) {
@@ -184,10 +201,13 @@ export function contentChecks(options?: ContentCheckOptions): CloudropPlugin {
       // A refusal here refuses the whole request, before anything is signed, so no such file reaches the bucket.
       beforeUpload({ files, accept }) {
         const refused = files.find(({ type }) => isRefused(type, type, accept, lists));
-        return (
-          refused &&
-          notAccepted(`One of the files was sent as ${refused.type}`, { declared: refused.type, reason: "refused" })
-        );
+        if (!refused) return undefined;
+        const { type } = refused;
+        return notAccepted(`One of the files was sent as ${type}`, {
+          declared: type,
+          reason: "refused",
+          kind: kindOf(type),
+        });
       },
       async afterVerify({ file, accept, storage }) {
         return checkContent(file.type, sniff(await firstBytes(storage, file), file.size), accept, lists);

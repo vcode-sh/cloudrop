@@ -3,6 +3,7 @@ export {
   type CloudropErrorCode,
   type CloudropErrorOptions,
   type ContentRefusal,
+  type RefusedKind,
   type Result,
 } from "./errors.ts";
 export type {

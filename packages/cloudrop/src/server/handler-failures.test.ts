@@ -166,6 +166,26 @@ describe("cloudrop.handler failures", () => {
     });
   });
 
+  // M12-E6: a kind is sent only from the closed set and only with "refused"; otherwise the kind alone is dropped.
+  it.for([
+    {
+      name: "a kind of its own",
+      content: { declared: "text/html", reason: "refused", kind: "nope" },
+      sent: { declared: "text/html", reason: "refused" },
+    },
+    { name: "a kind on a mismatch", content: { ...found, kind: "web-page" }, sent: found },
+    {
+      name: "a kind of the closed set on a refusal",
+      content: { declared: "text/html", reason: "refused", kind: "web-page" },
+      sent: { declared: "text/html", reason: "refused", kind: "web-page" },
+    },
+  ])("sends only a kind it may when a plugin gives it $name", async ({ content, sent }) => {
+    const refusal = new CloudropError("FILE_TYPE_NOT_ALLOWED", "Not this file.", { content: content as never });
+    const plugin: CloudropPlugin = { id: "types", server: { beforeUpload: () => refusal } };
+    const response = await serverFixture({ avatar }, { plugins: [plugin] }).post("upload", uploadBody);
+    expect((await response.json()).error.content).toStrictEqual(sent);
+  });
+
   it("sends content with no detected type as the two values it has", async () => {
     const content = { declared: "text/html", detected: undefined, reason: "refused" } as const;
     const refusal = new CloudropError("FILE_TYPE_NOT_ALLOWED", "Not this file.", { content });
