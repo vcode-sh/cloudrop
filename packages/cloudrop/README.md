@@ -4,7 +4,8 @@ Direct-to-bucket file uploads for Cloudflare R2 and S3-compatible storage. Your 
 short-lived links; the browser sends the bytes straight to the bucket, with progress, retries, pause and resume after a
 reload.
 
-Before 1.0, a minor version may change the API; every change is in the
+From 1.0 the public API follows semantic versioning
+([Stability](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/stability.md)); every change is in the
 [changelog](https://github.com/vcode-sh/cloudrop/blob/main/packages/cloudrop/CHANGELOG.md).
 
 ```bash
@@ -13,25 +14,23 @@ npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
 
 ## Quickstart
 
-The server, in `lib/cloudrop.ts`. It reads `CLOUDROP_SECRET` and the `CLOUDROP_R2_*` credentials on the first request:
+The server, in `lib/cloudrop.ts`. Its storage is `r2()`, which reads `CLOUDROP_SECRET` and the four `CLOUDROP_R2_*`
+variables on the first request, so a build needs none of them; files go under the route's name, `avatar/`:
 
 ```ts
-import { createCloudrop, r2, route, unauthorized } from "cloudrop";
+// lib/cloudrop.ts
+import { createCloudrop, route, unauthorized } from "cloudrop";
 
 export const cloudrop = createCloudrop({
-  storage: r2({ bucket: "media" }),
   routes: {
-    avatar: route(
-      {
-        accept: "image/*",
-        maxSize: "5MB",
-        authorize: async ({ request }) => {
-          const user = await getUser(request); // your app's session lookup
-          return user ? { userId: user.id } : unauthorized();
-        },
+    avatar: route({
+      accept: "image/*",
+      maxSize: "5MB",
+      authorize: async ({ request }) => {
+        const user = await getUser(request);
+        return user ? { userId: user.id } : unauthorized();
       },
-      { prefix: ({ userId }) => `users/${userId}/avatars` },
-    ),
+    }),
   },
 });
 ```
@@ -108,7 +107,7 @@ files: [Testing your app](https://github.com/vcode-sh/cloudrop/blob/main/docs/gu
 The browser declares each file's type, and `accept` checks that declaration. `contentChecks()` from `cloudrop/plugins`
 refuses web pages, programs, scripts and unnamed XML types at `/upload`, and checks the bytes at `/complete`: it reads
 the first 4 KiB of the stored file and refuses, and deletes, a file whose content contradicts its type or is one of
-those, whatever it was sent as.
+those, whatever it was sent as. Scanning for malware is a recipe of about ten lines, in the same guide.
 
 ```ts
 import { contentChecks } from "cloudrop/plugins";
@@ -123,10 +122,11 @@ What it recognises, what it refuses and its limits:
 
 The browser uploads to the bucket directly, so the bucket needs a CORS rule that allows `PUT` from your page's origin
 with the headers cloudrop signs (`content-type`, `content-disposition`, `if-none-match`, `x-amz-meta-cloudrop-id`) and
-exposes `ETag` and `Retry-After`, plus a lifecycle rule that aborts incomplete multipart uploads. Both rules, with the
-Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/bucket-setup.md).
-`npx cloudrop setup --origin <origin> --apply` adds both and keeps the bucket's other rules, and `npx cloudrop doctor
---origin <origin>` checks the settings, the bucket and its rules:
+exposes `ETag` and `Retry-After`, plus a lifecycle rule that aborts incomplete multipart uploads. Without the CORS
+rule every upload fails with `BUCKET_BLOCKED`. `npx cloudrop setup --origin http://localhost:3000` prints both rules
+and the commands that set them, `--apply` adds both and keeps the bucket's other rules, and `npx cloudrop doctor
+--origin <origin>` checks the settings, the bucket and its rules. Both rules, with the Wrangler and AWS CLI commands:
+[Bucket setup](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/bucket-setup.md), and the command:
 [The cloudrop command](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/command.md).
 
 ## Documentation
@@ -143,6 +143,8 @@ Wrangler and AWS CLI commands: [Bucket setup](https://github.com/vcode-sh/cloudr
 [Hono guide](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/hono.md) ·
 [Errors](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/errors.md) ·
 [Troubleshooting](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/troubleshooting.md) ·
+[Stability](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/stability.md) ·
+[Security](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/security.md) ·
 [The cloudrop command](https://github.com/vcode-sh/cloudrop/blob/main/docs/guide/command.md)
 
 The same guides ship inside the package, for this exact version: `node_modules/cloudrop/docs/README.md` lists them, so

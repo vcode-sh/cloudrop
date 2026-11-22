@@ -1,14 +1,72 @@
 # Hono with better-auth and Drizzle
 
-This page adds cloudrop to an app built like this: a Hono API on Bun with better-auth, Drizzle on Postgres with
-drizzle-kit migrations, a React SPA on another origin of the same site calling the API with cookies, background jobs
-in a worker process, and shadcn on Base UI. The steps are in the order you take them. The working version of every
-snippet is in [`examples/hono`](../../examples/hono/README.md) (the API and the worker) and
+This page starts with the smallest Hono server on Bun, without a database. The rest of it adds cloudrop to an app built
+like this: a Hono API on Bun with better-auth, Drizzle on Postgres with drizzle-kit migrations, a React SPA on another
+origin of the same site calling the API with cookies, background jobs in a worker process, and shadcn on Base UI. The
+steps are in the order you take them. The working version of every snippet is in
+[`examples/hono`](../../examples/hono/README.md) (the API and the worker) and
 [`examples/vite-react`](../../examples/vite-react/README.md) (the web app), which run against RustFS and Postgres in
 Docker with no credentials.
 
 The page uses the layout of a monorepo with an API app, a web app, a worker app and shared packages (`@app/db` for the
 schema and the pool, `@app/api` for oRPC). Adapt the names to yours.
+
+## Quick start: Hono on Bun, without a store
+
+A server that signs uploads to R2 and keeps no record of them, in two files. `getUser` stands for your app's session
+lookup.
+
+```ts
+// src/cloudrop.ts
+import { createCloudrop, route, unauthorized } from "cloudrop";
+
+export const cloudrop = createCloudrop({
+  routes: {
+    attachments: route({
+      accept: ["image/*", "application/pdf"],
+      maxSize: "20MB",
+      authorize: async ({ request }) => {
+        const user = await getUser(request);
+        return user ? { userId: user.id } : unauthorized();
+      },
+    }),
+  },
+});
+```
+
+```ts
+// src/index.ts
+import { Hono } from "hono";
+import { cloudrop } from "./cloudrop";
+
+const app = new Hono();
+app.all("/api/cloudrop/*", (c) => cloudrop.handler(c.req.raw));
+
+export default app; // `bun run src/index.ts` serves it on port 3000
+```
+
+Bun reads `.env` by itself. Put the five variables there:
+
+```sh
+CLOUDROP_SECRET=<at least 32 characters>    # openssl rand -base64 32
+CLOUDROP_R2_ACCOUNT_ID=<32 hexadecimal characters>
+CLOUDROP_R2_ACCESS_KEY_ID=<access key id>
+CLOUDROP_R2_SECRET_ACCESS_KEY=<secret access key>
+CLOUDROP_R2_BUCKET=media
+```
+
+Then give the bucket a CORS rule for the origin of the page that uploads, here a Vite app on port 5173:
+`npx cloudrop setup --origin http://localhost:5173` prints the rule and the commands that set it
+([Bucket setup](bucket-setup.md)). That page is on another origin than the API, so it needs three more things:
+
+- the API lists it: `createCloudrop({ trustedOrigins: ["http://localhost:5173"], routes })`;
+- the client calls the API there: `createCloudropClient<typeof cloudrop>({ basePath: "http://localhost:3000/api/cloudrop" })`,
+  or the same option of `createUploadHooks`;
+- the session cookie reaches the API ([Deployment](deployment.md#cross-origin-an-api-on-another-origin)).
+
+`app.all` takes `POST` and the preflight's `OPTIONS`; keep `hono/cors` off this path, as step 4 shows. Without a store,
+`onComplete` runs at least once per file, and nothing counts a quota or lists the files: the steps below add the
+Drizzle store for that.
 
 ## 1. One package owns cloudrop
 
@@ -52,8 +110,9 @@ Export it from the schema index (`export * from "./cloudrop"`), as you do for ev
 `timestamptz(3)`, millisecond precision, the same as `timestamp(name, { withTimezone: true, precision: 3 })`.
 
 The tables are your app's. `uploads.api.files({ owner })` lists a user's completed files a page at a time (step 6);
-when you need more, such as a join with your own tables, read them with your own Drizzle queries. Write to them only
-through cloudrop, which keeps each owner's usage in step with their files.
+when you need more, such as a join with your own tables, read them with your own Drizzle queries: which columns are
+guaranteed, the recipes and why you never write to them are in
+[Your own queries](store.md#your-own-queries).
 
 ## 3. Generate and apply the migration
 

@@ -202,6 +202,15 @@ Every notable change to the `cloudrop` package. The format follows
   reading `node_modules/cloudrop` (`M12-P10`).
 - Two guides: "Stability and versioning" (`docs/stability.md`), what semver covers from 1.0, and "Security model"
   (`docs/security.md`), the threat model (`M12-P8`, `M12-P9`).
+- The columns of `cloudrop_files` and `cloudrop_usage` an app may read are guaranteed under semver, and the store
+  guide's "Your own queries" gives the reading rules and five recipes in Postgres and SQLite: an admin inventory
+  joined with your users, stuck completions, the failures of the last day, usage per owner, and the owners who no
+  longer exist, followed by `eraseOwner`. It also gives the only delete an app may run, a purge of ended rows proven
+  clean, and of an erased owner's rows (`M12-Q1`, `M12-Q2`).
+- Guides: mounting on Express 5, Fastify 5, Elysia, SvelteKit, React Router 7, Astro, Nuxt and Nitro, Deno and
+  Workers, each with its trap (`M12-P4`); a malware-scanning recipe, an `afterVerify` plugin of about ten lines; a Hono
+  and Bun quick start without a store; what `close()` promises when nothing awaits it; and the opt-in store's
+  `StoreFileApi` view.
 
 ### Changed
 

@@ -58,6 +58,11 @@ orphan cleanup and built-in quota. (Amended 2026-11-17, M5-T15: the database sto
 adapters shipped as milestone M5, before the plugins and before 1.0; see the
 [M5 store spec](2026-11-17-m5-store-design.md). Cross-device resume stays later.)
 
+(Amended 2026-11-22, the owner's ruling on the 1.0 scope: of the four plugins only content checks ship in 1.0.
+`checksums()`, `limits()` and `images()` are cut, and so is the virus-scan and quarantine part of content checks; a
+scanning recipe in `docs/guide/plugins.md` replaces it. See the [1.0 spec](2026-11-22-1.0.0-design.md), "Why this
+release, and what it is not".)
+
 **Later, not designed here:** Vue and Svelte bindings, a Cloudflare Worker R2-binding driver, server-side streaming
 multipart for large server uploads.
 
@@ -74,9 +79,12 @@ One npm package, `cloudrop`, with subpath exports. One install and one version; 
 | `cloudrop/next`, `cloudrop/node` | `toNextHandler`, `toNodeHandler` | Server |
 | `cloudrop/client` | `createCloudropClient`: store, queue, transports, persistence; wire and route inference types | Browser, React Native |
 | `cloudrop/react` | `useUpload`, `useDropzone` | React 18 and 19 (optional peer) |
-| `cloudrop/plugins` | `contentChecks`, `checksums`, `limits`, `images` (server halves) | Server |
-| `cloudrop/client/plugins` | Client halves of the same plugins | Browser |
+| `cloudrop/plugins` | `contentChecks` | Server |
 | `cloudrop/adapters/sql`, `cloudrop/adapters/drizzle`, `cloudrop/adapters/prisma` | The database store's adapters (M5): `sqlStore` with executors for node-postgres, postgres.js, `node:sqlite` and D1; `drizzleStore`, `cloudropPgTables`, `cloudropSqliteTables`; `prismaStore` | Server |
+
+(Amended 2026-11-22, the owner's ruling on the 1.0 scope: `cloudrop/plugins` holds `contentChecks` alone, and
+`cloudrop/client/plugins` is not in 1.0. It never shipped: its plugins, `checksums()` and `images()`, are cut. See the
+[1.0 spec](2026-11-22-1.0.0-design.md), "Why this release, and what it is not".)
 
 `cloudrop/client` exports the wire types of the four endpoints and the route inference types `RouteName`,
 `RouteMetadata`, `RouteResult` and `InferableCloudrop` (M3-O1 as scoped by M3-H13; 31 names with
@@ -390,6 +398,13 @@ Design: [`2026-11-16-resume-design.md`](2026-11-16-resume-design.md); decisions 
    session reads the request there.
 
 ## 8. Plugins (1.0)
+
+(Amended 2026-11-22, the owner's ruling on the 1.0 scope: 1.0 ships `contentChecks()` without its quarantine and
+`scan(file)` hook, and none of `checksums()`, `limits()` and `images()`, nor the client hooks `prepareFile` and
+`beforePart` that only they needed. A scanner is a ten-line `afterVerify` plugin, given as a recipe in
+`docs/guide/plugins.md` ("Scanning uploads"); rate limits are `rateLimited()` from `authorize` (`M12-E2`); the store's
+`quota` counts storage. The plugin API is experimental and outside semver in 1.0 (`M12-A12`). The text below is the
+original design. See the [1.0 spec](2026-11-22-1.0.0-design.md), "Why this release, and what it is not".)
 
 A plugin is `{ id, server?: hooks, client?: hooks, $Infer? }`. Hooks: `beforeUpload`, `afterVerify`, `onAbort`,
 `extendRoute` (new route options with types), and client `prepareFile`, `beforePart`. `onAbort` runs when a file a

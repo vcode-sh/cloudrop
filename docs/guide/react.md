@@ -409,6 +409,13 @@ async function signOut() {
 - **Effects, not render.** `close()` is permanent, so call it from an event handler or from an effect that runs again
   harmlessly, as `useCloseOtherUsers` does; never from an effect's cleanup, which StrictMode runs once on mount.
 
+An app need not wait for `close()` to move on. What it started runs to its end whether or not anything awaits it: a
+ticket that an `/upload` in flight brings back later still gets its `/abort`, sent with that upload's own token, so the
+server accepts it whoever is signed in by then; a `/complete` in flight still finishes for the user who started it. An
+app can drop the promise, call `forget()` and create the next client at once: a late ticket saves no record. The cost:
+if the app's `headers` function fails once the user signed out, a late `/abort` is not sent and that upload waits for
+the lifecycle rule or the sweep.
+
 A file picked during sign-out, or on a client `useCloseOtherUsers` closed, leaves no row in `files`. Show it from the
 route's `startError`; there is no need to wrap the client to catch it:
 

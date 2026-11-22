@@ -36,69 +36,50 @@ npm i cloudrop    # or: bun add cloudrop, pnpm add cloudrop
 
 ## Quick start
 
-A Next.js app with an avatar upload: the server, the route that mounts it, the hooks, a component, and the bucket's
-CORS rule. `getUser` stands for your own app's session lookup.
+A Next.js app with an avatar upload, in four files: the server, the route that mounts it, the hooks and a component.
+Then five variables and the bucket's CORS rule. `getUser` stands for your own app's session lookup.
 
 **1. Create the server** in `lib/cloudrop.ts`:
 
 ```ts
-import { createCloudrop, r2, route, unauthorized } from "cloudrop";
+// lib/cloudrop.ts
+import { createCloudrop, route, unauthorized } from "cloudrop";
 
 export const cloudrop = createCloudrop({
-  storage: r2(), // reads the CLOUDROP_R2_* variables below
   routes: {
-    avatar: route(
-      {
-        accept: "image/*",
-        maxSize: "5MB",
-        authorize: async ({ request }) => {
-          const user = await getUser(request); // your app's session lookup
-          return user ? { userId: user.id } : unauthorized();
-        },
+    avatar: route({
+      accept: "image/*",
+      maxSize: "5MB",
+      authorize: async ({ request }) => {
+        const user = await getUser(request);
+        return user ? { userId: user.id } : unauthorized();
       },
-      { prefix: ({ userId }) => `users/${userId}/avatars` },
-    ),
+    }),
   },
 });
 ```
 
-The settings come from the environment and are read on the first request, so a build needs none of them. In Next.js,
-put them in `.env.local`:
-
-```sh
-CLOUDROP_SECRET=<at least 32 characters>    # generate one with: openssl rand -base64 32
-
-CLOUDROP_R2_ACCOUNT_ID=<32 hexadecimal characters>
-CLOUDROP_R2_ACCESS_KEY_ID=<access key id>
-CLOUDROP_R2_SECRET_ACCESS_KEY=<secret access key>
-CLOUDROP_R2_BUCKET=media
-
-# Any S3-compatible service instead: storage: s3() with
-# CLOUDROP_S3_ENDPOINT, CLOUDROP_S3_REGION, CLOUDROP_S3_BUCKET,
-# CLOUDROP_S3_ACCESS_KEY_ID and CLOUDROP_S3_SECRET_ACCESS_KEY
-```
-
-What `authorize` returns is signed into the upload token, which the browser can read, so return ids, never secrets.
+It stores files in R2 under the route's name, such as `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. What `authorize`
+returns is signed into the upload token, which the browser can read, so return ids, never secrets.
 
 **2. Mount the handler** in `app/api/cloudrop/[...all]/route.ts`:
 
 ```ts
 import { toNextHandler } from "cloudrop/next";
 import { cloudrop } from "../../../../lib/cloudrop";
-
 export const { GET, POST, OPTIONS } = toNextHandler(cloudrop);
 ```
 
-Node, Express, Hono, Bun and other runtimes: [Mounting the handler](docs/guide/server.md#mounting-the-handler).
+Express, Fastify, Hono, SvelteKit, Astro and other frameworks:
+[Mounting the handler](docs/guide/server.md#mounting-the-handler).
 
-**3. Create the hooks** in `lib/upload.ts`:
+**3. Create the hooks** in `lib/upload.ts`. Import the server as a type only: a value import would pull the server and
+its secret into the browser bundle.
 
 ```ts
 import { createUploadHooks } from "cloudrop/react";
-// A type import: a value import would pull the server and its secret into the browser bundle.
 import type { cloudrop } from "./cloudrop";
-
-export const { useUpload, useResumable } = createUploadHooks<typeof cloudrop>();
+export const { useUpload } = createUploadHooks<typeof cloudrop>();
 ```
 
 **4. Upload from a component:**
@@ -121,6 +102,33 @@ export function AvatarPicker() {
 }
 ```
 
+**5. Set five variables.** They are read on the first request, so a build needs none of them. In Next.js, put them
+in `.env.local`:
+
+```sh
+CLOUDROP_SECRET=<at least 32 characters>    # generate one with: openssl rand -base64 32
+CLOUDROP_R2_ACCOUNT_ID=<32 hexadecimal characters>
+CLOUDROP_R2_ACCESS_KEY_ID=<access key id>
+CLOUDROP_R2_SECRET_ACCESS_KEY=<secret access key>
+CLOUDROP_R2_BUCKET=media
+```
+
+Any other S3-compatible service: pass `storage: s3()`, which reads the `CLOUDROP_S3_*` variables
+([Server](docs/guide/server.md#any-s3-compatible-service)).
+
+**6. Allow your page to upload to the bucket.** The browser sends the bytes to the bucket itself, so the bucket needs a
+CORS rule for your page's origin; without one every upload fails with `BUCKET_BLOCKED`. This prints the rule and the
+commands that set it, and changes nothing:
+
+```bash
+npx cloudrop setup --origin http://localhost:3000
+```
+
+With credentials that may change bucket settings, `--apply` adds the CORS rule and the lifecycle rule that cleans up
+abandoned uploads, keeping the bucket's other rules, and `npx cloudrop doctor --origin http://localhost:3000` checks
+the settings, the bucket and its rules ([the cloudrop command](docs/guide/command.md)). Both rules in R2's and S3's
+formats, the Wrangler and AWS CLI commands and the token permissions: [Bucket setup](docs/guide/bucket-setup.md).
+
 Without React, the client does the same in one call:
 
 ```ts
@@ -130,41 +138,6 @@ import type { cloudrop } from "../lib/cloudrop";
 const { upload } = createCloudropClient<typeof cloudrop>();
 const { data, error } = await upload("avatar", file); // never rejects for an expected failure
 ```
-
-**5. Allow your page to upload to the bucket.** Without a CORS rule the browser blocks every upload, which shows as
-`NETWORK_ERROR`. With credentials that may change bucket settings, the [cloudrop command](docs/guide/command.md) adds
-the CORS and lifecycle rules and keeps the bucket's other rules:
-
-```bash
-npx cloudrop setup --origin http://localhost:3000 --apply
-npx cloudrop doctor --origin http://localhost:3000    # checks the settings, the bucket and its rules
-```
-
-Or by hand: for R2, write `cors.json` with your page's origin:
-
-```json
-{
-  "rules": [
-    {
-      "allowed": {
-        "origins": ["http://localhost:3000"],
-        "methods": ["PUT", "GET", "HEAD"],
-        "headers": ["content-type", "content-disposition", "if-none-match", "x-amz-meta-cloudrop-id"]
-      },
-      "exposeHeaders": ["ETag", "Retry-After"],
-      "maxAgeSeconds": 3600
-    }
-  ]
-}
-```
-
-```bash
-wrangler r2 bucket cors list media                    # setting CORS replaces every rule: keep the ones you need
-wrangler r2 bucket cors set media --file cors.json
-```
-
-Add a lifecycle rule that aborts incomplete multipart uploads too. Both rules for R2 and S3, the AWS CLI commands and
-the token permissions: [Bucket setup](docs/guide/bucket-setup.md).
 
 Each entry of `files` is one file's live state: `status`, `progress`, `error` and, once done, `result`. An expected
 failure never throws: `error.code` is for your code to branch on (`UNAUTHORIZED`, `FILE_TOO_LARGE`, `NETWORK_ERROR`,
@@ -218,14 +191,13 @@ The server above is stateless: the signed token carries everything, and `onCompl
 a store to keep one row per upload in your own database:
 
 ```ts
-import { createCloudrop, r2, route, unauthorized } from "cloudrop";
+import { createCloudrop, route, unauthorized } from "cloudrop";
 import { pgExecutor, sqlStore } from "cloudrop/adapters/sql";
 import pg from "pg";
 
 const store = sqlStore(pgExecutor(new pg.Pool({ connectionString: process.env.DATABASE_URL })));
 
 export const cloudrop = createCloudrop({
-  storage: r2(),
   store,
   quota: () => 1024 ** 3, // bytes each owner may keep
   routes: {
@@ -249,7 +221,8 @@ signed-out user's uploads, and `api.sweep` cleans up after abandoned ones. "Once
 run longer than `completionLeaseMs` runs it again, and only writes through `tx` on Postgres with `transaction: true`
 commit exactly once. Keep an email or a webhook in `onComplete` idempotent, or send it from `afterComplete`, which runs
 at most once and best effort. The tables, every adapter and what each mode guarantees:
-[Database store](docs/guide/store.md#what-it-guarantees).
+[Database store](docs/guide/store.md#what-it-guarantees). The tables are yours to read with your own SQL, for an admin
+inventory or a usage page, with columns guaranteed under semver: [Your own queries](docs/guide/store.md#your-own-queries).
 
 ## Examples
 
@@ -273,13 +246,15 @@ Start at the [documentation index](docs/README.md). The guides:
 | [Bucket setup](docs/guide/bucket-setup.md) | CORS and lifecycle rules for R2 and S3, credentials, `checkBucket` |
 | [The cloudrop command](docs/guide/command.md) | `cloudrop doctor` and `cloudrop setup`: check the settings and bucket, add the rules |
 | [Database store](docs/guide/store.md) | Adapters, tables, `owner`, `quota`, `onComplete` once, `onDelete`, revocation, the sweep |
-| [Plugins](docs/guide/plugins.md) | `contentChecks()`: refuse a file whose content is not its declared type, and web pages or programs |
+| [Plugins](docs/guide/plugins.md) | `contentChecks()`: refuse a file whose content is not its declared type, and web pages or programs; scanning for malware |
 | [Deployment](docs/guide/deployment.md) | Same-origin and cross-origin setups, cookies, proxies, building without secrets |
 | [Resume after reload](docs/guide/resume.md) | Continuing a large upload after a reload or a closed tab |
 | [Hono with better-auth and Drizzle](docs/guide/hono.md) | A Hono API and a Vite SPA on another origin, step by step |
 | [Testing your app](docs/guide/testing-your-app.md) | `cloudrop/testing`: test routes, quotas, `onComplete` and uploads without a bucket |
 | [Errors](docs/guide/errors.md) | Every error code, where it comes from and what to do |
 | [Troubleshooting](docs/guide/troubleshooting.md) | Symptoms and their usual causes |
+| [Stability](docs/guide/stability.md) | What semver covers from 1.0, deprecations, supported runtimes |
+| [Security](docs/guide/security.md) | The threat model: what cloudrop guards, and what is left to your app |
 
 ## Requirements
 
@@ -290,15 +265,16 @@ Start at the [documentation index](docs/README.md). The guides:
 
 ## Status
 
-cloudrop is pre-1.0. The server, the browser client, the React hooks and the database store are built and tested:
-against an in-process fake R2, real R2, RustFS behind a fault-injecting proxy, and from Chromium through the examples.
-Until 1.0, a minor version may change the API; every change is in the [changelog](packages/cloudrop/CHANGELOG.md).
+cloudrop 1.0 is stable. The exports of every entry, documented behaviour, the error codes and their HTTP statuses, the
+wire protocol, the token format, the command's flags and the guaranteed table columns follow semantic versioning:
+what a minor may add, and what only a major changes, is in [Stability](docs/guide/stability.md). The plugin API is
+marked experimental and stays outside that promise.
 
-1.0 freezes the public API under semantic versioning. 0.1.0 was the first release; 0.2.0 added what the first
-production app asked for (a client-wide `close()`, headers for your API only, listing and erasing an owner's files, one
-file per owner on a route); 0.3.0 added `cloudrop/testing` and the `cloudrop` command; 0.4.0 added content checks,
-`onDelete`, search and sort for an owner's files, and the `account` guard. Before 1.0 come plugins for limits, images
-and checksums. Where the project stands: [plans and roadmap](docs/superpowers/plans/README.md).
+The server, the browser client, the React hooks and the database store are tested against an in-process fake R2,
+real R2, RustFS behind a fault-injecting proxy, Postgres, SQLite and Cloudflare D1, and from Chromium through the
+examples, and a production app runs each release candidate before it is published. Every change is in the
+[changelog](packages/cloudrop/CHANGELOG.md), and where the project goes next in the
+[plans and roadmap](docs/superpowers/plans/README.md).
 
 ## Contributing
 

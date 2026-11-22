@@ -11,6 +11,9 @@ and commands for your origins, `--apply` adds the rules to the bucket and keeps 
 variables; when your app names its settings otherwise, `--var CLOUDROP_R2_BUCKET=R2_BUCKET` reads one from your
 variable ([Your own variable names](command.md#your-own-variable-names)).
 
+The README's quick start leaves the rule to `npx cloudrop setup --origin http://localhost:3000`; the rules it prints
+are the ones below, for your origins.
+
 The rule lists the origin of the **page** that uploads, not the origin of your API: the browser sends the bytes from
 the page. With the page and the API on different origins, see [Deployment](deployment.md).
 
@@ -18,7 +21,7 @@ the page. With the page and the API on different origins, see [Deployment](deplo
 
 | Setting | Why |
 | --- | --- |
-| A CORS rule allowing `PUT` from your page's origin | Browsers upload to the bucket directly, from your page's origin. Without the rule, the browser blocks every upload. |
+| A CORS rule allowing `PUT` from your page's origin | Browsers upload to the bucket directly, from your page's origin. Without the rule, the browser blocks every upload, and the client ends each file with `BUCKET_BLOCKED`. |
 | The four headers cloudrop signs, in the rule's allowed headers | `content-type`, `content-disposition`, `if-none-match` and `x-amz-meta-cloudrop-id`. A preflight fails if one is missing. |
 | `Retry-After` in the exposed headers (recommended) | The one header of the bucket's answer the client reads. It lets the client wait as long as the bucket asks after a `429` or `503`. Uploads work without it. |
 | `ETag` in the exposed headers (optional) | Nothing in cloudrop reads it from a page: the client never reads `ETag`, and the server gets part ETags from the bucket when it completes an upload. The rules below expose it all the same, see [Why the rule exposes ETag](#why-the-rule-exposes-etag). |
