@@ -5,7 +5,8 @@
 // hears every file that ends done, on its first try or after retry(); a cancel is neither. Each hook hears each event
 // that happened while it was mounted once, StrictMode included and even when that event unmounts it, from the latest
 // render's options, and nothing that ended before it mounted.
-// Oracle: the requests the fixture saw, the server's verdicts for the routes below and the outcomes the client resolves.
+// Oracle: the requests the fixture saw, the server's verdicts for the routes below and the outcomes the client
+// resolves.
 
 import { File as NodeFile } from "node:buffer";
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react";
@@ -57,14 +58,32 @@ function Listener({ useUpload, name, log }: { useUpload: UseNotes; name: string;
   return createElement("p", null, name);
 }
 
-/** "leaving" until a file of the route is done, then "arriving" in its place; hands its upload() to the test. */
-function Swap({ useUpload, log, give }: { useUpload: UseNotes; log: string[]; give: (upload: () => unknown) => void }) {
+/** A component that logs what its hooks hear and hands its upload() of a.txt to the test. */
+type Starter = { useUpload: UseNotes; log: string[]; give: (upload: () => unknown) => void };
+
+/** "leaving" until a file of the route is done, then "arriving" in its place. */
+function Swap({ useUpload, log, give }: Starter) {
   const { totals, upload } = useUpload("notes");
   const given = useRef(false);
   if (!given.current) give(() => upload(note("alpha", "a.txt")));
   given.current = true;
   const name = totals.done === 0 ? "leaving" : "arriving";
   return createElement(Listener, { key: name, useUpload, name, log });
+}
+
+/** A hook on `route` that logs each file it hears end done, as "notes a.txt". */
+function Follower({ useUpload, route, log }: { useUpload: UseNotes; route: "notes" | "closed"; log: string[] }) {
+  useUpload(route, { onUploaded: (file) => log.push(`${route} ${file.name}`) });
+  return createElement("p", null, route);
+}
+
+/** Moves its Follower, the same instance, from notes to closed once a file of notes is done. */
+function Mover({ useUpload, log, give }: Starter) {
+  const { totals, upload } = useUpload("notes", { onUploaded: (file) => log.push(`mover ${file.name}`) });
+  const given = useRef(false);
+  if (!given.current) give(() => upload(note("alpha", "a.txt")));
+  given.current = true;
+  return createElement(Follower, { useUpload, route: totals.done === 0 ? "notes" : "closed", log });
 }
 
 beforeEach(() => {
@@ -233,6 +252,19 @@ describe("useUpload's startError, onUploaded and onError", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect({ shown: view.container.textContent, log }).toEqual({ shown: "arriving", log: ["leaving a.txt"] });
+  });
+
+  it("tells no callback of a route the end itself moved the hook to", async () => {
+    const { useUpload } = setup();
+    const log: string[] = [];
+    let start: () => unknown = () => undefined;
+    const view = render(createElement(Mover, { useUpload, log, give: (upload) => (start = upload) }));
+    // As above: React renders the move before the callbacks' microtask runs.
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+    await start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect({ shown: view.container.textContent, log }).toEqual({ shown: "closed", log: ["mover a.txt"] });
   });
 
   it("calls the latest render's onUploaded", async () => {

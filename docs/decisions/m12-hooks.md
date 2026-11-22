@@ -19,18 +19,24 @@ Entries start from 1.
   publishes, not when the microtask runs: outside `act`, React renders a store change and runs its effects in a
   microtask the view's listeners queued, before the callbacks' one. So a hook hears a file that ended while it was
   mounted even when that end unmounts it (`{!done && <Picker onUploaded={...} />}`), and a hook that the end mounts
-  (`{totals.done > 0 && <Summary onUploaded={...} />}`) does not hear it (fix round 1 of the review; the test renders
-  without `act`). A listener that throws is thrown again
-  in a `setTimeout` and the others still run, as the client's job listeners do (M3-U8). `cloudrop/react` measured
-  2.62 kB (gzip, size-limit; 2.61 kB before fix round 1) against 2.25 kB before, under its 4 kB ceiling.
+  (`{totals.done > 0 && <Summary onUploaded={...} />}`) does not hear it. Each listener keeps the route and the factory
+  it was registered for, and calls nothing when `controller.latest` names another: a hook that the end itself moves to
+  another route or factory (`useUpload(done ? "b" : "a", { onUploaded })`) does not tell the new route's callbacks
+  about the old route's end. A listener that throws is thrown again in a `setTimeout` and the others still run, as the
+  client's job listeners do (M3-U8). `cloudrop/react` measured 2.63 kB (gzip, size-limit) against 2.25 kB before,
+  under its 4 kB ceiling.
 - **Why:** spec 1.0 §1: the pilot compared `totals.done` with a ref to refresh its queries, and every surveyed library
   has success and error callbacks. In the store rather than per hook, so two components do not each diff the jobs and
   the event exists once; in an effect, so StrictMode's double effect leaves one listener per mounted hook; in a
   microtask, so a callback that calls `upload()` or `retry()` runs outside the store's own notify.
 - **If wrong:** an app that wants one call per file across the whole route, not per mounted component, gives the
   callback to one component only, as the guide says. A file that ends while it is being rendered by two components
-  calls each one's callback: that is the contract, not a duplicate.
-- **Status:** in force.
+  calls each one's callback: that is the contract, not a duplicate. A hook whose route changes in the render a file's
+  end causes hears that end on neither route.
+- **Status:** in force. `src/react/use-upload-callbacks.test.ts`, rendering without `act` as a browser does: a hook
+  the end unmounts hears it and one the end mounts does not; a hook the end moves from `notes` to `closed` tells
+  `closed`'s callback nothing, while another hook on `notes` hears the end (before the listener checked its route,
+  `closed`'s callback heard `notes`' end).
 - **Visible in:** `src/react/types.ts`, `src/react/upload-store.ts`, `src/react/use-upload.ts`,
   `src/react/use-upload-callbacks.test.ts`, `src/react/types.test.ts`, `docs/guide/react.md`.
 
