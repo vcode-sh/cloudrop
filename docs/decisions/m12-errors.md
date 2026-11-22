@@ -15,12 +15,12 @@ Entries start from 1.
   `INVALID_METADATA`, `INVALID_INPUT` and `SERVER_ERROR` is rebuilt from its code, message, `retryable`, `content` and
   recorded wait, so `parts`, `file` and `cause` never leave the server. A `RATE_LIMITED` is always rebuilt retryable
   (coordinator's ruling, fix round 1): one built by hand without `retryable` would otherwise reach the client as a
-  refusal it never retries, which contradicts the code. Any other code is logged as
-  `cloudrop: authorize returned <CODE>, which /upload cannot send. Return one of …` (`a plugin's beforeUpload` for a
-  plugin) and answered as the generic, non-retryable `SERVER_ERROR`. A returned refusal logs nothing. An `Error` named
-  `CloudropError` that is not this copy's class throws the "Install cloudrop once" `TypeError`, worded as plugins
-  already are, and the other non-plain-object `TypeError` now names a `CloudropError` among the answers. The handler's
-  generic "cannot send" log stays for the other endpoints; its unit rows now refuse at `/complete`.
+  refusal it never retries, which contradicts the code. Any other code is logged as `cloudrop: authorize returned
+  <CODE>, which /upload cannot send. Return one of …` (`a plugin's beforeUpload` for a plugin) and answered as the
+  generic, non-retryable `SERVER_ERROR`. A returned refusal logs nothing. An `Error` named `CloudropError` that is not
+  this copy's class throws the "Install cloudrop once" `TypeError`, worded as plugins already are, and the other
+  non-plain-object `TypeError` now names a `CloudropError` among the answers. The handler's generic "cannot send" log
+  stays for the other endpoints; its unit rows now refuse at `/complete`.
 - **Why:** spec 1.0 §2a: the pilot smuggled `retryInSeconds` through the signed auth object and turned it into an error
   in a plugin. One table for `authorize` and `beforeUpload` keeps the two refusal points equal; rebuilding the error
   is the only way to keep `QUOTA_EXCEEDED` with `parts` from sending them, since `errorBody` copies `parts` from any
@@ -37,7 +37,8 @@ Entries start from 1.
 - **Decision:** a new export of `cloudrop`, beside `unauthorized` and `forbidden` in `src/server/refusal.ts` (the
   plan's `src/server/refusals.ts` was not created: an earlier 1.0 task moved those helpers to `refusal.ts`, and a
   second file would split one concept), re-exported from `route.ts`. It returns a retryable `RATE_LIMITED` with a
-  recorded wait of `max(1, ceil(seconds))` seconds, which the handler sends as `Retry-After`. The default message is
+  recorded wait of `min(86400, max(1, ceil(seconds)))` seconds, which the handler sends as `Retry-After`: the cap is
+  the header's (`M12-E3`), applied here so the message says the wait the header sends. The default message is
   `Too many upload requests. Try again in N seconds.`, with "1 second" for a wait of one. A negative or non-finite
   `seconds` throws `TypeError: rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got -1.`,
   which the handler logs and answers as a 500.
@@ -49,7 +50,8 @@ Entries start from 1.
   client's callers kept their types.
 - **If wrong:** an app that wants fractional waits sees them rounded up; a wait shorter than a second is not a use
   case `Retry-After` can express.
-- **Status:** in force.
+- **Status:** in force. `src/server/upload-authorize.test.ts`: `rateLimited(1e30)` answers `Retry-After: 86400` and
+  "Try again in 86400 seconds." (the message said `1e+30 seconds` before the cap moved into `rateLimited`).
 - **Visible in:** `src/server/refusal.ts`, `src/retry-after.ts`, `src/server/http.ts`, `src/index.ts`,
   `src/storage/presets.test.ts`, `docs/guide/server.md`.
 
@@ -63,10 +65,10 @@ Entries start from 1.
   retryable error (429, 503, 5xx), and `storageFailure` keeps it, so a throttled `/complete` answers 429 with the
   bucket's `Retry-After`. The chaos row `a CompleteMultipartUpload the storage answers 503` expects
   `POST /complete 429`.
-- **Cap (fix round 1, coordinator's ruling):** without it `String()` writes a wait of 10^21 seconds or more in exponent
-  form (`1e+21`), which is no `delay-seconds` value (RFC 9110 §10.2.3), and a mistaken wait could park a client for
-  good. A day is far past the client's 20-second cap (M12-E4), so no honest wait is cut short in effect.
-- **Why:** spec 1.0 §2a: one status per code, and a 503 can make a load balancer eject a healthy app server.
+- **Why:** spec 1.0 §2a: one status per code, and a 503 can make a load balancer eject a healthy app server. The cap:
+  without it `String()` writes a wait of 10^21 seconds or more in exponent form (`1e+21`), which is no `delay-seconds`
+  value (RFC 9110 §10.2.3), and a mistaken wait could park a client for good. A day is far past the client's
+  20-second cap (`M12-E4`), so no honest wait is cut short in effect.
 - **If wrong:** a proxy or monitor that alerted on 503 from the upload server no longer sees storage throttling there;
   the server log still records each storage failure.
 - **Status:** in force.
@@ -133,15 +135,15 @@ Entries start from 1.
 
 ### M12-E7: `BUCKET_BLOCKED` when the browser sends no byte to the bucket while the upload server answers
 
-- **Decision:** a part, or a single `PUT`, fails at once with the client code `BUCKET_BLOCKED`, not retryable, when
-  two consecutive attempts of it ended in XHR `onerror` with no upload progress (`loaded > 0` never seen), a `/sign`
-  of that part answered 2xx between them (the second attempt used a URL the server had just signed), and
-  `navigator.onLine` is not `false`. Only on the XHR path: with a `fetch` option, or where there is no
-  XMLHttpRequest, nothing changes. cloudrop's own stall abort and `ontimeout` are never counted, nor is an XHR whose
-  `open()` or `send()` throws, nor an empty body: a 0-byte file has no byte to report, so a bad signature or an
-  expired URL on it would look blocked, and it keeps the six attempts and `NETWORK_ERROR`. The code is in `ClientErrorCode`, so the server's status table cannot hold it, and in
-  `KEEPS_TICKET`: `retry()` after the rule is fixed sends only what had not landed. The message names the CORS rule
-  and `npx cloudrop doctor --origin <origin>`, and says that a firewall or extension looks the same.
+- **Decision:** a part, or a single `PUT`, fails at once with the client code `BUCKET_BLOCKED`, not retryable, when two
+  consecutive attempts of it ended in XHR `onerror` with no upload progress (`loaded > 0` never seen), a `/sign` of that
+  part answered 2xx between them (the second attempt used a URL the server had just signed), and `navigator.onLine` is
+  not `false`. Only on the XHR path: with a `fetch` option, or where there is no XMLHttpRequest, nothing changes.
+  cloudrop's own stall abort and `ontimeout` are never counted, nor is an XHR whose `open()` or `send()` throws, nor an
+  empty body: a 0-byte file has no byte to report, so a bad signature or an expired URL on it would look blocked, and it
+  keeps the six attempts and `NETWORK_ERROR`. The code is in `ClientErrorCode`, so the server's status table cannot hold
+  it, and in `KEEPS_TICKET`: `retry()` after the rule is fixed sends only what had not landed. The message names the
+  CORS rule and `npx cloudrop doctor --origin <origin>`, and says that a firewall or extension looks the same.
 - **Why:** spec 1.0 §2d. A missing or wrong CORS rule is the most common newcomer mistake, and it showed as a
   retryable `NETWORK_ERROR` after about 15 s. A rule that misses the origin or a signed header fails the preflight, so
   the body never leaves. Measured on R2 from Chromium 159 (`r2-spike-findings.md`, "Missing CORS origin and bad
@@ -165,5 +167,5 @@ Entries start from 1.
 - **Visible in:** `src/client/transport.ts`, `src/client/bucket.ts`, `src/client/parts.ts`, `src/client/failures.ts`,
   `src/client/retry-step.ts`, `src/errors.ts`, `src/client/bucket-blocked.test.ts`,
   `examples/next/app/bucket-faults.chaos.browser.test.ts`, `examples/next/app/lab-blocked.browser.test.ts`,
-  `examples/next/app/lab/lab-xhr.ts`, `docs/guide/errors.md`, `docs/guide/troubleshooting.md`,
-  `docs/guide/client.md`, base spec §6.2.
+  `examples/next/app/lab/lab-xhr.ts`, `examples/next/app/lab/lab-fetch.ts`, `examples/next/app/lab/fault-panel.tsx`,
+  `docs/guide/errors.md`, `docs/guide/troubleshooting.md`, `docs/guide/client.md`, base spec §6.2.

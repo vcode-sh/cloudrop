@@ -3,7 +3,7 @@
 import { CloudropError, type CloudropErrorCode } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
-import { serverError } from "./http.ts";
+import { MAX_RETRY_AFTER_SECONDS, serverError } from "./http.ts";
 import type { Logger } from "./plugins.ts";
 
 // Symbol.for, not Symbol(): two copies of cloudrop in one app must recognise each other's refusals, or one would read
@@ -50,8 +50,8 @@ export function refusalError(refusal: Refusal): CloudropError {
 
 /**
  * For a caller who sends too many uploads: RATE_LIMITED, retryable, answered 429 with `Retry-After` of `seconds`
- * rounded up, at least 1. The client waits that long before it asks again, or, past its own 20-second cap, leaves the
- * file failed and retryable for the app's `retry()` (M12-E2, M12-E4).
+ * rounded up, at least 1 and at most a day. The client waits that long before it asks again, or, past its own 20-second
+ * cap, leaves the file failed and retryable for the app's `retry()` (M12-E2, M12-E4).
  */
 export function rateLimited(seconds: number, message?: string): CloudropError {
   if (!Number.isFinite(seconds) || seconds < 0) {
@@ -59,7 +59,8 @@ export function rateLimited(seconds: number, message?: string): CloudropError {
       `rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got ${String(seconds)}.`,
     );
   }
-  const wait = Math.max(1, Math.ceil(seconds));
+  // The header's cap, so the default message says the wait the header sends (M12-E3).
+  const wait = Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(1, Math.ceil(seconds)));
   const text = message ?? `Too many upload requests. Try again in ${wait} ${wait === 1 ? "second" : "seconds"}.`;
   return waitAtLeast(new CloudropError("RATE_LIMITED", text, { retryable: true }), wait * 1000);
 }
@@ -80,8 +81,8 @@ const UPLOAD_REFUSALS: readonly CloudropErrorCode[] = [
 
 /**
  * The answer to an /upload that `source` refused with `error`: rebuilt from its code, message, retryable flag, content
- * and wait, so its parts, file and cause stay on the server. RATE_LIMITED is always retryable. Any other code is a bug of the app's, answered as the
- * generic 500 and logged with the codes it may use.
+ * and wait, so its parts, file and cause stay on the server. RATE_LIMITED is always retryable. Any other code is a bug
+ * of the app's, answered as the generic 500 and logged with the codes it may use.
  */
 export function uploadRefusal(error: CloudropError, source: string, logger: Logger): CloudropError {
   if (!UPLOAD_REFUSALS.includes(error.code)) {
