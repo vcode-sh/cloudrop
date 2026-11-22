@@ -76,7 +76,8 @@ Every notable change to the `cloudrop` package. The format follows
   means the bucket or the server's storage (`M12-A7`).
 - The React hook continues a listed upload with `resumeUpload`. Before: `const { resume } = useUpload("files")`, then
   `resume(upload, file)`. After: `const { resumeUpload } = useUpload("files")`, then `resumeUpload(upload, file)`.
-  `resume()` without arguments still un-pauses every paused file. The client's `client.resume(upload, file)` keeps
+  `resume()` without arguments still un-pauses every paused file; in plain JavaScript the old `resume(upload, file)`
+  call now only un-pauses, and resumes no record. The client's `client.resume(upload, file)` keeps
   its name (`M12-A5`).
 - `useResumable().discarding` is `discardingIds`. Before: `disabled={discarding.has(upload.id)}`. After:
   `disabled={discardingIds.has(upload.id)}` (`M12-A6`).

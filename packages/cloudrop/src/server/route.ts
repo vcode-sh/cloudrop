@@ -66,7 +66,10 @@ export function allowAnyone(): object {
   return {};
 }
 
-/** A store's extra context (an adapter's `tx`) replaces an authorize field of the same name. */
+/**
+ * A store's extra context (an adapter's `tx`) replaces an authorize field of the same name. Since M12-A8 the types forbid
+ * such a field (`AuthResult`), so the replacement only matters to plain JavaScript.
+ */
 type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : Omit<TContext, keyof TExtra> & TExtra;
 
 type NoExtra = Record<never, never>;

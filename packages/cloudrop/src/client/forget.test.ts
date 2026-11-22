@@ -13,6 +13,7 @@ import { errorResponse } from "../testing/fake-r2/responses.ts";
 import {
   fourParts,
   gate,
+  METADATA,
   nth,
   partThree,
   persistFixture,
@@ -104,6 +105,21 @@ describe("resumable()", () => {
     const { client, db } = persistFixture();
     db.failNext("UnknownError");
     expect(brief((await client.resumable()).error)).toEqual(BROWSER_STORAGE_ERROR);
+  });
+
+  it("saves an upload of a client with account u1 and no namespace under u1, which a reload as u1 lists", async () => {
+    const held = gate(partThree);
+    const setup = persistFixture({ fault: held.fault, options: { concurrency: 1, account: "u1" } });
+    setup.client.start("files", fourParts(), { metadata: METADATA });
+    await held.reached;
+    await setup.drained();
+    const saved = Object.values(setup.db.stored()) as UploadRecord[];
+    const listed = async (changed: ClientOptions) => ids((await setup.reload(changed).resumable()).data);
+    expect({
+      namespaces: saved.map((record) => record.namespace),
+      asU1: await listed({}),
+      withoutAccount: await listed({ account: undefined }),
+    }).toEqual({ namespaces: ["u1"], asU1: [saved[0]?.id], withoutAccount: [] });
   });
 });
 

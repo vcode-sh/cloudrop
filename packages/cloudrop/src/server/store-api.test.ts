@@ -8,6 +8,8 @@ import { route } from "./route.ts";
 import type { StoreFileApi } from "./store-api.ts";
 
 const HOUR = 3_600_000;
+const BAD_OWNER =
+  "Pass the owner, a string of 1 to 255 characters without NUL (U+0000) or a lone surrogate, as owner() returned it.";
 /** When a check of the bucket for a file completed at NOW is final: a URL signed as the completion claimed the file
  *  works 15 minutes more, then the default grace, an hour. */
 const SETTLED = NOW.getTime() + 15 * 60_000 + HOUR;
@@ -70,7 +72,8 @@ describe("cloudrop.api with a store", () => {
     const { api } = fixture.cloudrop;
     const open = await fixture.single("owned", TEXT);
     // 0.6's { owner } is refused with usage's message and revokes nothing: the next call still finds the upload.
-    expect(await api.revokeUploads({ owner: "u1" } as never)).toEqual(await api.usage(""));
+    const refused = await api.revokeUploads({ owner: "u1" } as never);
+    expect([refused.data, refused.error?.code, refused.error?.message]).toEqual([null, "INVALID_INPUT", BAD_OWNER]);
     expect(await api.revokeUploads("u1")).toEqual({ data: { revoked: 1 }, error: null });
     expect(await api.revokeUploads("u1")).toEqual({ data: { revoked: 0 }, error: null });
     const statuses = await Promise.all([ticket.id, open.id].map(async (id) => (await api.file(id)).data?.status));
@@ -262,9 +265,7 @@ describe("cloudrop.api with a store", () => {
       api.files({ owner: "u1", cursor: `1763380800000:${id}` }),
     ]);
     expect(answers.map((answer) => answer.error?.code)).toEqual(Array.from({ length: 9 }, () => "INVALID_INPUT"));
-    expect(answers[0]?.error?.message).toBe(
-      "Pass the owner, a string of 1 to 255 characters without NUL (U+0000) or a lone surrogate, as owner() returned it.",
-    );
+    expect(answers[0]?.error?.message).toBe(BAD_OWNER);
     expect(calls).toEqual([]);
   });
 });
