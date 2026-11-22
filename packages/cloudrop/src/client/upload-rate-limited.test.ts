@@ -145,17 +145,19 @@ describe("a part's /sign refused with Retry-After", () => {
       },
     );
 
-  it("fails at once, retryable, when the wait is 600 seconds, instead of asking again every 20 seconds", async () => {
+  it("fails at once, retryable, when the wait is 600 seconds, instead of waiting 20 seconds to ask again", async () => {
     const { basePath, fetch, requests } = fixture();
     const client = createCloudropClient({ basePath, fetch });
     let error: CloudropError | null | undefined;
     void client.start("files", [file()]).done.then((result) => {
       error = result.error;
     });
-    // Two minutes in steps of a second, each followed by a turn of the real event loop for the file's hashing. Waits of
-    // 20 seconds would have sent a /sign every 20 seconds by then.
-    for (let second = 0; second < 120; second++) {
-      await vi.advanceTimersByTimeAsync(1000);
+    // The fake clock stays at 0 and only timers due now fire (the backoff's are 0 ms here), while the in-process server
+    // answers in real time. So no request's deadline passes however slow a loaded lane is, and a part that waits
+    // 20 seconds before its next /sign never settles: it fails this test after 2 real seconds.
+    const giveUpAt = performance.now() + 2000;
+    while (error === undefined && performance.now() < giveUpAt) {
+      await vi.advanceTimersByTimeAsync(0);
       await new Promise((resolve) => setImmediate(resolve));
     }
     expect({ failed: { code: error?.code, retryable: error?.retryable }, requests }).toEqual({
