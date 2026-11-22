@@ -80,7 +80,7 @@ const UPLOAD_REFUSALS: readonly CloudropErrorCode[] = [
 
 /**
  * The answer to an /upload that `source` refused with `error`: rebuilt from its code, message, retryable flag, content
- * and wait, so its parts, file and cause stay on the server. Any other code is a bug of the app's, answered as the
+ * and wait, so its parts, file and cause stay on the server. RATE_LIMITED is always retryable. Any other code is a bug of the app's, answered as the
  * generic 500 and logged with the codes it may use.
  */
 export function uploadRefusal(error: CloudropError, source: string, logger: Logger): CloudropError {
@@ -91,6 +91,8 @@ export function uploadRefusal(error: CloudropError, source: string, logger: Logg
     );
     return serverError();
   }
-  const { code, message, retryable, content } = error;
+  const { code, message, content } = error;
+  // RATE_LIMITED always says "try again later": a hand-built one without retryable would never be retried (M12-E1).
+  const retryable = error.retryable || code === "RATE_LIMITED";
   return waitAtLeast(new CloudropError(code, message, { retryable, content }), retryAfterOf(error));
 }

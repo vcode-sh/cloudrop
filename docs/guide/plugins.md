@@ -114,8 +114,8 @@ error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mism
 | `"program"` | A Windows, Linux or macOS program. |
 | `"installer"` | A Windows installer (`application/x-msi`). |
 | `"script"` | JavaScript, a shell script or VBScript. |
-| `"svg"` | An SVG image on a route that does not name `image/svg+xml`. |
-| `"xml"` | Another XML type the route does not name. |
+| `"svg"` | An SVG image. |
+| `"xml"` | Another XML type. |
 | `"denied"` | None of the above: refused only because it is in `deny`. |
 
 A kind wins over `"denied"`: with `deny: ["text/html"]`, a web page is still `"web-page"`. Word a refusal from it

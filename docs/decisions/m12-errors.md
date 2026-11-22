@@ -13,7 +13,9 @@ Entries start from 1.
   plugin's `beforeUpload` refusal, go through `uploadRefusal` (`src/server/refusal.ts`): a code among `UNAUTHORIZED`,
   `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `TOO_MANY_FILES`,
   `INVALID_METADATA`, `INVALID_INPUT` and `SERVER_ERROR` is rebuilt from its code, message, `retryable`, `content` and
-  recorded wait, so `parts`, `file` and `cause` never leave the server; any other code is logged as
+  recorded wait, so `parts`, `file` and `cause` never leave the server. A `RATE_LIMITED` is always rebuilt retryable
+  (coordinator's ruling, fix round 1): one built by hand without `retryable` would otherwise reach the client as a
+  refusal it never retries, which contradicts the code. Any other code is logged as
   `cloudrop: authorize returned <CODE>, which /upload cannot send. Return one of …` (`a plugin's beforeUpload` for a
   plugin) and answered as the generic, non-retryable `SERVER_ERROR`. A returned refusal logs nothing. An `Error` named
   `CloudropError` that is not this copy's class throws the "Install cloudrop once" `TypeError`, worded as plugins
@@ -34,8 +36,8 @@ Entries start from 1.
 
 - **Decision:** a new export of `cloudrop`, beside `unauthorized` and `forbidden` in `src/server/refusal.ts` (the
   plan's `src/server/refusals.ts` was not created: an earlier 1.0 task moved those helpers to `refusal.ts`, and a
-  second file would split one concept), re-exported from `route.ts`. It returns a retryable `RATE_LIMITED` with a recorded wait of
-  `max(1, ceil(seconds))` seconds, which the handler sends as `Retry-After`. The default message is
+  second file would split one concept), re-exported from `route.ts`. It returns a retryable `RATE_LIMITED` with a
+  recorded wait of `max(1, ceil(seconds))` seconds, which the handler sends as `Retry-After`. The default message is
   `Too many upload requests. Try again in N seconds.`, with "1 second" for a wait of one. A negative or non-finite
   `seconds` throws `TypeError: rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got -1.`,
   which the handler logs and answers as a 500.
@@ -55,10 +57,15 @@ Entries start from 1.
 
 - **Decision:** the status table in `src/server/http.ts` maps `RATE_LIMITED` to 429, so storage throttling at
   `/upload`, `/sign` or `/complete` answers 429 too, not 503. `errorResponse` sets `Retry-After` from the error's
-  recorded wait, in whole seconds rounded up, and exposes it to a cross-origin page
-  (`access-control-expose-headers: Retry-After`), as it did for the busy answer. The S3 transport passes a failed answer's
-  `retry-after` header to `storageError`, which records it as the wait of a retryable error (429, 503, 5xx), and
-  `storageFailure` keeps it, so a throttled `/complete` answers 429 with the bucket's `Retry-After`. The chaos row `a CompleteMultipartUpload the storage answers 503` expects `POST /complete 429`.
+  recorded wait, in whole seconds rounded up and at most 86,400 (a day), always written as a plain integer, and
+  exposes it to a cross-origin page (`access-control-expose-headers: Retry-After`), as it did for the busy answer. The
+  S3 transport passes a failed answer's `retry-after` header to `storageError`, which records it as the wait of a
+  retryable error (429, 503, 5xx), and `storageFailure` keeps it, so a throttled `/complete` answers 429 with the
+  bucket's `Retry-After`. The chaos row `a CompleteMultipartUpload the storage answers 503` expects
+  `POST /complete 429`.
+- **Cap (fix round 1, coordinator's ruling):** without it `String()` writes a wait of 10^21 seconds or more in exponent
+  form (`1e+21`), which is no `delay-seconds` value (RFC 9110 §10.2.3), and a mistaken wait could park a client for
+  good. A day is far past the client's 20-second cap (M12-E4), so no honest wait is cut short in effect.
 - **Why:** spec 1.0 §2a: one status per code, and a 503 can make a load balancer eject a healthy app server.
 - **If wrong:** a proxy or monitor that alerted on 503 from the upload server no longer sees storage throttling there;
   the server log still records each storage failure.

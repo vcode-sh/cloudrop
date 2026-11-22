@@ -102,7 +102,13 @@ export const busy = (): CloudropError =>
     2000,
   );
 
-/** Retry-After for the wait recorded on `answer`, in whole seconds, or nothing when there is none. */
+/** A day: no wait longer is sent, so a mistaken one cannot park the client for good (M12-E3). */
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+/**
+ * Retry-After for the wait recorded on `answer`, in whole seconds and at most a day, or nothing when there is none. The
+ * cap also keeps the value a plain integer: String() writes 1e21 and above in exponent form, which RFC 9110 forbids.
+ */
 export function retryAfterHeaders(answer: object, cors: ResponseHeaders): ResponseHeaders {
   const waitMs = retryAfterOf(answer);
   if (waitMs === 0) return {};
@@ -110,7 +116,8 @@ export function retryAfterHeaders(answer: object, cors: ResponseHeaders): Respon
   const exposed: ResponseHeaders = cors["access-control-allow-origin"]
     ? { "access-control-expose-headers": "Retry-After" }
     : {};
-  return { ...exposed, "retry-after": String(Math.ceil(waitMs / 1000)) };
+  const seconds = Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(waitMs / 1000));
+  return { ...exposed, "retry-after": String(seconds) };
 }
 
 export function errorResponse(error: CloudropError, headers: ResponseHeaders = {}): Response {

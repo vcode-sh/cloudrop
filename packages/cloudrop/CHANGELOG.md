@@ -137,7 +137,8 @@ Every notable change to the `cloudrop` package. The format follows
 - `CloudropPlugin<TAuth>` types `auth` in every hook of a plugin, checked against the routes' authorize results
   (`M12-T5`).
 - `rateLimited(seconds, message?)` from `cloudrop`: `authorize` refuses with `RATE_LIMITED`, answered 429 with
-  `Retry-After` (`M12-E2`).
+  `Retry-After`, at most 86400 seconds (`M12-E2`, `M12-E3`). A `RATE_LIMITED` returned from `authorize` or
+  `beforeUpload` is always sent retryable (`M12-E1`).
 - `authorize` may return a `CloudropError`, and it and a plugin's `beforeUpload` refuse `/upload` with any of
   `UNAUTHORIZED`, `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`,
   `TOO_MANY_FILES`, `INVALID_METADATA`, `INVALID_INPUT` and `SERVER_ERROR`, sent without its `parts`, `file` or

@@ -38,10 +38,9 @@ export function pause(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Calls `run` until it succeeds, fails with an error that is not retryable or asks to wait too long, or has used
- * MAX_ATTEMPTS. A cancel before
- * an attempt or during a pause returns ABORTED; an answer that arrives after a cancel is returned as it is, since a
- * request that finished must not be reported as cancelled. `first` continues a budget earlier attempts used, and `run`
- * hears which attempt it makes.
+ * MAX_ATTEMPTS. A cancel before an attempt or during a pause returns ABORTED; an answer that arrives after a cancel is
+ * returned as it is, since a request that finished must not be reported as cancelled. `first` continues a budget
+ * earlier attempts used, and `run` hears which attempt it makes.
  */
 export async function withRetry<T>(
   run: (attempt: number) => Promise<Result<T>>,

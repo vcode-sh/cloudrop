@@ -306,6 +306,8 @@ status:
 
 - The client gets the error's code, message and `retryable` (and a type refusal's `content`). Its `parts`, `file` and
   `cause` stay on the server.
+- `RATE_LIMITED` is always sent retryable, even from `new CloudropError("RATE_LIMITED", "...")` without
+  `retryable: true`. Its `Retry-After` is at most 86400 (a day).
 - Any other code is a bug: the client gets the generic, non-retryable `SERVER_ERROR` and the log names the code and
   the list above.
 - A refusal is not a failure: nothing is logged.

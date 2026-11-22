@@ -209,6 +209,12 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
     });
   });
 
+  // M12-E3: 10^30 seconds would be written "1e+30", which is no Retry-After value; a day is the most ever sent.
+  it("caps Retry-After at a day, written as a plain integer", async () => {
+    const { status, retryAfter } = await answer(serverFixture({ files: refusing(() => rateLimited(1e30)) }));
+    expect({ status, retryAfter }).toEqual({ status: 429, retryAfter: "86400" });
+  });
+
   it.for([{ seconds: -1 }, { seconds: Number.NaN }, { seconds: Number.POSITIVE_INFINITY }])(
     "answers 500 and logs the app's bug for rateLimited($seconds)",
     async ({ seconds }) => {
@@ -235,6 +241,13 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
       refusal: new CloudropError("QUOTA_EXCEEDED", "Your 1 GB is full.", { parts: [1] }),
       status: 403,
       error: { code: "QUOTA_EXCEEDED", message: "Your 1 GB is full.", retryable: false },
+    },
+    // The code means "try again later", so a hand-built one without `retryable` is still retried (M12-E1).
+    {
+      name: "RATE_LIMITED built by hand with 429, retryable",
+      refusal: new CloudropError("RATE_LIMITED", "Slow down."),
+      status: 429,
+      error: { code: "RATE_LIMITED", message: "Slow down.", retryable: true },
     },
     {
       name: "SERVER_ERROR with 500, keeping the app's retryable",
