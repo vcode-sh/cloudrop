@@ -4,7 +4,7 @@
 import { type ClientErrorCode, CloudropError, type CloudropErrorCode, fail, ok, type Result } from "../errors.ts";
 import { invalidInput } from "../input.ts";
 import { type ErrorBody, isRefusedKind, MAX_BODY_BYTES } from "../protocol/types.ts";
-import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
+import { retryAfterOf, retryAfterSeconds, waitAtLeast } from "../retry-after.ts";
 import type { Logger } from "./plugins.ts";
 
 type ServerErrorCode = Exclude<CloudropErrorCode, ClientErrorCode>;
@@ -105,21 +105,14 @@ export const busy = (): CloudropError =>
     2000,
   );
 
-/** A day: no wait longer is sent, so a mistaken one cannot park the client for good (M12-E3). */
-export const MAX_RETRY_AFTER_SECONDS = 86_400;
-
-/**
- * Retry-After for the wait recorded on `answer`, in whole seconds and at most a day, or nothing when there is none. The
- * cap also keeps the value a plain integer: String() writes 1e21 and above in exponent form, which RFC 9110 forbids.
- */
+/** Retry-After for the wait recorded on `answer`, in whole seconds and at most a day, or nothing when there is none. */
 export function retryAfterHeaders(answer: object, cors: ResponseHeaders): ResponseHeaders {
-  const waitMs = retryAfterOf(answer);
-  if (waitMs === 0) return {};
+  const seconds = retryAfterSeconds(answer);
+  if (seconds === undefined) return {};
   // A cross-origin page reads Retry-After only when CORS exposes it.
   const exposed: ResponseHeaders = cors["access-control-allow-origin"]
     ? { "access-control-expose-headers": "Retry-After" }
     : {};
-  const seconds = Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(waitMs / 1000));
   return { ...exposed, "retry-after": String(seconds) };
 }
 

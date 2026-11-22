@@ -211,7 +211,8 @@ Entries start from 1.
   - a plugin is typed for the shape it reads, `CloudropPlugin<{ userId: string }>`, and the plugin API is outside
     semver anyway;
   - the opt-in store view writes the context types it declared, `StoreFileApi<RouteName<typeof cloudrop>, FileDeleter,
-    undefined>`, or takes `Cloudrop<typeof routes, CloudropStore>["api"]`, instead of `DeletedOf<typeof routes>`.
+    undefined>`, or takes `Cloudrop<typeof routes, CloudropStore>["api"]`, instead of `DeletedOf<typeof routes>`; since
+    `M12-R71` it writes `StoreApiOf<typeof cloudrop>`.
 
   The client's option types are reached as `ClientOptions["account"]` and `ClientOptions["headers"]`; the store
   helpers are contextually typed inside `defineStore({ ... })`, so a hand-written store names none of them.

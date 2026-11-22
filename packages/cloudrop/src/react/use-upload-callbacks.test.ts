@@ -15,13 +15,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { CloudropError } from "../client.ts";
 import type { UseUploadOptions } from "../react.ts";
-import { forbidden } from "../server/refusal.ts";
+import { forbidden, rateLimited } from "../server/refusal.ts";
 import { allowAnyone, route } from "../server/route.ts";
 import { failPut, fast, holdPut, hooksFixture, note, statuses } from "../testing/react-fixture.ts";
 
 const routes = {
   notes: route({ accept: "text/plain", maxSize: 16, authorize: allowAnyone }),
   closed: route({ accept: "text/plain", maxSize: 16, authorize: () => forbidden() }),
+  busy: route({ accept: "text/plain", maxSize: 16, authorize: () => rateLimited(600) }),
 };
 type Fault = Parameters<typeof hooksFixture>[1];
 type Options = UseUploadOptions<undefined>;
@@ -175,6 +176,19 @@ describe("useUpload's startError, onUploaded and onError", () => {
     await waitFor(() => expect(heard).toHaveLength(2), fast);
 
     expect(heard).toEqual(["failed FORBIDDEN a.txt", "failed FORBIDDEN b.txt"]);
+  });
+
+  // M12-R70: the copy that names the file keeps the wait, so the app can say "try again in 600 seconds".
+  it("keeps the wait of a whole /upload refused with rateLimited(600) on the error that names the file", async () => {
+    const { useUpload } = setup();
+    const errors: CloudropError[] = [];
+    const { result } = renderHook(() => useUpload("busy", { onError: (error) => errors.push(error) }));
+    await act(() => result.current.upload([note("alpha", "a.txt")]));
+    await waitFor(() => expect(errors).toHaveLength(1), fast);
+
+    expect(errors.map((error) => [error.code, error.file?.name, error.retryAfter])).toEqual([
+      ["RATE_LIMITED", "a.txt", 600],
+    ]);
   });
 
   it("calls each callback once per event under StrictMode", async () => {

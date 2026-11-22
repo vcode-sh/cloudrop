@@ -2,7 +2,7 @@
 
 import type { CloudropError } from "../errors.ts";
 import type { SignedRequest } from "../protocol/types.ts";
-import { parseRetryAfter } from "../retry-after.ts";
+import { parseRetryAfter, waitAtLeast } from "../retry-after.ts";
 import type { ClientFetch } from "./endpoints.ts";
 import {
   aborted,
@@ -61,10 +61,13 @@ export function classifyAnswer(status: number, body: string, retryAfter: string 
       : { kind: "expired", error: linkRefused(), retryAfterMs };
   }
   // R2 throttles with 429 and the S3 code ServiceUnavailable (spike Q9), so the status decides.
-  if (status === 429 || status === 503) return { kind: "retry", error: storageBusy(), retryAfterMs };
+  // The error keeps the wait too: after the last attempt it is what the app reads as `retryAfter` (M12-R70).
+  if (status === 429 || status === 503) {
+    return { kind: "retry", error: waitAtLeast(storageBusy(), retryAfterMs), retryAfterMs };
+  }
   // 501 Not Implemented: the storage service lacks the feature, so a retry can never succeed.
   if (status === 408 || (status >= 500 && status !== 501) || TRANSIENT_CODES.has(storageCode)) {
-    return { kind: "retry", error: storageDown(), retryAfterMs };
+    return { kind: "retry", error: waitAtLeast(storageDown(), retryAfterMs), retryAfterMs };
   }
   // A part of an upload that was aborted (another tab, the sweep, the bucket's lifecycle rule): no new URL revives it.
   if (status === 404 && storageCode === "NoSuchUpload") return { kind: "rejected", error: uploadGone() };

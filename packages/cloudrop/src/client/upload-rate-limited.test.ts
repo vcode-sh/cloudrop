@@ -2,8 +2,9 @@
 // that `authorize` refuses with rateLimited(seconds) is asked again no sooner than its Retry-After; a wait longer than
 // the client's 20-second backoff cap is not waited for: the job fails with the retryable RATE_LIMITED, and the app's
 // retry() asks again. The same holds for one file a 200 refuses with the bucket's Retry-After, and for a part's /sign.
-// A Retry-After HTTP date counts from the answer's Date header (M12-R43). Oracle: the requests the fixture saw, the
-// moment each was sent on the fake clock, and the result the job reports.
+// A Retry-After HTTP date counts from the answer's Date header (M12-R43). The error the app gets carries the answer's
+// wait as `retryAfter` in whole seconds, and none without the header (M12-R70). Oracle: the requests the fixture saw,
+// the moment each was sent on the fake clock, and the result the job reports.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type CloudropError, createCloudropClient } from "../client.ts";
@@ -62,12 +63,12 @@ describe("an /upload refused with rateLimited()", () => {
     const sentAfterFailing = uploadsSent();
     const retried = await job.retry();
     expect({
-      failed: { code: error?.code, retryable: error?.retryable },
+      failed: { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter },
       sentAfterFailing,
       retried: retried.data?.files.map((outcome) => outcome.status),
       sentAfterRetry: uploadsSent(),
     }).toEqual({
-      failed: { code: "RATE_LIMITED", retryable: true },
+      failed: { code: "RATE_LIMITED", retryable: true, retryAfter: 600 },
       sentAfterFailing: 1,
       retried: ["done"],
       sentAfterRetry: 2,
@@ -122,8 +123,11 @@ describe("a file the 200 of /upload refuses with the bucket's Retry-After", () =
     );
     const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
     const { error } = await client.start("files", [file()]).done;
-    expect({ failed: { code: error?.code, retryable: error?.retryable }, requests: fixture.requests }).toEqual({
-      failed: { code: "RATE_LIMITED", retryable: true },
+    expect({
+      failed: { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter },
+      requests: fixture.requests,
+    }).toEqual({
+      failed: { code: "RATE_LIMITED", retryable: true, retryAfter: 600 },
       requests: ["POST /upload"],
     });
   });
@@ -160,9 +164,63 @@ describe("a part's /sign refused with Retry-After", () => {
       await vi.advanceTimersByTimeAsync(0);
       await new Promise((resolve) => setImmediate(resolve));
     }
-    expect({ failed: { code: error?.code, retryable: error?.retryable }, requests }).toEqual({
-      failed: { code: "RATE_LIMITED", retryable: true },
+    expect({
+      failed: { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter },
+      requests,
+    }).toEqual({
+      failed: { code: "RATE_LIMITED", retryable: true, retryAfter: 600 },
       requests: ["POST /upload", "PUT object", "POST /sign"],
     });
+  });
+});
+
+describe("the wait on the error the app gets (M12-R70)", () => {
+  const files = route({ accept: "application/octet-stream", maxSize: "100MB", authorize: () => ({}) });
+  const busy = { code: "RATE_LIMITED", message: "Too many requests.", retryable: true };
+
+  /**
+   * The job's error once it ends, moving the fake clock `stepMs` at a time. The in-process server answers in real
+   * time, so each step also lets real I/O run; a job still running after 2 real seconds fails the test.
+   */
+  async function failure(fixture: ReturnType<typeof clientFixture>, stepMs: number) {
+    let ended: { error: CloudropError | null } | undefined;
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
+    void client.start("files", [file()]).done.then((result) => {
+      ended = result;
+    });
+    const giveUpAt = performance.now() + 2000;
+    while (ended === undefined && performance.now() < giveUpAt) {
+      await vi.advanceTimersByTimeAsync(stepMs);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const error = ended?.error;
+    return { code: error?.code, retryable: error?.retryable, retryAfter: error?.retryAfter };
+  }
+
+  it("has no retryAfter when the 429 carried no Retry-After, after the whole budget", async () => {
+    const fixture = clientFixture(
+      { files },
+      {
+        fault: ({ label }) => (label === "POST /upload" ? Response.json({ error: busy }, { status: 429 }) : undefined),
+      },
+    );
+    expect({ error: await failure(fixture, 20_000), sent: fixture.requests }).toEqual({
+      error: { code: "RATE_LIMITED", retryable: true, retryAfter: undefined },
+      sent: Array(6).fill("POST /upload"),
+    });
+  });
+
+  it("has the bucket's Retry-After of 30 when every PUT is throttled, after the whole budget", async () => {
+    const fixture = clientFixture(
+      { files },
+      {
+        fault: ({ label }) =>
+          label === "PUT object"
+            ? new Response("<Error><Code>SlowDown</Code></Error>", { status: 429, headers: { "retry-after": "30" } })
+            : undefined,
+      },
+    );
+    // Each wait is the backoff's 20-second cap.
+    expect(await failure(fixture, 20_000)).toEqual({ code: "RATE_LIMITED", retryable: true, retryAfter: 30 });
   });
 });

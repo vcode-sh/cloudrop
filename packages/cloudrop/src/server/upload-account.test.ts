@@ -1,7 +1,8 @@
 // Contract: the account guard of POST /upload (M10-A). On a route with a store and `owner`, a request whose
 // x-cloudrop-account header (the client's `account` option, percent-encoded) differs from owner()'s answer is refused
 // whole with ACCOUNT_CHANGED, not retryable, before any plugin, reservation or storage call. Without the header, on a
-// route without an owner, or when owner() answers null, the header changes nothing.
+// route without an owner, or when owner() answers null, the header changes nothing. A refusal `authorize` returns is
+// answered first: owner(), the account check and the plugins never run (M12-R72).
 // Oracle: the error body, the store's rows, the plugin and storage calls the request reached, literal strings.
 
 import { describe, expect, it } from "vitest";
@@ -9,7 +10,7 @@ import type { UploadResponse } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
 import { storeFixture } from "../testing/store-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
-import { allowAnyone, route } from "./route.ts";
+import { allowAnyone, rateLimited, route } from "./route.ts";
 
 const note = { name: "note.txt", size: 5, type: "text/plain" };
 // Over the multipart threshold below, so an accepted file costs a storage call (CreateMultipartUpload).
@@ -81,6 +82,27 @@ describe("POST /upload with the account header", () => {
       kinds: ["multipart"],
       rows: 1,
       plugins: ["clip.mp4"],
+    });
+  });
+
+  it("answers a refusal from authorize before owner(), the account check and any plugin", async () => {
+    const calls: string[] = [];
+    const owned = route(
+      { accept: "*/*", maxSize: "10MB", authorize: () => rateLimited(30) },
+      {
+        owner: () => {
+          calls.push("owner");
+          return "u1";
+        },
+      },
+    );
+    const fixture = storeFixture({ owned }, { plugins: [watcher(calls)] });
+    const response = await fixture.post("upload", { route: "owned", files: [note] }, { "x-cloudrop-account": "u2" });
+
+    expect({ status: response.status, code: (await response.json()).error.code, calls }).toEqual({
+      status: 429,
+      code: "RATE_LIMITED",
+      calls: [],
     });
   });
 

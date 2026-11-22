@@ -1,4 +1,4 @@
-import { createCloudrop, type RouteName, r2, route, type StoreFileApi, s3, unauthorized } from "cloudrop";
+import { createCloudrop, r2, route, type StoreApiOf, s3, unauthorized } from "cloudrop";
 import { quotaBytes, recordUpload, store } from "./store";
 
 // The presets read their settings from CLOUDROP_S3_* or CLOUDROP_R2_* (README.md). An empty CLOUDROP_S3_ENDPOINT
@@ -55,4 +55,4 @@ export const cloudrop = createCloudrop({
  * `cloudrop.api` with the store's calls, or null when the example is stateless. The store is opt-in here, so the type
  * of `cloudrop.api` has none of them (M12-T3); an app that always passes a store needs no such view.
  */
-export const storeApi = store ? (cloudrop.api as StoreFileApi<RouteName<typeof cloudrop>>) : null;
+export const storeApi = store ? (cloudrop.api as StoreApiOf<typeof cloudrop>) : null;

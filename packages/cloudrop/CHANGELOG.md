@@ -30,8 +30,8 @@ Every notable change to the `cloudrop` package. The format follows
   and `api.sweep`, which answered `INVALID_CONFIG`. After: they are type errors there, and a store that may be
   undefined (`store: flag ? s : undefined`, or a spread `...(store && { store })`) counts as none. An app with an
   opt-in store writes one view of `api` with the store's calls next to its server and calls them through it:
-  `export const storeApi = store ? (cloudrop.api as StoreFileApi<RouteName<typeof cloudrop>>) : null;` (both types
-  from `cloudrop`), then `if (storeApi) await storeApi.usage(userId)` where it wrote `cloudrop.api.usage(userId)`.
+  `export const storeApi = store ? (cloudrop.api as StoreApiOf<typeof cloudrop>) : null;` (`StoreApiOf` from
+  `cloudrop`), then `if (storeApi) await storeApi.usage(userId)` where it wrote `cloudrop.api.usage(userId)`.
   At runtime the calls still answer `INVALID_CONFIG` without a store (`M12-T3`).
 - `FileApi` is the storage calls alone. Before: `FileApi` had the store's calls too. After: a type holding them is
   `StoreFileApi` (or `Cloudrop<typeof routes, typeof store>["api"]`) (`M12-T3`).
@@ -147,8 +147,8 @@ Every notable change to the `cloudrop` package. The format follows
 - The client no longer waits out a `Retry-After` longer than its 20-second backoff cap, at `/upload`, `/sign` or
   `/complete`. Before: a server or proxy asking for 600 seconds was asked again five times, 20 seconds apart. After:
   the file fails at once with the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when the app
-  chooses. The error has no field for the wait: only `rateLimited()`'s default message names it, so pick the delay
-  before `retry()` yourself (`M12-E4`, `M12-R41`, `M12-R42`).
+  chooses. `error.retryAfter` gives the wait in seconds when the answer carried `Retry-After`; without one, pick the
+  delay before `retry()` yourself (`M12-E4`, `M12-R41`, `M12-R42`, `M12-R70`).
 - A bucket the browser cannot reach while the upload server answers fails the file with `BUCKET_BLOCKED`. Before: a
   CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
   `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, when all six `PUT` attempts failed before
@@ -239,7 +239,17 @@ Every notable change to the `cloudrop` package. The format follows
 - Guides: mounting on Express 5, Fastify 5, Elysia, SvelteKit, React Router 7, Astro, Nuxt and Nitro, Deno and
   Workers, each with its trap (`M12-P4`); a malware-scanning recipe, an `afterVerify` plugin of about ten lines; a Hono
   and Bun quick start without a store; what `close()` promises when nothing awaits it; and the opt-in store's
-  `StoreFileApi` view.
+  `StoreApiOf` view.
+- `CloudropError.retryAfter`: the wait an answer named, in whole seconds (at most 86,400), or `undefined`. Set by
+  `rateLimited(seconds)` and by a storage error with the bucket's `Retry-After` on the server, and on the client from
+  the `Retry-After` of your server's or a proxy's answer, or of the bucket's on a `PUT`. It covers a file failed at
+  once on a wait over 20 seconds, so the app can say "try again in 600 s". Nothing is added to the JSON body: the
+  client reads the header (`M12-R70`).
+- `StoreApiOf<typeof cloudrop>` from `cloudrop`: the store-backed `api` of a server, with its route names and the
+  `context` its routes' `onDelete` declare, for the view of an opt-in store. With a store it is `typeof cloudrop.api`
+  (`M12-R71`).
+- The guides say that a refusal returned from `authorize` is answered before the account check (`ACCOUNT_CHANGED`)
+  and before any plugin runs (`M12-R72`).
 
 ### Changed
 

@@ -86,8 +86,9 @@ Entries start from 1.
   that said ten minutes.
 - **If wrong:** a page that left uploads to the client's retries alone now shows a retryable failure for a long wait.
   Only `rateLimited()`'s default message gives the wait ("Try again in 600 seconds."); a proxy's `429`, storage
-  throttling and a custom message say "Try again in a moment" or what the app wrote, and `CloudropError` has no field
-  for the wait, so the app picks when to call `retry()` (`M12-R42`).
+  throttling and a custom message say "Try again in a moment" or what the app wrote. `error.retryAfter` carries the
+  wait in seconds whenever the answer had `Retry-After`, so the app can say when `retry()` may pass (`M12-R70`, which
+  supersedes `M12-R42`).
 - **Status:** in force.
 - **Visible in:** `src/client/retry.ts`, `src/client/launch.ts`, `src/client/parts.ts`,
   `src/client/upload-rate-limited.test.ts`, `docs/guide/client.md`.

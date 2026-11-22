@@ -2,8 +2,8 @@
 
 import { CloudropError, type CloudropErrorCode } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
-import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
-import { MAX_RETRY_AFTER_SECONDS, serverError } from "./http.ts";
+import { MAX_RETRY_AFTER_SECONDS, retryAfterOf, waitAtLeast } from "../retry-after.ts";
+import { serverError } from "./http.ts";
 import type { Logger } from "./plugins.ts";
 
 // Symbol.for, not Symbol(): two copies of cloudrop in one app must recognise each other's refusals, or one would read

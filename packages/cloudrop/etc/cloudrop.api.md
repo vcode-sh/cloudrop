@@ -186,6 +186,7 @@ export class CloudropError extends Error {
     readonly parts: readonly number[] | undefined;
     // (undocumented)
     readonly retryable: boolean;
+    get retryAfter(): number | undefined;
     readonly status: number | undefined;
     readonly storageCode: string | undefined;
 }
@@ -1092,6 +1093,9 @@ export interface StorageRules {
 
 // @public (undocumented)
 const STORE: unique symbol;
+
+// @public
+export type StoreApiOf<TCloudrop extends Cloudrop<Record<string, Route>, unknown>> = TCloudrop extends Cloudrop<infer TRoutes, unknown> ? StoreFileApi<keyof TRoutes & string, DeletedOf<TRoutes>, ErasedOf<TRoutes>> : never;
 
 // @public
 interface StoreErasure {

@@ -328,7 +328,8 @@ Entries start from 1.
   `retryAfter` field on `CloudropError` before 1.0 freezes the surface.
 - **If wrong:** an app that shows a Retry button for such an error lets a person press it too early, and the file fails
   again at once with the same retryable error. A read-only field can be added in a minor release.
-- **Status:** in force.
+- **Status:** superseded by `M12-R70`: the owner approved `CloudropError.retryAfter` before 1.0, after the pilot asked
+  for it (gap G1). The messages are unchanged: only `rateLimited()`'s default one names the wait.
 - **Visible in:** `docs/decisions/m12-errors.md` (`M12-E4`), `docs/guide/client.md`.
 
 ### M12-R43: an HTTP-date `Retry-After` counts from the answer's `Date` header
@@ -549,3 +550,66 @@ Entries start from 1.
 - **Status:** in force.
 - **Visible in:** `docs/guide/server.md`, `docs/guide/store.md`, `README.md`, `packages/cloudrop/README.md`,
   `packages/cloudrop/CHANGELOG.md`, `M12-R24`.
+
+### M12-R70: `CloudropError.retryAfter`, the wait an answer named (supersedes M12-R42)
+
+- **Decision:** `CloudropError` gains `retryAfter`, a read-only `number | undefined`: the wait recorded on the error, in
+  whole seconds rounded up and at most 86,400, the same value and cap as the `Retry-After` header the handler sends
+  (`retryAfterSeconds` in `src/retry-after.ts`, which `retryAfterHeaders` uses too). It is a getter over the one
+  recorded wait (`waitAtLeast`/`retryAfterOf`), not a second field, so it cannot disagree with the header or the
+  client's backoff, and, not being an own enumerable property, it never reaches JSON, logs or a spread copy.
+  - Server: `rateLimited(seconds)` and a storage error that recorded the bucket's `Retry-After` have it, and so do the
+    refusals rebuilt from them (`uploadRefusal`, `storageFailure`).
+  - Client: an error built from an answer with `Retry-After` has it: `/upload`, `/sign`, `/complete` and `/abort` (in
+    `post()`), a file a 200 of `/upload` refused with the bucket's wait, and a bucket `PUT` answered `429`, `503`,
+    `408` or a `5xx` (`classifyAnswer` now records the wait on the error as well as on the outcome). `withFile` and the
+    React store's copy that names the file keep the wait; before, their spread dropped it. That covers the long-wait
+    stop (`M12-E4`, `M12-R41`): the file fails retryable at once and `error.retryAfter` says when `retry()` may pass.
+  - Wire: nothing is added to the JSON body. The client reads the wait from the header, as before. `M11-K3` holds: a
+    client still receives only `code`, `message`, `retryable`, `parts` and `content` in the body.
+  - The declared shape is `get retryAfter(): number | undefined`, like the class's other optional fields
+    (`status: number | undefined`), rather than `readonly retryAfter?: number`, which would need a stored field.
+- **Why:** pilot gap G1. vstack refuses with `rateLimited(600)`, the client fails the file at once (`M12-E4`), and the
+  wait existed only in the English message, so upload rows could not say "try again in 10 minutes" in Polish, and a
+  Retry pressed at once was refused again. The owner approved the field before 1.0.
+- **If wrong:** the field is additive and read-only; removing it would be breaking, so it stays for 1.x. A server that
+  sends a wrong `Retry-After` is reported as it is, under the day's cap.
+- **Status:** in force.
+- **Visible in:** `src/errors.ts`, `src/retry-after.ts`, `src/server/http.ts`, `src/client/bucket.ts`,
+  `src/client/failures.ts`, `src/react/upload-store.ts`, `src/client/upload-rate-limited.test.ts`,
+  `src/server/upload-authorize.test.ts`, `src/storage/storage-error.test.ts`,
+  `src/react/use-upload-callbacks.test.ts`, `docs/guide/client.md`, `docs/guide/react.md`, `docs/guide/errors.md`,
+  `M12-E4`, `M12-R42`, `packages/cloudrop/etc/*.api.md`.
+
+### M12-R71: `StoreApiOf<typeof cloudrop>` names a server's store-backed `api`
+
+- **Decision:** `cloudrop` exports the type `StoreApiOf<TCloudrop>`: for `Cloudrop<TRoutes, TStore>`,
+  `StoreFileApi<keyof TRoutes & string, DeletedOf<TRoutes>, ErasedOf<TRoutes>>`, the type `Cloudrop["api"]` has with a
+  store. A server with a store gets exactly `typeof server.api`; the opt-in store view casts to it
+  (`cloudrop.api as StoreApiOf<typeof cloudrop>`) and keeps the route names and the `context` the routes' `onDelete`
+  declare, so `deleteFile`, `eraseOwner` and `sweep` stay typed. The examples, store.md's "An optional store" and the
+  upgrade note use it instead of `StoreFileApi<RouteName<typeof cloudrop>>`, which dropped the declared contexts.
+  `DeletedOf` and `ErasedOf` stay unexported (`M12-P6`'s ruling on them holds).
+- **Why:** pilot gap G2. The pilot wrote `StoreFileApi<UseCase, FileDeleter, undefined>` by hand, repeating the route
+  names and both contexts, and a drift showed only where `cloudrop.api` was passed in. A module that the server's own
+  module imports names it through `import type { cloudrop }`, which adds no runtime import.
+- **If wrong:** an additive type; a better name later would be an alias beside it.
+- **Status:** in force.
+- **Visible in:** `src/server/cloudrop.ts`, `src/index.ts`, `src/server/store-types.test.ts`,
+  `examples/next/lib/cloudrop.ts`, `docs/guide/store.md`, `packages/cloudrop/CHANGELOG.md`,
+  `packages/cloudrop/etc/cloudrop.api.md`.
+
+### M12-R72: a refusal from `authorize` is answered before the account check and the plugins
+
+- **Decision:** docs and one test, no behaviour change. `handleUpload` (`src/server/upload.ts`) checks the request's
+  shape and metadata, then calls `authorize`; a refusal it returns is answered at once. Only after it do the per-file
+  type and size checks, `owner`, the account check (`ACCOUNT_CHANGED`), the plugins' `beforeUpload` and the
+  reservations run. server.md (step 4 of "What happens in `/upload`" and the refusal list) and errors.md say so; a row
+  in `src/server/upload-account.test.ts` proves it: `rateLimited(30)` from `authorize` with a mismatched
+  `x-cloudrop-account` answers `429 RATE_LIMITED`, and neither `owner` nor a plugin runs (a fault probe that ran the
+  account check first turned it red).
+- **Why:** pilot gap G4. Under 0.6 the pilot refused its rate limit in `beforeUpload`, after the account check, so
+  `ACCOUNT_CHANGED` won; refusing in `authorize`, as 1.0 recommends, makes `RATE_LIMITED` win for a stale tab.
+- **If wrong:** none; the docs match the code.
+- **Status:** in force.
+- **Visible in:** `docs/guide/server.md`, `docs/guide/errors.md`, `src/server/upload-account.test.ts`.

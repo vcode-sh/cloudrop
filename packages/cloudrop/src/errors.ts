@@ -1,3 +1,5 @@
+import { retryAfterSeconds } from "./retry-after.ts";
+
 export type CloudropErrorCode =
   // Storage driver.
   | "INVALID_INPUT"
@@ -133,6 +135,16 @@ export class CloudropError extends Error {
     this.file = options.file;
     // Not enumerable, so logs, JSON and equality checks see the error's fields only.
     Object.defineProperty(this, BRAND, { value: true });
+  }
+
+  /**
+   * How long to wait before trying again, in whole seconds (at most 86,400), when the answer said: the `Retry-After` of
+   * a refusal such as `rateLimited(seconds)` or of a busy storage service. Undefined when no wait is known. On the
+   * client, a wait over 20 seconds is not waited for: the file fails retryable, and this says when `retry()` may pass.
+   */
+  get retryAfter(): number | undefined {
+    // Read from the one recorded wait the server answers and the client honours, never stored twice (M12-R70).
+    return retryAfterSeconds(this);
   }
 }
 

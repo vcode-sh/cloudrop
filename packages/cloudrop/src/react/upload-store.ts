@@ -13,6 +13,7 @@ import {
   type JobSnapshot,
   type UploadJob,
 } from "../client.ts";
+import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
 import type { UploadItem } from "./types.ts";
 
 type Totals = JobSnapshot<unknown>["totals"];
@@ -58,10 +59,14 @@ function endOf<R>(snapshot: FileSnapshot<R>, before: FileStatus | undefined): En
   if (status === "done")
     return { kind: "done", file: { id, name, status, result: result as NonNullable<typeof result> } };
   if (status !== "failed" || !error) return undefined;
-  // A refusal of the whole /upload fails every file with the job's error, which names no file (launch.ts).
+  // A refusal of the whole /upload fails every file with the job's error, which names no file (launch.ts). The copy
+  // keeps its wait, which the spread leaves out.
   const named = error.file
     ? error
-    : new CloudropError(error.code, error.message, { ...error, file: { id, name }, cause: error });
+    : waitAtLeast(
+        new CloudropError(error.code, error.message, { ...error, file: { id, name }, cause: error }),
+        retryAfterOf(error),
+      );
   return { kind: "failed", error: named };
 }
 

@@ -366,9 +366,18 @@ server has answered which parts the bucket lacks: the page before the reload may
   When the answer carries `Retry-After`, the wait is at least that long; an HTTP date counts from the answer's own
   `Date` header when the client can read it. A bucket `PUT` waits at most 20 s. When your server (or a proxy in front
   of it) asks for more than 20 s at `/upload`, `/sign` or `/complete`, the client does not wait: the file fails with
-  the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when your app chooses. The error has no field
-  for the wait. Only the default message of `rateLimited(seconds)` names it ("Try again in 600 seconds."); a proxy's
-  `429`, storage throttling and your own message do not, so choose the delay before `retry()` yourself.
+  the retryable error, such as `RATE_LIMITED`, and `retry()` asks again when your app chooses. `error.retryAfter` gives
+  the wait in whole seconds (at most 86,400) whenever the answer carried `Retry-After`: your server's, a proxy's, or the
+  bucket's on a `PUT`. It is `undefined` when no wait is known, so pick your own delay then. Only the default message
+  of `rateLimited(seconds)` names the wait ("Try again in 600 seconds."), so build your own text from `retryAfter`:
+
+  ```ts
+  const { error } = await job.done;
+  if (error?.retryable && error.retryAfter !== undefined) {
+    showNotice(`Too many uploads right now. Try again in ${error.retryAfter} s.`); // your app's notice
+    setTimeout(() => void job.retry(), error.retryAfter * 1000);
+  }
+  ```
 - An expired upload URL is renewed once.
 - Parts that `/complete` reports missing are sent again, at most twice.
 - Calls to your server send cookies (`credentials: "include"`), so `authorize` can read the session. Uploads to the

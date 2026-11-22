@@ -5,7 +5,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import { CloudropError } from "../errors.ts";
 import { contentChecks } from "../plugins.ts";
 import type { RouteResult } from "../protocol/types.ts";
-import { type Cloudrop, createCloudrop } from "./cloudrop.ts";
+import { type Cloudrop, createCloudrop, type StoreApiOf } from "./cloudrop.ts";
 import type { DeleteContext } from "./delete-context.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { forbidden, rateLimited } from "./refusal.ts";
@@ -252,6 +252,31 @@ describe("typed auth in plugins and a typed deletion context", () => {
       void api.deleteFile("f1");
       void api.eraseOwner("u1");
       expectTypeOf(api.deleteFile).parameter(1).toEqualTypeOf<{ context?: unknown } | undefined>();
+    });
+  });
+});
+
+// M12-R71: an app names its server's store-backed api from the server alone, routes and deletion contexts included.
+describe("StoreApiOf", () => {
+  it("is the api of a server with a store", () => {
+    void (() => {
+      const server = createCloudrop({ routes: { moderated, open }, store });
+      expectTypeOf<StoreApiOf<typeof server>>().toEqualTypeOf<typeof server.api>();
+    });
+  });
+
+  it("keeps the route names and the declared contexts in the view of an opt-in store", () => {
+    void (() => {
+      const optional = store as CloudropStore<DrizzleTx> | undefined;
+      const server = createCloudrop({ routes: { moderated, open }, ...(optional && { store: optional }) });
+      const view = server.api as StoreApiOf<typeof server>;
+      // @ts-expect-error: moderated's onDelete needs to know who deletes.
+      void view.deleteFile("f1");
+      void view.deleteFile("f1", { context: deleter });
+      // @ts-expect-error: the erased context is declared undefined.
+      void view.eraseOwner("u1", { context: deleter });
+      // @ts-expect-error: no route of that name.
+      void view.files({ owner: "u1", route: "avatar" });
     });
   });
 });

@@ -25,6 +25,17 @@ export interface Cloudrop<TRoutes extends Record<string, Route> = Record<string,
 }
 
 /**
+ * The `api` of the server `TCloudrop` (`typeof cloudrop`) with the store's calls: its route names, and the `context`
+ * its routes' `onDelete` declare for `deleteFile` and `eraseOwner`. With a store it is the type of `cloudrop.api`. An
+ * app whose store is opt-in casts to it once, beside its server:
+ * `const storeApi = store ? (cloudrop.api as StoreApiOf<typeof cloudrop>) : null`.
+ */
+export type StoreApiOf<TCloudrop extends Cloudrop<Record<string, Route>, unknown>> =
+  TCloudrop extends Cloudrop<infer TRoutes, unknown>
+    ? StoreFileApi<keyof TRoutes & string, DeletedOf<TRoutes>, ErasedOf<TRoutes>>
+    : never;
+
+/**
  * Checks every option now and throws INVALID_CONFIG for a mistake, so a misconfigured server fails at start-up.
  * Settings from the environment (CLOUDROP_SECRET, a storage preset's variables) are read on the first request instead,
  * so a build needs no secrets; one still missing then makes every request answer 500 and every api call INVALID_CONFIG

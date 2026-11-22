@@ -17,7 +17,7 @@ export type { StorageRules } from "./rules.ts";
 export type { AllFilesOptions } from "./server/all-files.ts";
 export type { FileApi } from "./server/api.ts";
 export type { BucketCheck, BucketReport } from "./server/bucket-check.ts";
-export { type Cloudrop, createCloudrop } from "./server/cloudrop.ts";
+export { type Cloudrop, createCloudrop, type StoreApiOf } from "./server/cloudrop.ts";
 export type { CloudropOptions } from "./server/config.ts";
 export type { DeleteContext, DeleteReason } from "./server/delete-context.ts";
 export type { EraseOptions, EraseReport } from "./server/erase.ts";

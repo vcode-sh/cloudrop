@@ -17,6 +17,7 @@ Every public call returns `{ data, error }` instead of throwing for an expected 
 | `parts` | `PARTS_MISSING` only: the part numbers to send again. |
 | `content` | `FILE_TYPE_NOT_ALLOWED` from [`contentChecks()`](plugins.md#what-a-refusal-carries), or from a plugin of your own that sets it: `{ declared, detected?, reason, kind? }`, the type the file was sent as, the type its bytes show, why it was refused and, for a refused type, what it is (`"web-page"`, `"program"`, `"script"`…). Word the refusal from it in your own language. |
 | `file` | In a job, the file the error belongs to: `{ id, name }`. |
+| `retryAfter` | How long to wait before trying again, in whole seconds (at most 86,400), when the answer named a wait: the `Retry-After` of `rateLimited(seconds)`, of a proxy's `429` or of a busy bucket. `undefined` when no wait is known. |
 | `status`, `storageCode` | On the server only: the storage service's HTTP status and own error code, for logs. Never shown to users. |
 
 ```ts
@@ -28,7 +29,8 @@ if (error) {
 ```
 
 Messages never contain credentials, presigned URLs or raw storage responses. The handler sends a client only an error's
-`code`, `message`, `retryable`, `parts` and `content`; everything else goes to your server's `logger`.
+`code`, `message`, `retryable`, `parts` and `content`; everything else goes to your server's `logger`. The wait is not
+in the body: it travels as the `Retry-After` header, and the client reads it from there into `retryAfter`.
 
 **The client has already retried.** A retryable error that reaches your code has been through the client's attempts
 (up to 6 per request, with backoff). Offer the user a retry button rather than retrying in a loop: `retry()` on a job or
@@ -79,7 +81,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `VERIFICATION_FAILED` | 422 | No | The stored file's size or type does not match what was declared, so it was deleted; or another file is stored under this upload's key. | Start a new upload. `retry()` gives the ticket up and asks for a new one. |
 | `NO_SUCH_UPLOAD` | 410 | No | The multipart upload no longer exists: it was aborted or expired, and no file of it is stored. The server ends the upload with this answer: plugins hear `onAbort` with `reason: "rejected"`, and with a [database store](store.md) the row becomes `rejected`, so the bytes it reserved are free at once. | Start a new upload. `retry()` and `resume()` give the ticket up and ask for a new one. |
 | `ALREADY_EXISTS` | 409 | No | Another file already has this multipart upload's key. | Start a new upload: `retry()` gives the ticket up and asks for a new one, under a new key. With a custom `key`, make keys unique, or the retry is refused the same way. |
-| `RATE_LIMITED` | 429 | Yes | `authorize` or a plugin returned `rateLimited(seconds)`, sent with `Retry-After`, or another `CloudropError` with this code, sent without one; or the storage service was throttling while the server called it, sent with the bucket's `Retry-After` when it gave one. | Try again in a moment; the client waits at least the `Retry-After`. A wait longer than 20 seconds is not waited for: the file fails with this code, and `retry()` asks again. `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
+| `RATE_LIMITED` | 429 | Yes | `authorize` or a plugin returned `rateLimited(seconds)`, sent with `Retry-After`, or another `CloudropError` with this code, sent without one; or the storage service was throttling while the server called it, sent with the bucket's `Retry-After` when it gave one. | Try again in a moment; the client waits at least the `Retry-After`. A wait longer than 20 seconds is not waited for: the file fails with this code, `error.retryAfter` says how many seconds to wait, and `retry()` asks again. `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
 | `STORAGE_ERROR` | 502 | Sometimes | The server's call to the storage service failed (retryable), or the storage refused it (not retryable). Your server log has the details. | When retryable, try again. Otherwise check the server log: often credentials, permissions or the bucket name. Either way `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
 | `SERVER_ERROR` | 500 | Sometimes | Something in the server failed: your `authorize`, `owner`, `onComplete` or a plugin threw, or cloudrop hit a bug. Retryable when the file is stored but `onComplete` or a hook did not finish, and while an environment setting is missing. With a database store, also retryable when the store failed ("could not reach its upload records"), when `quota` failed ("could not check your storage limit"), and while another request is completing the same file ("Another request is completing this upload", sent with `Retry-After: 2` and not logged). | Check the server log. When retryable, try again; the client does. Retryable or not, `retry()` keeps the file's ticket and what is stored; after a `/complete` it sends `/complete` alone, since the file may be complete. |
 | `NOT_FOUND` | 404 | No | There is no cloudrop endpoint at the requested path. | Check that `basePath` matches on the server and the client. Once it does, `retry()` goes on where the file stopped, with the same ticket. |
@@ -90,6 +92,11 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 `INVALID_INPUT` or `SERVER_ERROR`, answered with the status this table gives its code and with the `retryable` they
 set. Any other code reaches the client as the generic, non-retryable `SERVER_ERROR`, and the server log names it (see
 [Server](server.md#refuse-with-a-wait-or-another-code)).
+
+A refusal from `authorize` is answered first, after only the request's shape and its metadata are checked: before the
+files' type and size, before the account check (`ACCOUNT_CHANGED`) and before any plugin runs. A tab left open after
+another sign-in that is also over its limit therefore gets `RATE_LIMITED`, not `ACCOUNT_CHANGED`. A plugin's
+`beforeUpload` refusal comes after the account check.
 
 A plugin's `afterVerify`, and with a database store a [`replace: true`](store.md#one-file-per-owner-replace) route's
 `onDelete` that [refuses the replacement](store.md#refuse-a-deletion), may refuse `/complete` with a `CloudropError`
@@ -113,7 +120,7 @@ These come from `cloudrop/client`. The first seven never come from the server.
 | `UPLOAD_IN_USE` | No | `resume()` or `discard()` found the upload held in this page or another tab. | Finish or cancel it there, then try again: `retry()` of the refused `resume()` job runs its checks again. |
 | `CLIENT_CLOSED` | No | `start()`, `upload()` or `resume()` on a client after its [`close()`](client.md#close-the-client), such as the last user's client after a sign-out. | Use the client of the user who is signed in now. `retry()` of the refused job answers `CLIENT_CLOSED` again. |
 | `BROWSER_STORAGE_ERROR` | No | The browser's storage for unfinished uploads could not be read or written. Only `resumable()`, `resume()`, `discard()` and `forget()` answer it; `discard()` also when the browser refuses Web Locks. | Nothing for the upload: a browser storage failure never stops uploads; only resuming after a reload may not work. `retry()` of a `resume()` job refused with it reads the storage again. |
-| `RATE_LIMITED` | Yes | The bucket answered `429` or `503` to every attempt, or a proxy in front of your server answered `429`. | Try again in a moment: `retry()` keeps the file's ticket and the parts already stored. |
+| `RATE_LIMITED` | Yes | The bucket answered `429` or `503` to every attempt, or a proxy in front of your server answered `429`. | Try again in a moment, or after `error.retryAfter` seconds when the answer gave a wait: `retry()` keeps the file's ticket and the parts already stored. |
 | `STORAGE_ERROR` (from the bucket) | Yes | The bucket answered a `PUT` with `408`, a `5xx` other than `501`, S3's `400 RequestTimeout` (it stopped waiting for the body) or S3's `409 OperationAborted` (a conflicting operation was still running) on every attempt. A `501` ends the file with `UPLOAD_REJECTED` instead. | Retry the upload: `retry()` keeps the file's ticket and the parts already stored. |
 | `NO_SUCH_UPLOAD` (from the bucket) | No | The bucket answered a part's `PUT` with `404 NoSuchUpload`: the multipart upload was aborted (in another tab, by the sweep or by the bucket's lifecycle rule). The same code and message as the server's. | Start a new upload: `retry()` gives the ticket up and asks for a new one. |
 | `STORAGE_ERROR` (from your server) | Yes / No | Your server's call to the storage service failed or was refused, as in the [endpoint table](#upload-endpoint-errors): such as bad credentials, or Wrangler's local R2 refusing a multipart completion. | When retryable, retry. Otherwise check the server log. Either way `retry()` keeps the file's ticket, or asks `/upload` again when the file had none yet. |

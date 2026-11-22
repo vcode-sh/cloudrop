@@ -2,12 +2,16 @@
 // the storage service answered (spec §7.7).
 
 import { CloudropError } from "../errors.ts";
+import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
 
-/** `error` as the error of one file of a job: the same answer, with `file` set and the original as its cause. */
+/** `error` as the error of one file of a job: the same answer and wait, with `file` set and the original as its cause. */
 export const withFile = (error: CloudropError, { id, file }: { id: string; file: File }): CloudropError =>
-  // The spread copies the error's own fields (retryable, status, storageCode, parts, content), never its message or
-  // cause.
-  new CloudropError(error.code, error.message, { ...error, file: { id, name: file.name }, cause: error });
+  // The spread copies the error's own fields (retryable, status, storageCode, parts, content), never its message, cause
+  // or wait, which is not enumerable.
+  waitAtLeast(
+    new CloudropError(error.code, error.message, { ...error, file: { id, name: file.name }, cause: error }),
+    retryAfterOf(error),
+  );
 
 export const aborted = (): CloudropError =>
   new CloudropError("ABORTED", "The upload was cancelled. Start it again to upload the file.");

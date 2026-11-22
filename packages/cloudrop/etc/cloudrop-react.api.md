@@ -78,6 +78,7 @@ class CloudropError extends Error {
     readonly parts: readonly number[] | undefined;
     // (undocumented)
     readonly retryable: boolean;
+    get retryAfter(): number | undefined;
     readonly status: number | undefined;
     readonly storageCode: string | undefined;
 }

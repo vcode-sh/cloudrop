@@ -1666,12 +1666,12 @@ your server, and call the store's calls through it where the store may be off:
 
 ```ts
 // lib/cloudrop.ts
-import { createCloudrop, type RouteName, type StoreFileApi } from "cloudrop";
+import { createCloudrop, type StoreApiOf } from "cloudrop";
 
 const store = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL) : undefined; // your sqlStore(...)
 export const cloudrop = createCloudrop({ store, routes: { avatar } });
 /** The store's calls, or null on a deployment without a store. */
-export const storeApi = store ? (cloudrop.api as StoreFileApi<RouteName<typeof cloudrop>>) : null;
+export const storeApi = store ? (cloudrop.api as StoreApiOf<typeof cloudrop>) : null;
 ```
 
 ```ts
@@ -1679,4 +1679,8 @@ if (storeApi) await storeApi.revokeUploads(userId); // where you wrote cloudrop.
 ```
 
 The view is a type only: at runtime it is `cloudrop.api`. Without a store, the same calls through `cloudrop.api` would
-answer `INVALID_CONFIG`.
+answer `INVALID_CONFIG`. `StoreApiOf<typeof cloudrop>` is the type `cloudrop.api` has with a store: your route names,
+and the `context` your routes' [`onDelete`](#ondelete) declare, so `storeApi.deleteFile(id, { context })`
+is checked as it would be there. A module that `lib/cloudrop.ts` itself imports, such as your sweep job, can name it
+too: `import type { cloudrop } from "./cloudrop"` and `StoreApiOf<typeof cloudrop>`, since a type-only import adds no
+import at runtime.

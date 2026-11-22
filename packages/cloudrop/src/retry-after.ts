@@ -1,13 +1,26 @@
 // How long a refused request must wait before it is sent again, shared by the server, which answers it as Retry-After,
 // and the client, which honours it (spec 1.0 §2a). 0 means no wait throughout.
 
-// A hidden property rather than a field of CloudropError, which is public and would promise it. An answer body carries
-// one too: the 200 of /upload, with the longest wait of the files storage could not start (spec 1.0 §2b). A registered
-// symbol, so the server reads the wait of a rateLimited() from a second installed copy of cloudrop (M12-R2).
+// A hidden property, the one record of the wait: CloudropError's public `retryAfter` reads it (M12-R70). An answer body
+// carries one too: the 200 of /upload, with the longest wait of the files storage could not start (spec 1.0 §2b). A
+// registered symbol, so the server reads the wait of a rateLimited() from a second installed copy of cloudrop (M12-R2).
 const WAIT: unique symbol = Symbol.for("cloudrop.retry-after");
 
 /** The wait recorded for `target`, in milliseconds; 0 when none was. */
 export const retryAfterOf = (target: object): number => (target as { [WAIT]?: number })[WAIT] ?? 0;
+
+/** A day: no wait longer is sent or reported, so a mistaken one cannot park the client for good (M12-E3). */
+export const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+/**
+ * The wait recorded for `target` as a Retry-After value: whole seconds rounded up, at most a day, and undefined when
+ * none was. The cap also keeps the header a plain integer: String() writes 1e21 and above in exponent form, which
+ * RFC 9110 forbids.
+ */
+export function retryAfterSeconds(target: object): number | undefined {
+  const waitMs = retryAfterOf(target);
+  return waitMs > 0 ? Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(waitMs / 1000)) : undefined;
+}
 
 /** Records that `target`'s request must not be sent again for `ms`; a wait of 0 or less records nothing. */
 export function waitAtLeast<T extends object>(target: T, ms: number): T {

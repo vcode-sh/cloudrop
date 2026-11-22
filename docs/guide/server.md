@@ -326,7 +326,7 @@ status:
 | --- | --- |
 | `UNAUTHORIZED` | 401 |
 | `FORBIDDEN`, `QUOTA_EXCEEDED` | 403 |
-| `RATE_LIMITED` | 429, with `Retry-After` when it came from `rateLimited()` |
+| `RATE_LIMITED` | 429, with `Retry-After` when it came from `rateLimited()`; the client reads it as `error.retryAfter` |
 | `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `TOO_MANY_FILES`, `INVALID_METADATA`, `INVALID_INPUT` | 400 |
 | `SERVER_ERROR` (your `retryable` is kept) | 500 |
 
@@ -337,6 +337,9 @@ status:
 - Any other code is a bug: the client gets the generic, non-retryable `SERVER_ERROR` and the log names the code and
   the list above.
 - A refusal is not a failure: nothing is logged.
+- A refusal from `authorize` is answered before the [account check](#the-upload-token-and-what-it-allows) (`ACCOUNT_CHANGED`) and
+  before any plugin runs, so a tab left open after another sign-in that is also over its limit gets `RATE_LIMITED`,
+  not `ACCOUNT_CHANGED`. A refusal from a plugin's `beforeUpload` comes after the account check.
 - An error from a copy of cloudrop older than 1.0 is answered `500`, and the log says to install cloudrop once; a
   second 1.x copy's error is recognised.
 
@@ -427,7 +430,9 @@ What happens in `/upload`:
    route without `owner`, or when it answers null, the key does nothing.
 3. The route's metadata schema validates the metadata (`INVALID_METADATA`). Metadata nested more than 32 arrays or
    objects deep is refused before the schema sees it, and its JSON must fit in 2 KiB.
-4. `authorize` runs (`UNAUTHORIZED`, `FORBIDDEN`).
+4. `authorize` runs. A refusal it returns (`unauthorized()`, `forbidden()`, `rateLimited()` or a `CloudropError`)
+   answers the whole request here: no file is checked, `owner` does not run, the account is not compared and no
+   plugin runs.
 5. Each file's type and size are checked against the route (`FILE_TYPE_NOT_ALLOWED`, `FILE_TOO_LARGE`), and its key is
    built. A refused file does not stop the others.
 6. With a store and `owner`, the owner is read. When the client sent an `x-cloudrop-account` header (its
