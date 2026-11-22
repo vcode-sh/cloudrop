@@ -255,6 +255,18 @@ Every notable change to the `cloudrop` package. The format follows
 - `defineStore` refuses what it cannot wrap with `INVALID_CONFIG`. Before: `defineStore(undefined)` threw a raw
   `TypeError`, a string came back as a `String` object, and a frozen store threw `object is not extensible`. After:
   each throws `INVALID_CONFIG` naming the fix (`M12-R4`).
+- The sweep never marks an owner for erasure. Before: an owner the app reopened with `reopenOwner` while the sweep was
+  erasing an earlier owner of the same page was marked again, had their files deleted, and ended erased for good.
+  After: the sweep reads each owner's mark and carries on only that one; an owner without a mark is skipped and not
+  counted in `erasing` (`M12-R3`).
+- `erase.prefixes` refuses a folder that starts in the folder of a route without its own `prefix`. Before: with a route
+  `docs`, `(owner) => [owner + "/"]` and an owner named `docs`, `eraseOwner("docs")` emptied every owner's files of
+  that route. After: it answers `INVALID_CONFIG` naming the route, before the owner is marked (`M12-R6`).
+- A sweep whose erasure of an owner fails logs one warning for that owner, saying that the owner holds a row of every
+  sweep's `limit` ahead of the owners after it until the cause is fixed or the sweep continues from its cursor. Before:
+  an error was logged with `logger.error` and a run with failed files said nothing more (`M12-R5`).
+- The `erase.prefixes` refusal says to use `encodeURIComponent(owner)` when owner ids can contain `/`: with owners
+  `acme` and `acme/alice`, `exports/acme/` also holds `exports/acme/alice/` (`M12-R7`).
 
 ## 0.6.0 - 2026-11-21
 

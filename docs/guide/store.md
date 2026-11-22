@@ -1084,7 +1084,8 @@ A report counts files, and a file can count twice: one deleted in this run is in
 - **`api.usage(owner)`** answers the mark as `erasure: { requestedAt, erasedAt }`, null for an owner not being erased.
 - **`api.reopenOwner(owner)`** clears the mark, for an owner id used again or an erasure started by mistake, and
   answers `{ reopened }`, false when there was no mark. The owner's uploads are accepted again and the sweep stops
-  erasing them. What was deleted stays deleted; the rows stay as they are. A run already under way when you reopen,
+  erasing them: it never sets a mark itself, so a sweep that found the owner before the reopen skips them when it
+  reaches them. What was deleted stays deleted; the rows stay as they are. A run already under way when you reopen,
   an `eraseOwner` or a sweep's, goes on to its end: it keeps deleting the owner's completed files it reads, which can
   include one uploaded after the reopen, but it cannot record the erasure as finished, as it finishes only the mark it
   started with. Reopen when no run for that owner is under way.
@@ -1110,8 +1111,17 @@ createCloudrop({
 
 Each folder must end in `/` and hold the owner, as it is or `encodeURIComponent`-encoded, as one whole segment
 between slashes. Anything else, such as `() => ["avatars/"]`, which would empty every owner's folder, or
-`exports/u10/` for the owner `u1`, makes `eraseOwner` answer `INVALID_CONFIG` before it marks the owner. The folders
-are emptied with [`deletePrefix`](server.md) only once the owner's rows are erased, in the order given.
+`exports/u10/` for the owner `u1`, makes `eraseOwner` answer `INVALID_CONFIG` before it marks the owner. So does a
+folder that starts in the folder of a route without its own `prefix`, which keeps every owner's files under the
+route's name: with a route `docs`, `(owner) => [owner + "/"]` would empty the whole route for an owner named `docs`,
+so `"docs/"` is refused, and the message names the route. The folders are emptied with [`deletePrefix`](server.md)
+only once the owner's rows are erased, in the order given.
+
+**When owner ids can contain `/`, use the encoded form.** The rule compares one segment, and cloudrop cannot see your
+other owners: with owners `acme` and `acme/alice` (an organisation and its member), `exports/${owner}/` gives
+`acme` the folder `exports/acme/`, which holds `exports/acme/alice/` too, so erasing `acme` empties Alice's exports.
+`exports/${encodeURIComponent(owner)}/` keeps them apart (`exports/acme/` and `exports/acme%2Falice/`). The raw form
+is safe only when no owner id contains `/`.
 
 ### Finding owners who no longer exist
 
@@ -1492,11 +1502,16 @@ failed, reported, erasing, erased, cursor }`; pass `cursor` back to continue. It
   reservation released; then its multipart upload is aborted and its object deleted only when the object's
   `cloudrop-id` is this upload's. A completion stuck past its lease, and past its deadline plus `graceMs`, is ended as
   `failed` and **reported**, and its object is kept: its `onComplete` may have recorded it, so check each reported
-  file.
+  file. The exception is an owner being erased: the same sweep's erase pass removes that object.
 - **Erase:** every owner [`eraseOwner`](#erasing-an-owner) marked and has not finished, by owner, each counting as one
   row of `limit`. Each is erased as `eraseOwner` erases it, with the sweep's `graceMs`, `signal` and `context`, and
-  counted in `erasing`; those it finishes are counted in `erased` too. An owner that fails is logged and counted in
-  `failed`, and the next sweep runs it again.
+  counted in `erasing`; those it finishes are counted in `erased` too. It deletes the owner's completed files, each
+  after its route's `onDelete`. An owner whose run fails is counted in `failed`, with a warning naming the owner and
+  the cause, and the next sweep runs it again. The pass never marks an owner: one reopened after the pass read its
+  page is skipped. Without a `cursor` every sweep starts the pass at the first marked owner in byte order, so owners
+  that keep failing, or cannot finish yet, take rows of `limit` ahead of those after them; with as many of them as the
+  pass's share of `limit`, the later owners wait. Fix what the warnings name, or carry the sweep's `cursor` from one
+  call to the next.
 - **Cleanup:** an ended upload (`aborted`, `rejected`, `failed`, `expired` or `deleted`) not yet cleaned up, and ended
   more than `graceMs` ago, has its late parts and object removed, again only when the object is its own. This catches
   a `PUT` that landed after an `/abort`, an upload that could not start, and an expired one whose first cleanup
@@ -1509,7 +1524,8 @@ row may be cleaned up, and at most 30 days. A failing row is logged, counted in 
 still swept. Two sweeps at once are safe, and so is a sweep racing a `/complete`: the sweep takes the row before it
 deletes anything. Each sweep counts in `cleaned` the rows it marked, so two at once may both count the same row.
 
-The sweep never deletes a completed file, never touches an object whose `cloudrop-id` belongs to another upload or
+The sweep never deletes a completed file, except an owner's being erased, never touches an object whose `cloudrop-id`
+belongs to another upload or
 that has no row, and runs no plugin `onAbort` (rows carry no authorize result). Keep the bucket's lifecycle rule that
 aborts incomplete multipart uploads ([Bucket setup](bucket-setup.md)): it covers a server that crashes between creating
 a multipart upload and recording it, which leaves no row to sweep. With a store, `api.checkBucket()` reports that rule
@@ -1531,15 +1547,23 @@ the store, a query being one statement or one batch:
 | `api.sweep`, a round | 2 to find the work | none |
 | … per unfinished upload it expires | 2 | 1 to 3 |
 | … per ended upload it cleans up | 1 | 1 to 3 |
+| … per owner it carries an erasure on | 12 with no files, 2 more per file, and 1 more per 100 files | 2 per file, and those that empty each `erase.prefixes` folder |
 | The first call in a new isolate | 2 more, the check of the tables | none |
 
-- **The sweep is what needs a bound.** `api.sweep({ limit: 400 })` makes at most 804 queries and 1,200 requests to
-  the bucket, under the Paid limits whatever the rows are; `all: true` over a backlog does not stop at 1,000. On the
-  Free plan use `limit: 15`: at most 34 queries and 45 requests. The Free plan also gives a cron run 10 ms of CPU,
-  which signing that many requests may not fit (not measured).
+- **The sweep is what needs a bound.** With no owner being erased, `api.sweep({ limit: 400 })` makes at most 804
+  queries and 1,200 requests to the bucket, under the Paid limits whatever the rows are; `all: true` over a backlog
+  does not stop at 1,000. On the Free plan use `limit: 15`: at most 34 queries and 45 requests. The Free plan also
+  gives a cron run 10 ms of CPU, which signing that many requests may not fit (not measured).
+- **An erasure costs more than its row.** Each owner the erase pass carries on counts as one row of `limit` but makes
+  at least 12 queries (measured on the memory store, 2026-11-22: 12 store calls for an owner with no files, 16 with
+  one file, 20 with three), so with erasures pending `limit: 400` can pass 1,000 queries, and `limit: 15` the Free plan's 50. Past the limit the
+  rest of the run fails as below and the next run goes on. Erase owners from their own invocation with `eraseOwner`
+  when you can, or lower `limit` while many are pending: at most about `limit × 12` queries when no owner has files.
 - **A backlog needs more runs, not a bigger one.** A run leaves what is over its `limit` where it was, and the next
   run starts with the oldest work, so there is no cursor to keep between runs: `crons = ["*/5 * * * *"]` with
-  `limit: 400` sweeps 4,800 uploads an hour.
+  `limit: 400` sweeps 4,800 uploads an hour. The erase pass is the exception: it starts at the first marked owner, so
+  owners whose erasure keeps failing take a run's rows ahead of the owners after them (see Erase above); the sweep
+  warns for each one, and keeping the `cursor` between runs, in KV say, moves past them.
 - **Past the limit nothing is lost.** The sweep logs each upload whose query was refused, counts it in `failed` and
   leaves it as it was; the next run does it. `eraseOwner` has no `limit` and costs about as much per file, so an
   owner with several hundred files can pass the limit in one run: it then counts the files it could not handle in
