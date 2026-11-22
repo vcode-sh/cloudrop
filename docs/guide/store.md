@@ -686,7 +686,7 @@ That `request` has its body already read, as every hook's does: read its headers
 throws ([Server](server.md#the-requests-body-is-already-read)).
 
 cloudrop does not read `context`; check its shape in the hook, as it is whatever your code passed. Only completed files run it: an upload that never completed was never
-yours, so `/abort`, `revokeUploads`, a refusal and the sweep run nothing, and neither does `api.delete(key)`, which
+yours, so `/abort`, `revokeUploads`, a refusal and the sweep run nothing, and neither does `api.deleteObject(key)`, which
 removes an object and leaves its row. `onDelete` needs a store (`INVALID_CONFIG` otherwise), and a file whose route is
 no longer among your `routes` is deleted without one.
 
@@ -1017,7 +1017,7 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |
 
-`api.delete(key)` still deletes an object by key, but leaves the row and the owner's usage as they were: use
+`api.deleteObject(key)` still deletes an object by key, but leaves the row and the owner's usage as they were: use
 `deleteFile` for uploaded files.
 
 ### What `deleteFile` answers

@@ -290,12 +290,12 @@ describe("api keys in another Unicode form", () => {
   it("writes, reads, copies and deletes the NFC key", async () => {
     const { cloudrop, storage } = serverFixture({ files });
     const keys = async () => (await storage.list("users/")).data?.items.map((item) => item.key);
-    await cloudrop.api.put(`${NFD}a.txt`, "x");
-    await cloudrop.api.copy(`${NFD}a.txt`, `${NFD}b.txt`);
+    await cloudrop.api.putObject(`${NFD}a.txt`, "x");
+    await cloudrop.api.copyObject(`${NFD}a.txt`, `${NFD}b.txt`);
     const written = await keys();
-    const size = (await cloudrop.api.head(`${NFD}b.txt`)).data?.size;
-    await cloudrop.api.delete(`${NFD}a.txt`);
-    await cloudrop.api.deleteMany([`${NFD}b.txt`]);
+    const size = (await cloudrop.api.headObject(`${NFD}b.txt`)).data?.size;
+    await cloudrop.api.deleteObject(`${NFD}a.txt`);
+    await cloudrop.api.deleteObjects([`${NFD}b.txt`]);
     expect({ written, size, left: await keys() }).toEqual({
       written: [`${NFC}a.txt`, `${NFC}b.txt`],
       size: 1,

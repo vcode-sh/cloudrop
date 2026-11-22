@@ -2,7 +2,7 @@
 
 import { CloudropError, configError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
-import type { ObjectOptions, StorageDriver } from "../storage/driver.ts";
+import type { ObjectInfo, ObjectOptions, StorageDriver } from "../storage/driver.ts";
 import { encodeKeyPath } from "../storage/sigv4.ts";
 import { keyProblem } from "../storage/validate.ts";
 import { type BucketReport, checkBucket } from "./bucket-check.ts";
@@ -19,7 +19,26 @@ import type { StoreFileApi, StoreMethods } from "./store-api.ts";
  * key in another form is out of reach here on a store that compares keys byte for byte (S3; R2 keeps the forms as one
  * object): reach it through the storage driver, which sends a key as it is.
  */
-export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy"> {
+export interface FileApi {
+  /** The object's size, type and metadata, or `null` when no object has the key. Reads the bucket, never the store. */
+  headObject(key: string): Promise<Result<ObjectInfo | null>>;
+  /**
+   * Deletes the object at a key and nothing else: with a store, the file's row and the owner's quota stay as they are,
+   * so a stored file is deleted with `deleteFile(id)`. Deleting a missing key succeeds.
+   */
+  deleteObject(key: string): Promise<Result<void>>;
+  /**
+   * Deletes any number of keys, 16 at a time. Every key ends up in `deleted` (a missing key counts as deleted) or in
+   * `failed` with its own error. Like `deleteObject`, it never touches the store's rows.
+   */
+  deleteObjects(
+    keys: readonly string[],
+  ): Promise<Result<{ deleted: string[]; failed: { key: string; error: CloudropError }[] }>>;
+  /**
+   * A server-side copy that keeps type, disposition and metadata. It is conditional on the source's ETag, so a source
+   * overwritten during the copy fails it with a retryable STORAGE_ERROR instead of mixing two versions.
+   */
+  copyObject(from: string, to: string): Promise<Result<{ etag: string }>>;
   /**
    * A URL to read the object. With the storage's publicUrl and no options: the plain public URL. Otherwise a presigned
    * GET signed at the start of an `expiresIn` window (default 3600 s) and valid for two windows, so every viewer in a
@@ -30,7 +49,7 @@ export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "delete
     options?: { expiresIn?: number; download?: string },
   ): Promise<Result<{ url: string; expiresAt: Date | null }>>;
   /** A small server-side upload, up to the storage's single-PUT limit. */
-  put(
+  putObject(
     key: string,
     body: Uint8Array<ArrayBuffer> | ArrayBuffer | string | Blob,
     options?: ObjectOptions,
@@ -196,16 +215,16 @@ export function createFileApi(config: ServerConfig): StoreFileApi {
       ? config.paths.api.storeApi(config, config.store, whenReady)
       : withoutStore(whenReady)),
     getUrl: (key, options) => whenReady(() => getUrl(storage, nfc(key), options)),
-    head: (key) => whenReady(() => storage.head(nfc(key))),
-    put: (key, body, options) =>
+    headObject: (key) => whenReady(() => storage.head(nfc(key))),
+    putObject: (key, body, options) =>
       whenReady(async () =>
         optionsOf(options)
           ? storage.put(nfc(key), body, options)
-          : fail(invalidInput('put options must be an object, such as { type: "text/plain" }.')),
+          : fail(invalidInput('putObject options must be an object, such as { type: "text/plain" }.')),
       ),
-    delete: (key) => whenReady(() => storage.delete(nfc(key))),
-    deleteMany: (keys) => whenReady(() => storage.deleteMany(Array.isArray(keys) ? keys.map(nfc) : keys)),
-    copy: (from, to) => whenReady(() => storage.copy(nfc(from), nfc(to))),
+    deleteObject: (key) => whenReady(() => storage.delete(nfc(key))),
+    deleteObjects: (keys) => whenReady(() => storage.deleteMany(Array.isArray(keys) ? keys.map(nfc) : keys)),
+    copyObject: (from, to) => whenReady(() => storage.copy(nfc(from), nfc(to))),
     deletePrefix: (prefix) => whenReady(() => deletePrefix(storage, nfc(prefix))),
     checkBucket: async (given) => {
       const options = optionsOf(given);

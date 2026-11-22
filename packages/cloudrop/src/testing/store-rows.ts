@@ -2,7 +2,7 @@
 // oracle. Every backend's reader returns this one shape, whatever the database keeps (snake_case columns, int8 as
 // strings, times as integer milliseconds on SQLite).
 
-import type { FileStatus, OwnerUsage } from "../server/store.ts";
+import type { FileRecordStatus, OwnerUsage } from "../server/store.ts";
 
 /** A `cloudrop_files` row: every column, camelCased, sizes as numbers and times as `Date`s. */
 export interface RawFileRow {
@@ -10,7 +10,7 @@ export interface RawFileRow {
   route: string;
   key: string;
   owner: string | null;
-  status: FileStatus;
+  status: FileRecordStatus;
   name: string;
   type: string;
   size: number;

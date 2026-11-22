@@ -3,7 +3,7 @@
 // as on Postgres (postgres-tables.ts).
 
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { FileStatus } from "../../server/store.ts";
+import type { FileRecordStatus } from "../../server/store.ts";
 import { type StoreTables, tableNames } from "../../store/sql/tables.ts";
 
 // drizzle-orm 0.45 and 1.0 share no builder type names, and `text`'s overload that takes a name erases to `any` on both,
@@ -16,7 +16,7 @@ type NotNull<TColumn extends { notNull(): unknown }> = ReturnType<TColumn["notNu
 type PrimaryKey<TColumn extends { primaryKey(): unknown }> = ReturnType<TColumn["primaryKey"]>;
 // A type-only stand-in for a text column, so `$type`, a generic method, can be instantiated with the status type.
 declare const textStandIn: Text;
-type Status = NotNull<ReturnType<typeof textStandIn.$type<FileStatus>>>;
+type Status = NotNull<ReturnType<typeof textStandIn.$type<FileRecordStatus>>>;
 
 type FileColumns = {
   id: PrimaryKey<Text>;
@@ -81,7 +81,7 @@ export function cloudropSqliteTables(options: { tables?: Omit<StoreTables, "sche
       key: textColumn("key").notNull(),
       /** From the route's `owner` callback; not the token's `owner` (what `authorize` returned). */
       owner: textColumn("owner"),
-      status: textColumn("status").$type<FileStatus>().notNull(),
+      status: textColumn("status").$type<FileRecordStatus>().notNull(),
       name: textColumn("name").notNull(),
       type: textColumn("type").notNull(),
       size: count("size"),

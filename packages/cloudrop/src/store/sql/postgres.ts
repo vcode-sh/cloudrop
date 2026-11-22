@@ -4,7 +4,7 @@
 // exclusive. Two are more: reconcile is a batch, the usage row made to exist and locked first, so the recount takes a
 // snapshot after it; revoke is a statement and then one for each row another transaction held (postgres-revoke.ts).
 
-import type { FileStatus, NewFile } from "../../server/store.ts";
+import type { FileRecordStatus, NewFile } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { isUniqueViolation, runStatement } from "./executor.ts";
 import { claimOutcome, RECOUNT, releaseFrom, transition } from "./outcomes.ts";
@@ -68,7 +68,7 @@ export function postgresWrites(context: SqlContext): GuardedWrites {
    * Files and usage of one guarded transition, then the row: changed, or unchanged as found. `from` is the status the
    * update requires.
    */
-  async function transitionRow(update: string, set: string | null, id: string, from: FileStatus, b: Binder) {
+  async function transitionRow(update: string, set: string | null, id: string, from: FileRecordStatus, b: Binder) {
     const counted = set
       ? `, counted AS (UPDATE ${usage} SET ${set} FROM changed WHERE ${usage}.owner = changed.owner)`
       : "";

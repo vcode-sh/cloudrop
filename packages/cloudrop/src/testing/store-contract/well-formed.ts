@@ -3,13 +3,13 @@
 // proves the cast true on every backend.
 
 import { expect } from "vitest";
-import type { CloudropStore, FileStatus } from "../../server/store.ts";
+import type { CloudropStore, FileRecordStatus } from "../../server/store.ts";
 import type { RawTables } from "../store-rows.ts";
 
 /** What the table constrains, loose on purpose: the oracle must be able to see a row the union calls impossible. */
 interface RecordFields {
   id: string;
-  status: FileStatus;
+  status: FileRecordStatus;
   claimedAt: Date | null;
   completedAt: Date | null;
   endedAt: Date | null;
@@ -21,7 +21,7 @@ type Rule = "null" | "date" | "any";
 type Field = "claimedAt" | "completedAt" | "endedAt" | "cleanedAt" | "result";
 
 /** One row of the table per status; `result` is "any" where it may hold `onComplete`'s JSON or null. */
-const TABLE: Record<FileStatus, Record<Field, Rule>> = {
+const TABLE: Record<FileRecordStatus, Record<Field, Rule>> = {
   pending: { claimedAt: "null", completedAt: "null", endedAt: "null", cleanedAt: "null", result: "null" },
   completing: { claimedAt: "date", completedAt: "null", endedAt: "null", cleanedAt: "null", result: "null" },
   completed: { claimedAt: "date", completedAt: "date", endedAt: "null", cleanedAt: "null", result: "any" },

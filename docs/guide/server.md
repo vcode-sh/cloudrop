@@ -660,17 +660,19 @@ Same-origin versus cross-origin setups, cookies across sites and which origin th
 | Call | What it does |
 | --- | --- |
 | `getUrl(key, { expiresIn?, download? })` | A URL to read the object. With a `publicUrl` and no options: the plain public URL. Otherwise a presigned `GET`, valid for at least `expiresIn` seconds (default 3600). `download` names the saved file. |
-| `head(key)` | The object's size, type, ETag, metadata and upload time, or `null` when it does not exist. |
-| `put(key, body, options?)` | A small server-side upload, up to the storage's single-`PUT` limit. |
-| `delete(key)` | Deletes one object. Deleting a missing key succeeds. |
-| `deleteMany(keys)` | Deletes many objects; each key ends up in `deleted` or in `failed` with its own error. |
-| `copy(from, to)` | Copies an object. |
+| `headObject(key)` | The object's size, type, ETag, metadata and upload time, or `null` when it does not exist. |
+| `putObject(key, body, options?)` | A small server-side upload, up to the storage's single-`PUT` limit. |
+| `deleteObject(key)` | Deletes one object. Deleting a missing key succeeds. |
+| `deleteObjects(keys)` | Deletes many objects; each key ends up in `deleted` or in `failed` with its own error. |
+| `copyObject(from, to)` | Copies an object. |
 | `deletePrefix(prefix)` | Empties a folder prefix ending in `/`, such as `"users/42/"`, then lists it again to prove it is empty. For erasure requests. |
 | `checkBucket({ origins? })` | Reports the bucket's CORS rule, lifecycle rule and public-access conflicts (see below). |
 
 With a store, `api` also has `file`, `files` (filtered by route, name and type, newest or oldest first), `allFiles`
 (the files of every owner, in any status, for your admin tools: call it behind your own admin check), `usage`,
 `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep` (see [Database store](store.md#file-operations)).
+The `*Object` calls work on the bucket by key and never touch the store: with a store, delete an uploaded file with
+`deleteFile(id)`, which also ends its row and frees the owner's quota.
 For an erasure request, `eraseOwner` needs no key layout and proves when nothing is left; `deletePrefix` empties a
 folder you name.
 

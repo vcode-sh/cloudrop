@@ -43,6 +43,14 @@ Every notable change to the `cloudrop` package. The format follows
 - `FilesPage` is typed by its records. Before: `FilesPage` with `items: FileRecord[]`. After:
   `FilesPage<CompletedRecord<R>>` from `api.files` and `FilesPage<RecordOf<S, R>>` from `api.allFiles({ status })`;
   plain `FilesPage` still means every status (`M12-T4`).
+- The row status type is `FileRecordStatus`. Before: `import type { FileStatus } from "cloudrop"` (or
+  `"cloudrop/store"`). After: `import type { FileRecordStatus } from "cloudrop"`. `FileStatus` from `cloudrop/client`,
+  a file's state in an upload job, keeps its name (`M12-A1`).
+- The `api` calls by key end in `Object`. Before: `api.head(key)`, `api.put(key, body, options)`, `api.delete(key)`,
+  `api.deleteMany(keys)`, `api.copy(from, to)`. After: `api.headObject(key)`, `api.putObject(key, body, options)`,
+  `api.deleteObject(key)`, `api.deleteObjects(keys)`, `api.copyObject(from, to)`, with the same answers. They never
+  touch the store: with a store, delete an uploaded file with `api.deleteFile(id)`. The storage driver keeps `head`,
+  `put`, `delete`, `deleteMany` and `copy` (`M12-A2`).
 
 ### Added
 

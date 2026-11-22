@@ -3,7 +3,7 @@
 // backend.
 
 /** Where a file's row stands. `pending` until a `/complete` claims it; the five ended statuses never change again. */
-export type FileStatus =
+export type FileRecordStatus =
   | "pending"
   | "completing"
   | "completed"
@@ -136,7 +136,7 @@ export type FailedRecord<R extends string = string> = RecordBase<R> & {
  * loose, so the compiler still checks that a store maps every field and gives each its type. No entry exports it.
  */
 export interface MappedRecord extends RecordBase<string> {
-  status: FileStatus;
+  status: FileRecordStatus;
   claimedAt: Date | null;
   completedAt: Date | null;
   endedAt: Date | null;
@@ -160,4 +160,4 @@ export type FileRecord<R extends string = string> =
   | FailedRecord<R>;
 
 /** The records of one status, or of a union of statuses: `RecordOf<"failed">` is `FailedRecord`. */
-export type RecordOf<S extends FileStatus, R extends string = string> = Extract<FileRecord<R>, { status: S }>;
+export type RecordOf<S extends FileRecordStatus, R extends string = string> = Extract<FileRecord<R>, { status: S }>;

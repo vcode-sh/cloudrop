@@ -1,12 +1,12 @@
 // The store contract's `RawTables` over a test database: C0's raw reader for the reads, plus the two writes past the
 // store that the contract needs (counters made to drift, a usage row deleted).
 
-import type { FileStatus } from "../../server/store.ts";
+import type { FileRecordStatus } from "../../server/store.ts";
 import type { RawFileRow, RawTables } from "../store-rows.ts";
 import { type FileRow, rawReader } from "./raw-reader.ts";
 import { qualified, resolveTables, type TableNames, type TestDatabase } from "./schema.ts";
 
-const STATUSES: ReadonlySet<string> = new Set<FileStatus>([
+const STATUSES: ReadonlySet<string> = new Set<FileRecordStatus>([
   "pending",
   "completing",
   "completed",
@@ -19,7 +19,7 @@ const STATUSES: ReadonlySet<string> = new Set<FileStatus>([
 
 function withStatus(row: FileRow): RawFileRow {
   if (!STATUSES.has(row.status)) throw new Error(`Column status holds "${row.status}", which is not a file status.`);
-  return { ...row, status: row.status as FileStatus };
+  return { ...row, status: row.status as FileRecordStatus };
 }
 
 export function rawTables(db: TestDatabase, tables?: Partial<TableNames>): RawTables {

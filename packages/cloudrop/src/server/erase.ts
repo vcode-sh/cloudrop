@@ -7,7 +7,7 @@ import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { readGrace, removeLeftovers, settledAt } from "./leftovers.ts";
 import { badOwner, isOwnerOrId } from "./owner-files.ts";
-import type { CloudropStore, FileRecord, FileStatus } from "./store.ts";
+import type { CloudropStore, FileRecord, FileRecordStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 import { deleteCompleted } from "./store-delete.ts";
 
@@ -76,10 +76,10 @@ interface Eraser {
 
 const PAGE = 100;
 /** Read together, in one statement per page: a file in any of them at that moment keeps the owner from done. */
-const LIVE: readonly FileStatus[] = ["pending", "completing", "completed"];
+const LIVE: readonly FileRecordStatus[] = ["pending", "completing", "completed"];
 /** Read after the live statuses, one at a time, as ended rows never change status again. */
-const ENDED: readonly FileStatus[] = ["aborted", "rejected", "failed", "expired", "deleted"];
-const EVERY: readonly FileStatus[] = [...LIVE, ...ENDED];
+const ENDED: readonly FileRecordStatus[] = ["aborted", "rejected", "failed", "expired", "deleted"];
+const EVERY: readonly FileRecordStatus[] = [...LIVE, ...ENDED];
 /** Every row of the owner's, in the store's default order. */
 const UNFILTERED = { route: null, name: null, type: null, order: "newest" } as const;
 
@@ -145,7 +145,11 @@ type Handler = (eraser: Eraser, record: FileRecord) => Promise<void>;
  * Every page of the owner's rows in `statuses`, each row handled in turn. False when the signal stopped the run, which
  * is checked before each page and each row.
  */
-async function eachRow(eraser: Eraser, statuses: readonly FileStatus[], handle: Handler): Promise<Result<boolean>> {
+async function eachRow(
+  eraser: Eraser,
+  statuses: readonly FileRecordStatus[],
+  handle: Handler,
+): Promise<Result<boolean>> {
   const { config, store, owner, signal } = eraser;
   let cursor: string | null = null;
   do {
@@ -172,7 +176,7 @@ const wait = async ({ report }: Eraser): Promise<void> => {
 /** Each pass in turn. False when the signal stopped the run. */
 async function runPasses(
   eraser: Eraser,
-  passes: readonly (readonly [readonly FileStatus[], Handler])[],
+  passes: readonly (readonly [readonly FileRecordStatus[], Handler])[],
 ): Promise<Result<boolean>> {
   for (const [statuses, handle] of passes) {
     const finished = await eachRow(eraser, statuses, handle);

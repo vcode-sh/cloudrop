@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import { pgExecutor, sqliteExecutor, sqlStore } from "../../adapters/sql.ts";
-import type { CloudropStore, FileStatus } from "../../server/store.ts";
+import type { CloudropStore, FileRecordStatus } from "../../server/store.ts";
 import { usePostgresDatabase } from "../../testing/db/postgres.ts";
 import type { Dialect, TestDatabase } from "../../testing/db/schema.ts";
 import { useSqliteDatabase } from "../../testing/db/sqlite.ts";
@@ -14,7 +14,7 @@ const START = Date.parse("2026-11-17T12:00:00.000Z");
 const STATUSES = ["completed", "completed", "completed", "pending", "completed", "deleted", "completed", "aborted"];
 const TYPES = ["image/png", "image/jpeg", "text/plain", "application/pdf", "image/png"];
 const LIVE = ["pending", "completing", "completed"] as const;
-const EVERY: readonly FileStatus[] = [...LIVE, "aborted", "rejected", "failed", "expired", "deleted"];
+const EVERY: readonly FileRecordStatus[] = [...LIVE, "aborted", "rejected", "failed", "expired", "deleted"];
 
 /** 900 files of "u-1" (most), "u-2" and nobody, six to an instant, ids "f-<n>" and "F-<n>". */
 async function seed(db: TestDatabase): Promise<void> {

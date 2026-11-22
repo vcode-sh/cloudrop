@@ -1,14 +1,14 @@
 // end, revoke and cleaned: rows reaching an ended status release exactly the bytes their previous status held.
 
 import { expect, it } from "vitest";
-import type { EndedStatus, FileStatus } from "../../server/store.ts";
+import type { EndedStatus, FileRecordStatus } from "../../server/store.ts";
 import type { RawFileRow } from "../store-rows.ts";
 import { at, MINUTE, newFile, pendingRow, type StoreSuite, usageRow } from "./suite.ts";
 
 export function endCases(suite: StoreSuite): void {
   const { rawFile, seed, advance } = suite;
 
-  it.each<{ from: FileStatus; to: EndedStatus; cleaned: boolean; claimed: Partial<RawFileRow> }>([
+  it.each<{ from: FileRecordStatus; to: EndedStatus; cleaned: boolean; claimed: Partial<RawFileRow> }>([
     { from: "pending", to: "aborted", cleaned: false, claimed: {} },
     { from: "completing", to: "failed", cleaned: true, claimed: { claim: "claim-f-1", claimedAt: at(MINUTE) } },
   ])(

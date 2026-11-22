@@ -9,7 +9,7 @@ import type { ServerConfig } from "./config.ts";
 import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
 import { removeDeleted } from "./leftovers.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listFiles } from "./owner-files.ts";
-import type { CloudropStore, CompletedRecord, FileRecord, FileStatus, OwnerUsage, RecordOf } from "./store.ts";
+import type { CloudropStore, CompletedRecord, FileRecord, FileRecordStatus, OwnerUsage, RecordOf } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 import { deleteCompleted } from "./store-delete.ts";
 import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
@@ -28,7 +28,7 @@ export interface StoreFileApi<R extends string = string> extends FileApi {
    * type, a page at a time. It crosses owners: call it only behind your app's own admin check, never with options a
    * visitor chose. With a `status`, the records are typed by it: `{ status: "failed" }` answers `FailedRecord`s.
    */
-  allFiles<S extends FileStatus = FileStatus>(
+  allFiles<S extends FileRecordStatus = FileRecordStatus>(
     options?: AllFilesOptions<R, S>,
   ): Promise<Result<FilesPage<RecordOf<S, R>>>>;
   /** An owner's counters, with or without a quota. */
@@ -146,7 +146,7 @@ export function storeApi(
     file: (id) =>
       whenReady(async () => (isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId())),
     files: (options) => whenReady(() => listFiles(config, store, options)),
-    allFiles: <S extends FileStatus>(options?: AllFilesOptions<string, S>) =>
+    allFiles: <S extends FileRecordStatus>(options?: AllFilesOptions<string, S>) =>
       whenReady(() => listAllFiles<S>(config, store, options)),
     usage: (owner) =>
       whenReady(async () =>

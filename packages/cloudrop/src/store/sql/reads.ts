@@ -1,7 +1,7 @@
 // The store methods that are one statement on both dialects: they touch one table, so the only differences are the
 // placeholders (the binder's) and the collation of keyset comparisons.
 
-import type { CloudropStore, FileRecord, FileStatus } from "../../server/store.ts";
+import type { CloudropStore, FileRecord, FileRecordStatus } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlDialect, type SqlExecutor, type SqlStatement } from "./executor.ts";
 import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage } from "./records.ts";
@@ -25,7 +25,7 @@ type SingleStatementMethods = Pick<
 /** What `list` and `listAll` read: `owner` null is every owner, `statuses` null every status. */
 type Listing = Omit<Parameters<StoreMethods["list"]>[0], "owner" | "statuses"> & {
   owner: string | null;
-  statuses: readonly FileStatus[] | null;
+  statuses: readonly FileRecordStatus[] | null;
 };
 
 /** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
@@ -92,9 +92,9 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
   // order then leads with the owner, which only that index has, and the owner is compared as a one-element array,
   // because the planner drops a column it knows to be one value from an order. In several statuses or none the order
   // is one no index has, and the owner's rows are sorted (M11-L6). The rows and their order are the same in each form.
-  const inOwnerOrder = (owner: string | null, statuses: readonly FileStatus[] | null) =>
+  const inOwnerOrder = (owner: string | null, statuses: readonly FileRecordStatus[] | null) =>
     dialect === "postgres" && owner !== null && statuses?.length === 1;
-  const listedBy = (owner: string | null, statuses: readonly FileStatus[] | null, direction: string) => {
+  const listedBy = (owner: string | null, statuses: readonly FileRecordStatus[] | null, direction: string) => {
     if (owner === null || (dialect === "sqlite" && statuses?.length === 1)) return `created_at ${direction}`;
     if (dialect === "sqlite") return `+created_at ${direction}`;
     return inOwnerOrder(owner, statuses)

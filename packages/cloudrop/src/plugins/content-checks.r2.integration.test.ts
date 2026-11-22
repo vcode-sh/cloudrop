@@ -57,7 +57,7 @@ async function uploadAndComplete(file: { name: string; type: string }, body: Uin
   await put.arrayBuffer();
   expect(put.status).toBe(200);
   const completed = await call<CompleteResponse>("complete", { token: ticket.token });
-  const kept = (await cloudrop.api.head(ticket.key)).data?.size ?? null;
+  const kept = (await cloudrop.api.headObject(ticket.key)).data?.size ?? null;
   const { code = null, content = null } = completed.body.error ?? {};
   return { status: completed.status, code, content, kept };
 }

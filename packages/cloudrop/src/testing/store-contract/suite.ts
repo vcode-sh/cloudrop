@@ -2,7 +2,7 @@
 // that bring a row to a given status through the store's own methods.
 
 import type { TestContext } from "vitest";
-import type { CloudropStore, EndedStatus, FileRecord, FileStatus, NewFile } from "../../server/store.ts";
+import type { CloudropStore, EndedStatus, FileRecord, FileRecordStatus, NewFile } from "../../server/store.ts";
 import type { StoreGap, StoreTarget } from "../store-contract.ts";
 import type { RawFileRow, RawTables, RawUsageRow } from "../store-rows.ts";
 
@@ -55,7 +55,7 @@ export function provided<T>(value: T | undefined, member: string): T {
 }
 
 /** The statuses a pending row passes through to reach each status, the way the server moves it. */
-const PATHS: Record<FileStatus, ("completing" | "completed" | EndedStatus)[]> = {
+const PATHS: Record<FileRecordStatus, ("completing" | "completed" | EndedStatus)[]> = {
   pending: [],
   completing: ["completing"],
   completed: ["completing", "completed"],
@@ -83,7 +83,7 @@ export interface StoreSuite {
   /** Reserves `files` for `owner` at `at(0)` without a limit; throws unless every one is reserved. */
   seed(owner: string | null, files: readonly NewFile[], expiresAt?: Date): Promise<void>;
   /** Brings a reserved row to `status` through the store at `now`, the way the server does. */
-  advance(id: string, status: FileStatus, now: Date): Promise<void>;
+  advance(id: string, status: FileRecordStatus, now: Date): Promise<void>;
   /** The store's `listAll`, which every store under the contract must have. */
   listAll(options?: ListAllOptions): Promise<{ records: FileRecord[]; cursor: string | null }>;
 }
@@ -99,7 +99,7 @@ export function storeSuite(connected: () => StoreTarget): StoreSuite {
   /** One step of `advance`: true when the store made it. */
   async function step(
     id: string,
-    from: FileStatus,
+    from: FileRecordStatus,
     to: "completing" | "completed" | EndedStatus,
     now: Date,
   ): Promise<boolean> {
@@ -109,8 +109,8 @@ export function storeSuite(connected: () => StoreTarget): StoreSuite {
     return (await store().end(id, from, to, now)).changed;
   }
 
-  async function advance(id: string, status: FileStatus, now: Date): Promise<void> {
-    let from: FileStatus = "pending";
+  async function advance(id: string, status: FileRecordStatus, now: Date): Promise<void> {
+    let from: FileRecordStatus = "pending";
     for (const to of PATHS[status]) {
       if (!(await step(id, from, to, now))) throw new Error(`Could not bring ${id} from ${from} to ${to}.`);
       from = to;

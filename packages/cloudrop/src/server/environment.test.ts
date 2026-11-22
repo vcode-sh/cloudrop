@@ -108,7 +108,7 @@ describe("configuration from the environment", () => {
     setEnvironment();
     vi.stubEnv("CLOUDROP_SECRET", "too short");
     const { cloudrop } = server();
-    expect((await cloudrop.api.head("a.png")).error).toMatchObject({
+    expect((await cloudrop.api.headObject("a.png")).error).toMatchObject({
       code: "INVALID_CONFIG",
       message: "CLOUDROP_SECRET must be text of at least 32 characters. Generate one with `openssl rand -base64 32`.",
     });
@@ -116,7 +116,7 @@ describe("configuration from the environment", () => {
 
   it("gives cloudrop.api calls the INVALID_CONFIG with what is missing", async () => {
     const { cloudrop } = server();
-    expect(await cloudrop.api.head("a.png")).toEqual({
+    expect(await cloudrop.api.headObject("a.png")).toEqual({
       data: null,
       error: expect.objectContaining({ code: "INVALID_CONFIG", message: MISSING }),
     });
@@ -127,7 +127,7 @@ describe("configuration from the environment", () => {
     expect((await post()).status).toBe(500);
     setEnvironment();
     expect((await post()).status).toBe(200);
-    expect(await cloudrop.api.head("a.png")).toEqual({ data: null, error: null });
+    expect(await cloudrop.api.headObject("a.png")).toEqual({ data: null, error: null });
     // Once complete, the settings are kept for the life of the server.
     for (const name of VARIABLES) vi.stubEnv(name, "");
     expect((await post()).status).toBe(200);

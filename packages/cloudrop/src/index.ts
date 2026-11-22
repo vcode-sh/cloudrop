@@ -62,7 +62,7 @@ export type {
   ExpiredRecord,
   FailedRecord,
   FileRecord,
-  FileStatus,
+  FileRecordStatus,
   NewFile,
   OwnerUsage,
   PendingRecord,

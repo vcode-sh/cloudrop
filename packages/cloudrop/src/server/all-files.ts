@@ -6,10 +6,10 @@ import { configError, fail, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listPage } from "./owner-files.ts";
-import type { CloudropStore, FileStatus, RecordOf } from "./store.ts";
+import type { CloudropStore, FileRecordStatus, RecordOf } from "./store.ts";
 
 /** `R` is the server's route names, `S` the status asked for. */
-export interface AllFilesOptions<R extends string = string, S extends FileStatus = FileStatus>
+export interface AllFilesOptions<R extends string = string, S extends FileRecordStatus = FileRecordStatus>
   extends Omit<FilesOptions<R>, "owner"> {
   /**
    * Only this owner's files, as the route's `owner` callback returned it. Left out: every owner's, and files without
@@ -35,12 +35,12 @@ const STATUSES: readonly unknown[] = [
   "failed",
   "expired",
   "deleted",
-] satisfies FileStatus[];
+] satisfies FileRecordStatus[];
 
-const isStatus = (status: unknown): status is FileStatus => STATUSES.includes(status);
+const isStatus = (status: unknown): status is FileRecordStatus => STATUSES.includes(status);
 
 /** The page is checked to hold only the status asked for (`listPage`), so it is typed by that status, `S`. */
-export async function listAllFiles<S extends FileStatus>(
+export async function listAllFiles<S extends FileRecordStatus>(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   given: unknown,

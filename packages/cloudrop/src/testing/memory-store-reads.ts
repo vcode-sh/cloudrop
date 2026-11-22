@@ -1,7 +1,7 @@
 // The memory store's methods that only read: rows as records, and the keyset pages of `stale`, `list`, `listAll` and
 // `owners`, ordered as a database orders them: ids and owners by their bytes.
 
-import type { CloudropStore, FileRecord, FileStatus, MappedRecord } from "../server/store.ts";
+import type { CloudropStore, FileRecord, FileRecordStatus, MappedRecord } from "../server/store.ts";
 import type { MemoryTables } from "./memory-store-methods.ts";
 import type { RawFileRow } from "./store-rows.ts";
 
@@ -11,10 +11,10 @@ type ReadMethods = Pick<Store, "get" | "stale" | "list" | "owners"> & Required<P
 /** What `list` and `listAll` read: `owner` null is every owner, `statuses` null every status. */
 type Listing = Omit<Parameters<Store["list"]>[0], "owner" | "statuses"> & {
   owner: string | null;
-  statuses: readonly FileStatus[] | null;
+  statuses: readonly FileRecordStatus[] | null;
 };
 
-const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
+const CLEANUP: ReadonlySet<FileRecordStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
 
 /** A row as its record, cast to the union by status as the SQL store casts it (M12-T1); the contract proves both. */
 export function toRecord(row: RawFileRow): FileRecord {

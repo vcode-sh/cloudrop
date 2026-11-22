@@ -4,7 +4,7 @@
 import type { SingleTicket } from "../protocol/types.ts";
 import type { DeleteContext } from "../server/delete-context.ts";
 import { route, routeFor } from "../server/route.ts";
-import type { CloudropStore, FileStatus } from "../server/store.ts";
+import type { CloudropStore, FileRecordStatus } from "../server/store.ts";
 import { complete } from "./complete-fixture.ts";
 import { type MemoryStore, type MemoryTx, memoryStore } from "./memory-store.ts";
 import { hello, leaseStore, type StoreFixture, storeFixture, TEXT } from "./store-fixture.ts";
@@ -55,7 +55,7 @@ export interface Deleting {
   upload(): Promise<SingleTicket>;
   /** Uploads a file and completes it. */
   uploaded(): Promise<SingleTicket>;
-  status(id: string): Promise<FileStatus | undefined>;
+  status(id: string): Promise<FileRecordStatus | undefined>;
   /** Whether the bucket holds an object at the key. */
   stored(key: string): Promise<boolean>;
 }

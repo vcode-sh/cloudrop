@@ -8,7 +8,7 @@
 
 import { sql } from "drizzle-orm";
 import { bigint, check, index, integer, PgSchema, type PgTableFn, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import type { FileStatus } from "../../server/store.ts";
+import type { FileRecordStatus } from "../../server/store.ts";
 import { type StoreTables, tableNames } from "../../store/sql/tables.ts";
 
 // Each builder function's last overload names the column; `timestamp`'s mode defaults to Dates, and `bigint`'s answer
@@ -20,7 +20,7 @@ type PrimaryKey<TColumn extends { primaryKey(): unknown }> = ReturnType<TColumn[
 type Count = NotNull<Extract<ReturnType<typeof bigint>, { _: { data: number } }>>;
 // A type-only stand-in for a text column, so `$type`, a generic method, can be instantiated with the status type.
 declare const textStandIn: Text;
-type Status = NotNull<ReturnType<typeof textStandIn.$type<FileStatus>>>;
+type Status = NotNull<ReturnType<typeof textStandIn.$type<FileRecordStatus>>>;
 // A type-only table function whose tables may or may not carry a schema: `pgTable` and a schema's `table` both fit it.
 declare const tableStandIn: PgTableFn<string | undefined>;
 
@@ -96,7 +96,7 @@ export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropP
       key: text("key").notNull(),
       /** From the route's `owner` callback; not the token's `owner` (what `authorize` returned). */
       owner: text("owner"),
-      status: text("status").$type<FileStatus>().notNull(),
+      status: text("status").$type<FileRecordStatus>().notNull(),
       name: text("name").notNull(),
       type: text("type").notNull(),
       size: count("size"),

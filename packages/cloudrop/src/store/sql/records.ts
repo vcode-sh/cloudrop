@@ -2,7 +2,7 @@
 // postgres.js return int8 and numeric sums as decimal text, Prisma returns BigInt and Decimal, node:sqlite and D1
 // return numbers; Postgres times arrive as Dates, SQLite times are the integer milliseconds the core wrote.
 
-import type { FileRecord, FileStatus, MappedRecord, OwnerUsage } from "../../server/store.ts";
+import type { FileRecord, FileRecordStatus, MappedRecord, OwnerUsage } from "../../server/store.ts";
 import type { SqlRow } from "./executor.ts";
 
 /** Every column of the files table, in the order of spec §3. */
@@ -88,8 +88,8 @@ export function toRecord(row: SqlRow): FileRecord {
     size: toSafeInteger(row.size, "size"),
     metadata: optionalText(row, "metadata"),
     owner: optionalText(row, "owner"),
-    // Only the store writes this column, always one of the FileStatus values.
-    status: text(row, "status") as FileStatus,
+    // Only the store writes this column, always one of the FileRecordStatus values.
+    status: text(row, "status") as FileRecordStatus,
     uploadId: optionalText(row, "upload_id"),
     result: optionalText(row, "result"),
     expiresAt: toDate(row.expires_at, "expires_at"),

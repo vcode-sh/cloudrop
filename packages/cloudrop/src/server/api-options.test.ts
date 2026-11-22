@@ -43,9 +43,9 @@ it.for<{ name: string; call: (api: Api, options: never) => Promise<Result<unknow
     message: "getUrl options must be an object, such as { expiresIn: 3600 }.",
   },
   {
-    name: "put",
-    call: (api, options) => api.put("users/u1/a.txt", "a", options),
-    message: 'put options must be an object, such as { type: "text/plain" }.',
+    name: "putObject",
+    call: (api, options) => api.putObject("users/u1/a.txt", "a", options),
+    message: 'putObject options must be an object, such as { type: "text/plain" }.',
   },
   {
     name: "checkBucket",

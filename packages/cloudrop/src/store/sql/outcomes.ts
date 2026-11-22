@@ -1,7 +1,7 @@
 // What both dialects share once their statements have run: reading a claim's outcome or a transition from the row, and
 // the usage change each status gives back when a row leaves it.
 
-import type { ClaimOutcome, FileStatus, Transition } from "../../server/store.ts";
+import type { ClaimOutcome, FileRecordStatus, Transition } from "../../server/store.ts";
 import type { SqlRow } from "./executor.ts";
 import { toRecord } from "./records.ts";
 
@@ -26,7 +26,7 @@ export function transition(changed: boolean, row: SqlRow | undefined): Transitio
  * The `SET` list that takes a row of `size` bytes off its owner's counters as it leaves `from`, or null when `from`
  * holds no bytes (an ended status), in which case the usage row is not written at all.
  */
-export function releaseFrom(from: FileStatus, size: string): string | null {
+export function releaseFrom(from: FileRecordStatus, size: string): string | null {
   if (from === "pending" || from === "completing") return `reserved_bytes = reserved_bytes - ${size}`;
   if (from === "completed") return `active_bytes = active_bytes - ${size}, files = files - 1`;
   return null;

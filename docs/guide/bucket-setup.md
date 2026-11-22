@@ -233,7 +233,7 @@ The server needs credentials that can, in the bucket:
 - write objects and run multipart uploads (create, upload parts, list parts, complete, abort), and sign upload URLs for
   them;
 - read object metadata (`HEAD`) and objects (for `api.getUrl`);
-- delete objects (rejected and aborted uploads, `api.delete`, `api.deletePrefix`);
+- delete objects (rejected and aborted uploads, `api.deleteObject`, `api.deletePrefix`);
 - list objects (`api.deletePrefix`).
 
 On R2, an API token with **Object Read & Write** permission on the bucket does all of this; cloudrop's live tests run

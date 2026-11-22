@@ -10,12 +10,12 @@ import type { EndpointConfig, EndpointInput } from "./config.ts";
 import { storageFailure } from "./http.ts";
 import { runOnAbort } from "./plugins.ts";
 import { nowSeconds } from "./presign.ts";
-import type { FileStatus } from "./store.ts";
+import type { FileRecordStatus } from "./store.ts";
 import { isMultipart, type UploadTokenPayload } from "./token.ts";
 import { readToken, tokenAbortContexts } from "./token-request.ts";
 
 /** Ended rows whose upload may have left something in the bucket: cleaning up again is harmless. */
-const UNFINISHED: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired"]);
+const UNFINISHED: ReadonlySet<FileRecordStatus> = new Set(["aborted", "rejected", "failed", "expired"]);
 
 /**
  * Aborts the multipart upload and deletes this upload's own object (never another writer's), then tells the plugins.

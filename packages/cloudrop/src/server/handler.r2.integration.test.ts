@@ -86,7 +86,7 @@ describe("upload protocol on live R2", () => {
     const ticket = upload.body.files[0] as SingleTicket;
     expect(await put(ticket.put, offsetBytes(1000))).toBe(200);
     expect((await call<CompleteResponse>("complete", { token: ticket.token })).status).toBe(200);
-    expect((await cloudrop.api.head(ticket.key)).data).toMatchObject({
+    expect((await cloudrop.api.headObject(ticket.key)).data).toMatchObject({
       size: 1000,
       type: "image/png",
       disposition: "inline; filename=\"zdj_cie 1.png\"; filename*=UTF-8''zdj%C4%99cie%201.png",
@@ -127,12 +127,12 @@ describe("upload protocol on live R2", () => {
     expect(single.kind).toBe("single");
     expect(await put(single.put, offsetBytes(1000))).toBe(200);
     expect((await call<CompleteResponse>("complete", { token: single.token })).status).toBe(200);
-    expect((await cloudrop.api.head(single.key)).data?.disposition).toBe(disposition);
+    expect((await cloudrop.api.headObject(single.key)).data?.disposition).toBe(disposition);
     const [first, last] = multipart.parts as [SignedPart, SignedPart];
     expect(await put(first, offsetBytes(8 * MiB))).toBe(200);
     expect(await put(last, offsetBytes(5))).toBe(200);
     expect((await call<CompleteResponse>("complete", { token: multipart.token })).status).toBe(200);
-    expect((await cloudrop.api.head(multipart.key)).data?.disposition).toBe(disposition);
+    expect((await cloudrop.api.headObject(multipart.key)).data?.disposition).toBe(disposition);
   });
 
   it("resumes a multipart upload: complete names the missing part, sign renews it, complete succeeds", async () => {
@@ -153,7 +153,7 @@ describe("upload protocol on live R2", () => {
     expect(await put(first as SignedPart, bytes.slice(0, 8 * MiB))).toBe(200);
     const done = await call<CompleteResponse>("complete", { token: ticket.token });
     expect(done.status).toBe(200);
-    expect((await cloudrop.api.head(ticket.key)).data?.size).toBe(size);
+    expect((await cloudrop.api.headObject(ticket.key)).data?.size).toBe(size);
     // A retried completion after R2 forgot the upload succeeds by checking the stored object (spec §5.4).
     expect((await call<CompleteResponse>("complete", { token: ticket.token })).status).toBe(200);
   });
@@ -182,7 +182,7 @@ describe("upload protocol on live R2", () => {
     const ticket = upload.body.files[0] as SingleTicket;
     expect(await put(ticket.put, offsetBytes(7))).toBe(200);
     expect((await call<CompleteResponse>("complete", { token: ticket.token })).body.file?.type).toBe("text/csv");
-    expect((await cloudrop.api.head(ticket.key)).data?.type).toBe("text/csv");
+    expect((await cloudrop.api.headObject(ticket.key)).data?.type).toBe("text/csv");
   });
 
   it("reports a HEAD signed 20 minutes off R2's clock as the clock, not the credentials (M9-H2)", async () => {
@@ -202,7 +202,7 @@ describe("upload protocol on live R2", () => {
 
   it("erases a folder with deletePrefix and proves it empty", async () => {
     const folder = `${prefix}erase/`;
-    const stored = await Promise.all(["a.txt", "b.txt"].map((name) => cloudrop.api.put(`${folder}${name}`, "x")));
+    const stored = await Promise.all(["a.txt", "b.txt"].map((name) => cloudrop.api.putObject(`${folder}${name}`, "x")));
     expect(stored.map((result) => result.error)).toEqual([null, null]);
     expect((await cloudrop.api.deletePrefix(folder)).data?.deleted).toBe(2);
     expect((await storage?.list(folder))?.data?.items).toEqual([]);

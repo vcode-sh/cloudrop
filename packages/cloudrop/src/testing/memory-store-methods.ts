@@ -1,7 +1,14 @@
 // The memory store's methods over its two maps, one per table. Each writing method runs inside `atomic`, which records
 // every row it writes so a failure can undo them (memory-store.ts).
 
-import type { ClaimOutcome, CloudropStore, Completion, FileStatus, OwnerUsage, Transition } from "../server/store.ts";
+import type {
+  ClaimOutcome,
+  CloudropStore,
+  Completion,
+  FileRecordStatus,
+  OwnerUsage,
+  Transition,
+} from "../server/store.ts";
 import { readMethods, toRecord } from "./memory-store-reads.ts";
 import type { RawFileRow, RawUsageRow } from "./store-rows.ts";
 
@@ -19,7 +26,7 @@ type Atomic = <T>(method: string, body: (write: Write) => T) => Promise<T>;
 type Methods = Omit<CloudropStore<never>, "transaction"> & Required<Pick<CloudropStore<never>, "listAll">>;
 
 const ZERO: OwnerUsage = { reservedBytes: 0, activeBytes: 0, files: 0 };
-const RESERVING: ReadonlySet<FileStatus> = new Set(["pending", "completing"]);
+const RESERVING: ReadonlySet<FileRecordStatus> = new Set(["pending", "completing"]);
 
 /** An owner's counters as its rows say they should be. */
 function countRows(rows: Iterable<RawFileRow>, owner: string): OwnerUsage {
@@ -57,7 +64,7 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   }
 
   /** What leaving `from` takes off the owner's counters. */
-  const releaseFrom = (from: FileStatus, size: number): Partial<OwnerUsage> => {
+  const releaseFrom = (from: FileRecordStatus, size: number): Partial<OwnerUsage> => {
     if (RESERVING.has(from)) return { reservedBytes: -size };
     return from === "completed" ? { activeBytes: -size, files: -1 } : {};
   };

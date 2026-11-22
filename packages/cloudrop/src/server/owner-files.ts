@@ -6,7 +6,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { type FileFilters, readFilters } from "./files-filters.ts";
-import type { CloudropStore, CompletedRecord, FileRecord, FileStatus } from "./store.ts";
+import type { CloudropStore, CompletedRecord, FileRecord, FileRecordStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
 /** `R` is the server's route names. */
@@ -46,7 +46,7 @@ const MARKED_CURSOR = /^(?:((?:all\.)?[0-9a-f]{8})\.)?(.*)$/s;
 /** The listing the store is asked for, every option checked. `api.allFiles` may leave the owner and the status null. */
 interface FilesQuery extends FileFilters {
   owner: string | null;
-  status: FileStatus | null;
+  status: FileRecordStatus | null;
   limit: number;
   cursor: string | null;
 }

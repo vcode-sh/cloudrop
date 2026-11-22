@@ -2,7 +2,7 @@
 // own. The shipped adapters (`cloudrop/adapters/*`) and the testing memory store implement it; the contract suite in
 // `src/testing/store-contract.ts` proves an implementation keeps every promise written here.
 
-import type { EndedStatus, FileRecord, FileStatus, NewFile } from "./file-record.ts";
+import type { EndedStatus, FileRecord, FileRecordStatus, NewFile } from "./file-record.ts";
 import type { RouteFunction } from "./store-route.ts";
 
 export type {
@@ -14,7 +14,7 @@ export type {
   ExpiredRecord,
   FailedRecord,
   FileRecord,
-  FileStatus,
+  FileRecordStatus,
   MappedRecord,
   NewFile,
   PendingRecord,
@@ -146,7 +146,13 @@ export interface CloudropStore<TTx = never> {
    * and one file; an ended status releases nothing. `claim` and `claimed_at` stay as they were. Unchanged when the
    * row is in another status, or missing.
    */
-  end(id: string, from: FileStatus, to: EndedStatus, now: Date, options?: { cleaned?: boolean }): Promise<Transition>;
+  end(
+    id: string,
+    from: FileRecordStatus,
+    to: EndedStatus,
+    now: Date,
+    options?: { cleaned?: boolean },
+  ): Promise<Transition>;
   /** Ends every `pending` row of one owner as `aborted`, releasing their reserved bytes. `completing` and later rows
    *  stay. Answers how many rows changed. May be several units, each ending rows with their bytes (M11-R240). */
   revoke(owner: string, now: Date): Promise<number>;
@@ -177,13 +183,13 @@ export interface CloudropStore<TTx = never> {
    * last page. A cursor is `<milliseconds>:<id>`, the last row's `created_at` and id (the file API refuses any other
    * before calling the store).
    */
-  list(input: ListQuery & { owner: string; statuses: readonly FileStatus[] }): Promise<RecordPage>;
+  list(input: ListQuery & { owner: string; statuses: readonly FileRecordStatus[] }): Promise<RecordPage>;
   /**
    * `list` across owners, for `api.allFiles` (M11-L): `owner` null is every owner, rows without one included, and
    * `status` null every status; given, each narrows to that one. Optional, so a store written before 0.6 still
    * compiles: without it `api.allFiles` answers `INVALID_CONFIG`.
    */
-  listAll?(input: ListQuery & { owner: string | null; status: FileStatus | null }): Promise<RecordPage>;
+  listAll?(input: ListQuery & { owner: string | null; status: FileRecordStatus | null }): Promise<RecordPage>;
   /** Sets `cleaned_at = now` on a row that has none; a cleaned or missing row is left as it is. */
   cleaned(id: string, now: Date): Promise<void>;
   /** The owner's counters; zeros for an owner the store has never counted. */

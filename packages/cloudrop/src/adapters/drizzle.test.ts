@@ -12,7 +12,7 @@ import { drizzle as pgProxy } from "drizzle-orm/pg-proxy";
 import { drizzle as postgresJs } from "drizzle-orm/postgres-js";
 import pg from "pg";
 import { afterAll, describe, expect, expectTypeOf, onTestFinished, test } from "vitest";
-import type { FileStatus } from "../server/store.ts";
+import type { FileRecordStatus } from "../server/store.ts";
 import { schemaStatements } from "../testing/db/schema.ts";
 import { drizzleSql } from "./drizzle/statement.ts";
 import { cloudropPgTables, cloudropSqliteTables, drizzleStore } from "./drizzle.ts";
@@ -192,7 +192,7 @@ type FileRow = {
   route: string;
   key: string;
   owner: string | null;
-  status: FileStatus;
+  status: FileRecordStatus;
   name: string;
   type: string;
   size: number;
