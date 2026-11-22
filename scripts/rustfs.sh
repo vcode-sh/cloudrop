@@ -20,7 +20,8 @@ case "${1:-}" in
     exit 1
     ;;
   down)
-    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    # Manual removal must remove the image's anonymous /data volume too.
+    docker rm -f -v "$NAME" >/dev/null 2>&1 || true
     echo "RustFS container ${NAME} removed"
     ;;
   *)
