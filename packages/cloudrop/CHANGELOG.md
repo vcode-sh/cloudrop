@@ -62,10 +62,17 @@ Every notable change to the `cloudrop` package. The format follows
 - A route without `prefix` (or `key`) writes under its own name. Before: `avatar: route({ ... })` stored
   `01JD5Z3K7Q2X8M4N6P9R0S1T2V.png` at the bucket root. After: `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. To keep the
   root: `route({ ... }, { prefix: () => "" })`. Files already stored keep their keys (`M12-A10`).
+- A value `authorize` may give as undefined is optional in the JSON types, as JSON leaves out its key. Before: with
+  `authorize: (): { userId: string; teamId: string | undefined } => ...`, a plugin's `auth.teamId` and `onComplete`'s
+  `teamId` were typed `string`, so `auth.teamId.length` compiled and threw when the key was missing. After: they are
+  `teamId?: string`; check the value before using it. The same holds for an `onComplete` result's properties in the
+  client's `data` type. Nothing changes at runtime (`M12-R20`).
 - `authorize` may not return a field named `request`, `metadata`, `file`, `data`, `tx`, `route` or `signal`: it is a
   type error. Before: `authorize: () => ({ userId, route: "admin" })` compiled, and cloudrop's own `request`,
   `metadata` and `file` replaced fields of those names. After: wrap the value, such as
-  `authorize: () => ({ userId, scope: { route: "admin" } })`. The runtime is unchanged (`M12-A8`).
+  `authorize: () => ({ userId, scope: { route: "admin" } })`. The runtime is unchanged. The check cannot see into an
+  index signature: a result typed `Record<string, string>` or as a JWT payload compiles and may still carry one of
+  these names, so return the claims you need as a plain object (`M12-A8`, `M12-R21`).
 - The client's `namespace` defaults to `account` when `account` is a string. Before:
   `createCloudropClient({ namespace: userId, account: userId })`, and `{ account: userId }` alone kept records under
   `""`. After: `createCloudropClient({ account: userId })` keeps them under `userId`. A function `account` keeps `""`,
@@ -74,7 +81,8 @@ Every notable change to the `cloudrop` package. The format follows
 - The browser's own storage fails with `BROWSER_STORAGE_ERROR`. Before: `resumable()`, `resume()`, `discard()` and
   `forget()` answered `STORAGE_ERROR` when IndexedDB failed, and `discard()` when the browser refused a Web Lock.
   After: `error.code === "BROWSER_STORAGE_ERROR"`, not retryable, with the same messages. `STORAGE_ERROR` now always
-  means the bucket or the server's storage (`M12-A7`).
+  means the bucket or the server's storage. Code that maps every code, in an exhaustive `switch` or a
+  `Record<CloudropErrorCode, string>` or `Record<ClientErrorCode, string>`, handles the new code (`M12-A7`).
 - The React hook continues a listed upload with `resumeUpload`. Before: `const { resume } = useUpload("files")`, then
   `resume(upload, file)`. After: `const { resumeUpload } = useUpload("files")`, then `resumeUpload(upload, file)`.
   `resume()` without arguments still un-pauses every paused file; in plain JavaScript the old `resume(upload, file)`

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { CloudropError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
@@ -192,6 +192,44 @@ describe("the auth every hook receives", () => {
       { hook: "beforeUpload", auth: datedAuth },
       { hook: "onAbort failed", auth: datedAuth },
     ]);
+  });
+
+  // JSON.stringify leaves out an undefined value, so the snapshot has no such key and the types say it may be missing
+  // (M12-R20): they used to claim a required string, and `auth.teamId.length` compiled and threw.
+  it("has no key for a value authorize gave as undefined, in the hooks and onComplete alike", async () => {
+    type Auth = { userId: string; teamId: string | undefined };
+    const seen: { hook: string; hasKey: boolean }[] = [];
+    const recorder: CloudropPlugin<Auth> = {
+      id: "recorder",
+      server: {
+        beforeUpload: ({ auth }) => {
+          expectTypeOf(auth).toEqualTypeOf<{ userId: string; teamId?: string }>();
+          seen.push({ hook: "beforeUpload", hasKey: "teamId" in auth });
+        },
+        afterVerify: ({ auth }) => void seen.push({ hook: "afterVerify", hasKey: "teamId" in auth }),
+      },
+    };
+    const team = route(
+      { accept: "*/*", maxSize: 1024, authorize: (): Auth => ({ userId: "u1", teamId: undefined }) },
+      {
+        onComplete: ({ request: _request, file: _file, metadata: _metadata, ...auth }) => {
+          expectTypeOf(auth).toEqualTypeOf<{ userId: string; teamId?: string }>();
+          seen.push({ hook: "onComplete", hasKey: "teamId" in auth });
+        },
+      },
+    );
+    const fixture = serverFixture({ team }, { plugins: [recorder] });
+    const ticket = await fixture.single("team", file);
+    await fixture.send(ticket.put, new TextEncoder().encode("a"));
+    const completed = await fixture.post("complete", { token: ticket.token });
+    expect({ completed: completed.status, seen }).toEqual({
+      completed: 200,
+      seen: [
+        { hook: "beforeUpload", hasKey: false },
+        { hook: "afterVerify", hasKey: false },
+        { hook: "onComplete", hasKey: false },
+      ],
+    });
   });
 
   // The hooks get their own copy: a write to it must not reach the token, which every later step trusts.

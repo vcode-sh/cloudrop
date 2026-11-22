@@ -164,10 +164,11 @@ export interface ErrorResponse {
 
 /**
  * Approximately what a value becomes after JSON.stringify and JSON.parse, for JSON-shaped data such as an authorize
- * result or schema output: a `toJSON` value (a Date) becomes its JSON form, and function, symbol and undefined
- * properties vanish. It does not model every JavaScript object: in arrays JSON turns undefined and functions into
- * null, a `T | undefined` property is typed as present though JSON may drop it, and a Map, a Set or a class instance is
- * typed by its own fields while JSON keeps only own enumerable properties (a Map becomes `{}`). Return plain data.
+ * result or schema output: a `toJSON` value (a Date) becomes its JSON form, function, symbol and undefined
+ * properties vanish, and a property that may be undefined is optional, since JSON leaves out its key. It does not model
+ * every JavaScript object: in arrays JSON turns undefined and functions into null, NaN and Infinity become null, and a
+ * Map, a Set or a class instance is typed by its own fields while JSON keeps only own enumerable properties (a Map
+ * becomes `{}`). Return plain data.
  */
 // T is only ever the type being checked, never the one it is checked against, so TypeScript relates Jsonified<A> to
 // Jsonified<B> whenever A relates to B: a plugin for { userId } is checked against the routes' results (M12-T5).
@@ -185,14 +186,30 @@ export type Jsonified<T> = T extends { toJSON(): infer J }
         : T extends readonly (infer E)[]
           ? Jsonified<E>[]
           : T extends object
-            ? {
-                [K in keyof T as K extends string | number
-                  ? Jsonified<T[K]> extends never
-                    ? never
-                    : K
-                  : never]: Jsonified<T[K]>;
-              }
+            ? // Two maps, the keys JSON always keeps and the ones it may leave out, flattened back into one object.
+              Flattened<
+                {
+                  [K in keyof T as K extends string | number
+                    ? Jsonified<T[K]> extends never
+                      ? never
+                      : undefined extends T[K]
+                        ? never
+                        : K
+                    : never]: Jsonified<T[K]>;
+                } & {
+                  [K in keyof T as K extends string | number
+                    ? Jsonified<T[K]> extends never
+                      ? never
+                      : undefined extends T[K]
+                        ? K
+                        : never
+                    : never]?: Jsonified<Exclude<T[K], undefined>>;
+                }
+              >
             : unknown;
+
+/** An intersection of object types as the one object type it describes, the shape editors and type tests show. */
+type Flattened<T> = { [K in keyof T]: T[K] };
 
 /** The types the client reads from a route. */
 export interface RouteTypes {

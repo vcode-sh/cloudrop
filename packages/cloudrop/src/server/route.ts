@@ -92,7 +92,10 @@ export interface RouteCallbacks<
   TDeleted = unknown,
   TErased = TDeleted,
 > {
-  /** Folder for generated keys `<prefix>/<ulid><ext>`. Sanitized like every key. */
+  /**
+   * Folder for generated keys `<prefix>/<ulid><ext>`. Sanitized like every key. Default: the route's name, so a route
+   * `avatar` writes `avatar/<ulid><ext>`. Return `""` to write at the bucket root.
+   */
   prefix?: (context: KeyContext<TAuth, TMetadata>) => string;
   /**
    * The whole key instead of `<prefix>/<ulid><ext>`. Sanitized like every key. It must be unique: a rejected or

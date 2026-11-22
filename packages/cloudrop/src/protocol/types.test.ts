@@ -22,7 +22,14 @@ describe("Jsonified", () => {
   });
 
   it("keeps unknown values and numeric keys, as JSON does", () => {
-    expectTypeOf<Jsonified<{ a: unknown; 1: string }>>().toEqualTypeOf<{ a: unknown; 1: string }>();
+    expectTypeOf<Jsonified<{ a: unknown; 1: string }>>().toEqualTypeOf<{ a?: unknown; 1: string }>();
+  });
+
+  // JSON.stringify leaves out a key whose value is undefined, so a value that may be undefined may be missing (M12-R20).
+  it("makes a key optional when its value may be undefined", () => {
+    expectTypeOf<
+      Jsonified<{ teamId: string | undefined; at: Date | undefined; nested: { id: number | undefined } }>
+    >().toEqualTypeOf<{ teamId?: string; at?: string; nested: { id?: number } }>();
   });
 });
 

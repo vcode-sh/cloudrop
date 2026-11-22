@@ -4,11 +4,13 @@ import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 
 /**
  * Names cloudrop puts, or may put, into a route context: an authorize result may not use them, so a context
- * field added after 1.0 cannot collide with an app's own. At runtime cloudrop's fields still win.
+ * field added after 1.0 cannot collide with an app's own. At runtime cloudrop's fields still win. The check reads the
+ * result's declared keys, so a type with an index signature, such as `Record<string, string>` or a JWT payload, passes
+ * it and may still carry one of these names: copy the claims you need into a plain object.
  */
 export type ReservedName = "request" | "metadata" | "file" | "data" | "tx" | "route" | "signal";
 
-/** An authorize result: a plain object without any reserved name. */
+/** An authorize result: a plain object without any reserved name (an index signature is not checked). */
 export type AuthResult = object & { [K in ReservedName]?: never };
 
 export interface AuthorizeContext<TMetadata> {
