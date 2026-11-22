@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CloudropError } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
@@ -59,8 +59,17 @@ describe("runBeforeUpload", () => {
   it("refuses a hook that returns something other than a CloudropError", async () => {
     const sloppy = { id: "sloppy", server: { beforeUpload: () => "no" } } as unknown as CloudropPlugin;
     await expect(runBeforeUpload([sloppy], context, recordingLogger())).rejects.toThrow(
-      'Plugin "sloppy": beforeUpload must return nothing or a CloudropError from the same cloudrop the server uses. Install cloudrop once, so the plugin and the server share it.',
+      'Plugin "sloppy": beforeUpload must return nothing or a CloudropError. A CloudropError from a cloudrop older than 1.0 is not recognised: install cloudrop once, so the plugin and the server share it.',
     );
+  });
+
+  // A plugin package may resolve its own copy of cloudrop 1.x: its errors refuse as this copy's do (M12-R2).
+  it("lets a CloudropError from a second copy of cloudrop refuse the upload", async () => {
+    vi.resetModules();
+    const secondCopy: typeof import("../errors.ts") = await import("../errors.ts");
+    const refusal = new secondCopy.CloudropError("FORBIDDEN", "Closed for today.");
+    const plugin: CloudropPlugin = { id: "closed", server: { beforeUpload: () => refusal } };
+    await expect(runBeforeUpload([plugin], context, recordingLogger())).resolves.toBe(refusal);
   });
 });
 

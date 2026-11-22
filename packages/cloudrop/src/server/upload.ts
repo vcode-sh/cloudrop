@@ -1,7 +1,7 @@
 // POST /upload (spec §5): bounds, metadata, authorize, policy, plugins, then one ticket per file. Nothing is signed
 // before authorize has passed and the policy has accepted the file.
 
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { CloudropError, fail, isCloudropError, ok, type Result } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
@@ -112,11 +112,12 @@ function readAuth(
   logger: Logger,
 ): Result<{ auth: Record<string, unknown>; ownerJson: string }> {
   if (isRefusal(auth)) return fail(refusalError(auth));
-  if (auth instanceof CloudropError) return fail(uploadRefusal(auth, "authorize", logger));
-  // A CloudropError from a second installed copy of cloudrop fails the check above, so the message names that cause.
+  if (isCloudropError(auth)) return fail(uploadRefusal(auth, "authorize", logger));
+  // A CloudropError from a copy of cloudrop older than 1.0 carries no brand and fails the check above, so the message
+  // names that cause.
   if (auth instanceof Error && auth.name === "CloudropError") {
     throw new TypeError(
-      `Route "${routeName}": authorize returned a CloudropError from another copy of cloudrop than the server uses. Install cloudrop once, so the route and the server share it.`,
+      `Route "${routeName}": authorize returned a CloudropError from a cloudrop older than 1.0, which the server does not recognise. Install cloudrop once, so the route and the server share it.`,
     );
   }
   // Only a plain object whose JSON is an object authorizes: a Response or an Error is an object too, and reading one

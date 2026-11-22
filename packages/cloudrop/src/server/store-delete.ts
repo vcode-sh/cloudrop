@@ -5,7 +5,7 @@
 // the deletion is recorded, at least once, as onComplete runs under a lease. It refuses a deletion by returning a
 // CloudropError (M11-D3): the file is kept, nothing is logged, and the caller answers that error.
 
-import { CloudropError, fail, ok, type Result } from "../errors.ts";
+import { CloudropError, fail, isCloudropError, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import type { DeleteContext, DeleteReason } from "./delete-context.ts";
@@ -68,10 +68,11 @@ async function runOnDelete(
     // One context of the union by reason: `deleteCompleted`'s callers pair each reason with its context or request.
     const hookContext = { ...extra, ...from, file, owner: file.owner, reason, context } as DeleteContext;
     const kept = await route.definition.onDelete?.(hookContext);
-    if (kept === undefined || kept instanceof CloudropError) return kept;
-    // A CloudropError from a second installed copy of cloudrop fails that check too, so the message names the cause.
+    if (kept === undefined || isCloudropError(kept)) return kept;
+    // A CloudropError from a copy of cloudrop older than 1.0 carries no brand and fails that check too, so the message
+    // names the cause.
     throw new TypeError(
-      `onDelete returned a value of type ${typeof kept}. To keep the file, return a CloudropError from the same cloudrop the server uses; otherwise return nothing.`,
+      `onDelete returned a value of type ${typeof kept}. To keep the file, return a CloudropError (one from a cloudrop older than 1.0 is not recognised: install cloudrop once); otherwise return nothing.`,
     );
   } catch (error) {
     config.logger.error(`cloudrop: onDelete failed for route "${route.name}" while deleting file ${file.id}.`, error);

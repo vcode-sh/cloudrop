@@ -290,15 +290,34 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
     });
   });
 
-  // Another installed copy of cloudrop has its own class: its errors are not this server's, as for plugins (M10-K5).
-  it("answers 500 for a CloudropError from another copy of cloudrop, and logs how to fix it", async () => {
+  // A second installed copy of cloudrop 1.x has its own class, and its errors carry the same registered brand (M12-R2).
+  it("answers a CloudropError from a second copy of cloudrop as this copy's own", async () => {
+    vi.resetModules();
+    const secondCopy: typeof import("../errors.ts") = await import("../errors.ts");
+    const fixture = serverFixture({ files: refusing(() => new secondCopy.CloudropError("FORBIDDEN", "Closed.")) });
+    const { status, body } = await answer(fixture);
+    expect({ status, error: body.error }).toEqual({
+      status: 403,
+      error: { code: "FORBIDDEN", message: "Closed.", retryable: false },
+    });
+  });
+
+  it("keeps the wait of a second copy's rateLimited(30): 429 with Retry-After: 30", async () => {
+    vi.resetModules();
+    const secondCopy: typeof import("./refusal.ts") = await import("./refusal.ts");
+    const { status, retryAfter } = await answer(serverFixture({ files: refusing(() => secondCopy.rateLimited(30)) }));
+    expect({ status, retryAfter }).toEqual({ status: 429, retryAfter: "30" });
+  });
+
+  // A copy older than 1.0 carries no brand: its errors are not this server's, as for plugins (M10-K5).
+  it("answers 500 for a CloudropError from a copy of cloudrop older than 1.0, and logs how to fix it", async () => {
     const foreign = Object.assign(new Error("Slow down."), { name: "CloudropError", code: "RATE_LIMITED" });
     const fixture = serverFixture({ files: refusing(() => foreign) });
     const { status } = await answer(fixture);
     expect({ status, logged: String(fixture.logger.errors[0]?.error) }).toEqual({
       status: 500,
       logged:
-        'TypeError: Route "files": authorize returned a CloudropError from another copy of cloudrop than the server uses. Install cloudrop once, so the route and the server share it.',
+        'TypeError: Route "files": authorize returned a CloudropError from a cloudrop older than 1.0, which the server does not recognise. Install cloudrop once, so the route and the server share it.',
     });
   });
 

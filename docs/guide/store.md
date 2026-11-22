@@ -244,15 +244,20 @@ object with `defineStore`. It attaches the code the server runs with a store, wh
 import { type CloudropStore, defineStore } from "cloudrop/store";
 
 const methods: CloudropStore = {
-  /* reserve, attach, get, claim, release, complete, end, revoke, stale, list, cleaned, usage, reconcile, owners */
+  /* reserve, attach, get, claim, release, complete, end, revoke, stale, list, cleaned, usage, reconcile, owners,
+     markErasure, erased, reopen, erasing */
 };
 export const store = defineStore(methods);
 ```
 
-`defineStore` returns the same object, so a class instance keeps its methods and `this`. Without it, the server logs
-`INVALID_CONFIG` at start saying so, and every request and every `api` call fails with it. An adapter's store needs no
-`defineStore`, and a copy made with spread (`{ ...store, get: logged(store.get) }`) keeps what it carries; a copy made
-any other way, such as from `Object.entries`, does not: wrap that copy with `defineStore` too.
+The `CloudropStore` type lists all 18 methods, each with its contract; `createCloudrop` refuses a store missing any of
+them with `INVALID_CONFIG`, naming the method. `defineStore` returns the same object, so a class instance keeps its
+methods and `this`. Without it, the server logs `INVALID_CONFIG` at start saying so; every request then answers a
+retryable 500 (`SERVER_ERROR`, the server is not ready) and every `api` call answers that `INVALID_CONFIG`. An
+adapter's store needs no `defineStore`, and a copy made with spread (`{ ...store, get: logged(store.get) }`) keeps what
+it carries, the routes of a `transaction: true` store's `route()` included. A copy made any other way, such as from
+`Object.entries`, does not: wrap that copy with `defineStore` too. Spread copies only an object's own properties, so a
+class instance loses its methods to it: wrap such a store in an object whose methods call it instead.
 
 ## Create the tables
 

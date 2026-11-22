@@ -1,7 +1,7 @@
 // The server half of the plugin contract (spec §8): the hooks plugins can use and the order and failure rules the
 // handler applies to them. The plugins cloudrop ships are in cloudrop/plugins (src/plugins.ts).
 
-import { CloudropError } from "../errors.ts";
+import { type CloudropError, isCloudropError } from "../errors.ts";
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 import type { StorageDriver } from "../storage/driver.ts";
 import type { Awaitable, RouteDefinition } from "./route.ts";
@@ -135,10 +135,11 @@ export interface Logger {
 function refusal(plugin: CloudropPlugin, hook: string, given: unknown): CloudropError | undefined {
   // null is nothing too: plain JavaScript returns it as easily as undefined.
   const value = given ?? undefined;
-  if (value === undefined || value instanceof CloudropError) return value;
-  // A CloudropError from a second installed copy of cloudrop fails this check too, so the message names that cause.
+  if (value === undefined || isCloudropError(value)) return value;
+  // A CloudropError from a copy of cloudrop older than 1.0 carries no brand and fails this check too, so the message
+  // names that cause.
   throw new TypeError(
-    `Plugin "${plugin.id}": ${hook} must return nothing or a CloudropError from the same cloudrop the server uses. Install cloudrop once, so the plugin and the server share it.`,
+    `Plugin "${plugin.id}": ${hook} must return nothing or a CloudropError. A CloudropError from a cloudrop older than 1.0 is not recognised: install cloudrop once, so the plugin and the server share it.`,
   );
 }
 

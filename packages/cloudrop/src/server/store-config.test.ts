@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { pgExecutor, sqlStore } from "../adapters/sql.ts";
+import { withRoute } from "../adapters/transactional.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { recordingLogger, serverFixture } from "../testing/server-fixture.ts";
 import { leaseStore, owned } from "../testing/store-fixture.ts";
+import { memoryStore as publicMemoryStore } from "../testing.ts";
 import { createCloudrop } from "./cloudrop.ts";
-import { allowAnyone, route, routeFor } from "./route.ts";
+import { allowAnyone, route } from "./route.ts";
 
 const files = route({ accept: "*/*", maxSize: "1MB", authorize: allowAnyone });
 const { storage } = serverFixture({ files });
@@ -152,28 +155,45 @@ describe("createCloudrop with a store: configuration errors", () => {
 
 describe("createCloudrop with a store: branded routes", () => {
   it("accepts a route from a store's own route() and plain routes beside it", () => {
-    const store = memoryStore();
-    const branded = routeFor<{ tx: unknown }>(store)({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
+    const store = withRoute(memoryStore());
+    const branded = store.route({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
     expect(create({ store, routes: { branded, files } })).not.toThrow();
+  });
+
+  // The store guide's logging wrapper (M12-R1): a spread copy with one method replaced, its own route(), passed itself.
+  it.for([
+    {
+      name: "sqlStore",
+      make: () => {
+        const pool = { query: async () => ({ rows: [] }), connect: async () => ({ ...pool, release() {} }) };
+        return sqlStore(pgExecutor(pool), { transaction: true });
+      },
+    },
+    { name: "cloudrop/testing's memoryStore", make: () => publicMemoryStore({ transaction: true }) },
+  ])("accepts a spread copy of a transactional $name with routes from the copy's route()", ({ make }) => {
+    const store = make();
+    const logged = { ...store, get: (id: string) => store.get(id) };
+    const branded = logged.route({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
+    expect(create({ store: logged, routes: { branded } })).not.toThrow();
   });
 
   it.for([
     { name: "another store", store: memoryStore() },
     { name: "no store", store: undefined },
   ])("refuses a route from a store's route() given $name", ({ store }) => {
-    const branded = routeFor<{ tx: unknown }>(memoryStore())({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
+    const branded = withRoute(memoryStore()).route({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
     expect(create({ store, routes: { branded } })).toThrow(
       expect.objectContaining({
         code: "INVALID_CONFIG",
         message:
-          "Route \"branded\" was made by another store's route(), so its onComplete expects that store's tx. Pass that store to createCloudrop, or build the route with route().",
+          "Route \"branded\" was made by another store's route(), so its onComplete expects that store's tx. Pass that store, or a copy of it made with spread ({ ...store }), to createCloudrop, or build the route with route().",
       }),
     );
   });
 
   it("refuses a branded route when its store has no transaction", () => {
-    const store = leaseStore();
-    const branded = routeFor<{ tx: unknown }>(store)({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
+    const store = withRoute(leaseStore());
+    const branded = store.route({ accept: "*/*", maxSize: 1, authorize: allowAnyone });
     expect(create({ store, routes: { branded } })).toThrow(
       expect.objectContaining({
         code: "INVALID_CONFIG",

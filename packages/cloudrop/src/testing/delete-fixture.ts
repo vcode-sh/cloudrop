@@ -1,9 +1,10 @@
 // Setup shared by the onDelete unit tests: a server whose "files" route records each onDelete call, on a store with a
 // transaction or under a lease. It builds inputs only; every expected value stays in the tests.
 
+import { withRoute } from "../adapters/transactional.ts";
 import type { SingleTicket } from "../protocol/types.ts";
 import type { DeleteContext } from "../server/delete-context.ts";
-import { route, routeFor } from "../server/route.ts";
+import { route } from "../server/route.ts";
 import type { CloudropStore, FileRecordStatus } from "../server/store.ts";
 import { complete } from "./complete-fixture.ts";
 import { type MemoryStore, type MemoryTx, memoryStore } from "./memory-store.ts";
@@ -130,9 +131,7 @@ export function deleting(mode: Mode, options: DeletingOptions = {}): Deleting {
     onDelete: onDelete as never,
   };
   const files =
-    mode === "transaction" && !options.plain
-      ? routeFor<{ tx: MemoryTx }>(backing)(policy, callbacks)
-      : route(policy, callbacks);
+    mode === "transaction" && !options.plain ? withRoute(backing).route(policy, callbacks) : route(policy, callbacks);
   const fixture = storeFixture({ files }, { store: mode === "transaction" ? backing : leaseStore(memory) });
   const upload = async () => {
     const ticket = await fixture.single("files", TEXT);

@@ -7,7 +7,7 @@ import type { Awaitable } from "./route.ts";
 import { isFunction } from "./route-config.ts";
 import type { CloudropStore } from "./store.ts";
 import { STORE_PATHS, type StorePaths } from "./store-paths.ts";
-import { storeOfRoute } from "./store-route.ts";
+import { brandOf, storeOfRoute } from "./store-route.ts";
 
 /** An owner's limit in bytes, or null for no limit. */
 export type Quota = (owner: string) => Awaitable<number | null>;
@@ -118,11 +118,11 @@ function checkRoutes(routes: readonly RouteConfig[], store: CloudropStore<unknow
         `Route "${name}": ${needsStore} needs a database store. Pass store to createCloudrop, or remove ${needsStore}.`,
       );
     }
-    const routeStore = storeOfRoute(definition);
-    if (routeStore === undefined) continue;
-    if (routeStore !== store) {
+    const brand = storeOfRoute(definition);
+    if (brand === undefined) continue;
+    if (brand !== brandOf(store)) {
       throw configError(
-        `Route "${name}" was made by another store's route(), so its onComplete expects that store's tx. Pass that store to createCloudrop, or build the route with route().`,
+        `Route "${name}" was made by another store's route(), so its onComplete expects that store's tx. Pass that store, or a copy of it made with spread ({ ...store }), to createCloudrop, or build the route with route().`,
       );
     }
     if (!store?.transaction) {

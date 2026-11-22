@@ -95,8 +95,9 @@ export interface TestClientOptions {
 const CREDENTIALS = { accessKeyId: "cloudrop-test-key", secretAccessKey: "cloudrop-test-secret" };
 /** The origin of the page the test client runs on, and of the server it reaches (M9-T4). */
 const PAGE_ORIGIN = "http://localhost";
-// The brand createCloudrop reads to tie a route to its store; Symbol.for, so copies of cloudrop agree (server/route.ts).
+// The brands createCloudrop reads to tie a route to its store; Symbol.for, so copies of cloudrop agree (server/route.ts).
 const STORE = Symbol.for("cloudrop.store");
+const STORE_BRAND = Symbol.for("cloudrop.store-brand");
 /** A path such as /api/cloudrop: no origin, trailing slash, query or fragment. */
 const PATH = /^(?:\/[^/?#\s]+)+$/;
 
@@ -187,13 +188,15 @@ export function memoryStore(options?: { transaction?: boolean } | null): Cloudro
     ...methods
   } = createMemoryStore();
   if (!options?.transaction) return methods;
-  const store = {
+  // What withRoute (adapters/transactional.ts) does for the adapters, over the public route().
+  const brand = {};
+  const storeRoute = ((policy, callbacks) => ({
+    definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: brand },
+  })) as RouteFunction<{ tx: undefined }>;
+  return {
     ...methods,
     transaction: (run) => transaction((_tx, inner) => run(undefined, inner)),
+    route: storeRoute,
+    [STORE_BRAND]: brand,
   } as TransactionalStore<undefined>;
-  // What routeFor (server/route.ts) does for the adapters, over the public route().
-  store.route = ((policy, callbacks) => ({
-    definition: { ...route(policy, callbacks as RouteCallbacks<object, unknown, unknown>).definition, [STORE]: store },
-  })) as RouteFunction<{ tx: undefined }>;
-  return store;
 }
