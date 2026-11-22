@@ -138,7 +138,7 @@ export interface ErrorBody {
   retryable: boolean;
   /** PARTS_MISSING only: the part numbers to upload again. */
   parts?: number[];
-  /** FILE_TYPE_NOT_ALLOWED from a type check only: what it found in the file (M11-K1). */
+  /** FILE_TYPE_NOT_ALLOWED from a type check only: what it found in the file. */
   content?: ContentRefusal;
 }
 

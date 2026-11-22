@@ -195,6 +195,10 @@ Every notable change to the `cloudrop` package. The format follows
   owner's rows are erased. Each must hold the owner, as it is or URI-encoded, as a whole segment (`M12-O3`).
 - `api.reopenOwner(owner)` clears an owner's erase mark and answers `{ reopened }` (`M12-O5`).
 - The types `OwnerErasure`, `ReserveOutcome` and `EraseSettings` (`M12-O1`, `M12-O3`).
+- `llms.txt` and `llms-full.txt` at the package root: a summary, rules for coding agents, and every guide, for an agent
+  reading `node_modules/cloudrop` (`M12-P10`).
+- Two guides: "Stability and versioning" (`docs/stability.md`), what semver covers from 1.0, and "Security model"
+  (`docs/security.md`), the threat model (`M12-P8`, `M12-P9`).
 
 ### Changed
 
@@ -207,6 +211,12 @@ Every notable change to the `cloudrop` package. The format follows
 - `Jsonified<any>` is `any`. Before: `unknown`. After: `any`, so an `authorize` or an `onComplete` typed `any` gives
   `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
   (`M12-T5`).
+- The plugin API is experimental, outside semver: `CloudropPlugin`, `ServerHooks`, their hooks' contexts and
+  `extendRoute` are marked `@experimental`, and a minor release may change them. Using `contentChecks()` is covered as
+  before; a plugin you wrote yourself may need a change on a minor upgrade, which the changelog will say (`M12-A12`,
+  `M12-P8`).
+- The doc comments in the published `.d.ts` explain themselves in plain words instead of citing internal decision ids
+  (`M12-P10`).
 
 ### Fixed
 

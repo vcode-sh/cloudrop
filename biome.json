@@ -15,6 +15,7 @@
       "!**/playwright-report",
       "!**/components/ui",
       "!.superpowers",
+      "!docs/reference",
       "!**/*.md"
     ]
   },

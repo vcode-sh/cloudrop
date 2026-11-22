@@ -26,6 +26,13 @@ For developers adding uploads to an app, in reading order:
 10. [Plugins](guide/plugins.md): `cloudrop/plugins` and `contentChecks()`, which refuses a file whose content is not the
     type it was sent as.
 
+Before you ship:
+
+- [Security model](guide/security.md): what cloudrop protects and how, what your app must do itself, and the risks
+  that remain.
+- [Stability and versioning](guide/stability.md): what semver covers from 1.0, what a minor release may add, and the
+  supported runtimes.
+
 When something goes wrong:
 
 - [Errors](guide/errors.md): every error code, where it comes from and what to do.

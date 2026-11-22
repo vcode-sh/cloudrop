@@ -84,12 +84,12 @@ export interface CloudropStore<TTx = never> extends StoreErasure {
    * check of the new files counts without them: a retry supersedes an attempt whose answer was lost. Rows in any other
    * status are left alone. The rows are superseded whatever the new files' outcomes, even when every one is over the
    * quota, and not at all when the call throws. A call with no files writes nothing. The server passes a key only with
-   * an owner (M5-T105): owner-less rows hold no quota, so superseding them would free nothing. A store that ignores
+   * an owner: owner-less rows hold no quota, so superseding them would free nothing. A store that ignores
    * `requestKey` keeps the old cost: lost answers hold their bytes until the sweep.
    *
    * With an owner whose usage row carries an erase mark (`markErasure`), every file is `"erased"` and the call writes
    * nothing, superseding included. The mark is read under the same usage-row lock as the quota (on Postgres the row is
-   * locked first, with or without a limit), so a reserve either commits before the mark or is refused (M12-O2).
+   * locked first, with or without a limit), so a reserve either commits before the mark or is refused.
    */
   reserve(
     input: {
@@ -150,7 +150,7 @@ export interface CloudropStore<TTx = never> extends StoreErasure {
     options?: { cleaned?: boolean },
   ): Promise<Transition>;
   /** Ends every `pending` row of one owner as `aborted`, releasing their reserved bytes. `completing` and later rows
-   *  stay. Answers how many rows changed. May be several units, each ending rows with their bytes (M11-R240). */
+   *  stay. Answers how many rows changed. May be several units, each ending rows with their bytes. */
   revoke(owner: string, now: Date): Promise<number>;
   /**
    * One page of sweep work, ordered by its time column, then id. `"expire"`: `pending` rows with `expires_at < before`,
@@ -181,7 +181,7 @@ export interface CloudropStore<TTx = never> extends StoreErasure {
    */
   list(input: ListQuery & { owner: string; statuses: readonly FileRecordStatus[] }): Promise<RecordPage>;
   /**
-   * `list` across owners, for `api.allFiles` (M11-L): `owner` null is every owner, rows without one included, and
+   * `list` across owners, for `api.allFiles`: `owner` null is every owner, rows without one included, and
    * `status` null every status; given, each narrows to that one. Optional, so a store written before 0.6 still
    * compiles: without it `api.allFiles` answers `INVALID_CONFIG`.
    */

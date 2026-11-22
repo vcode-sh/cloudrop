@@ -40,7 +40,7 @@ export interface CloudropOptions<TRoutes extends Record<string, Route>> extends 
   trustedOrigins?: readonly string[];
   /** Files larger than this use multipart. Default 64 MiB. */
   multipartThreshold?: Size;
-  /** Each plugin's `auth` type must fit every route's authorize result (M12-T5); its hooks get the token's JSON form. */
+  /** Each plugin's `auth` type must fit every route's authorize result; its hooks get the token's JSON form. */
   plugins?: readonly NoInfer<CloudropPlugin<AuthOf<TRoutes>>>[];
   /** Where failures inside the handler and configuration warnings go. Default: console. */
   logger?: Logger;

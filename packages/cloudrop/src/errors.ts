@@ -55,12 +55,12 @@ export type ClientErrorCode =
   | "BROWSER_STORAGE_ERROR";
 
 /**
- * What a file `contentChecks()` refused is (M12-E6): a web page, a program, a Windows installer, a script, an SVG image
+ * What a file `contentChecks()` refused is: a web page, a program, a Windows installer, a script, an SVG image
  * or another XML type the route does not name, or "denied" for a type only the app's `deny` refuses.
  */
 export type RefusedKind = "web-page" | "program" | "installer" | "script" | "svg" | "xml" | "denied";
 
-/** What a type check found in a file it refused (M11-K1). The two types are MIME types, never a name, key or byte. */
+/** What a type check found in a file it refused. The two types are MIME types, never a name, key or byte. */
 export interface ContentRefusal {
   /** The type the file was sent as. */
   declared: string;

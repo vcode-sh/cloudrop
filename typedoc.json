@@ -1,0 +1,30 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "cloudrop",
+  "entryPoints": [
+    "packages/cloudrop/dist/index.d.ts",
+    "packages/cloudrop/dist/client.d.ts",
+    "packages/cloudrop/dist/react.d.ts",
+    "packages/cloudrop/dist/next.d.ts",
+    "packages/cloudrop/dist/node.d.ts",
+    "packages/cloudrop/dist/store.d.ts",
+    "packages/cloudrop/dist/plugins.d.ts",
+    "packages/cloudrop/dist/testing.d.ts",
+    "packages/cloudrop/dist/adapters/sql.d.ts",
+    "packages/cloudrop/dist/adapters/drizzle.d.ts",
+    "packages/cloudrop/dist/adapters/prisma.d.ts"
+  ],
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "out": "docs/reference",
+  "readme": "none",
+  "validation": { "notExported": false },
+  "disableSources": true
+}

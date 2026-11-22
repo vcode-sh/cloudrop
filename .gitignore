@@ -1,7 +1,11 @@
 node_modules/
 dist/
-# The guides copied into the package by scripts/package-docs.ts at build time
+# The guides, llms.txt and llms-full.txt written into the package by scripts/package-docs.ts at build time
 packages/cloudrop/docs/
+packages/cloudrop/llms.txt
+packages/cloudrop/llms-full.txt
+# The API reference, built by bun run docs:reference (scripts/api-reference.ts); CI keeps it as an artifact
+docs/reference/
 coverage/
 .turbo/
 *.tgz

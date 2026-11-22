@@ -135,6 +135,76 @@ jobs:
         env:
           CLOUDROP_DRIZZLE_CHECK_DIR: ${{ runner.temp }}/drizzle-check
 
+  # The packed tarball installed into a fresh project outside the checkout and type-checked with TypeScript 7.0.2, the
+  # oldest release of the 7.0 floor, with skipLibCheck off (M12-P3, M12-P5). The project goes to the runner's temp
+  # directory.
+  ts-floor:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: scripts/check-ts-floor.sh
+
+  # The packed package uploads one file on Deno through cloudrop.handler, on cloudrop/testing's bucket (M12-P5).
+  deno:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: 2.9.8
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: scripts/check-deno.sh
+
+  # The freeze guard: the build's public API must match the reviewed reports in packages/cloudrop/etc/ (M12-P6). Then
+  # the API reference, built from the same .d.ts with TypeDoc, is kept as an artifact (M12-P10).
+  api-report:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run api:check
+      - run: bun run docs:reference
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: api-reference
+          path: docs/reference
+          if-no-files-found: error
+          retention-days: 30
+
   # Nightly and manual only: jobs of files under seeded random faults (M3-K7) and the real-time stall and throttle
   # rows (M3-K10). The seed is in each test's title; --silent=false also logs it, and each job's counts, when the run
   # passes. CLOUDROP_CHAOS_SEED=<seed> bun run test:chaos:soak reruns the same files and fault stream, but requests

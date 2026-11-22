@@ -18,7 +18,7 @@ import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 /**
  * `api` on a server with a store: the storage calls and the store's. `R` is the server's route names, the type of every
  * record's `route` and of the listings' `route` filter. `TDeleted` and `TErased` are the `context` the routes' `onDelete`
- * declare (M12-T6): required when it does not admit undefined.
+ * declare: required when it does not admit undefined.
  */
 export interface StoreFileApi<R extends string = string, TDeleted = unknown, TErased = TDeleted> extends FileApi {
   /** A file's row, or null when the store has none. */

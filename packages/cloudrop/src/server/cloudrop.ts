@@ -9,7 +9,7 @@ import type { StoreFileApi } from "./store-api.ts";
 
 /**
  * The server `createCloudrop` returns. `TStore` is the type of its `store` option: `api` has the store's calls only
- * when it is surely a store, so a store that is sometimes undefined gives the store-less `api` (M12-T3).
+ * when it is surely a store, so a store that is sometimes undefined gives the store-less `api`.
  */
 export interface Cloudrop<TRoutes extends Record<string, Route> = Record<string, Route>, TStore = undefined>
   extends InferableCloudrop<RouteTypeMap<TRoutes>> {
@@ -17,7 +17,7 @@ export interface Cloudrop<TRoutes extends Record<string, Route> = Record<string,
   handler(request: Request): Promise<Response>;
   /**
    * Server-side file operations on the same storage, each returning { data, error }; with a store, on its rows too,
-   * and `deleteFile` and `eraseOwner` take the `context` the routes' `onDelete` declare (M12-T6).
+   * and `deleteFile` and `eraseOwner` take the `context` the routes' `onDelete` declare.
    */
   readonly api: [TStore] extends [CloudropStore<unknown>]
     ? StoreFileApi<keyof TRoutes & string, DeletedOf<TRoutes>, ErasedOf<TRoutes>>

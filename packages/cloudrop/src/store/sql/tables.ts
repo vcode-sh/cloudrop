@@ -6,7 +6,7 @@ import { CloudropError, configError } from "../../errors.ts";
 import { isMissingFromSchema, isPermissionDenied, type SqlDialect, type SqlExecutor } from "./executor.ts";
 import { FILE_COLUMNS } from "./records.ts";
 
-/** The table names a store is built with (spec §3); columns are fixed. */
+/** The table names a store is built with; columns are fixed. */
 export interface StoreTables {
   files?: string;
   usage?: string;
