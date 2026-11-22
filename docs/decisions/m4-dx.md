@@ -226,7 +226,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   other change keeps the behaviour and cuts 30 B.
 - **If wrong:** spec §1's "client plus React" target of about 12 kB is now 11.03 + 1.96 kB, 12.99 kB after the final
   review: about 1 kB over the round figure, for the owner to confirm with `M4-B10`.
-- **Status:** in force (`516bac5`). Supersedes `M3-U91`'s 11 kB.
+- **Status:** superseded by `M4-F24` (15 kB, 2026-11-17), whose ceilings `M12-P1` superseded in turn (18 kB for 1.0).
+  Superseded `M3-U91`'s 11 kB (`516bac5`).
 - **Source:** design §5.7; task D measurement (`bun run package:check`, 2026-11-17).
 - **Visible in:** `scripts/size-limit.config.ts`.
 

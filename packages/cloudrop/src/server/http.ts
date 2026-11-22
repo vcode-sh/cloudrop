@@ -103,7 +103,7 @@ export const busy = (): CloudropError =>
   );
 
 /** A day: no wait longer is sent, so a mistaken one cannot park the client for good (M12-E3). */
-const MAX_RETRY_AFTER_SECONDS = 86_400;
+export const MAX_RETRY_AFTER_SECONDS = 86_400;
 
 /**
  * Retry-After for the wait recorded on `answer`, in whole seconds and at most a day, or nothing when there is none. The

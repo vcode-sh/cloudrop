@@ -37,6 +37,19 @@ type WithExtra<TContext, TExtra> = [keyof TExtra] extends [never] ? TContext : T
 
 type NoExtra = Record<never, never>;
 
+/**
+ * What `authorize` lets through: the result inferred from it, without the refusals. TypeScript sets a refusal aside
+ * only when it is one member of a returned union, so `() => forbidden()` alone infers the refusal itself as the result;
+ * here it becomes `never`, a route that authorizes no one, which every typed plugin accepts.
+ */
+export type Authorized<TAuth> = TAuth extends Refusal | CloudropError ? never : TAuth;
+
+/**
+ * The authorize result a route's callbacks see: none of its fields when nobody is authorized, since `never` there
+ * would type every field name as `never` and let any typo compile. The callbacks of such a route never run.
+ */
+export type CallbackAuth<TAuth> = [Authorized<TAuth>] extends [never] ? NoExtra : Authorized<TAuth>;
+
 /** route()'s first argument: every option that is not typed from authorize's result. */
 export interface RoutePolicy<TAuth extends object, TSchema extends StandardSchema | undefined> {
   /** MIME types such as "image/png", "image/*" or "*\/*". The file name's extension must agree with the type. */
@@ -192,17 +205,18 @@ function checkPlacement(policy: object, callbacks: object): void {
  * and typed from what `authorize` returns.
  */
 export function route<
-  TAuth extends AuthResult,
+  // The refusals too: a function that only refuses infers its refusal here, which Authorized then removes.
+  TAuth extends AuthResult | Refusal | CloudropError,
   TSchema extends StandardSchema | undefined = undefined,
   TResult = null,
   TDeleted = unknown,
   TErased = TDeleted,
 >(
   policy: RoutePolicy<TAuth, TSchema>,
-  callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, NoExtra, TDeleted, TErased>,
+  callbacks?: RouteCallbacks<CallbackAuth<TAuth>, SchemaOutput<TSchema>, TResult, NoExtra, TDeleted, TErased>,
   // NoInfer: written inside createCloudrop({ routes }), the call would otherwise infer TResult from the expected Route
   // and type a route without onComplete as unknown, not null.
-): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>> {
+): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, Authorized<TAuth>, TDeleted, TErased>> {
   // Plain JavaScript may pass anything; createCloudrop reports a definition without authorize or accept.
   const given: object = policy ?? {};
   checkPlacement(given, callbacks ?? {});

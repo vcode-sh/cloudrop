@@ -125,15 +125,18 @@ export function useUploadWith(source: HookSource, route: string, options: UseUpl
   const store = source.storeOf(route);
   const view = useSyncExternalStore(store.subscribe, store.getSnapshot, serverView);
   // In an effect, so StrictMode's second effect still leaves one listener per mounted hook, which reads the callbacks
-  // of the latest committed render (M12-H1).
+  // of the latest committed render (M12-H1). It keeps its own route and factory: a publish hands its events to the
+  // listeners registered then, so when the end itself moves the hook to another route or factory, the next one's
+  // callbacks must not hear this route's end.
   useEffect(
     () =>
       store.onEnd((event) => {
-        const { onUploaded, onError } = controller.latest.options;
-        if (event.kind === "done") onUploaded?.(event.file);
-        else onError?.(event.error);
+        const { latest } = controller;
+        if (latest.source !== source || latest.route !== route) return;
+        if (event.kind === "done") latest.options.onUploaded?.(event.file);
+        else latest.options.onError?.(event.error);
       }),
-    [store, controller],
+    [store, controller, source, route],
   );
   const { multiple = false, accept } = options;
   // Built from this render's options, so a changed `accept` reaches the input in the same render.

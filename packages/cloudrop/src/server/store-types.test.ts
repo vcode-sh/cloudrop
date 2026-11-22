@@ -8,7 +8,8 @@ import type { RouteResult } from "../protocol/types.ts";
 import { type Cloudrop, createCloudrop } from "./cloudrop.ts";
 import type { DeleteContext } from "./delete-context.ts";
 import type { CloudropPlugin } from "./plugins.ts";
-import { allowAnyone, route, routeFor } from "./route.ts";
+import { forbidden, rateLimited } from "./refusal.ts";
+import { allowAnyone, type Route, route, routeFor } from "./route.ts";
 import type { CloudropStore, FileRecord } from "./store.ts";
 
 interface DrizzleTx {
@@ -165,7 +166,34 @@ const ticketed = route(
   { onDelete: ({ context }: DeleteContext<{ ticket: string }>) => void context },
 );
 
+// M12-T7: a route whose authorize only refuses authorizes no one, so its auth type is never, not the refusal's own
+// fields, and a typed plugin beside it still compiles.
+const closed = route(
+  { ...policy, authorize: () => forbidden("closed") },
+  {
+    prefix: (context) => {
+      // Before M12-T7 the context offered the refusal's code and message, which no authorize result carries.
+      // @ts-expect-error: nobody is authorized, so there is no message.
+      void context.message;
+      // @ts-expect-error: nor a code.
+      void context.code;
+      return "closed";
+    },
+  },
+);
+const closedLater = route({ ...policy, authorize: async () => forbidden("closed") });
+const throttled = route({ ...policy, authorize: () => rateLimited(30) });
+expectTypeOf(closed).toEqualTypeOf<Route<undefined, null, never>>();
+expectTypeOf(closedLater).toEqualTypeOf<Route<undefined, null, never>>();
+expectTypeOf(throttled).toEqualTypeOf<Route<undefined, null, never>>();
+// A route that authorizes someone keeps exactly that result.
+expectTypeOf(team).toEqualTypeOf<Route<undefined, null, { userId: string; teamId: string }>>();
+
 describe("typed auth in plugins and a typed deletion context", () => {
+  it("accepts a typed plugin beside routes whose authorize only refuses, sync or async", () => {
+    void (() => createCloudrop({ routes: { signedIn, closed, closedLater, throttled }, plugins: [perUser] }));
+  });
+
   it("refuses a plugin that reads a field one of the routes' authorize results lacks", () => {
     // @ts-expect-error: `open` authorizes without a userId, so the plugin would read one that is not there.
     void (() => createCloudrop({ routes: { signedIn, open }, plugins: [perUser] }));

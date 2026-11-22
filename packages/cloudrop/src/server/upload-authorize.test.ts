@@ -209,10 +209,15 @@ describe("POST /upload: authorize and beforeUpload refuse with a CloudropError",
     });
   });
 
-  // M12-E3: 10^30 seconds would be written "1e+30", which is no Retry-After value; a day is the most ever sent.
-  it("caps Retry-After at a day, written as a plain integer", async () => {
-    const { status, retryAfter } = await answer(serverFixture({ files: refusing(() => rateLimited(1e30)) }));
-    expect({ status, retryAfter }).toEqual({ status: 429, retryAfter: "86400" });
+  // M12-E3: 10^30 seconds would be written "1e+30", which is no Retry-After value; a day is the most ever sent, and the
+  // message says the wait the header sends.
+  it("caps Retry-After and the message's wait at a day, written as a plain integer", async () => {
+    const { status, retryAfter, body } = await answer(serverFixture({ files: refusing(() => rateLimited(1e30)) }));
+    expect({ status, retryAfter, message: body.error.message }).toEqual({
+      status: 429,
+      retryAfter: "86400",
+      message: "Too many upload requests. Try again in 86400 seconds.",
+    });
   });
 
   it.for([{ seconds: -1 }, { seconds: Number.NaN }, { seconds: Number.POSITIVE_INFINITY }])(

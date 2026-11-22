@@ -10,20 +10,19 @@ Entries start from 1.
 
 - **Decision:** `cloudrop_usage` gains `erase_requested_at` and `erased_at` (`timestamptz(3)` on Postgres, integer
   milliseconds on SQLite and D1), after `updated_at`, with the partial index `cloudrop_usage_erasing_idx` on `(owner)`
-  `WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL`. The store has four new required methods
-  (`StoreErasure` in `src/server/store-erasure.ts`, part of `CloudropStore`): `markErasure({ owner, now })` upserts the
-  usage row (zero counters when there is none) and sets `erase_requested_at` only where it is null, then answers the
-  mark as it is, in one batch whose read takes its own snapshot; `erased({ owner, requestedAt, now })` sets `erased_at`
-  only for that exact `requestedAt`, and answers true when that mark is finished after the call, by this call or an
-  earlier one, so two runs at once both report done; `reopen({ owner, now })` clears both columns; `erasing({ cursor,
-  limit })` pages the marked, unfinished owners by keyset in byte order, as `owners` does, through one shared
-  statement in `src/store/sql/reads.ts`. `OwnerUsage` gains `erasure: { requestedAt, erasedAt } | null`, which
-  `api.usage` answers; `EraseReport` gains `requestedAt`. `checkSchema` requires both columns; a usage table without
-  them fails the first call with `INVALID_CONFIG` naming the missing column and the exact `ALTER TABLE` for the
-  columns it lacks, then the `CREATE INDEX`, for the dialect and the configured names (`eraseMarkUpgrade` in
-  `src/store/sql/tables.ts`). The
-  Drizzle tables declare the columns and the index; the Prisma models declare the columns only, and the guide adds
-  the index with `--create-only`, as for the CHECKs. `createCloudrop` refuses a store without the four methods.
+  `WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL`. The store has four new required methods (`StoreErasure`
+  in `src/server/store-erasure.ts`, part of `CloudropStore`): `markErasure({ owner, now })` upserts the usage row (zero
+  counters when there is none) and sets `erase_requested_at` only where it is null, then answers the mark as it is, in
+  one batch whose read takes its own snapshot; `erased({ owner, requestedAt, now })` sets `erased_at` only for that
+  exact `requestedAt`, and answers true when that mark is finished after the call, by this call or an earlier one, so
+  two runs at once both report done; `reopen({ owner, now })` clears both columns; `erasing({ cursor, limit })` pages
+  the marked, unfinished owners by keyset in byte order, as `owners` does, through one shared statement in
+  `src/store/sql/reads.ts`. `OwnerUsage` gains `erasure: { requestedAt, erasedAt } | null`, which `api.usage` answers;
+  `EraseReport` gains `requestedAt`. `checkSchema` requires both columns; a usage table without them fails the first
+  call with `INVALID_CONFIG` naming the missing column and the exact `ALTER TABLE` for the columns it lacks, then the
+  `CREATE INDEX`, for the dialect and the configured names (`eraseMarkUpgrade` in `src/store/sql/tables.ts`). The
+  Drizzle tables declare the columns and the index; the Prisma models declare the columns only, and the guide adds the
+  index with `--create-only`, as for the CHECKs. `createCloudrop` refuses a store without the four methods.
 - **Why:** spec 1.0 §4. The pilot kept a marker table of its own and compared a usage watermark across two
   `eraseOwner` passes, with timestamps from different clocks. A mark beside the counters is read under the lock the
   quota already takes (`M12-O2`), and makes `done` durable: once `erased_at` is set, `eraseOwner` answers done at once,
@@ -85,9 +84,10 @@ Entries start from 1.
   `encodeURIComponent`-encoded, as one whole `/` segment, compared in NFC, and that some key can start with:
   `keyProblem` of its NFC form is null, the rule `deletePrefix` applies (no leading slash, no `.` or `..` segment, no
   control character, at most 1024 bytes); a throw is `INVALID_CONFIG` with it as the cause. An owner whose erasure
-  already finished answers done even when `erase.prefixes` fails now: the mark is read only on that error path. Once the row passes report nothing failed and nothing waiting, the folders are emptied in order with the
-  `deletePrefix` of `api.deletePrefix`; `prefixed` counts the objects deleted, and a folder that fails is logged and
-  counted in `failed`, so the run is not done. Only then is `erased_at` set.
+  already finished answers done even when `erase.prefixes` fails now: the mark is read only on that error path. Once the
+  row passes report nothing failed and nothing waiting, the folders are emptied in order with the `deletePrefix` of
+  `api.deletePrefix`; `prefixed` counts the objects deleted, and a folder that fails is logged and counted in `failed`,
+  so the run is not done. Only then is `erased_at` set.
 - **Why:** spec §4: the pilot emptied one folder per use case with its own `deletePrefix` loop. A segment rule makes a
   mistake such as `() => ["avatars/"]` fail loudly instead of emptying every owner's files; `exports/u10/` is not
   `u1`'s. Prefixes go last, so a folder is not emptied while a file of the owner's may still complete into it, and
@@ -101,20 +101,22 @@ Entries start from 1.
   another owner's stays (fault probe: emptied before the rows were done, seen failing); the encoded owner; the seven
   unsafe prefixes (fault probe: the rule always passing, seen failing; the four key-rule rows failed before the fix);
   an erased owner answers done while `erase.prefixes` throws (failed before the fix).
-- **Visible in:** `src/server/erase.ts`, `src/server/store-config.ts`, `docs/guide/store.md#folders-no-row-tracks-eraseprefixes`.
+- **Visible in:** `src/server/erase.ts`, `src/server/store-config.ts`,
+  `docs/guide/store.md#folders-no-row-tracks-eraseprefixes`.
 
 ### M12-O4: the sweep carries every unfinished erasure on
 
 - **Decision:** `api.sweep` has a third pass, `erase`, between `expire` and `cleanup`: it pages `store.erasing` by
-  owner, each owner counting as one row of `limit`, and runs the same erasure as `eraseOwner` for each, with the
-  sweep's `graceMs`, `signal` and `context`. `SweepReport` gains `erasing` (owners it ran) and `erased` (owners it
-  finished); an owner whose run answers an error is logged and counted in `failed`, and the files a run counts in
-  `failed` are added there. Once the signal aborts, the pass starts no further owner; those left on the page stay
-  marked for the next sweep that starts over. The sweep cursor names the pass, `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6
-  stay valid. `SweepOptions<TErased>` is a type alias with `ContextOption<TErased>`, and `api.sweep` takes its options
-  as `eraseOwner` does: required when the routes' `onDelete` declare an erased context that does not admit
-  `undefined`, so a file the sweep deletes never reaches an `onDelete` without the context its type promises
-  (`M12-T6`).
+  owner, each owner counting as one row of `limit`, and runs the same erasure as `eraseOwner` for each, with the sweep's
+  `graceMs`, `signal` and `context`. `SweepReport` gains `erasing` (owners it ran) and `erased` (owners it finished); an
+  owner whose run answers an error is logged and counted in `failed`, and the files a run counts in `failed` are added
+  there. Once the signal aborts, the pass starts no further owner, and the cursor it answers is
+  `erase:<the last owner that ran>`, or the cursor the page started from when none ran (`erase:` at the pass's start),
+  so a sweep that continues from it runs the owners left on the page. The sweep cursor names the pass, `erase:<owner>`;
+  `cleanup:` and `expire:` cursors of 0.6 stay valid. `SweepOptions<TErased>` is a type alias with
+  `ContextOption<TErased>`, and `api.sweep` takes its options as `eraseOwner` does: required when the routes' `onDelete`
+  declare an erased context that does not admit `undefined`, so a file the sweep deletes never reaches an `onDelete`
+  without the context its type promises (`M12-T6`).
 - **Why:** spec §4.6: an app calls `eraseOwner` once at account deletion and keeps its sweep schedule. After the expire
   pass, so a completion the same sweep ended as failed is erased in that sweep; for an owner being erased its object
   is removed, not kept for the app to check.
@@ -122,7 +124,10 @@ Entries start from 1.
   run pages its own rows; D1 apps keep `limit` low, as the guide says for the sweep.
 - **Status:** in force. `src/server/erase-mark.test.ts`: an erasure stopped by its signal is finished by the next
   sweep (`erasing: 1, erased: 1`), and the sweep after has nobody to erase; an erasure the storage cannot finish is
-  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing.
+  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing. A sweep
+  stopped after the first owner of a page of two answers `erase:u1`, and continuing from it runs u2 and u3 (it
+  answered `erase:u2`, skipping u2, before the fix); stopped before the first owner it answers `erase:` (fault probe:
+  without the fallback it answered no cursor, seen failing).
   `src/server/erase.test.ts`: the sweep that ends a stuck completion of an owner being erased removes its object.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `docs/guide/store.md#the-sweep`.
 

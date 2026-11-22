@@ -16,8 +16,9 @@ Every notable change to the `cloudrop` package. The format follows
 - A database store you wrote yourself is wrapped with `defineStore` from the new entry `cloudrop/store`. Before:
   `createCloudrop({ store: myStore, ... })`. After: `import { defineStore } from "cloudrop/store"` and
   `createCloudrop({ store: defineStore(myStore), ... })`. Without it the server logs `INVALID_CONFIG` at start, every
-  request answers a retryable 500 and every `api` call answers that `INVALID_CONFIG`. The adapters' stores (`sqlStore`, `drizzleStore`, `prismaStore`) and
-  `memoryStore` need nothing, and neither does a store copied from one with spread (`M12-S1`, `M12-S2`).
+  request answers a retryable 500 and every `api` call answers that `INVALID_CONFIG`. The adapters' stores (`sqlStore`,
+  `drizzleStore`, `prismaStore`) and `memoryStore` need nothing, and neither does a store copied from one with spread
+  (`M12-S1`, `M12-S2`).
 - A wrapper around an adapter's store that copies it any other way than spread, such as
   `Object.fromEntries(Object.entries(store).map(...))` or a class that copies the methods, loses the store code and
   answers as above. Before: `createCloudrop({ store: logged(sqlStore(executor)), ... })`. After: copy with spread
@@ -111,9 +112,10 @@ Every notable change to the `cloudrop` package. The format follows
   `reason: "replaced"` with `context: undefined` (`M12-T6`).
 - `Route` has three more type parameters: `Route<TMetadataInput, TResult, TAuth, TDeleted, TErased>`. Before: `route()`
   returned `Route<M, R>`. After: it returns `Route<M, R, TAuth, TDeleted, TErased>`, so an exact-equality type test
-  such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` must name them:
-  `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a route to `Route` or `Route<M, R>` still
-  compiles (`M12-T5`, `M12-T6`).
+  such as `expectTypeOf(avatar).toEqualTypeOf<Route<undefined, null>>()` names the new parameters up to the last one
+  that differs from its default (`TAuth = object`, `TDeleted = unknown`, `TErased = TDeleted`): for a route whose
+  `authorize` returns `{ userId: string }`, `toEqualTypeOf<Route<undefined, null, { userId: string }>>()`. Assigning a
+  route to `Route` or `Route<M, R>` still compiles (`M12-T5`, `M12-T6`).
 - `RATE_LIMITED` answers HTTP 429 from every source. Before: storage throttling, and a plugin's `RATE_LIMITED`,
   answered 503. After: 429, with `Retry-After` when the bucket or `rateLimited()` gave a wait. A proxy, monitor or
   custom client that keyed on 503 from the upload server keys on 429 (`M12-E3`).
@@ -156,12 +158,13 @@ Every notable change to the `cloudrop` package. The format follows
 - `EraseReport` and `SweepReport` have more fields. Before: `{ revoked, deleted, refused, cleaned, failed, waiting,
   done }` and `{ expired, cleaned, failed, reported, cursor }`. After: `EraseReport` also has `requestedAt` and
   `prefixed`, and `SweepReport` `erasing` and `erased` (`M12-O1`, `M12-O3`, `M12-O4`).
-- `api.sweep` carries every unfinished erasure on, in a pass between its two passes over rows. Before: an erasure
-  went on only while the app called `eraseOwner` again. After: one call at account deletion is enough. For an owner
-  being erased, the object of a stuck completion the sweep ends is removed by that pass instead of kept, and each owner
-  counts as one row of `limit`. `SweepOptions` is a generic type alias whose `context` reaches `onDelete` for the files
-  it deletes there: required when the routes' `onDelete` declare an erased context that does not admit `undefined`
-  (`M12-O4`, `M12-T6`).
+- `api.sweep` carries every unfinished erasure on, in a pass between its two passes over rows. Before: an erasure went
+  on only while the app called `eraseOwner` again. After: one call at account deletion is enough. For an owner being
+  erased, the object of a stuck completion the sweep ends is removed by that pass instead of kept, and each owner counts
+  as one row of `limit`. A sweep its `signal` stops in that pass answers the cursor `erase:<owner>` after the last owner
+  it ran, so continuing from it skips no owner it did not run. `SweepOptions` is a generic type alias whose `context`
+  reaches `onDelete` for the files it deletes there: required when the routes' `onDelete` declare an erased context that
+  does not admit `undefined` (`M12-O4`, `M12-T6`).
 
 ### Added
 
@@ -175,8 +178,8 @@ Every notable change to the `cloudrop` package. The format follows
 - `content.kind` on a `contentChecks()` refusal with `reason: "refused"`: `"web-page"`, `"program"`, `"installer"`,
   `"script"`, `"svg"`, `"xml"` or `"denied"`, and the type `RefusedKind` from `cloudrop` and `cloudrop/client`. A
   client drops a kind it does not know, and an older client ignores it (`M12-E6`).
-- The client error code `BUCKET_BLOCKED`, whose message names the bucket's CORS rule and
-  `npx cloudrop doctor --origin <origin>` (`M12-E7`).
+- The client error code `BUCKET_BLOCKED`, when the browser sends no byte to the bucket: its message names the bucket's
+  CORS rule and `npx cloudrop doctor --origin <origin>` (`M12-E7`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
@@ -210,6 +213,11 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Fixed
 
+- A route whose `authorize` only refuses, such as `() => forbidden("closed")`, authorizes no one in the types. Before:
+  its auth type was the refusal itself (or `AuthResult` for `() => rateLimited(30)`), so a typed plugin such as
+  `CloudropPlugin<{ userId: string }>` beside it failed to compile, and `prefix`'s context offered `code` and
+  `message`. After: the route is `Route<M, R, never>`, the plugin compiles, and its callbacks see no auth fields
+  (`M12-T7`).
 - The bucket's `Retry-After` reaches the client when `/upload` refuses a file storage could not start. Before: the
   driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
   After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the

@@ -433,7 +433,8 @@ decision, why, if wrong, status, source, visible in. Execution rulings continue 
 - **Why:** the controller's ruling. An `await import()` costs every store app a cold-start round trip and a packaging
   surface, for 4.7 kB of server code that a browser never ships.
 - **If wrong:** a lazy chunk, or a `cloudrop/store` entry, can be added later without an API change in the first case.
-- **Status:** decided; it extends M5-T33.
+- **Status:** superseded by `M12-S1` (1.0): the store paths travel on the store object, so a server without a store
+  no longer loads them. It extended M5-T33.
 - **Amended 2026-11-17 (final fix round):** after task E moved `route()` into a shared chunk and the final fix round,
   `cloudrop` bundled is 27.19 kB (+4.81 kB against 22.38 kB) and summed 46.08 kB.
 - **Re-measured 2026-11-17 (after the post-M5 follow-ups):** `cloudrop` bundled is 27.29 kB, +4.93 kB against
