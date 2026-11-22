@@ -62,6 +62,7 @@ mkdirSync(SCRATCH, { recursive: true });
 mkdirSync(REPORTS, { recursive: true });
 const failed: string[] = [];
 const changed: string[] = [];
+const orphans: string[] = [];
 for (const [entry, { types }] of Object.entries(manifest.exports)) {
   const report = extract(entry, types);
   const file = join(REPORTS, `${reportName(entry)}.api.md`);
@@ -74,16 +75,17 @@ for (const [entry, { types }] of Object.entries(manifest.exports)) {
 // A report whose entry left the exports map would otherwise stay in etc/ and look reviewed.
 const expected = new Set(Object.keys(manifest.exports).map((entry) => `${reportName(entry)}.api.md`));
 for (const name of readdirSync(REPORTS).filter((name) => name.endsWith(".api.md") && !expected.has(name))) {
-  changed.push(`etc/${name} (no such entry)`);
+  orphans.push(`etc/${name}`);
   if (!check) rmSync(join(REPORTS, name));
 }
 if (failed.length > 0) {
   console.error(`api-extractor could not read ${failed.join(", ")}. The errors above say why.`);
   process.exit(1);
 }
-if (check && changed.length > 0) {
+if (check && changed.length + orphans.length > 0) {
+  const problems = [...changed, ...orphans.map((orphan) => `${orphan} (no such entry)`)];
   console.error(
-    `The public API differs from its reviewed report in ${changed.join(", ")}.\n` +
+    `The public API differs from its reviewed report in ${problems.join(", ")}.\n` +
       "If the change is intended, run bun run api:report, review the diff in packages/cloudrop/etc/, and commit it " +
       "with the decision entry and the changelog line it needs.",
   );
@@ -93,5 +95,7 @@ const entries = Object.keys(manifest.exports).length;
 console.log(
   check
     ? `The public API of all ${entries} entries matches its reviewed report in packages/cloudrop/etc/.`
-    : `Rewrote ${changed.length} of ${entries} reports in packages/cloudrop/etc/. Review the diff before committing it.`,
+    : `Rewrote ${changed.length} of ${entries} reports in packages/cloudrop/etc/` +
+        (orphans.length > 0 ? ` and deleted ${orphans.join(", ")}, which no entry has any more` : "") +
+        ". Review the diff before committing it.",
 );

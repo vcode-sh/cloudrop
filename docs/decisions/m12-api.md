@@ -193,5 +193,6 @@ Entries start from 1.
   version.
 - **If wrong:** a required member needed in a minor waits for a major, or becomes optional with a default; a plugin
   API change in a minor breaks the rare app that wrote a plugin, which `@experimental` warned.
-- **Status:** in force; written up in the stability guide by Task 11.
+- **Status:** in force; written up in `docs/guide/stability.md`. The mark is `@beta` plus the word in the prose since
+  `M12-P7`.
 - **Visible in:** spec 1.0 §6, `docs/guide/stability.md` (Task 11).

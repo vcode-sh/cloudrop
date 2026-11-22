@@ -95,14 +95,14 @@ Entries start from 1.
   - **`api-report`** runs `bun run api:check` (`M12-P6`), then `bun run docs:reference` and keeps `docs/reference/` as
     the artifact `api-reference` for 30 days (`M12-P10`).
 - **Why:** spec 1.0 §8 and §10 ask for a TypeScript 7.0 floor job and a Deno smoke lane. npm has no TypeScript 7.0.0 or
-  7.0.1: the 7 line was published as `7.0.1-rc`, then `7.0.2` (`npm view typescript versions`, 2026-11-22), so 7.0.2
-  is the oldest release of the floor. It is also the workspace's version today; the job still adds what the workspace
+  7.0.1: the 7 line was published as `7.0.1-rc`, then `7.0.2` (`npm view typescript versions`, 2026-11-22), so 7.0.2 is
+  the oldest release of the floor. It is also the workspace's version today; the job still adds what the workspace
   cannot see, an install of the packed tarball with `skipLibCheck` off, and it stays on 7.0.2 when the workspace moves
   on. drizzle-orm's own `.d.ts` fail with `skipLibCheck` off unless `@types/node` and `mysql2` are installed (measured:
   41 errors in `node_modules/drizzle-orm`, none in cloudrop's), so the Drizzle entry is checked in a second program.
-  Deno grants no env access by default, and cloudrop reads `process.env.NODE_ENV` when `r2()` is built (and
-  `CLOUDROP_*` when a setting is left out): without `--allow-env` the first run failed with Deno's `NotCapable`,
-  "Requires env access to "NODE_ENV"". An app on Deno grants the same access.
+  Deno grants no env access by default, and cloudrop reads `process.env.NODE_ENV` when `r2()` is built (and `CLOUDROP_*`
+  when a setting is left out): without `--allow-env` the first run failed with Deno's `NotCapable`, "Requires env access
+  to "NODE_ENV"". An app on Deno grants the same access.
 - **The fixture's other types float:** only `typescript`, `@types/react` and `drizzle-orm` are pinned; what they
   depend on (`csstype` for `@types/react`, for one) resolves to the newest matching version at each run. They are types
   only, so a new release can fail the job but never reaches an app; the ruling keeps them floating (coordinator,
@@ -169,9 +169,9 @@ Entries start from 1.
   and `ContextOf` from `cloudrop`; `Account`, `ServerHeaders`, `ClientFetch` and `TicketFields` from `cloudrop/client`;
   `UseUploadArguments` and `ResumableOf` from `cloudrop/react`. Their shapes are frozen through the report (`M12-P6`).
   The plugin API's types (`CloudropPlugin`, `ServerHooks`, `BeforeUploadContext`, `AfterVerifyContext`,
-  `AbortContext`, `PluginFile` and `extendRoute`) are marked experimental in their doc comments, as `M12-A12` rules, with
-  the tag `@beta`, the release tag api-extractor knows, so the reports show the tier (TypeDoc refuses `@beta` beside
-  `@experimental` as two release stages, so the word stays in the prose); the `plugins` option of
+  `AbortContext`, `PluginFile` and `extendRoute`) are marked experimental in their doc comments, as `M12-A12` rules,
+  with the tag `@beta`, the release tag api-extractor knows, so the reports show the tier (TypeDoc refuses `@beta`
+  beside `@experimental` as two release stages, so the word stays in the prose); the `plugins` option of
   `CloudropOptions` carries api-extractor's warning that a public signature uses a beta type, which is the case.
 - **Why:** every export is a semver promise (`M2-X38`), and adding one later is not breaking. None of the five is a
   type an app needs to write:
@@ -245,10 +245,11 @@ Entries start from 1.
     when `llms.txt` does not link a shipped guide, or when `llms-full.txt` does not carry it.
   - `bun run docs:reference` (`scripts/api-reference.ts`, run by Node) builds the TypeDoc 0.28 reference from the built
     `.d.ts` of every entry in the exports map into `docs/reference/` (git-ignored), names each module as an app imports
-    it (`cloudrop/adapters/sql`), and fails on any TypeDoc warning. TypeDoc gets TypeScript 6.0.3 through the dev dependency alias
-    `typescript-6@npm:typescript@6.0.3` and a `module.registerHooks` resolve hook, in that process only.
-  - The doc comments the build ships carry no decision id or spec section: 36 lines in the built `.d.ts` cited one
-    (34 found by `grep -nE "M[0-9]+-[A-Z][0-9]+|spec §"` over `dist/`, where the plan counted 16; two more cited a series,
+    it (`cloudrop/adapters/sql`), and fails on any TypeDoc warning. TypeDoc gets TypeScript 6.0.3 through the dev
+    dependency alias `typescript-6@npm:typescript@6.0.3` and a `module.registerHooks` resolve hook, in that process
+    only.
+  - The doc comments the build ships carry no decision id or spec section: 36 lines in the built `.d.ts` cited one (34
+    found by `grep -nE "M[0-9]+-[A-Z][0-9]+|spec §"` over `dist/`, where the plan counted 16; two more cited a series,
     `M10-A` and `M11-L`), and each was rewritten in plain words in its source's doc comment. `check-package.sh` fails
     when one comes back, or when any `§` does. `//` comments keep their ids.
 - **Why:** spec 1.0 §8. An agent with the package installed reads `node_modules/cloudrop/llms.txt` with no network, so

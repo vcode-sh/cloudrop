@@ -35,8 +35,9 @@ const RULES = `## Rules for coding agents
   \`ORIGIN_NOT_ALLOWED\`.
 - \`cloudrop.api.*\`, \`client.upload()\` and the other calls that do work answer \`{ data, error }\` instead of
   throwing: check \`error\`, branch on \`error.code\` (never on the message), and keep a \`default\` branch, since a
-  minor release may add codes. Only a wrong setting throws, when the server, its routes, its storage or the client
-  are built (\`createCloudrop\`, \`route\`, \`r2\`, \`s3\`, \`createCloudropClient\`).
+  minor release may add codes. What throws is a wrong setting, with \`INVALID_CONFIG\`, at the moment something is
+  built: the server, a route, a storage driver, a store, a plugin or the client (\`createCloudrop\`, \`route\`, \`r2\`,
+  \`sqlStore\` and the adapters' stores, \`contentChecks\`, \`createCloudropClient\`, among others).
 - With a database store, delete an uploaded file with \`api.deleteFile(id)\`. \`api.deleteObject(key)\` removes the
   object only and leaves the row and the quota as they were.
 `;

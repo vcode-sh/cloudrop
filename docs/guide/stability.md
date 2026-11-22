@@ -61,10 +61,10 @@ What semver promises depends on who writes the code on each side of a type.
   optional member to one of them, never a required one. A required member waits for a major release. A store you wrote
   yourself and wrapped with `defineStore` keeps compiling and working across minor releases.
 - **The plugin API:** `CloudropPlugin`, `ServerHooks` with its contexts (`BeforeUploadContext`, `AfterVerifyContext`,
-  `AbortContext`, `PluginFile`) and `extendRoute` are marked `@beta` and experimental in their doc comments, and are **outside semver**: a minor
-  release may change them. The API has one user, and the plugins it was designed for were cut before 1.0. Using a
-  plugin cloudrop ships, such as `contentChecks()` from `cloudrop/plugins`, is covered like any other call; writing
-  your own plugin is what may need a change on upgrade. The changelog says when it does.
+  `AbortContext`, `PluginFile`) and `extendRoute` are marked `@beta` and experimental in their doc comments, and are
+  **outside semver**: a minor release may change them. The API has one user, and the plugins it was designed for were
+  cut before 1.0. Using a plugin cloudrop ships, such as `contentChecks()` from `cloudrop/plugins`, is covered like any
+  other call; writing your own plugin is what may need a change on upgrade. The changelog says when it does.
 
 The wire types `cloudrop/client` exports (`UploadRequest`, `UploadResponse`, `FileTicket`, `SingleTicket`,
 `MultipartTicket`, `RejectedFile`, `FileDescriptor`, `SignRequest`, `SignResponse`, `SignedRequest`, `SignedPart`,
