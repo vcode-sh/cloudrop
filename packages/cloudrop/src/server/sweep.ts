@@ -71,13 +71,13 @@ async function cleanUp(sweeper: Sweeper, record: FileRecord): Promise<void> {
 
 /**
  * The erasures of one page of marked owners, each run as `eraseOwner` runs it, with the sweep's grace, signal and
- * context. One that fails is logged and counted, and the next sweep runs it again.
+ * context. One that fails is logged and counted, and the next sweep runs it again. Answers how many owners it ran.
  */
-async function eraseEach({ config, store, report, run }: Sweeper, owners: readonly string[]): Promise<void> {
+async function eraseEach({ config, store, report, run }: Sweeper, owners: readonly string[]): Promise<number> {
   const { graceMs, signal, context } = run;
-  for (const owner of owners) {
-    // Stopped: the owners left on this page stay marked, and the next sweep that starts over runs them.
-    if (signal?.aborted) return;
+  for (const [ran, owner] of owners.entries()) {
+    // Stopped: the owners left on this page stay marked, and the cursor continues after the last one that ran.
+    if (signal?.aborted) return ran;
     report.erasing += 1;
     const erased = await eraseRun(config, store, owner, { graceMs, signal, context });
     if (erased.error) {
@@ -91,19 +91,25 @@ async function eraseEach({ config, store, report, run }: Sweeper, owners: readon
     report.failed += erased.data.failed;
     if (erased.data.done) report.erased += 1;
   }
+  return owners.length;
 }
 
 type Page = { handled: number; cursor: string | null };
 
-/** One page of the erase pass: the owners whose erasure is unfinished, by owner. */
+/**
+ * One page of the erase pass: the owners whose erasure is unfinished, by owner. Stopped part way, it answers the last
+ * owner that ran, or the cursor it was given ("" for the pass's start) when none did, so continuing skips no owner.
+ */
 async function erasePage(sweeper: Sweeper, page: { limit: number; cursor: string | null }): Promise<Result<Page>> {
   const { config, store } = sweeper;
   const found = await storeCall(config.logger, "find the owners being erased", () => store.erasing(page));
   if (found.error) return found;
   const cursor = checkedCursor(config, "erase", found.data.cursor);
   if (cursor.error) return cursor;
-  await eraseEach(sweeper, found.data.owners);
-  return ok({ handled: found.data.owners.length, cursor: cursor.data });
+  const { owners } = found.data;
+  const ran = await eraseEach(sweeper, owners);
+  if (ran < owners.length) return ok({ handled: ran, cursor: owners[ran - 1] ?? page.cursor ?? "" });
+  return ok({ handled: owners.length, cursor: cursor.data });
 }
 
 /** A sweep continues from the cursor it is given back, and `all` from this one: any other shape cannot be continued. */

@@ -159,9 +159,10 @@ Every notable change to the `cloudrop` package. The format follows
 - `api.sweep` carries every unfinished erasure on, in a pass between its two passes over rows. Before: an erasure
   went on only while the app called `eraseOwner` again. After: one call at account deletion is enough. For an owner
   being erased, the object of a stuck completion the sweep ends is removed by that pass instead of kept, and each owner
-  counts as one row of `limit`. `SweepOptions` is a generic type alias whose `context` reaches `onDelete` for the files
-  it deletes there: required when the routes' `onDelete` declare an erased context that does not admit `undefined`
-  (`M12-O4`, `M12-T6`).
+  counts as one row of `limit`. A sweep its `signal` stops in that pass answers the cursor `erase:<owner>` after the
+  last owner it ran, so continuing from it skips no one. `SweepOptions` is a generic type alias whose `context`
+  reaches `onDelete` for the files it deletes there: required when the routes' `onDelete` declare an erased context
+  that does not admit `undefined` (`M12-O4`, `M12-T6`).
 
 ### Added
 

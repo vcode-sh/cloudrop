@@ -267,6 +267,56 @@ describe("the sweep's erase pass", () => {
     expect(swept.data).toMatchObject({ erasing: 1, erased: 0 });
   });
 
+  it("answers the last owner it ran when stopped mid-page, so continuing from it skips no owner", async () => {
+    const base = memoryStore();
+    const controller = new AbortController();
+    let armed = false;
+    const fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...base,
+          markErasure: (input) => {
+            if (armed) controller.abort();
+            return base.markErasure(input);
+          },
+        },
+      },
+    );
+    const { api } = fixture.cloudrop;
+    for (const owner of ["u1", "u2", "u3"]) await api.eraseOwner(owner, { signal: AbortSignal.abort() });
+    armed = true;
+    // A page of two owners, u1 and u2; the signal aborts while u1 runs, so u2 never runs.
+    const stopped = await api.sweep({ all: true, limit: 2, signal: controller.signal });
+    expect(stopped.data).toMatchObject({ erasing: 1, cursor: "erase:u1" });
+    armed = false;
+    const rest = await api.sweep({ cursor: stopped.data?.cursor, limit: 2 });
+    expect(rest.data).toMatchObject({ erasing: 2, erased: 2 });
+  });
+
+  it("answers the pass's start when stopped before its first owner ran, not the cleanup pass", async () => {
+    const base = memoryStore();
+    const controller = new AbortController();
+    const fixture = storeFixture(
+      { owned },
+      {
+        store: {
+          ...base,
+          // The signal aborts while the erase pass reads its page.
+          erasing: (page) => {
+            controller.abort();
+            return base.erasing(page);
+          },
+        },
+      },
+    );
+    const { api } = fixture.cloudrop;
+    await api.eraseOwner("u1", { signal: AbortSignal.abort() });
+    const stopped = await api.sweep({ all: true, signal: controller.signal });
+    expect(stopped.data).toMatchObject({ erasing: 0, cursor: "erase:" });
+    expect((await api.sweep({ cursor: "erase:" })).data).toMatchObject({ erasing: 1, erased: 1 });
+  });
+
   it("counts an erasure it cannot finish as failed, logs it, and finishes it once storage is back", async () => {
     const fixture = storeFixture({ owned }, { erase: { prefixes: (owner) => [`exports/${owner}/`] } });
     const { api } = fixture.cloudrop;

@@ -109,9 +109,10 @@ Entries start from 1.
   owner, each owner counting as one row of `limit`, and runs the same erasure as `eraseOwner` for each, with the
   sweep's `graceMs`, `signal` and `context`. `SweepReport` gains `erasing` (owners it ran) and `erased` (owners it
   finished); an owner whose run answers an error is logged and counted in `failed`, and the files a run counts in
-  `failed` are added there. Once the signal aborts, the pass starts no further owner; those left on the page stay
-  marked for the next sweep that starts over. The sweep cursor names the pass, `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6
-  stay valid. `SweepOptions<TErased>` is a type alias with `ContextOption<TErased>`, and `api.sweep` takes its options
+  `failed` are added there. Once the signal aborts, the pass starts no further owner, and the cursor it answers is
+  `erase:<the last owner that ran>`, or the cursor the page started from when none ran (`erase:` at the pass's start),
+  so a sweep that continues from it runs the owners left on the page. The sweep cursor names the pass,
+  `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6 stay valid. `SweepOptions<TErased>` is a type alias with `ContextOption<TErased>`, and `api.sweep` takes its options
   as `eraseOwner` does: required when the routes' `onDelete` declare an erased context that does not admit
   `undefined`, so a file the sweep deletes never reaches an `onDelete` without the context its type promises
   (`M12-T6`).
@@ -122,7 +123,10 @@ Entries start from 1.
   run pages its own rows; D1 apps keep `limit` low, as the guide says for the sweep.
 - **Status:** in force. `src/server/erase-mark.test.ts`: an erasure stopped by its signal is finished by the next
   sweep (`erasing: 1, erased: 1`), and the sweep after has nobody to erase; an erasure the storage cannot finish is
-  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing.
+  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing. A sweep
+  stopped after the first owner of a page of two answers `erase:u1`, and continuing from it runs u2 and u3 (it
+  answered `erase:u2`, skipping u2, before the fix); stopped before the first owner it answers `erase:` (fault probe:
+  without the fallback it answered no cursor, seen failing).
   `src/server/erase.test.ts`: the sweep that ends a stuck completion of an owner being erased removes its object.
 - **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `docs/guide/store.md#the-sweep`.
 
