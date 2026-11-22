@@ -75,6 +75,9 @@ export interface AuthorizeContext<TMetadata> {
     request: Request;
 }
 
+// @public
+type Authorized<TAuth> = TAuth extends Refusal | CloudropError ? never : TAuth;
+
 // Warning: (ae-forgotten-export) The symbol "ReservedName" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -138,6 +141,12 @@ export interface BucketReport {
     // (undocumented)
     publicAccess: BucketCheck;
 }
+
+// Warning: (ae-forgotten-export) The symbol "Authorized" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "NoExtra" needs to be exported by the entry point index.d.ts
+//
+// @public
+type CallbackAuth<TAuth> = [Authorized<TAuth>] extends [never] ? NoExtra : Authorized<TAuth>;
 
 // @public
 export type ClaimOutcome = {
@@ -824,12 +833,12 @@ export interface Route<TMetadataInput = unknown, TResult = unknown, TAuth = obje
 }
 
 // Warning: (ae-forgotten-export) The symbol "AuthResult" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "CallbackAuth" needs to be exported by the entry point index.d.ts
 // Warning: (ae-forgotten-export) The symbol "SchemaOutput" needs to be exported by the entry point index.d.ts
-// Warning: (ae-forgotten-export) The symbol "NoExtra" needs to be exported by the entry point index.d.ts
 // Warning: (ae-forgotten-export) The symbol "SchemaInput" needs to be exported by the entry point index.d.ts
 //
 // @public
-export function route<TAuth extends AuthResult, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, NoExtra, TDeleted, TErased>): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>>;
+export function route<TAuth extends AuthResult | Refusal | CloudropError, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<CallbackAuth<TAuth>, SchemaOutput<TSchema>, TResult, NoExtra, TDeleted, TErased>): NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, Authorized<TAuth>, TDeleted, TErased>>;
 
 // @public
 export interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra extends object = NoExtra, TDeleted = unknown, TErased = TDeleted> {
@@ -883,7 +892,7 @@ export interface RouteDefinition {
 }
 
 // @public
-export type RouteFunction<TExtra extends object> = <TAuth extends AuthResult, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra, TDeleted, TErased>) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>>;
+export type RouteFunction<TExtra extends object> = <TAuth extends AuthResult | Refusal | CloudropError, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<CallbackAuth<TAuth>, SchemaOutput<TSchema>, TResult, TExtra, TDeleted, TErased>) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, Authorized<TAuth>, TDeleted, TErased>>;
 
 // Warning: (ae-forgotten-export) The symbol "RoutesOf" needs to be exported by the entry point index.d.ts
 //

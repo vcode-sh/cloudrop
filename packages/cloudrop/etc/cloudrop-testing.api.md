@@ -49,6 +49,12 @@ interface AuthorizeContext<TMetadata> {
     request: Request;
 }
 
+// Warning: (ae-forgotten-export) The symbol "Refusal" needs to be exported by the entry point testing.d.ts
+// Warning: (ae-forgotten-export) The symbol "CloudropError" needs to be exported by the entry point testing.d.ts
+//
+// @public
+type Authorized<TAuth> = TAuth extends Refusal | CloudropError ? never : TAuth;
+
 // Warning: (ae-forgotten-export) The symbol "ReservedName" needs to be exported by the entry point testing.d.ts
 //
 // @public
@@ -101,6 +107,12 @@ interface BucketReport {
     // (undocumented)
     publicAccess: BucketCheck;
 }
+
+// Warning: (ae-forgotten-export) The symbol "Authorized" needs to be exported by the entry point testing.d.ts
+// Warning: (ae-forgotten-export) The symbol "NoExtra" needs to be exported by the entry point testing.d.ts
+//
+// @public
+type CallbackAuth<TAuth> = [Authorized<TAuth>] extends [never] ? NoExtra : Authorized<TAuth>;
 
 // @public
 type ClaimOutcome = {
@@ -893,8 +905,6 @@ interface Route<TMetadataInput = unknown, TResult = unknown, TAuth = object, TDe
     readonly definition: RouteDefinition;
 }
 
-// Warning: (ae-forgotten-export) The symbol "NoExtra" needs to be exported by the entry point testing.d.ts
-//
 // @public
 interface RouteCallbacks<TAuth extends object, TMetadata, TResult, TExtra extends object = NoExtra, TDeleted = unknown, TErased = TDeleted> {
     // Warning: (ae-forgotten-export) The symbol "AfterCompleteContext" needs to be exported by the entry point testing.d.ts
@@ -957,11 +967,12 @@ interface RouteDefinition {
 // Warning: (ae-forgotten-export) The symbol "AuthResult" needs to be exported by the entry point testing.d.ts
 // Warning: (ae-forgotten-export) The symbol "RoutePolicy" needs to be exported by the entry point testing.d.ts
 // Warning: (ae-forgotten-export) The symbol "RouteCallbacks" needs to be exported by the entry point testing.d.ts
+// Warning: (ae-forgotten-export) The symbol "CallbackAuth" needs to be exported by the entry point testing.d.ts
 // Warning: (ae-forgotten-export) The symbol "SchemaOutput" needs to be exported by the entry point testing.d.ts
 // Warning: (ae-forgotten-export) The symbol "SchemaInput" needs to be exported by the entry point testing.d.ts
 //
 // @public
-type RouteFunction<TExtra extends object> = <TAuth extends AuthResult, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult, TExtra, TDeleted, TErased>) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, TAuth, TDeleted, TErased>>;
+type RouteFunction<TExtra extends object> = <TAuth extends AuthResult | Refusal | CloudropError, TSchema extends StandardSchema | undefined = undefined, TResult = null, TDeleted = unknown, TErased = TDeleted>(policy: RoutePolicy<TAuth, TSchema>, callbacks?: RouteCallbacks<CallbackAuth<TAuth>, SchemaOutput<TSchema>, TResult, TExtra, TDeleted, TErased>) => NoInfer<Route<SchemaInput<TSchema>, CompleteData<Awaited<TResult>>, Authorized<TAuth>, TDeleted, TErased>>;
 
 // Warning: (ae-forgotten-export) The symbol "RoutesOf" needs to be exported by the entry point testing.d.ts
 //
@@ -974,7 +985,6 @@ type RouteName<TCloudrop> = keyof RoutesOf<TCloudrop> & string;
 // @public
 interface RoutePolicy<TAuth extends object, TSchema extends StandardSchema | undefined> {
     accept: string | readonly string[];
-    // Warning: (ae-forgotten-export) The symbol "Refusal" needs to be exported by the entry point testing.d.ts
     authorize: (context: AuthorizeContext<SchemaOutput<TSchema>>) => Awaitable<TAuth | Refusal | CloudropError>;
     maxFiles?: number;
     maxSize: Size;
@@ -1361,7 +1371,6 @@ interface WriteOptions extends ObjectOptions {
 // Warnings were encountered during analysis:
 //
 // (ae-forgotten-export) The symbol "ListedObject" needs to be exported by the entry point testing.d.ts
-// (ae-forgotten-export) The symbol "CloudropError" needs to be exported by the entry point testing.d.ts
 // (ae-forgotten-export) The symbol "UploadedFile" needs to be exported by the entry point testing.d.ts
 // (ae-forgotten-export) The symbol "CompleteData" needs to be exported by the entry point testing.d.ts
 // (ae-forgotten-export) The symbol "StandardResult" needs to be exported by the entry point testing.d.ts
