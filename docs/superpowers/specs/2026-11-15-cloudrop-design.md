@@ -283,6 +283,7 @@ spec §5.4 and §5.6.
 | Network error, 408, 429, 5xx, `SlowDown` | Retry with exponential backoff and full jitter (0.5 s to 20 s), up to 6 attempts, honouring `Retry-After` |
 | Readable `403 ExpiredRequest`, or an unreadable CORS failure (an expired R2 URL may return no CORS headers) | Renew the signature once through `/sign`, then retry |
 | Readable `403 SignatureDoesNotMatch` (bytes do not match the signed size, type or checksum) | Fail the file with `UPLOAD_REJECTED`; never retried |
+| XHR path only: two consecutive attempts of a part ended in `onerror` with no upload progress, a `/sign` of it answered 2xx between them, and `navigator.onLine` is not `false` (a CORS rule that fails the preflight) | Fail the file with `BUCKET_BLOCKED`, not retryable; `retry()` keeps the ticket (`M12-E7`) |
 | No progress for 30 s | Abort that request and retry the part |
 | `offline` event | Pause; resume on `online` |
 | Other 4xx, expired token | Fail the file with a code, for example `UPLOAD_EXPIRED` |
@@ -294,6 +295,8 @@ only the missing parts.
 The client has four codes of its own, which the server never sends (M3-O3, `M3-U69`): `UPLOAD_REJECTED` (above),
 `ABORTED`, when the caller's signal fired, `NETWORK_ERROR`, retryable, when a request got no answer at all and its
 attempts ran out, and `UPLOAD_IN_USE`, when `resume()` finds the upload held by another tab or by this page (§6.3).
+Later milestones added `CLIENT_CLOSED` (`M8-L1`), `BROWSER_STORAGE_ERROR` (`M12-A7`) and `BUCKET_BLOCKED` (above,
+`M12-E7`).
 
 ### 6.3 Resume after reload
 

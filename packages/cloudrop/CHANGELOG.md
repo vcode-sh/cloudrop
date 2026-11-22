@@ -124,6 +124,13 @@ Every notable change to the `cloudrop` package. The format follows
 - The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
   600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
   such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
+- A bucket the browser cannot reach while the upload server answers fails the file with `BUCKET_BLOCKED`. Before: a
+  CORS rule that misses the page's origin or a signed header ended the file after about 15 s of retries with
+  `NETWORK_ERROR`, retryable. After: in a browser without a `fetch` option, two `PUT` attempts that send no byte
+  around a `/sign` that answered end it with `error.code === "BUCKET_BLOCKED"`, not retryable, within about a second;
+  `retry()` keeps the ticket. Code that shows a Retry button only for `error.retryable`, or that maps every code in an
+  exhaustive `switch` over `CloudropErrorCode` or `ClientErrorCode`, handles the new code. With a `fetch` option and
+  outside a browser nothing changes (`M12-E7`).
 
 ### Added
 
@@ -131,6 +138,8 @@ Every notable change to the `cloudrop` package. The format follows
 - `content.kind` on a `contentChecks()` refusal with `reason: "refused"`: `"web-page"`, `"program"`, `"installer"`,
   `"script"`, `"svg"`, `"xml"` or `"denied"`, and the type `RefusedKind` from `cloudrop` and `cloudrop/client`. A
   client drops a kind it does not know, and an older client ignores it (`M12-E6`).
+- The client error code `BUCKET_BLOCKED`, whose message names the bucket's CORS rule and
+  `npx cloudrop doctor --origin <origin>` (`M12-E7`).
 - A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
   `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
   `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).

@@ -22,7 +22,17 @@ import {
  */
 export type BucketOutcome =
   | { kind: "stored" }
-  | { kind: "opaque" | "expired" | "retry"; error: CloudropError; retryAfterMs: number }
+  | {
+      kind: "opaque";
+      error: CloudropError;
+      retryAfterMs: number;
+      /**
+       * The browser refused the request before any byte of its body left: an XHR onerror without upload progress, as
+       * for a preflight the bucket's CORS rule fails (M12-E7). Never set on the fetch path, which reports no progress.
+       */
+      blocked?: true;
+    }
+  | { kind: "expired" | "retry"; error: CloudropError; retryAfterMs: number }
   | { kind: "rejected" | "aborted"; error: CloudropError };
 
 /** The S3 error code in a storage answer's XML body. */
@@ -61,11 +71,14 @@ export function classifyAnswer(status: number, body: string, retryAfter: string 
   return { kind: "rejected", error: uploadRejected(status) };
 }
 
-/** A PUT that got no readable answer: cancelled by the caller, or lost to the network or a refusal without CORS. */
-export function unreachable(signal: AbortSignal): BucketOutcome {
-  return signal.aborted
-    ? { kind: "aborted", error: aborted() }
-    : { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 };
+/**
+ * A PUT that got no readable answer: cancelled by the caller, or lost to the network or a refusal without CORS.
+ * `blocked`: refused before any byte of the body left (an XHR onerror without upload progress, M12-E7).
+ */
+export function unreachable(signal: AbortSignal, blocked = false): BucketOutcome {
+  if (signal.aborted) return { kind: "aborted", error: aborted() };
+  const outcome = { kind: "opaque", error: bucketUnreachable(), retryAfterMs: 0 } as const;
+  return blocked ? { ...outcome, blocked } : outcome;
 }
 
 /** Sends one presigned PUT with exactly the signed headers. Never rejects. */

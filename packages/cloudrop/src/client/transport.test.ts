@@ -127,11 +127,22 @@ describe("createPut through XMLHttpRequest", () => {
     expect(await put(target, body, new AbortController().signal, onBytes)).toEqual(expected);
   });
 
-  it("reports a network or CORS failure as opaque", async () => {
+  // An error before any byte left is the browser's own refusal, such as a failed preflight (M12-E7).
+  it.each([
+    { name: "after a byte was sent", sent: 1, expected: {} },
+    { name: "before any byte was sent, marked blocked", sent: 0, expected: { blocked: true } },
+  ])("reports a network or CORS failure as opaque $name", async ({ sent, expected }) => {
     const { xhr, put, target, body, onBytes } = await setup({ hold: true });
     const outcome = put(target, body, new AbortController().signal, onBytes);
-    (await xhr.next()).fail();
-    expect(await outcome).toEqual({ kind: "opaque", error: withCode("NETWORK_ERROR"), retryAfterMs: 0 });
+    const call = await xhr.next();
+    call.progress(sent);
+    call.fail();
+    expect(await outcome).toStrictEqual({
+      kind: "opaque",
+      error: withCode("NETWORK_ERROR"),
+      retryAfterMs: 0,
+      ...expected,
+    });
   });
 
   it("reports an XMLHttpRequest that throws before sending as opaque, as fetch's throw is", async () => {

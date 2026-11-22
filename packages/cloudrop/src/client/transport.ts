@@ -39,8 +39,11 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       signal.removeEventListener("abort", cancel);
       resolve(outcome);
     };
+    // Whether any byte of the body left: an error before that is the browser's refusal, such as a failed preflight.
+    let sending = false;
     xhr.upload.onprogress = (event) => {
       watch();
+      sending ||= event.loaded > 0;
       onBytes(event.loaded);
     };
     xhr.onload = () => {
@@ -52,9 +55,12 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
       if (xhr.status === 0) return settle(unreachable(signal));
       settle(classifyAnswer(xhr.status, xhr.responseText, xhr.getResponseHeader("retry-after")));
     };
-    // A network failure and a refusal without CORS headers look the same here, as with fetch (decision S10).
+    // A network failure and a refusal without CORS headers look the same here, as with fetch (decision S10), except
+    // that an error before any progress is marked: twice around a renewal, it ends as BUCKET_BLOCKED (M12-E7). A
+    // timeout or an abort, cloudrop's stall abort included, is never marked, nor is an empty body, which has no byte
+    // to report and so cannot tell a refused URL from a blocked request.
     const lost = () => settle(unreachable(signal));
-    xhr.onerror = lost;
+    xhr.onerror = () => settle(unreachable(signal, !sending && body.size > 0));
     xhr.ontimeout = lost;
     xhr.onabort = lost;
     try {

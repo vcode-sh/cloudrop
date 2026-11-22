@@ -323,6 +323,7 @@ server has answered which parts the bucket lacks: the page before the reload may
   | Any error, or no answer | `/upload`: the file has no ticket yet | Asks `/upload` again. Its answer depends on the session, the quota and the server's rules of that moment, so a refusal for good is repeated until what it names has changed. |
   | `NETWORK_ERROR`; `RATE_LIMITED`; `STORAGE_ERROR` and `SERVER_ERROR`, retryable or not | `/sign`, `/complete`, or the bucket (`429`, `503`, `408`, another `5xx` except `501`, S3's `RequestTimeout` and `OperationAborted`, no readable answer) | Same ticket: sends the parts not yet stored, then `/complete`. After a `/complete` that may have succeeded, `/complete` alone. |
   | `INVALID_INPUT`, `ORIGIN_NOT_ALLOWED`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `BODY_TOO_LARGE`, `NOT_FOUND` | The handler at `/sign` or `/complete`, before it read the token | Same ticket: the request was turned away, not the upload. It passes once the proxy, `basePath` or `trustedOrigins` is fixed. |
+  | `BUCKET_BLOCKED` | The browser, for a `PUT` it sent no byte of, twice around a renewal `/sign` answered | Same ticket: sends the parts not yet stored, then `/complete`. It passes once the bucket's CORS rule lets the page through. |
   | `NOT_UPLOADED` | `/complete`, for a file sent in one `PUT` | Same ticket: sends the file again, then `/complete`. |
   | `PARTS_MISSING` | `/complete`, for a file sent in parts | Same ticket: sends the listed parts again (every part when the answer lists none), then `/complete`. |
   | `INVALID_TOKEN`, `UPLOAD_EXPIRED`, `UNKNOWN_ROUTE`, `NO_SUCH_UPLOAD` | `/sign` or `/complete`; `NO_SUCH_UPLOAD` also by the bucket (`404 NoSuchUpload`) | New ticket: this one is over. After `UNKNOWN_ROUTE`, `/upload` refuses the same way while the route is missing. |
@@ -487,11 +488,14 @@ In React, the factory returns the same `close()`: [Signed-in users](react.md#sig
 
 ## Errors that only the client produces
 
-Six codes come from the client and never from the server:
+Seven codes come from the client and never from the server:
 
 - `UPLOAD_REJECTED`: the bucket refused the bytes as signed (a different size, type or checksum).
 - `ABORTED`: a cancel.
 - `NETWORK_ERROR`: no answer after every attempt. Retryable.
+- `BUCKET_BLOCKED`: in a browser, the bucket's CORS rule (or a firewall or extension) let no byte of the file leave,
+  while your server answers. Not retryable as it is; `retry()` once the rule is fixed (see
+  [Troubleshooting](troubleshooting.md#uploads-fail-with-bucket_blocked)).
 - `UPLOAD_IN_USE`: `resume()` or `discard()` found the upload held in this browser (see
   [Resume after reload](resume.md#two-tabs)).
 - `CLIENT_CLOSED`: `start()`, `upload()` or `resume()` after [`close()`](#close-the-client).
