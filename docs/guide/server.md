@@ -215,9 +215,17 @@ import { forbidden, route } from "cloudrop";
 
 const scans = route(
   { accept: "image/*", maxSize: "10MB", authorize: () => forbidden("This upload is closed.") },
-  { owner: () => null, onDelete: recordDeletion }, // no upload reaches owner any more; onDelete as it was
+  {
+    // Kept as it was: the route's files still run it when api deletes or erases them.
+    onDelete: ({ file, owner, reason }) => {
+      console.info(`scan ${file.id} of ${owner ?? "no owner"} ${reason}`);
+    },
+  },
 );
 ```
+
+No upload reaches its other callbacks again, so drop them, except `owner` under a
+[quota](store.md#owners-and-quota), which otherwise warns at start that the route counts against no limit.
 
 ### Keys
 
