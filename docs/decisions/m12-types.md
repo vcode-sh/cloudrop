@@ -144,3 +144,29 @@ Entries start from 1.
 - **Visible in:** `src/server/delete-context.ts`, `src/server/route.ts`, `src/server/store-route.ts`,
   `src/server/route-types.ts`, `src/server/cloudrop.ts`, `src/server/store-api.ts`, `src/server/erase.ts`,
   `src/server/store-delete.ts`, `src/server/store-types.test.ts`, `fixtures/consumer-types/app.ts`.
+
+### M12-T7: a route whose `authorize` only refuses authorizes no one in the types
+
+- **Decision:** `route()` and a store's `route()` (`RouteFunction`) infer `TAuth` under the constraint
+  `AuthResult | Refusal | CloudropError` and pass it through `Authorized<TAuth>`, which removes `Refusal` and
+  `CloudropError`. A route whose `authorize` only refuses, such as `() => forbidden("closed")`,
+  `async () => forbidden()` or `() => rateLimited(30)`, is `Route<M, R, never>`, so it adds nothing to the auth
+  union a typed plugin is checked against (`M12-T5`). Its callbacks see `CallbackAuth<TAuth>`: no auth fields at all,
+  rather than `never`, which as an `Omit` becomes an index signature and would let any field name compile. A route
+  that authorizes someone keeps exactly the result it inferred before.
+- **Why:** found by Task 10's review. TypeScript sets a refusal aside only when it is one member of a returned union
+  (`{ userId } | Refusal`), so a function that returns only a refusal inferred the refusal itself: `TAuth = Refusal`.
+  A `CloudropPlugin<{ userId: string }>` beside such a route then failed with TS2322, and `prefix`'s context offered
+  `code` and `message`, which no authorize result carries at run time. A lone `CloudropError` failed `AuthResult`
+  (it has reserved fields), so TypeScript fell back to the constraint and gave `TAuth = AuthResult`, which fails the
+  plugin check the same way; admitting the refusals in the constraint lets `Authorized` see and remove them.
+- **If wrong:** an authorize result that is structurally a `Refusal` (it would need cloudrop's registered symbol) or a
+  `CloudropError` would be typed as no one; neither is a plain object an app returns. A reserved field in a real
+  result is still refused, since such an object fits none of the three members.
+- **Status:** in force. `src/server/store-types.test.ts`: `closed` (`forbidden`), `closedLater` (async) and
+  `throttled` (`rateLimited`) are `Route<undefined, null, never>`; `createCloudrop` takes them beside `signedIn` with
+  `plugins: [perUser]`; `closed`'s `prefix` context has neither `message` nor `code` (`@ts-expect-error`); `team`
+  keeps `{ userId: string; teamId: string }`, and the reserved `tx` row still fails. Before the fix the plugin row
+  failed with TS2322 and the three routes inferred `Refusal`, `Refusal` and `AuthResult`.
+- **Visible in:** `src/server/route.ts` (`Authorized`, `CallbackAuth`), `src/server/store-route.ts`,
+  `src/server/store-types.test.ts`.

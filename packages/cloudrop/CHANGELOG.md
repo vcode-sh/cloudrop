@@ -158,13 +158,13 @@ Every notable change to the `cloudrop` package. The format follows
 - `EraseReport` and `SweepReport` have more fields. Before: `{ revoked, deleted, refused, cleaned, failed, waiting,
   done }` and `{ expired, cleaned, failed, reported, cursor }`. After: `EraseReport` also has `requestedAt` and
   `prefixed`, and `SweepReport` `erasing` and `erased` (`M12-O1`, `M12-O3`, `M12-O4`).
-- `api.sweep` carries every unfinished erasure on, in a pass between its two passes over rows. Before: an erasure
-  went on only while the app called `eraseOwner` again. After: one call at account deletion is enough. For an owner
-  being erased, the object of a stuck completion the sweep ends is removed by that pass instead of kept, and each owner
-  counts as one row of `limit`. A sweep its `signal` stops in that pass answers the cursor `erase:<owner>` after the
-  last owner it ran, so continuing from it skips no one. `SweepOptions` is a generic type alias whose `context`
-  reaches `onDelete` for the files it deletes there: required when the routes' `onDelete` declare an erased context
-  that does not admit `undefined` (`M12-O4`, `M12-T6`).
+- `api.sweep` carries every unfinished erasure on, in a pass between its two passes over rows. Before: an erasure went
+  on only while the app called `eraseOwner` again. After: one call at account deletion is enough. For an owner being
+  erased, the object of a stuck completion the sweep ends is removed by that pass instead of kept, and each owner counts
+  as one row of `limit`. A sweep its `signal` stops in that pass answers the cursor `erase:<owner>` after the last owner
+  it ran, so continuing from it skips no owner it did not run. `SweepOptions` is a generic type alias whose `context`
+  reaches `onDelete` for the files it deletes there: required when the routes' `onDelete` declare an erased context that
+  does not admit `undefined` (`M12-O4`, `M12-T6`).
 
 ### Added
 
@@ -213,6 +213,11 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Fixed
 
+- A route whose `authorize` only refuses, such as `() => forbidden("closed")`, authorizes no one in the types. Before:
+  its auth type was the refusal itself (or `AuthResult` for `() => rateLimited(30)`), so a typed plugin such as
+  `CloudropPlugin<{ userId: string }>` beside it failed to compile, and `prefix`'s context offered `code` and
+  `message`. After: the route is `Route<M, R, never>`, the plugin compiles, and its callbacks see no auth fields
+  (`M12-T7`).
 - The bucket's `Retry-After` reaches the client when `/upload` refuses a file storage could not start. Before: the
   driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
   After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the
