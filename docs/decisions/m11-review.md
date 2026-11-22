@@ -1684,7 +1684,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   reading `waiting: 1` after an erasure request could believe the bucket was empty of that owner.
 - **If wrong:** none known; the counters themselves are as `M8-A5` and `M11-D4` set them.
 - **Status:** in force.
-- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
+- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erasing-an-owner`.
 
 ### M11-R153: an erasure needs the sweep for a completion its server never finished
 
@@ -1703,7 +1703,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   the guide names the cause and the cure. A per-owner `stale` would let `eraseOwner` share the rule later.
 - **Status:** in force. `src/server/erase.test.ts` ("waits for the sweep to end a completion its server never
   finished…") holds the times at the millisecond: not ended at 25 hours, ended one millisecond later.
-- **Visible in:** `docs/guide/store.md#erase-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.
+- **Visible in:** `docs/guide/store.md#erasing-an-owner`, `src/server/erase.ts`, `src/server/erase.test.ts`.
 
 ### M11-R154: a replacement whose `onDelete` threw for a lost race asks its client to retry
 

@@ -64,15 +64,17 @@ export type {
   FileRecord,
   FileRecordStatus,
   NewFile,
+  OwnerErasure,
   OwnerUsage,
   PendingRecord,
   RecordOf,
   RejectedRecord,
+  ReserveOutcome,
   TransactionalStore,
   Transition,
 } from "./server/store.ts";
 export type { DeletedFile, DeleteFileOptions, StoreFileApi } from "./server/store-api.ts";
-export type { Quota, StoreOptions } from "./server/store-config.ts";
+export type { EraseSettings, Quota, StoreOptions } from "./server/store-config.ts";
 export type { RouteFunction } from "./server/store-route.ts";
 export type { SweepOptions, SweepReport } from "./server/sweep.ts";
 export type {

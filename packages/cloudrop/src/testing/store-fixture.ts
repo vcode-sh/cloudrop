@@ -81,3 +81,11 @@ export function gate(): { arrived: Promise<void>; open(): void; pass(): Promise<
     },
   };
 }
+
+/**
+ * An erase mark answered but never kept, as a store written before 1.0 might: uploads of the owner are still reserved
+ * while eraseOwner runs, so only its last reads can catch one that starts during the run (M8-A5, M12-O2).
+ */
+export const unkeptMark: Pick<MemoryStore, "markErasure"> = {
+  markErasure: async ({ now }) => ({ requestedAt: now, erasedAt: null }),
+};

@@ -12,11 +12,22 @@ import { storeOfRoute } from "./store-route.ts";
 /** An owner's limit in bytes, or null for no limit. */
 export type Quota = (owner: string) => Awaitable<number | null>;
 
+/** `eraseOwner`'s settings (M12-O3). */
+export interface EraseSettings {
+  /**
+   * Folders of the owner's that no row tracks, such as files your app wrote with `putObject`, emptied with
+   * `deletePrefix` once the owner's rows are erased: `(owner) => ["exports/" + owner + "/"]`. Each must end in "/" and
+   * have the owner, as it is or URI-encoded, as one whole segment between slashes; any other answers INVALID_CONFIG.
+   */
+  prefixes?: (owner: string) => readonly string[];
+}
+
 export interface StoreOptions {
   /**
    * A database store, such as `sqlStore(...)` from `cloudrop/adapters/sql`. With one, `/upload` writes a row per file
    * before anything is signed, `onComplete` runs once per file, `/abort` never deletes a completed file, and `api`
-   * gains `file`, `files`, `allFiles`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep`.
+   * gains `file`, `files`, `allFiles`, `usage`, `revokeUploads`, `deleteFile`, `eraseOwner`, `reopenOwner`, `reconcile`
+   * and `sweep`.
    */
   store?: CloudropStore<unknown>;
   /**
@@ -29,12 +40,16 @@ export interface StoreOptions {
    * over. Make it longer than your slowest `onComplete`. Default 300000 (5 minutes), at most 2592000000 (30 days).
    */
   completionLeaseMs?: number;
+  /** With a store: what `eraseOwner` empties beyond the owner's rows. */
+  erase?: EraseSettings;
 }
 
 export interface StoreConfig {
   store: CloudropStore<unknown> | undefined;
   quota: Quota | undefined;
   completionLeaseMs: number;
+  /** `erase.prefixes`, or none. */
+  erasePrefixes: EraseSettings["prefixes"];
 }
 
 const DEFAULT_LEASE_MS = 300_000;
@@ -58,6 +73,10 @@ const STORE_METHODS = [
   "usage",
   "reconcile",
   "owners",
+  "markErasure",
+  "erased",
+  "reopen",
+  "erasing",
 ] as const;
 
 function readStoreObject(given: unknown): CloudropStore<unknown> | undefined {
@@ -114,8 +133,23 @@ function checkRoutes(routes: readonly RouteConfig[], store: CloudropStore<unknow
   }
 }
 
+function readErase(given: unknown, store: CloudropStore<unknown> | undefined): EraseSettings["prefixes"] {
+  if (given === undefined) return undefined;
+  if (!store) {
+    throw configError("erase needs a database store, which erases by the owner's rows. Pass store, or remove erase.");
+  }
+  const { prefixes } = (typeof given === "object" && given !== null ? given : { prefixes: null }) as EraseSettings;
+  if (prefixes !== undefined && !isFunction(prefixes)) {
+    throw configError(
+      'erase.prefixes must be a function from an owner to their folders, such as (owner) => ["exports/" + owner + "/"].',
+    );
+  }
+  return prefixes;
+}
+
 export function readStoreConfig(options: StoreOptions, routes: readonly RouteConfig[]): StoreConfig {
   const store = readStoreObject(options.store);
+  const erasePrefixes = readErase(options.erase, store);
   const { quota, completionLeaseMs } = options;
   if (!store && quota !== undefined) {
     throw configError("quota needs a database store to count usage. Pass store to createCloudrop, or remove quota.");
@@ -135,7 +169,7 @@ export function readStoreConfig(options: StoreOptions, routes: readonly RouteCon
     );
   }
   checkRoutes(routes, store);
-  return { store, quota, completionLeaseMs: leaseMs };
+  return { store, quota, completionLeaseMs: leaseMs, erasePrefixes };
 }
 
 /**

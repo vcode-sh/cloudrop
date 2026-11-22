@@ -124,7 +124,7 @@ function pageProblem(keys: string[], prefix: string, previous: ReadonlySet<strin
   return undefined;
 }
 
-async function deletePrefix(
+export async function deletePrefix(
   storage: StorageDriver,
   prefix: string,
 ): Promise<Result<{ deleted: number; verifiedAt: Date }>> {
@@ -196,6 +196,7 @@ function withoutStore(whenReady: <T>(call: () => Promise<Result<T>>) => Promise<
     revokeUploads: refuse("revokeUploads"),
     deleteFile: refuse("deleteFile"),
     eraseOwner: refuse("eraseOwner"),
+    reopenOwner: refuse("reopenOwner"),
     reconcile: refuse("reconcile"),
     sweep: refuse("sweep"),
   };

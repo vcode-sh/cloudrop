@@ -143,7 +143,17 @@ describe("an onDelete that refuses, with api.eraseOwner", () => {
     // Past both files' URLs and the grace, so the run that deletes the older one also proves it clean.
     vi.setSystemTime(NOW.getTime() + 2 * HOUR);
     expect(await fixture.cloudrop.api.eraseOwner("u1")).toEqual({
-      data: { revoked: 0, deleted: 1, refused: 1, cleaned: 1, failed: 0, waiting: 1, done: false },
+      data: {
+        requestedAt: new Date(NOW.getTime() + 2 * HOUR),
+        revoked: 0,
+        deleted: 1,
+        refused: 1,
+        cleaned: 1,
+        failed: 0,
+        waiting: 1,
+        prefixed: 0,
+        done: false,
+      },
       error: null,
     });
     // Newest first: the refused file came before the one deleted.
@@ -169,12 +179,14 @@ describe("an onDelete that refuses, with api.eraseOwner", () => {
     expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, deleted: true, cleaned: true });
     paused.open();
     expect((await erasing).data).toEqual({
+      requestedAt: new Date(NOW.getTime() + 2 * HOUR),
       revoked: 0,
       deleted: 0,
       refused: 1,
       cleaned: 0,
       failed: 0,
       waiting: 0,
+      prefixed: 0,
       done: true,
     });
   });

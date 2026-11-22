@@ -41,6 +41,8 @@ describe("api.sweep: expire", () => {
       cleaned: 0,
       failed: 0,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     vi.setSystemTime(PAST_GRACE);
@@ -49,6 +51,8 @@ describe("api.sweep: expire", () => {
       cleaned: 0,
       failed: 0,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     expect(await statuses(fixture)).toEqual({
@@ -213,6 +217,8 @@ describe("api.sweep: cleanup", () => {
       cleaned: 0,
       failed: 0,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     expect([fixture.storageCalls.length - callsBefore, fixture.logger.errors]).toEqual([0, []]);
@@ -227,10 +233,21 @@ describe("api.sweep: paging and failures", () => {
     const first = await fixture.cloudrop.api.sweep({ limit: 2 });
     expect([first.data?.expired, typeof first.data?.cursor]).toEqual([2, "string"]);
     const second = await fixture.cloudrop.api.sweep({ limit: 2, cursor: first.data?.cursor ?? undefined });
-    expect(second.data).toEqual({ expired: 1, cleaned: 0, failed: 0, reported: [], cursor: null });
+    expect(second.data).toEqual({
+      expired: 1,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      erasing: 0,
+      erased: 0,
+      cursor: null,
+    });
     // The null a finished sweep answers starts the next one from the beginning: nothing is left to do (M11-R64).
     const again = await fixture.cloudrop.api.sweep({ cursor: second.data?.cursor });
-    expect(again).toEqual({ data: { expired: 0, cleaned: 0, failed: 0, reported: [], cursor: null }, error: null });
+    expect(again).toEqual({
+      data: { expired: 0, cleaned: 0, failed: 0, reported: [], erasing: 0, erased: 0, cursor: null },
+      error: null,
+    });
   });
 
   it("logs a row that fails every time, goes on past it and still reports what it ended", async () => {
@@ -255,6 +272,8 @@ describe("api.sweep: paging and failures", () => {
       cleaned: 0,
       failed: 1,
       reported: [stuck.id],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     expect([(await statuses(fixture))[later.id], (await fixture.storage.head(later.key)).data]).toEqual([
@@ -272,6 +291,8 @@ describe("api.sweep: paging and failures", () => {
       cleaned: 1,
       failed: 0,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     expect((await statuses(fixture))[poison.id]).toEqual(["expired", at(26 * HOUR + 4000)]);
@@ -300,6 +321,8 @@ describe("api.sweep: paging and failures", () => {
       cleaned: 0,
       failed: 1,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     expect((await statuses(fixture))[ticket.id]?.[0]).toBe("expired");
@@ -330,6 +353,8 @@ describe("api.sweep: paging and failures", () => {
       cleaned: 0,
       failed: 0,
       reported: [],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
   });

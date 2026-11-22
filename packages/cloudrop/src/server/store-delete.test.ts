@@ -203,6 +203,7 @@ describe("onDelete with api.eraseOwner", () => {
     state.failing = true;
     const context = "account deleted";
     expect((await api.eraseOwner("u1", { context })).data).toEqual({
+      requestedAt: NOW,
       revoked: 0,
       deleted: 0,
       refused: 0,
@@ -210,6 +211,7 @@ describe("onDelete with api.eraseOwner", () => {
       failed: 1,
       // Still completed, so also a live file the run could not prove gone.
       waiting: 1,
+      prefixed: 0,
       done: false,
     });
     expect(await status(ticket.id)).toBe("completed");

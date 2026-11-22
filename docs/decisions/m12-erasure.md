@@ -75,3 +75,72 @@ Entries start from 1.
   `src/server/erase-mark.test.ts` whose `authorize` resolves after the mark), and SQLite's outcome read removed.
 - **Visible in:** `src/store/sql/postgres.ts`, `src/store/sql/sqlite.ts`, `src/testing/memory-store-methods.ts`,
   `src/server/store-upload.ts`, `src/server/store.ts`.
+
+### M12-O3: `erase.prefixes` empties folders no row tracks, each holding the owner as a whole segment
+
+- **Decision:** `createCloudrop({ erase: { prefixes: (owner) => readonly string[] } })` (`EraseSettings`), with a store
+  only (`INVALID_CONFIG` without one, or when `prefixes` is not a function). Each run calls it first, before the mark,
+  and refuses the whole call with `INVALID_CONFIG` unless every answer is a string ending in `/` with the owner, raw or
+  `encodeURIComponent`-encoded, as one whole `/` segment, compared in NFC; a throw is `INVALID_CONFIG` with it as the
+  cause. Once the row passes report nothing failed and nothing waiting, the folders are emptied in order with the
+  `deletePrefix` of `api.deletePrefix`; `prefixed` counts the objects deleted, and a folder that fails is logged and
+  counted in `failed`, so the run is not done. Only then is `erased_at` set.
+- **Why:** spec §4: the pilot emptied one folder per use case with its own `deletePrefix` loop. A segment rule makes a
+  mistake such as `() => ["avatars/"]` fail loudly instead of emptying every owner's files; `exports/u10/` is not
+  `u1`'s. Prefixes go last, so a folder is not emptied while a file of the owner's may still complete into it, and
+  checked first, so a misconfigured app marks nobody.
+- **If wrong:** a key layout that puts the owner inside a segment (`user-42/`) cannot use `prefixes` and erases those
+  folders itself. `deletePrefix` lists objects only: an untracked multipart upload under a prefix is the lifecycle
+  rule's to abort, as the guide says.
+- **Status:** in force. `src/server/erase-mark.test.ts`: the folder stays until the rows are done, then goes, and
+  another owner's stays (fault probe: emptied before the rows were done, seen failing); the encoded owner; the three
+  unsafe prefixes (fault probe: the rule always passing, seen failing).
+- **Visible in:** `src/server/erase.ts`, `src/server/store-config.ts`, `docs/guide/store.md#folders-no-row-tracks-eraseprefixes`.
+
+### M12-O4: the sweep carries every unfinished erasure on
+
+- **Decision:** `api.sweep` has a third pass, `erase`, between `expire` and `cleanup`: it pages `store.erasing` by
+  owner, each owner counting as one row of `limit`, and runs the same erasure as `eraseOwner` for each, with the
+  sweep's `graceMs`, `signal` and `context`. `SweepReport` gains `erasing` (owners it ran) and `erased` (owners it
+  finished); an owner whose run answers an error is logged and counted in `failed`, and the files a run counts in
+  `failed` are added there. The sweep cursor names the pass, `erase:<owner>`; `cleanup:` and `expire:` cursors of 0.6
+  stay valid. `SweepOptions<TErased>` is a type alias with `ContextOption<TErased>`, and `api.sweep` takes its options
+  as `eraseOwner` does: required when the routes' `onDelete` declare an erased context that does not admit
+  `undefined`, so a file the sweep deletes never reaches an `onDelete` without the context its type promises
+  (`M12-T6`).
+- **Why:** spec §4.6: an app calls `eraseOwner` once at account deletion and keeps its sweep schedule. After the expire
+  pass, so a completion the same sweep ended as failed is erased in that sweep; for an owner being erased its object
+  is removed, not kept for the app to check.
+- **If wrong:** a sweep with many marked owners does more work per call than `limit` rows suggest, since each owner's
+  run pages its own rows; D1 apps keep `limit` low, as the guide says for the sweep.
+- **Status:** in force. `src/server/erase-mark.test.ts`: an erasure stopped by its signal is finished by the next
+  sweep (`erasing: 1, erased: 1`), and the sweep after has nobody to erase; an erasure the storage cannot finish is
+  counted failed and logged, and finished once storage is back. Fault probe: the pass removed, seen failing.
+  `src/server/erase.test.ts`: the sweep that ends a stuck completion of an owner being erased removes its object.
+- **Visible in:** `src/server/sweep.ts`, `src/server/sweep-options.ts`, `docs/guide/store.md#the-sweep`.
+
+### M12-O5: `api.reopenOwner` clears the mark
+
+- **Decision:** `api.reopenOwner(owner)` calls `store.reopen` and answers `{ reopened }`: true when there was a mark,
+  finished or not, false when there was none. The owner's uploads are reserved again and the sweep stops erasing them;
+  rows and counters stay as they are, and nothing deleted comes back. A later `eraseOwner` marks the owner anew, with a
+  new `requestedAt`, so a run that began before the reopen cannot finish the new mark (`erased` is guarded on it).
+- **Why:** spec §4.6: an owner id used again, or an erasure started by mistake.
+- **If wrong:** an app that reopens an owner whose account is still gone lets uploads of that id back in; the
+  anti-join of the guide finds them again.
+- **Status:** in force. `src/server/erase-mark.test.ts` (an upload refused, reopened, then accepted; a second reopen
+  answers false); store contract row "reopen clears the mark and keeps the counters, and reserve reserves again".
+- **Visible in:** `src/server/store-api.ts`, `docs/guide/store.md#erasing-an-owner`.
+
+### M12-O6: finding owners who no longer exist stays the app's
+
+- **Decision:** cloudrop does not look for owners whose account is gone. The guide gives the anti-join of
+  `cloudrop_usage` against the app's user table, `WHERE erase_requested_at IS NULL`, followed by `eraseOwner` for each
+  owner it answers.
+- **Why:** spec §4.7: cloudrop cannot join the app's user table, and a callback asking the app whether each owner
+  still exists would push every owner through JavaScript on every sweep. The mark makes the app's query simple: a
+  marked owner leaves it.
+- **If wrong:** an app that never runs the query keeps the files of accounts deleted without `eraseOwner`; it is the
+  same as before 1.0.
+- **Status:** in force.
+- **Visible in:** `docs/guide/store.md#finding-owners-who-no-longer-exist`.
