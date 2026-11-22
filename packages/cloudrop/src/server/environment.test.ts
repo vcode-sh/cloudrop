@@ -2,6 +2,7 @@
 // first request reads it, and a server missing it answers 500 and logs why once.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { StorageDriver } from "../storage/driver.ts";
 import { r2 } from "../storage/presets.ts";
 import { createFakeR2 } from "../testing/fake-r2.ts";
 import { uploadBody } from "../testing/handler-fixture.ts";
@@ -15,6 +16,7 @@ const credentials = { accessKeyId: "key", secretAccessKey: "secret" };
 const routes = { avatar: route({ accept: "image/png", maxSize: "1MB", authorize: allowAnyone }) };
 const VARIABLES = [
   "CLOUDROP_SECRET",
+  "CLOUDROP_R2_BUCKET",
   "CLOUDROP_R2_ACCOUNT_ID",
   "CLOUDROP_R2_ACCESS_KEY_ID",
   "CLOUDROP_R2_SECRET_ACCESS_KEY",
@@ -31,11 +33,14 @@ afterEach(() => vi.unstubAllEnvs());
 
 const TRUSTED = "https://admin.example.com";
 
-function server() {
-  const fake = createFakeR2({ bucket: "uploads", credentials });
+/** A server on `r2({ bucket })` over the fake R2, or, with `{ storage: undefined }`, on the default storage. */
+function server(
+  options: { storage?: StorageDriver } = {
+    storage: r2({ bucket: "uploads", fetch: createFakeR2({ bucket: "uploads", credentials }).fetch }),
+  },
+) {
   const logger = recordingLogger();
-  const storage = r2({ bucket: "uploads", fetch: fake.fetch });
-  const cloudrop = createCloudrop({ storage, routes, logger, trustedOrigins: [TRUSTED] });
+  const cloudrop = createCloudrop({ ...options, routes, logger, trustedOrigins: [TRUSTED] });
   const post = async (origin = APP_ORIGIN) => {
     const response = await cloudrop.handler(
       new Request(`${APP_ORIGIN}/api/cloudrop/upload`, {
@@ -47,7 +52,10 @@ function server() {
     return {
       status: response.status,
       allowOrigin: response.headers.get("access-control-allow-origin"),
-      body: (await response.json()) as { error?: { code: string; message: string; retryable: boolean } },
+      body: (await response.json()) as {
+        files?: { key: string; put: { url: string } }[];
+        error?: { code: string; message: string; retryable: boolean };
+      },
     };
   };
   return { cloudrop, logger, post };
@@ -152,5 +160,22 @@ describe("configuration from the environment", () => {
       message:
         "Each upload token secret must be text of at least 32 characters. Generate one with `openssl rand -base64 32`.",
     });
+  });
+
+  it("signs on r2() from the CLOUDROP_R2_* variables when storage is left out", async () => {
+    setEnvironment();
+    vi.stubEnv("CLOUDROP_R2_BUCKET", "uploads");
+    const { body } = await server({ storage: undefined }).post();
+    expect(new URL(body.files?.[0]?.put.url ?? "").host).toBe(`${ACCOUNT}.r2.cloudflarestorage.com`);
+  });
+
+  it("starts without storage or variables, and names every missing CLOUDROP_R2_* variable on first use", async () => {
+    const { cloudrop, logger } = server({ storage: undefined });
+    const missing = MISSING.replace("Missing R2 settings: ", "Missing R2 settings: bucket (CLOUDROP_R2_BUCKET), ");
+    expect(await cloudrop.api.headObject("a.png")).toEqual({
+      data: null,
+      error: expect.objectContaining({ code: "INVALID_CONFIG", message: missing }),
+    });
+    expect(logger.errors).toEqual([]);
   });
 });

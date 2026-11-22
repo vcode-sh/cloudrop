@@ -54,6 +54,13 @@ Every notable change to the `cloudrop` package. The format follows
 - `revokeUploads` takes the owner itself. Before: `api.revokeUploads({ owner: userId })`. After:
   `api.revokeUploads(userId)`, like `usage(owner)` and `eraseOwner(owner)`. The old form answers `INVALID_INPUT`
   (`M12-A3`).
+- `storage` is optional and defaults to `r2()`. Before: `createCloudrop({ storage: r2(), routes })`, and leaving it
+  out threw `INVALID_CONFIG`. After: `createCloudrop({ routes })` reads the four `CLOUDROP_R2_*` variables, lazily as
+  `r2()` does, so a build still needs no secrets. Nothing changes for an app that passes `storage`. A value that is not
+  a driver is refused with "storage must be a storage driver, such as r2({ bucket }) or s3({ ... })" (`M12-A9`).
+- A route without `prefix` (or `key`) writes under its own name. Before: `avatar: route({ ... })` stored
+  `01JD5Z3K7Q2X8M4N6P9R0S1T2V.png` at the bucket root. After: `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. To keep the
+  root: `route({ ... }, { prefix: () => "" })`. Files already stored keep their keys (`M12-A10`).
 
 ### Added
 
@@ -64,6 +71,8 @@ Every notable change to the `cloudrop` package. The format follows
 
 ### Changed
 
+- The refusal of a `plugins` option that is not a list suggests `[contentChecks()]`, not the removed `limits()`
+  (`M12-A11`).
 - A server without a store no longer carries the store's code: it travels with the store object. The bundled server
   is 28.25 kB instead of 34.71 kB (gzip), and a server with a SQL store 33.61 kB instead of 33.13 kB (`M12-S1`).
 - The size ceilings of every entry are raised for 1.0, so they guard against accidents and never block work (`M12-P1`).

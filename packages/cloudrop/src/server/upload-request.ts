@@ -122,7 +122,9 @@ export function prepareFile(
     file: { id, name, size: descriptor.size, type, ext: match.ext },
   };
   const { definition } = route;
-  const folder = definition.prefix ? definition.prefix(keyContext) : "";
+  // Without a prefix, keys go under the route's name, so no route writes at the bucket root unless its prefix returns ""
+  // (M12-A10).
+  const folder = definition.prefix ? definition.prefix(keyContext) : route.name;
   // A prefix is often a tenant folder: falling back to the bucket root would mix tenants silently. A leading slash is
   // refused before generatedKey trims trailing ones, which would turn "/" into the root.
   if (typeof folder !== "string") {

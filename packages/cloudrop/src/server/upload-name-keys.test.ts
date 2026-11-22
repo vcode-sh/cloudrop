@@ -97,8 +97,10 @@ describe("POST /upload on a route that puts file.name in the key", () => {
     const fixture = serverFixture({ plain });
     const sent = ["Icon\r", "a\nb.txt", "a\u0085b.txt", " a.txt ", ".profile", "a.", "..", ".", "/", "a/b.txt", "a\\b"];
     const { body } = await upload(fixture, { route: "plain", files: sent.map(file) });
-    // A ULID and, at most, the name's extension in lower-case letters and digits.
-    const odd = answers(body.files).filter((key) => !/^[0-9A-HJKMNP-TV-Z]{26}(?:\.[a-z0-9]{1,16})?$/.test(String(key)));
+    // The route's folder, a ULID and, at most, the name's extension in lower-case letters and digits.
+    const odd = answers(body.files).filter(
+      (key) => !/^plain\/[0-9A-HJKMNP-TV-Z]{26}(?:\.[a-z0-9]{1,16})?$/.test(String(key)),
+    );
     expect(odd).toEqual([]);
   });
 

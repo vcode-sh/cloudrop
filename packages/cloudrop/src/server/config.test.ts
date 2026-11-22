@@ -40,15 +40,17 @@ function invalidRoute(options: Record<string, unknown>) {
 describe("readConfig errors", () => {
   it.for<{ name: string; make: () => unknown; message: string }>([
     {
+      // storage defaults to r2(), which reads its variables lazily (M12-A9): routes are the first thing missing.
       name: "no options",
       make: () => (readConfig as (options?: unknown) => unknown)(),
-      message: "Pass storage to createCloudrop: r2({ bucket }) or s3({ ... }).",
+      message: "Pass at least one route: routes: { avatar: route({ ... }) }.",
     },
     // The route checks read rules.maxObjectSize; without it they would throw a TypeError.
     {
       name: "a storage without rules",
       make: create({ storage: { presignPut: () => {} } }),
-      message: "Pass storage to createCloudrop: r2({ bucket }) or s3({ ... }).",
+      message:
+        "storage must be a storage driver, such as r2({ bucket }) or s3({ ... }). Leave it out to use r2() with the CLOUDROP_R2_* variables.",
     },
     {
       name: "no routes",
@@ -212,7 +214,7 @@ describe("readConfig errors", () => {
     {
       name: "plugins that are not a list",
       make: create({ plugins: { id: "a" } }),
-      message: "plugins must be a list, such as plugins: [limits()].",
+      message: "plugins must be a list, such as plugins: [contentChecks()].",
     },
     {
       name: "two plugins with one id",

@@ -190,7 +190,7 @@ describe("createCloudrop from plain JavaScript", () => {
     expect(() => createCloudrop(options as never)).toThrow(
       expect.objectContaining({
         code: "INVALID_CONFIG",
-        message: "Pass storage to createCloudrop: r2({ bucket }) or s3({ ... }).",
+        message: "Pass at least one route: routes: { avatar: route({ ... }) }.",
       }),
     );
   });

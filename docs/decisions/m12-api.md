@@ -48,3 +48,43 @@ Entries start from 1.
 - **Status:** in force.
 - **Visible in:** `src/server/store-api.ts`, `src/server/store-api.test.ts`, `docs/guide/store.md`,
   `docs/guide/resume.md`.
+
+### M12-A9: `storage` defaults to `r2()`, still read lazily
+
+- **Decision:** `createCloudrop`'s `storage` is optional; left out (or `undefined`), it is `r2()`, which reads
+  `CLOUDROP_R2_BUCKET`, `CLOUDROP_R2_ACCOUNT_ID`, `CLOUDROP_R2_ACCESS_KEY_ID` and `CLOUDROP_R2_SECRET_ACCESS_KEY` as an
+  explicit `r2()` does: on the first request in production, so `next build` needs no secrets (`M4-F16`, `M4-F17`),
+  and at construction with `NODE_ENV=development`. A missing variable is the same `INVALID_CONFIG` naming each one,
+  the bucket included. `r2()` is called only when `storage` is absent, so a server on `s3()` never reads an R2
+  variable. A value that is not a driver says what to pass and that leaving it out means `r2()`. With nothing passed
+  at all, the first refusal is now the missing routes, since storage has a default.
+- **Why:** spec 1.0 §6: one line less on the simple path, and the missing-settings error already names the variables.
+- **If wrong:** an app that meant to configure S3 and forgot `storage` gets an R2 error naming R2 variables on its
+  first request, not at start; the message says which variables, which points at the missing option.
+- **Status:** in force.
+- **Visible in:** `src/server/config.ts`, `src/server/environment.test.ts`, `src/server/config.test.ts`,
+  `docs/guide/server.md` (options table).
+
+### M12-A11: the plugins-list message names a plugin that exists
+
+- **Decision:** `plugins` that is not a list is refused with "plugins must be a list, such as plugins:
+  [contentChecks()]." instead of `[limits()]`.
+- **Why:** `limits()` was cut from 1.0 (spec 1.0, "Cut from 1.0"); a message must not suggest an import that fails.
+- **If wrong:** nothing depends on the text.
+- **Status:** in force.
+- **Visible in:** `src/server/config.ts`, `src/server/config.test.ts`.
+
+### M12-A10: a route without `prefix` writes under its own name
+
+- **Decision:** a route that defines neither `prefix` nor `key` generates `<route name>/<ulid><ext>`, such as
+  `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. `prefix: () => ""` keeps the bucket root, as an explicit choice. The route
+  name is safe as a key segment: `ROUTE_NAME` allows only letters, digits, `-` and `_`. A `key` function is unchanged.
+  Objects already stored at the root stay where they are; their keys live in the app's rows or the store's, and nothing
+  looks them up by prefix.
+- **Why:** spec 1.0 §6: no silent mixing of routes at the root, and a whole route can be found, listed or emptied by
+  prefix (`deletePrefix("avatar/")`).
+- **If wrong:** an app that relied on root keys and lists the bucket root by prefix finds new files under the route's
+  folder; `prefix: () => ""` restores the old keys, and the changelog says so.
+- **Status:** in force.
+- **Visible in:** `src/server/upload-request.ts`, `src/server/upload-requests.test.ts` ("POST /upload: keys"),
+  `docs/guide/server.md` (route options).

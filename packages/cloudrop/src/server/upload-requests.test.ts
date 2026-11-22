@@ -225,11 +225,12 @@ describe("POST /upload: keys", () => {
   });
 
   it.for([
-    { name: "a relative folder with a trailing slash", prefix: "users/42/", folder: "users/42/" },
-    { name: "an empty folder (the bucket root)", prefix: "", folder: "" },
+    { name: "a relative folder with a trailing slash", prefix: () => "users/42/", folder: "users/42/" },
+    { name: "the bucket root when prefix returns an empty folder", prefix: () => "", folder: "" },
+    { name: "the route's name without a prefix", prefix: undefined, folder: "avatar/" },
   ])("stores under $name", async ({ prefix, folder }) => {
-    const rooted = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { prefix: () => prefix });
-    const { body } = await upload(serverFixture({ files: rooted }), { route: "files", files: [png()] });
+    const avatar = route({ accept: "*/*", maxSize: "1GB", authorize: allowAnyone }, { prefix });
+    const { body } = await upload(serverFixture({ avatar }), { route: "avatar", files: [png()] });
     const ticket = body.files[0] as SingleTicket;
     expect(ticket.key).toBe(`${folder}${ticket.id}.png`);
   });

@@ -39,7 +39,7 @@ checked when `createCloudrop` runs too, so a dev server fails as soon as the ser
 
 | Option | What it does | Default |
 | --- | --- | --- |
-| `storage` | Where files go: `r2({ ... })` or `s3({ ... })`. Required. | |
+| `storage` | Where files go: `r2({ ... })` or `s3({ ... })`. | `r2()`, from `CLOUDROP_R2_BUCKET`, `CLOUDROP_R2_ACCOUNT_ID`, `CLOUDROP_R2_ACCESS_KEY_ID` and `CLOUDROP_R2_SECRET_ACCESS_KEY` |
 | `routes` | The upload routes, by name. At least one. A name uses letters, digits, `-` and `_`, at most 64. | |
 | `secret` | The secret that signs upload tokens: text of at least 32 characters, or a list of them (see [Rotate the secret](#rotate-the-secret)). | env `CLOUDROP_SECRET` |
 | `basePath` | Where the handler is mounted. A leading slash, no trailing slash, no query. | `"/api/cloudrop"` |
@@ -168,7 +168,7 @@ const photo = route(
 | `maxFiles` | Files per `/upload` call, 1 to 100. Default 10. |
 | `metadata` | Any [Standard Schema](https://standardschema.dev) (zod, valibot, arktype). The client sends metadata with the upload; the server validates it. Its output, as JSON, must fit in 2 KiB. A route without a schema refuses metadata. |
 | `authorize` | Required. Decides who may upload (see [Authorize uploads](#authorize-uploads)). |
-| `prefix` | The folder for generated keys. A key is `<prefix>/<ulid><ext>`, such as `users/42/avatars/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. |
+| `prefix` | The folder for generated keys. A key is `<prefix>/<ulid><ext>`, such as `users/42/avatars/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Default: the route's name, so a route `avatar` writes `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. Return `""` to write at the bucket root. |
 | `key` | The whole key instead of `<prefix>/<ulid><ext>`. Pass `prefix` or `key`, not both. A custom key must be unique (see below). |
 | `visibility` | `"public"` or `"private"`. `"public"` needs the storage's `publicUrl`. Default: `"public"` when the storage has a `publicUrl`, otherwise `"private"`. |
 | `replace` | With a store and `owner`: one file per owner, such as an avatar. A completed file deletes the owner's previous files on the route ([One file per owner](store.md#one-file-per-owner-replace)). |

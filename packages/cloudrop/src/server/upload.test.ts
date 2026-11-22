@@ -80,7 +80,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, uploadId: tokenPayload(ticket.token).uploadId }).toEqual({
-      key: `${ticket.id}.txt`,
+      key: `files/${ticket.id}.txt`,
       uploadId: undefined,
     });
   });
@@ -94,7 +94,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, headers: ticket.put.headers }).toMatchObject({
-      key: `${ticket.id}.svg`,
+      key: `files/${ticket.id}.svg`,
       headers: {
         "content-type": "image/svg+xml",
         "content-disposition": "attachment; filename=\"logo.svg\"; filename*=UTF-8''logo.svg",
@@ -119,7 +119,7 @@ describe("POST /upload: a single PUT ticket", () => {
     });
     const ticket = body.files[0] as SingleTicket;
     expect({ key: ticket.key, headers: ticket.put.headers }).toMatchObject({
-      key: `${ticket.id}.html`,
+      key: `files/${ticket.id}.html`,
       headers: {
         "content-type": "text/html",
         "content-disposition": "attachment; filename=\"page.html\"; filename*=UTF-8''page.html",

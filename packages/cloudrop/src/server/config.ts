@@ -4,6 +4,7 @@
 
 import { CloudropError, configError, fail, type Result } from "../errors.ts";
 import type { StorageDriver } from "../storage/driver.ts";
+import { r2 } from "../storage/presets.ts";
 import { environmentReader } from "./environment.ts";
 import { readOrigins } from "./origins.ts";
 import type { CloudropPlugin, Logger } from "./plugins.ts";
@@ -15,8 +16,11 @@ import type { StorePaths } from "./store-paths.ts";
 import type { TokenKeys } from "./token.ts";
 
 export interface CloudropOptions<TRoutes extends Record<string, Route>> extends StoreOptions {
-  /** `r2({ bucket })` or `s3({ ... })`. */
-  storage: StorageDriver;
+  /**
+   * `r2({ bucket })` or `s3({ ... })`. Default: `r2()`, which reads CLOUDROP_R2_BUCKET, CLOUDROP_R2_ACCOUNT_ID,
+   * CLOUDROP_R2_ACCESS_KEY_ID and CLOUDROP_R2_SECRET_ACCESS_KEY on the first request (in development, at start).
+   */
+  storage?: StorageDriver;
   routes: TRoutes;
   /**
    * HMAC secrets for upload tokens, each at least 32 characters. The first signs; every one verifies, so put a new
@@ -82,9 +86,13 @@ function readTrustedOrigins(given: unknown): Set<string> {
   return new Set(read.origins);
 }
 
-function readStorage(storage: StorageDriver | undefined): StorageDriver {
-  if (!storage || !isFunction(storage.presignPut) || !Number.isSafeInteger(storage.rules?.maxObjectSize)) {
-    throw configError("Pass storage to createCloudrop: r2({ bucket }) or s3({ ... }).");
+function readStorage(given: StorageDriver | undefined): StorageDriver {
+  // r2() reads its settings lazily (M4-F17), so a build without secrets can still construct the server (M12-A9).
+  const storage = given ?? r2();
+  if (!isFunction(storage.presignPut) || !Number.isSafeInteger(storage.rules?.maxObjectSize)) {
+    throw configError(
+      "storage must be a storage driver, such as r2({ bucket }) or s3({ ... }). Leave it out to use r2() with the CLOUDROP_R2_* variables.",
+    );
   }
   return storage;
 }
@@ -119,7 +127,7 @@ function readThreshold(threshold: Size | undefined): number | undefined {
 
 function readPlugins(given: readonly CloudropPlugin[] | undefined): readonly CloudropPlugin[] {
   const plugins = given ?? [];
-  if (!Array.isArray(plugins)) throw configError("plugins must be a list, such as plugins: [limits()].");
+  if (!Array.isArray(plugins)) throw configError("plugins must be a list, such as plugins: [contentChecks()].");
   const ids = plugins.map((plugin) => plugin?.id);
   if (!ids.every((id) => typeof id === "string" && id !== "") || new Set(ids).size !== ids.length) {
     throw configError("Every plugin needs its own id. Pass each plugin once.");
