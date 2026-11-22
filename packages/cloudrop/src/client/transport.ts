@@ -57,9 +57,10 @@ const putWithXhr: PutObject = (target, body, signal, onBytes) =>
     };
     // A network failure and a refusal without CORS headers look the same here, as with fetch (decision S10), except
     // that an error before any progress is marked: twice around a renewal, it ends as BUCKET_BLOCKED (M12-E7). A
-    // timeout or an abort, cloudrop's stall abort included, is never marked.
+    // timeout or an abort, cloudrop's stall abort included, is never marked, nor is an empty body, which has no byte
+    // to report and so cannot tell a refused URL from a blocked request.
     const lost = () => settle(unreachable(signal));
-    xhr.onerror = () => settle(unreachable(signal, !sending));
+    xhr.onerror = () => settle(unreachable(signal, !sending && body.size > 0));
     xhr.ontimeout = lost;
     xhr.onabort = lost;
     try {

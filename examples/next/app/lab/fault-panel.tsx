@@ -9,6 +9,7 @@ export const NO_FAULTS: Faults = {
   endpoint503: false,
   dropComplete: false,
   part2NetworkError: false,
+  bucketBlocked: false,
   bucket400: false,
   holdComplete: false,
   delayMs: 0,
@@ -19,7 +20,7 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "bucketNetworkError",
     label: "Fail the next bucket PUT with a network error",
     effect:
-      "What a browser shows for an answer it may not read, such as an expired R2 URL. The client waits a random time of up to 0.5 s after a first attempt, renews that URL once through /sign and sends it again (decisions M3-S10, M3-S11).",
+      "What a browser shows for an answer it may not read, such as an expired R2 URL, after half the body was sent. The client waits a random time of up to 0.5 s after a first attempt, renews that URL once through /sign and sends it again (decisions M3-S10, M3-S11).",
   },
   {
     fault: "dropBucketAnswer",
@@ -43,7 +44,13 @@ const FAULT_BOXES: { fault: OneShotFault | HeldFault; label: string; effect: str
     fault: "part2NetworkError",
     label: "Fail every PUT of part 2 with a network error while ticked",
     effect:
-      "A part the browser never sends, as for a bucket whose CORS rule misses this page: no byte of it leaves, so after a first failure the client renews its URL once, and when the renewed URL fails the same way the file fails at once with BUCKET_BLOCKED. It keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M12-E7).",
+      "A part that never gets through, its connection lost after half its body was sent: the client renews its URL once and makes 6 attempts with random waits of up to 0.5, 1, 2, 4 and 8 s between them, then the file fails with NETWORK_ERROR and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends part 2 and /complete only (M3-U30, M3-U31).",
+  },
+  {
+    fault: "bucketBlocked",
+    label: "Block every bucket PUT as a CORS rule that misses this page would, while ticked",
+    effect:
+      "No byte reaches the bucket while the upload server answers. After a first failure the client renews the URL once through /sign; when the renewed URL fails the same way, the file fails at once with BUCKET_BLOCKED and keeps its ticket and the parts that landed, so Retry, once this is unticked, sends only what had not landed (M12-E7). With PUTs sent through fetch the client cannot see that no byte left, and the file ends with NETWORK_ERROR after its attempts.",
   },
   {
     fault: "bucket400",
@@ -69,7 +76,7 @@ export function FaultPanel({ faults, onChange }: Props) {
     <section className={styles.section}>
       <h2>Faults</h2>
       <p className={styles.muted}>
-        The first four boxes hit the next matching request once, then untick themselves; the next three hit every
+        The first four boxes hit the next matching request once, then untick themselves; the next four hit every
         matching request until you untick them. Faults can change while an upload runs.
       </p>
       {FAULT_BOXES.map(({ fault, label, effect }) => (

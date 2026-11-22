@@ -137,6 +137,13 @@ describe("BUCKET_BLOCKED", () => {
     expect({ error: errorOf(job), log }).toEqual({ error: LOST, log: expected });
   });
 
+  it("keeps NETWORK_ERROR for an empty file, which never reports a byte sent", async () => {
+    const { log, run } = setup();
+    // A refused URL (bad signature, expired) sends an empty body too: no progress can tell it from a blocked request.
+    const job = await run(new File([], "empty.bin", { type: "application/octet-stream" }), refused);
+    expect({ error: errorOf(job), log }).toEqual({ error: LOST, log: SIX_PUTS });
+  });
+
   it("keeps NETWORK_ERROR for PUTs that stall until the 30 s abort", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { xhr, log, run } = setup();

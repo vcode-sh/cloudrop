@@ -8,7 +8,7 @@ type ClientFetch = NonNullable<ClientOptions["fetch"]>;
 
 export type OneShotFault = "bucketNetworkError" | "dropBucketAnswer" | "endpoint503" | "dropComplete";
 /** Faults that hit every matching request while ticked. */
-export type HeldFault = "part2NetworkError" | "bucket400" | "holdComplete";
+export type HeldFault = "part2NetworkError" | "bucketBlocked" | "bucket400" | "holdComplete";
 
 export interface FaultSwitch {
   /** Every bucket PUT waits this long before it is sent; 0 for none. */
@@ -32,14 +32,20 @@ export const abortedAs = (faults: FaultSwitch): "cancelled" | "stalled" =>
 export const REFUSAL = { status: 400, body: "<Error><Code>InvalidArgument</Code></Error>" } as const;
 
 /**
- * The bucket fault ticked for this PUT: a network error, the bucket's answer dropped once it is sent, the lab's 400 in
- * the bucket's place, or none. Noted in its record, apart from a dropped answer, which the sender notes with the
- * bucket's status. A held fault that applies leaves the one-shot faults ticked for the next PUT.
+ * The bucket fault ticked for this PUT: a request the browser blocks before any byte leaves (a CORS rule that misses
+ * the page), a network error, the bucket's answer dropped once it is sent, the lab's 400 in the bucket's place, or
+ * none. Noted in its record, apart from a dropped answer, which the sender notes with the bucket's status. A held fault
+ * that applies leaves the one-shot faults ticked for the next PUT.
  */
 export function bucketFault(
   record: RequestRecord,
   faults: FaultSwitch,
-): "network error" | "answer dropped" | "refused" | null {
+): "blocked" | "network error" | "answer dropped" | "refused" | null {
+  if (faults.on("bucketBlocked")) {
+    record.injected.push("injected CORS block");
+    record.bytes = 0;
+    return "blocked";
+  }
   const partTwo = record.kind === "PUT part 2" && faults.on("part2NetworkError");
   if (partTwo || faults.take("bucketNetworkError")) {
     record.injected.push("injected network error");
@@ -87,7 +93,8 @@ async function sendWithFaults(
     await delay(delayMs, init.signal);
   }
   const fault = record.isBucketPut ? bucketFault(record, faults) : null;
-  if (fault === "network error") throw networkError();
+  // fetch reports no progress, so the client cannot tell a block from a network error here (M12-E7).
+  if (fault === "network error" || fault === "blocked") throw networkError();
   if (fault === "answer dropped") {
     const response = await send(url, init);
     await response.body?.cancel();

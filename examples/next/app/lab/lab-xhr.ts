@@ -81,7 +81,15 @@ export function installLabXhr(journal: Journal, faults: FaultSwitch): () => void
       if (fault === "answer dropped") return this.#sendUnheard(record, body);
       // A real answer or network error arrives after send() returns, never inside it.
       this.#later(() => {
-        if (fault === "network error") return this.dispatchEvent(new ProgressEvent("error"));
+        // A network error comes after part of the body left, as a lost connection does, so the client keeps its six
+        // attempts; a block comes before any byte, as for a failed preflight, and ends in BUCKET_BLOCKED (M12-E7).
+        if (fault === "network error") {
+          const total = (body as Blob).size;
+          this.upload.dispatchEvent(
+            new ProgressEvent("progress", { lengthComputable: true, loaded: Math.ceil(total / 2), total }),
+          );
+        }
+        if (fault === "network error" || fault === "blocked") return this.dispatchEvent(new ProgressEvent("error"));
         this.#refused = true;
         for (const type of ["readystatechange", "load", "loadend"]) this.dispatchEvent(new ProgressEvent(type));
       });

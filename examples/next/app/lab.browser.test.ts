@@ -324,14 +324,14 @@ test("with one connection and order added, a PUT that fails frees the slot witho
 });
 
 test("a file whose part 2 kept failing is retried with its ticket, sending part 2 alone", async ({ page }) => {
+  // Part 2's six attempts wait up to 0.5 + 1 + 2 + 4 + 8 s between them (M3-S9) before the file fails.
+  test.setTimeout(60_000);
   await signIn(page);
   const fault = page.getByLabel("Fail every PUT of part 2 with a network error while ticked");
   await fault.check();
   await page.getByRole("button", { name: "20 MiB", exact: true }).click();
   await page.getByRole("button", { name: "Upload", exact: true }).click();
-  // The lab fails part 2 before any byte leaves, twice around a renewal: the server answers, the bucket never hears
-  // from the page, so the file fails at once (M12-E7). The six-attempt NETWORK_ERROR is bucket-faults' reset row.
-  await expect(page.getByRole("status")).toContainText("failed with BUCKET_BLOCKED", { timeout: 5_000 });
+  await expect(page.getByRole("status")).toContainText("failed with NETWORK_ERROR", { timeout: 30_000 });
   const failed = await requestRows(page);
   expect(failed).toEqual([
     ["/upload", "200", ""],
@@ -339,14 +339,14 @@ test("a file whose part 2 kept failing is retried with its ticket, sending part 
     ["PUT part 2", "network error", "injected network error"],
     ["PUT part 3", "200", ""],
     ["/sign", "200", "renewal of part 2"],
-    ["PUT part 2", "network error", "retry; injected network error"],
+    ...Array(5).fill(["PUT part 2", "network error", "retry; injected network error"]),
   ]);
   await fault.uncheck();
 
   await page.getByRole("button", { name: "Retry", exact: true }).click();
 
   await expect(page.getByRole("status")).toHaveText(
-    /^Started 5 PUTs \(at most 3 at a time\), 3 got an answer; part 2 was retried twice after a network error; renewed one URL through \/sign; completed after Retry, [\d.]+ m?s after Upload\.$/,
+    /^Started 9 PUTs \(at most 3 at a time\), 3 got an answer; part 2 was retried 6 times after a network error; renewed one URL through \/sign; completed after Retry, [\d.]+ m?s after Upload\.$/,
   );
   // The same ticket: no new /upload, and the parts that landed are not sent again.
   expect((await requestRows(page)).slice(failed.length)).toEqual([
