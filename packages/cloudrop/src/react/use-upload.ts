@@ -41,20 +41,20 @@ function createController(initial: Latest, setDragOver: (isOver: boolean) => voi
 
   function start(begin: (client: CloudropClient) => UploadJob<unknown>): Promise<UploadResult<unknown>> {
     const { source } = controller.latest;
-    const route = store();
-    const seq = route.begin();
+    const routeStore = store();
+    const seq = routeStore.begin();
     const client = source.client();
     if (client.error) {
-      route.refuse(seq, client.error);
+      routeStore.refuse(seq, client.error);
       return Promise.resolve({ data: null, error: client.error });
     }
     const job = begin(client.data);
     // A job refused before it started, by a closed client or for its arguments, has no file to list, retry or follow:
     // its `done` carries the refusal (M11-R6), which the route's startError shows (M12-H2).
     if (job.files.length === 0) {
-      void job.done.then(({ error }) => error && route.refuse(seq, error));
+      void job.done.then(({ error }) => error && routeStore.refuse(seq, error));
     } else {
-      route.add(job);
+      routeStore.add(job);
       source.track(job);
     }
     return job.done;

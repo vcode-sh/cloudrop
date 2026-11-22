@@ -35,8 +35,9 @@ export interface UseUploadOptions<TMetadata, R = unknown> {
   /** The input's `accept`, such as "image/*": it filters the file picker only, the route's `accept` decides. */
   accept?: string;
   /**
-   * A file of this route ended done, on its first try or after retry(), from any component on the route. Called while
-   * this component is mounted; the latest render's function is called.
+   * A file of this route ended done, on its first try or after retry(), from any component on the route. Called for a
+   * file that ended while this component was mounted, even when that end unmounts it; the latest render's function is
+   * called.
    */
   onUploaded?: (file: Extract<FileOutcome<R>, { status: "done" }>) => void;
   /**

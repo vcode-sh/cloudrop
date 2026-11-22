@@ -15,9 +15,14 @@ Entries start from 1.
   is copied with `file` set. A start refused without a file row is an `onError` event too, with `error.file`
   undefined (M12-H2). A cancel is neither. The store's `onEnd(listener)` hears the events of one publish in one
   microtask after the view's listeners ran; each hook registers there in a `useEffect` and calls the callbacks of its
-  latest committed render (`controller.latest`, set in `useInsertionEffect`). A listener that throws is thrown again
+  latest committed render (`controller.latest`, set in `useInsertionEffect`). The listeners are taken when the store
+  publishes, not when the microtask runs: outside `act`, React renders a store change and runs its effects in a
+  microtask the view's listeners queued, before the callbacks' one. So a hook hears a file that ended while it was
+  mounted even when that end unmounts it (`{!done && <Picker onUploaded={...} />}`), and a hook that the end mounts
+  (`{totals.done > 0 && <Summary onUploaded={...} />}`) does not hear it (fix round 1 of the review; the test renders
+  without `act`). A listener that throws is thrown again
   in a `setTimeout` and the others still run, as the client's job listeners do (M3-U8). `cloudrop/react` measured
-  2.61 kB (gzip, size-limit) against 2.25 kB before, under its 4 kB ceiling.
+  2.62 kB (gzip, size-limit; 2.61 kB before fix round 1) against 2.25 kB before, under its 4 kB ceiling.
 - **Why:** spec 1.0 §1: the pilot compared `totals.done` with a ref to refresh its queries, and every surveyed library
   has success and error callbacks. In the store rather than per hook, so two components do not each diff the jobs and
   the event exists once; in an effect, so StrictMode's double effect leaves one listener per mounted hook; in a
@@ -36,8 +41,10 @@ Entries start from 1.
   hooks, `upload()`, a pick, a drop or `resumeUpload()`, takes the store's next sequence number (`begin()`), which
   clears `startError`; a refusal sets it only when its number is still the latest (`refuse(seq, error)`), and still
   reaches `onError` when it is not. `clear()` clears it too. `upload(null)` and an empty list start nothing and keep
-  it. A pick or a drop with a wrong client option now goes through `upload()` as well, so it sets `startError`, and is
-  still thrown in a task (M3-U8).
+  it. `clear()` clears what is shown and does not advance the sequence: a refusal of the latest start that is answered
+  after the `clear()` still shows. A pick or a drop with a wrong client option now goes through `upload()` as well, so
+  it sets `startError` and reaches `onError`, and it is still thrown in a task (M3-U8): a developer's configuration bug
+  must stay loud on a page that renders no `startError`.
 - **Why:** spec 1.0 §1: a pick or a drop drops `upload()`'s promise, so a start the client refused before any file row
   existed reached nothing on the page (M11-R6); the pilot wrapped `start` and `resume` in 68 lines
   (`watchStartRefusals`) to keep the route's last refusal. Per route like `files`, so every component that shows the
@@ -58,6 +65,7 @@ Entries start from 1.
 - **Why:** spec 1.0 §1: a late report would fire `onUploaded` for work the page already reflects through `files`, at a
   time the app cannot tell from a fresh end, such as a toast for an upload that finished minutes ago on another page.
 - **If wrong:** an app that must react to every end, mounted or not, follows the jobs with the client's
-  `job.subscribe` or `job.done`, which the hooks do not change; or it compares `files` on mount itself.
+  `job.subscribe` or `job.done`, which the hooks do not change; or it compares `files` on mount itself. The same holds
+  within one publish: a hook mounted by a file's end does not hear that end (M12-H1).
 - **Status:** in force.
 - **Visible in:** `src/react/upload-store.ts`, `src/react/use-upload-callbacks.test.ts`.

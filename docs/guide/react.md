@@ -6,8 +6,8 @@ continuing large uploads after a reload. They are a thin layer over [`cloudrop/c
 client job, and the hooks only render it.
 
 This page covers setup, a one-file input, a list of several files with progress and controls, drag and drop, reacting
-when a file ends and when a start is refused, resume after a reload, building a full upload UI on the hooks, what each hook returns, and how the hooks behave under server
-rendering, StrictMode and unmounting.
+when a file ends and when a start is refused, resume after a reload, building a full upload UI on the hooks, what each
+hook returns, and how the hooks behave under server rendering, StrictMode and unmounting.
 
 ## Set up
 
@@ -29,8 +29,10 @@ the server's module graph, where React exports no `useState` or `useSyncExternal
 and the rest), or `{ client }` to share a client you already created for the same server's type. With options, the
 client is created at the first upload, the first `useResumable` read or `close()` in the browser, never while a server
 renders the page. A wrong option never throws from your code: `upload()`, `resumeUpload()` and `refresh()` resolve
-`{ data: null, error }` with its `INVALID_CONFIG` error, and a pick or a drop, which has no caller to resolve to, throws
-it in a separate task, so it reaches the console and your error reporting.
+`{ data: null, error }` with its `INVALID_CONFIG` error, which also reaches the route's `startError` and `onError` (see
+[When a file ends](#when-a-file-ends-and-refused-starts)). A pick or a drop, which has no caller to resolve to, also
+throws it in a separate task, so it reaches the console and your error reporting: a configuration bug stays loud on a
+page that renders no `startError`.
 
 The factory also returns `close()`, the client's [`close()`](client.md#close-the-client) for every route its hooks
 upload to: see [Signed-in users](#signed-in-users).
@@ -173,9 +175,8 @@ export function PasteTarget() {
 ```
 
 `upload`, `pause`, `resume`, `resumeUpload`, `abort`, `retry`, `clear` and `getDropProps` keep their identity across
-renders, and
-`getInputProps` keeps it while `multiple` and `accept` stay the same, so an effect that lists one of them in its
-dependencies does not run again on every render.
+renders, and `getInputProps` keeps it while `multiple` and `accept` stay the same, so an effect that lists one of them
+in its dependencies does not run again on every render.
 
 ## When a file ends, and refused starts
 
@@ -213,8 +214,10 @@ export function Documents({ folderId }: { folderId: string }) {
 - **Route-wide, like `files`.** Every mounted component on the route hears every file of the route, whichever component
   started it, and two components on one route are each called once. Put the callback in the component that owns the
   reaction, or give it to one of them only.
-- **Only while mounted.** A file that ended while no component on the route was mounted is not reported when one mounts
-  again; its row in `files` still shows how it ended. The latest render's functions are called, so a callback may read
+- **Only while mounted.** A component hears the files that ended while it was mounted, even when that end unmounts it,
+  as `{!done && <Picker onUploaded={...} />}` does. A file that ended before a component mounted is not reported to it,
+  also when the end is what mounts it, and nothing is reported late when the route's components mount again; the
+  file's row in `files` still shows how it ended. The latest render's functions are called, so a callback may read
   current props and state, and StrictMode does not call them twice.
 - **A callback may start or retry an upload.** It runs after the components rendered the change, outside the client's
   own work. One that throws does not stop the others: its error is thrown again in a separate task, for the console and
@@ -266,10 +269,11 @@ export function Unfinished() {
 }
 ```
 
-`useResumable(route?)` returns `{ uploads, discardingIds, refresh, discard, forget }`. `uploads` is the client's `resumable()` list, of
-one route or of every route, newest first. It leaves out the uploads this page holds: a file that is running, paused, or
-failed and kept for `retry()`, and an upload while its resume runs. A failed file is continued with `files[n].retry()`,
-never `resumeUpload()`, which would be refused. A listed upload leaves the list as soon as its resume starts.
+`useResumable(route?)` returns `{ uploads, discardingIds, refresh, discard, forget }`. `uploads` is the client's
+`resumable()` list, of one route or of every route, newest first. It leaves out the uploads this page holds: a file that
+is running, paused, or failed and kept for `retry()`, and an upload while its resume runs. A failed file is continued
+with `files[n].retry()`, never `resumeUpload()`, which would be refused. A listed upload leaves the list as soon as its
+resume starts.
 
 A refused resume, `UPLOAD_IN_USE` while another tab sends the upload or `INVALID_INPUT` for a different file, stays in
 `files` as a failed file with its error, and the upload is listed again: `retry()` checks again, and `abort()` ends the
@@ -303,10 +307,10 @@ factory read its list again, such as a badge that counts every route's uploads. 
 
 The module-level factory of [Set up](#set-up) suits an app without accounts. An app where users sign in needs a client
 per user, created with the user's id as its [`account`](client.md#guard-against-a-changed-account), which lets the
-server refuse an upload that a sign-in in another tab would make someone else's. A string `account` is also the
-client's `namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client for everyone would list one user's
-unfinished uploads to the next user of the browser. Create each user's client and hooks once, provide them in a context keyed by the user, and
-close the other users' clients when the user changes:
+server refuse an upload that a sign-in in another tab would make someone else's. A string `account` is also the client's
+`namespace` (see [Resume](resume.md#namespace-and-sign-out)): one client for everyone would list one user's unfinished
+uploads to the next user of the browser. Create each user's client and hooks once, provide them in a context keyed by
+the user, and close the other users' clients when the user changes:
 
 ```tsx
 // lib/upload.ts
@@ -554,6 +558,7 @@ where the message alone is not the right thing to show:
 | `ABORTED` | The file was cancelled: its own `abort()`, the hook's, or `close()`, with or without `{ abort: true }`, at sign-out or from `useCloseOtherUsers`. | Nothing more. The row's status is `aborted` and already says Cancelled; an error toast would report a cancel as a failure. |
 | `CLIENT_CLOSED` | A file picked while sign-out runs, or on a client that `useCloseOtherUsers` closed. `upload()` resolves this error and no row is added; the route's `startError` holds it. | No error and no Retry: the page is about to show the next user, whose client has none of this file. If you show anything, say from `startError` that the file was not uploaded because the account changed. |
 | `ACCOUNT_CHANGED` | The server refused `/upload` because the session belongs to another user than this page's `account`, as after a sign-in in another tab. Every file of that `/upload` ends `failed`. | The message, which asks the person to reload, with a Reload button (`location.reload()`). Retry cannot help: this page still names the old user. |
+| `BUCKET_BLOCKED` | The browser cannot reach the bucket while the upload server answers, usually because the bucket's CORS rule misses this page's origin or a header cloudrop sends. The file ends `failed` without the usual retries, and Retry cannot help until the rule is fixed. | Your own words, such as "Uploads are blocked by the storage service's settings. Contact the site's administrator.", and no Retry button. Report it: it is the site's configuration, not the person's file or connection. |
 | `FILE_TYPE_NOT_ALLOWED` with `error.content` | [`contentChecks()`](plugins.md#what-a-refusal-carries) refused the file. | The message, or your own words built from `error.content`, as below. |
 
 ```tsx

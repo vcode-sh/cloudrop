@@ -81,8 +81,8 @@ export interface UploadStore<R> {
   /** Start `seq` was refused before it had a file: tells onEnd, and sets the start error when no start followed. */
   refuse(seq: number, error: CloudropError): void;
   /**
-   * Calls `listener` with each file of the route that ends done or failed while React listens to the store, and each
-   * refused start, in a microtask after the view's listeners ran; returns the unsubscribe.
+   * Calls `listener` with each file of the route that ends done or failed while it is registered, and each refused
+   * start, in a microtask after the view's listeners ran, even when it was removed meanwhile; returns the unsubscribe.
    */
   onEnd(listener: (event: EndEvent<R>) => void): () => void;
   subscribe(listener: () => void): () => void;
@@ -101,13 +101,16 @@ export function createUploadStore<R>(): UploadStore<R> {
   const notify = (events: EndEvent<R>[] = []) => {
     view = build(events);
     for (const listener of listeners) listener();
-    // After React heard the new view, and outside this call, so a callback may start or retry an upload.
-    if (events.length > 0) queueMicrotask(() => tell(events));
+    if (events.length === 0) return;
+    // The hooks mounted now are the ones that hear it: React may unmount or mount hooks in its own microtask, queued by
+    // the listeners above, before this one runs. After it, and outside this call, so a callback may start an upload.
+    const heard = [...ends];
+    queueMicrotask(() => tell(events, heard));
   };
   /** Every listener hears every event; one that throws is thrown again in a task and stops nothing (M3-U8). */
-  function tell(events: EndEvent<R>[]) {
+  function tell(events: EndEvent<R>[], heard: readonly ((event: EndEvent<R>) => void)[]) {
     for (const event of events)
-      for (const listener of ends) {
+      for (const listener of heard) {
         try {
           listener(event);
         } catch (error) {

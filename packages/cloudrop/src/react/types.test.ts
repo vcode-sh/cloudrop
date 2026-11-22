@@ -1,7 +1,7 @@
 // Type tests for cloudrop/react (spec §6.1, M4-B1 and M4-B2): the route name, its metadata and its result are inferred
-// from useUpload's first argument, onUploaded's file included; metadata is required where the route's schema requires it; a record from
-// useResumable resumes only into a hook of its route. `bun run typecheck` compiles this file: every expectTypeOf and
-// every expect-error directive is an assertion. Oracle: the route definitions below.
+// from useUpload's first argument, onUploaded's file included; metadata is required where the route's schema requires
+// it; a record from useResumable resumes only into a hook of its route. `bun run typecheck` compiles this file: every
+// expectTypeOf and every expect-error directive is an assertion. Oracle: the route definitions below.
 
 import { describe, expectTypeOf, it } from "vitest";
 import {
