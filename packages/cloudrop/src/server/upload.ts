@@ -5,6 +5,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { isPlainObject } from "../input.ts";
 import { planUpload } from "../plan.ts";
 import { type FileTicket, PARTS_PER_SIGN, type UploadResponse } from "../protocol/types.ts";
+import { retryAfterOf, waitAtLeast } from "../retry-after.ts";
 import type { EndpointConfig, EndpointInput, ServerConfig } from "./config.ts";
 import { errorBody, serverError, storageFailure } from "./http.ts";
 import { abortContexts, type Logger, type PluginFile, runBeforeUpload, runOnAbort } from "./plugins.ts";
@@ -23,10 +24,11 @@ async function startFile(
   const { signing } = config.tokenKeys;
   const expiresAt = new Date(base.exp * 1000).toISOString();
   const ticket = { id: base.id, key: base.key, expiresAt };
-  const rejected = (error: CloudropError): FileTicket => ({
-    kind: "rejected",
-    error: errorBody(storageFailure(error, logger)),
-  });
+  // The ticket keeps the wait the storage asked for, which the 200 answers as Retry-After (M12-E5).
+  const rejected = (error: CloudropError): FileTicket => {
+    const failure = storageFailure(error, logger);
+    return waitAtLeast({ kind: "rejected", error: errorBody(failure) }, retryAfterOf(failure));
+  };
   const plan = planUpload(base.size, storage.rules, { multipartThreshold: config.multipartThreshold });
   if (plan.kind === "single") {
     const [put, token] = await Promise.all([presignSingle(storage, base), signToken(base, signing)]);
@@ -204,5 +206,6 @@ export async function handleUpload({ request, body, config }: EndpointInput): Pr
     (file, index): file is PluginFile => !(file instanceof CloudropError) && tickets[index]?.kind === "rejected",
   );
   await releaseUnstarted(config, { route: route.name, metadata, auth: pluginAuth }, unstarted, refusals);
-  return ok({ files: tickets });
+  // Only a retryable storage failure carries a wait. The client waits it out for each file refused with one.
+  return ok(waitAtLeast({ files: tickets }, Math.max(0, ...tickets.map(retryAfterOf))));
 }

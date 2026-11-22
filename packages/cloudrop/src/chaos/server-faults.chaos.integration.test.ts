@@ -58,20 +58,25 @@ test("a CompleteMultipartUpload the storage answers 503 reaches the client as a 
 });
 
 // M3-U92: a ticket the server could not issue reaches the client as that file's retryable refusal inside a 200, and
-// the client asks /upload again for that file alone. Only a multipart ticket calls the storage in /upload: a single
-// PUT's URL is presigned in process, so the proxy cannot fault that path.
-test("a CreateMultipartUpload the storage answers 503 refuses the file retryably, and asking /upload again finishes it", async () => {
+// the client asks /upload again for that file alone, no sooner than the bucket's Retry-After, which the 200 carries
+// (M12-E5). Only a multipart ticket calls the storage in /upload: a single PUT's URL is presigned in process, so the
+// proxy cannot fault that path.
+test("a CreateMultipartUpload the storage answers 503 refuses the file retryably, and asking /upload again after its Retry-After finishes it", async () => {
   chaos.proxy.set([
     {
       match: { kind: "server", operation: "CreateMultipartUpload" },
-      fault: { kind: "answer", status: 503, body: SLOW_DOWN },
+      fault: { kind: "answer", status: 503, body: SLOW_DOWN, headers: { "retry-after": "3" } },
     },
   ]);
   const file = chaosFile(MULTIPART_FILE_SIZE);
 
+  const started = performance.now();
   const { data, error } = await chaos.client().upload("files", file);
+  const elapsedMs = performance.now() - started;
 
   expect(error).toBeNull();
+  // The lane's jitter is 0, so only the Retry-After of 3 seconds can hold the second /upload back this long.
+  expect(elapsedMs).toBeGreaterThanOrEqual(3000);
   await chaos.expectStored(data?.file.key ?? "", file);
   await chaos.expectNoUploadsLeft();
   expect(chaos.appRequests()).toEqual(["POST /upload 200", "POST /upload 200", "POST /complete 200"]);

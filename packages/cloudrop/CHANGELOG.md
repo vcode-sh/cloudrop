@@ -154,6 +154,13 @@ Every notable change to the `cloudrop` package. The format follows
   `any` in the contexts and results that read its JSON form, as `any` asks for. `Jsonified<unknown>` stays `unknown`
   (`M12-T5`).
 
+### Fixed
+
+- The bucket's `Retry-After` reaches the client when `/upload` refuses a file storage could not start. Before: the
+  driver dropped the header, so the client asked again after its own short backoff while the bucket was throttling.
+  After: the 200 carries `Retry-After` with the longest wait of those files, exposed to a cross-origin page, and the
+  client waits it out for each of them (`M12-E5`).
+
 ## 0.6.0 - 2026-11-21
 
 In short: four things the first production app could not do with 0.5.0 are now built in (a deletion says what it

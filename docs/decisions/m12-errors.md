@@ -79,3 +79,23 @@ Entries start from 1.
   the error's message gives the wait.
 - **Status:** in force.
 - **Visible in:** `src/client/retry.ts`, `src/client/launch.ts`, `src/client/upload-rate-limited.test.ts`.
+
+### M12-E5: the 200 of `/upload` carries the bucket's `Retry-After`
+
+- **Decision:** each rejected ticket keeps the wait its storage failure recorded (`rejected()` in
+  `src/server/upload.ts`, through `waitAtLeast` on the ticket object), `handleUpload` records the longest of them on
+  its answer, and the handler sends it on the 200 as `Retry-After`, in whole seconds rounded up and exposed
+  cross-origin, through the same `retryAfterHeaders` as an error answer. Only a retryable storage failure carries a
+  wait (`storageError`, M12-E3), so the longest wait is the longest among the retryable rejected tickets. There is no
+  wire change and no server cap: the client already applies the header to each refused ticket
+  (`client/endpoints.ts`), and M12-E4 decides whether it waits. `EndpointHandler` answers `Result<object>`, which
+  every endpoint already did, so the handler can read a wait off any answer.
+- **Why:** spec 1.0 §2b closes the plans README's "Chaos plan follow-ups" debt: nothing in `storage/` read the header.
+  The chaos row that faults `CreateMultipartUpload` with `Retry-After: 3` proves the second `/upload` waits for it
+  on RustFS. The README entry is removed in Task 12.
+- **If wrong:** a throttled bucket that asks for a long wait now holds a file's re-ask that long, or fails it for
+  `retry()` past 20 seconds; before, the client hammered the bucket through the server.
+- **Status:** in force.
+- **Visible in:** `src/server/upload.ts`, `src/server/handler.ts`, `src/server/http.ts`,
+  `src/server/upload-storage.test.ts`, `src/client/upload-rate-limited.test.ts`,
+  `src/chaos/server-faults.chaos.integration.test.ts`.

@@ -1,7 +1,8 @@
-// Contract: spec 1.0 §2a through the real client and server (M12-E2, M12-E4). An /upload that `authorize` refuses with
-// rateLimited(seconds) is asked again no sooner than its Retry-After; a wait longer than the client's 20-second backoff
-// cap is not waited for: the job fails with the retryable RATE_LIMITED, and the app's retry() asks again. Oracle: the
-// requests the fixture saw, the moment each was sent on the fake clock, and the result the job reports.
+// Contract: spec 1.0 §2a and §2b through the real client and server (M12-E2, M12-E4, M12-E5). An /upload that
+// `authorize` refuses with rateLimited(seconds) is asked again no sooner than its Retry-After; a wait longer than the
+// client's 20-second backoff cap is not waited for: the job fails with the retryable RATE_LIMITED, and the app's
+// retry() asks again. The same holds for one file a 200 refuses with the bucket's Retry-After. Oracle: the requests the
+// fixture saw, the moment each was sent on the fake clock, and the result the job reports.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudropClient } from "../client.ts";
@@ -69,6 +70,33 @@ describe("an /upload refused with rateLimited()", () => {
       sentAfterFailing: 1,
       retried: ["done"],
       sentAfterRetry: 2,
+    });
+  });
+});
+
+describe("a file the 200 of /upload refuses with the bucket's Retry-After", () => {
+  const busy = {
+    code: "RATE_LIMITED",
+    message: "The storage service is busy. Try again in a moment.",
+    retryable: true,
+  };
+  const files = route({ accept: "application/octet-stream", maxSize: "100MB", authorize: () => ({}) });
+
+  it("fails at once, retryable, when the wait is 600 seconds", async () => {
+    const fixture = clientFixture(
+      { files },
+      {
+        fault: ({ label }) =>
+          label === "POST /upload"
+            ? Response.json({ files: [{ kind: "rejected", error: busy }] }, { headers: { "retry-after": "600" } })
+            : undefined,
+      },
+    );
+    const client = createCloudropClient({ basePath: fixture.basePath, fetch: fixture.fetch });
+    const { error } = await client.start("files", [file()]).done;
+    expect({ failed: { code: error?.code, retryable: error?.retryable }, requests: fixture.requests }).toEqual({
+      failed: { code: "RATE_LIMITED", retryable: true },
+      requests: ["POST /upload"],
     });
   });
 });
