@@ -77,7 +77,15 @@ describe("POST /upload with a store", () => {
       [pendingRow(first, png(10)), pendingRow(second, png(20))].toSorted((a, b) => (a.id < b.id ? -1 : 1)),
     );
     expect(await fixture.store.raw.usage()).toEqual([
-      { owner: "u1", reservedBytes: 30, activeBytes: 0, files: 0, updatedAt: NOW },
+      {
+        owner: "u1",
+        reservedBytes: 30,
+        activeBytes: 0,
+        files: 0,
+        eraseRequestedAt: null,
+        erasedAt: null,
+        updatedAt: NOW,
+      },
     ]);
     expect(tokenPayload(first.token).stored).toBe(true);
   });
@@ -105,7 +113,12 @@ describe("POST /upload with a store", () => {
         { id: retried.id, status: "pending", endedAt: null, cleanedAt: null, requestKey: key },
       ].toSorted((a, b) => (a.id < b.id ? -1 : 1)),
     );
-    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({ reservedBytes: 9 * MiB, activeBytes: 0, files: 0 });
+    expect((await fixture.cloudrop.api.usage("u1")).data).toEqual({
+      reservedBytes: 9 * MiB,
+      activeBytes: 0,
+      files: 0,
+      erasure: null,
+    });
     // The lost attempt's multipart upload is the sweep's cleanup work, past the grace.
     expect(fixture.fake.pendingUploads()).toBe(2);
     vi.setSystemTime(new Date(NOW.getTime() + 2 * 60 * 60_000));
@@ -139,7 +152,7 @@ describe("POST /upload with a store", () => {
     expect(asked).toEqual(["u1"]);
     expect((await fixture.store.raw.files()).map((row) => row.size).toSorted()).toEqual([1000, 500]);
     expect(await fixture.cloudrop.api.usage("u1")).toEqual({
-      data: { reservedBytes: 1500, activeBytes: 0, files: 0 },
+      data: { reservedBytes: 1500, activeBytes: 0, files: 0, erasure: null },
       error: null,
     });
     expect(calls.map(({ file, reason }) => ({ size: file.size, reason }))).toEqual([{ size: 501, reason: "rejected" }]);
@@ -286,7 +299,7 @@ describe("POST /upload with a store: files that cannot start", () => {
     expect((await store.raw.files()).map(({ status, endedAt }) => ({ status, endedAt }))).toEqual([
       { status: "failed", endedAt: NOW },
     ]);
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   });
 
   it("ends the row failed and releases its bytes when the storage cannot start the upload", async () => {
@@ -307,7 +320,7 @@ describe("POST /upload with a store: files that cannot start", () => {
     const [ticket] = await upload(fixture, [png(9 * MiB)]);
     expect(ticket?.kind).toBe("rejected");
     expect((await store.raw.files()).map((row) => row.status)).toEqual(["failed"]);
-    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   });
 });
 

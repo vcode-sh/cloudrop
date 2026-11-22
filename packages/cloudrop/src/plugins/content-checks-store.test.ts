@@ -40,7 +40,12 @@ it.for([
   const [ticket] = (await response.json()).files;
   const signed = ticket.kind === "single" ? ticket.put : (ticket.parts[0] as SignedPart);
   expect((await fixture.send(signed, HTML)).status).toBe(200);
-  expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: HTML.length, activeBytes: 0, files: 0 });
+  expect(await fixture.store.usage("u1")).toEqual({
+    reservedBytes: HTML.length,
+    activeBytes: 0,
+    files: 0,
+    erasure: null,
+  });
 
   expect((await complete(fixture, ticket.token)).body.error?.code).toBe("FILE_TYPE_NOT_ALLOWED");
   const [row] = await fixture.store.raw.files();
@@ -50,7 +55,7 @@ it.for([
     [],
     0,
   ]);
-  expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+  expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   // The row decided: a retry finds the upload ended, and no hook runs again.
   expect((await complete(fixture, ticket.token)).body.error?.code).toBe("UPLOAD_EXPIRED");
   expect([reasons, completions]).toEqual([["rejected"], 0]);
@@ -87,6 +92,11 @@ it.for([
     "rejected",
     [previous.key],
   ]);
-  expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: PNG.length, files: 1 });
+  expect(await fixture.store.usage("u1")).toEqual({
+    reservedBytes: 0,
+    activeBytes: PNG.length,
+    files: 1,
+    erasure: null,
+  });
   expect([deleted, reasons]).toEqual([[], ["rejected"]]);
 });

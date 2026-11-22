@@ -6,7 +6,7 @@ import type { MemoryTables } from "./memory-store-methods.ts";
 import type { RawFileRow } from "./store-rows.ts";
 
 type Store = CloudropStore<never>;
-type ReadMethods = Pick<Store, "get" | "stale" | "list" | "owners"> & Required<Pick<Store, "listAll">>;
+type ReadMethods = Pick<Store, "get" | "stale" | "list" | "owners" | "erasing"> & Required<Pick<Store, "listAll">>;
 
 /** What `list` and `listAll` read: `owner` null is every owner, `statuses` null every status. */
 type Listing = Omit<Parameters<Store["list"]>[0], "owner" | "statuses"> & {
@@ -103,10 +103,22 @@ export function readMethods({ files, usage }: MemoryTables): ReadMethods {
     list,
     listAll: ({ status, ...rest }) => list({ ...rest, statuses: status === null ? null : [status] }),
 
-    owners: async (cursor, limit) => {
-      const after = [...usage.keys()].filter((owner) => cursor === null || byBytes(owner, cursor) > 0).sort(byBytes);
-      const last = after[limit - 1];
-      return { owners: after.slice(0, limit), cursor: after.length > limit && last !== undefined ? last : null };
+    owners: async (cursor, limit) => ownerPage([...usage.keys()], cursor, limit),
+
+    erasing: async ({ cursor, limit }) => {
+      const unfinished = [...usage.values()].filter((row) => row.eraseRequestedAt !== null && row.erasedAt === null);
+      return ownerPage(
+        unfinished.map((row) => row.owner),
+        cursor,
+        limit,
+      );
     },
   };
+}
+
+/** The first `limit` owners after `cursor` in byte order, and the cursor of the next page or null. */
+function ownerPage(owners: string[], cursor: string | null, limit: number) {
+  const after = owners.filter((owner) => cursor === null || byBytes(owner, cursor) > 0).sort(byBytes);
+  const last = after[limit - 1];
+  return { owners: after.slice(0, limit), cursor: after.length > limit && last !== undefined ? last : null };
 }

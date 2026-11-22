@@ -39,7 +39,7 @@ describe("an onDelete that refuses, with api.deleteFile", () => {
     expect(refused).toEqual({ data: null, error: refusal });
     expect(refused.error).toBe(refusal);
     expect([await status(ticket.id), await stored(ticket.key)]).toEqual(["completed", true]);
-    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await memory.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
     // The hook wrote through tx before it refused: rolled back with the deletion.
     expect([memory.appRows(), fixture.logger.errors]).toEqual([[], []]);
     refusing = false;
@@ -143,7 +143,17 @@ describe("an onDelete that refuses, with api.eraseOwner", () => {
     // Past both files' URLs and the grace, so the run that deletes the older one also proves it clean.
     vi.setSystemTime(NOW.getTime() + 2 * HOUR);
     expect(await fixture.cloudrop.api.eraseOwner("u1")).toEqual({
-      data: { revoked: 0, deleted: 1, refused: 1, cleaned: 1, failed: 0, waiting: 1, done: false },
+      data: {
+        requestedAt: new Date(NOW.getTime() + 2 * HOUR),
+        revoked: 0,
+        deleted: 1,
+        refused: 1,
+        cleaned: 1,
+        failed: 0,
+        waiting: 1,
+        prefixed: 0,
+        done: false,
+      },
       error: null,
     });
     // Newest first: the refused file came before the one deleted.
@@ -169,12 +179,14 @@ describe("an onDelete that refuses, with api.eraseOwner", () => {
     expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, deleted: true, cleaned: true });
     paused.open();
     expect((await erasing).data).toEqual({
+      requestedAt: new Date(NOW.getTime() + 2 * HOUR),
       revoked: 0,
       deleted: 0,
       refused: 1,
       cleaned: 0,
       failed: 0,
       waiting: 0,
+      prefixed: 0,
       done: true,
     });
   });
@@ -200,7 +212,7 @@ describe("an onDelete that refuses, with replace", () => {
       ]);
       // Pending, not completing: under a lease the claim was released, with a transaction it rolled back.
       expect([await status(previous.id), await status(next.id)]).toEqual(["completed", "pending"]);
-      expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1 });
+      expect(await memory.usage("u1")).toEqual({ reservedBytes: 5, activeBytes: 5, files: 1, erasure: null });
       const tx = mode === "transaction";
       // onComplete ran for the new file either way; with a transaction its write rolled back with the hook's.
       expect([completions, memory.appRows()]).toEqual([[previous.id, next.id], tx ? [`completed ${previous.id}`] : []]);

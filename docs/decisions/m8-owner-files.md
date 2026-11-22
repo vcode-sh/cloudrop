@@ -119,11 +119,13 @@ and sweeping every page in one call. Entries continue from `M8-A1`.
   the owner's access can reserve a file after the last read. The guide says to revoke access first and run it once
   more if a request may still be in flight. Rows and the usage row stay (ended, and at zeros); an app whose erasure
   policy forbids keeping file names deletes them with its own SQL after `done`.
-- **Status:** in force. `src/server/erase.test.ts`, with fault probes: without the `failed` rule the stuck completion's
+- **Status:** in force, amended by `M12-O2`: since 1.0 the owner is marked first and every later reserve is refused,
+  so the race in "If wrong" is closed for a store that keeps the mark. `src/server/erase.test.ts`, with fault probes:
+  without the `failed` rule the stuck completion's
   object stays; without the live reads an upload started mid-run is missed; without the settle wait a late `PUT`
   survives a run that said done. The release race, the URL-life boundary and the upload cancelled mid-run were each
   seen failing before their fix.
-- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erase-an-owner`.
+- **Visible in:** `src/server/erase.ts`, `docs/guide/store.md#erasing-an-owner`.
 
 ### M8-A6: `replace: true` keeps one file per owner on a route
 

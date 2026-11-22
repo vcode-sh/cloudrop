@@ -59,6 +59,8 @@ function modelRows(
     );
     await store.claim("f-1", "claim-1", NOW, 60_000);
     await store.complete("f-1", "claim-1", '{"id":7}', LATER);
+    await store.markErasure({ owner: "u-1", now: LATER });
+    await store.erased({ owner: "u-1", requestedAt: LATER, now: LATER });
     expect(await prisma.cloudropFile.findUnique({ where: { id: "f-1" } })).toEqual({
       ...file("f-1", 0),
       size: BigInt(MAX_SAFE),
@@ -82,6 +84,8 @@ function modelRows(
       activeBytes: BigInt(MAX_SAFE),
       files: 1,
       updatedAt: time(LATER),
+      eraseRequestedAt: time(LATER),
+      erasedAt: time(LATER),
     });
   });
 

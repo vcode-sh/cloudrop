@@ -42,5 +42,9 @@ CREATE TABLE IF NOT EXISTS "cloudrop_usage" (
   reserved_bytes INTEGER NOT NULL,
   active_bytes INTEGER NOT NULL,
   files INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  erase_requested_at INTEGER,
+  erased_at INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;

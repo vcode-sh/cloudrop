@@ -17,8 +17,8 @@ export function reserveCases(suite: StoreSuite): void {
     expect(outcomes).toEqual(["reserved", "reserved"]);
     expect(await raw.files()).toEqual([pendingRow(first, "u-1"), pendingRow(second, "u-1")]);
     expect(await raw.usage()).toEqual([usageRow("u-1", { reservedBytes: 3072 })]);
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 3072, activeBytes: 0, files: 0 });
-    expect(await store.usage("nobody")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 3072, activeBytes: 0, files: 0, erasure: null });
+    expect(await store.usage("nobody")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     expect(await store.get("f-1")).toEqual({
       ...first,
       owner: "u-1",

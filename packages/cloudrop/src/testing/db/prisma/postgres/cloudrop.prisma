@@ -34,12 +34,15 @@ model CloudropFile {
   @@map("cloudrop_files")
 }
 
+// The partial index cloudrop_usage_erasing_idx is outside Prisma's schema too: add it to the migration as the guide shows.
 model CloudropUsage {
-  owner         String   @id
-  reservedBytes BigInt   @map("reserved_bytes")
-  activeBytes   BigInt   @map("active_bytes")
-  files         Int
-  updatedAt     DateTime @map("updated_at") @db.Timestamptz(3)
+  owner            String    @id
+  reservedBytes    BigInt    @map("reserved_bytes")
+  activeBytes      BigInt    @map("active_bytes")
+  files            Int
+  updatedAt        DateTime  @map("updated_at") @db.Timestamptz(3)
+  eraseRequestedAt DateTime? @map("erase_requested_at") @db.Timestamptz(3)
+  erasedAt         DateTime? @map("erased_at") @db.Timestamptz(3)
 
   @@map("cloudrop_usage")
 }

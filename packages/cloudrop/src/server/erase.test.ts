@@ -7,6 +7,7 @@ import { route } from "./route.ts";
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const at = (ms: number) => vi.setSystemTime(NOW.getTime() + ms);
+const time = (ms: number) => new Date(NOW.getTime() + ms);
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -47,8 +48,20 @@ describe("cloudrop.api.eraseOwner", () => {
     at(2 * HOUR);
     const open = await upload(fixture, "owned", false);
     const { api } = fixture.cloudrop;
+    // The first run marks the owner, and every later run keeps that time.
+    const requestedAt = time(2 * HOUR);
     expect(await api.eraseOwner("u1")).toEqual({
-      data: { revoked: 1, deleted: 1, refused: 0, cleaned: 1, failed: 0, waiting: 1, done: false },
+      data: {
+        requestedAt,
+        revoked: 1,
+        deleted: 1,
+        refused: 0,
+        cleaned: 1,
+        failed: 0,
+        waiting: 1,
+        prefixed: 0,
+        done: false,
+      },
       error: null,
     });
     expect([
@@ -63,26 +76,29 @@ describe("cloudrop.api.eraseOwner", () => {
     expect((await api.eraseOwner("u1")).data?.done).toBe(false);
     at(2 * HOUR + 15 * MINUTE + HOUR);
     expect(await api.eraseOwner("u1")).toEqual({
-      data: { revoked: 0, deleted: 0, refused: 0, cleaned: 1, failed: 0, waiting: 0, done: true },
+      data: {
+        requestedAt,
+        revoked: 0,
+        deleted: 0,
+        refused: 0,
+        cleaned: 1,
+        failed: 0,
+        waiting: 0,
+        prefixed: 0,
+        done: true,
+      },
       error: null,
     });
     expect(await stored(fixture, open.key)).toBe(false);
-    expect((await api.eraseOwner("u1")).data).toEqual({
-      revoked: 0,
-      deleted: 0,
-      refused: 0,
-      cleaned: 0,
-      failed: 0,
-      waiting: 0,
-      done: true,
-    });
-    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    const erasure = { requestedAt, erasedAt: time(2 * HOUR + 15 * MINUTE + HOUR) };
+    expect((await api.usage("u1")).data).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure });
     expect((await api.file(theirs.id)).data?.status).toBe("completed");
   });
 
   // eraseOwner never ends a completion: one its server never finished stays until the sweep ends it, once it is past
-  // its lease and the grace (1 hour) past its token's deadline (24 hours after /upload). The sweep keeps the object.
-  it("waits for the sweep to end a completion its server never finished, then removes its object", async () => {
+  // its lease and the grace (1 hour) past its token's deadline (24 hours after /upload). The sweep keeps the object of
+  // a stuck completion for the app to check, but not one of an owner being erased: its erase pass then removes it.
+  it("waits for the sweep to end a completion its server never finished, whose erase pass then removes it", async () => {
     const fixture = storeFixture({ owned });
     const stuck = await upload(fixture, "owned", false);
     await fixture.store.claim(stuck.id, "lost", new Date(), 60_000);
@@ -92,10 +108,10 @@ describe("cloudrop.api.eraseOwner", () => {
     at(25 * HOUR + 1);
     expect((await api.eraseOwner("u1")).data).toMatchObject({ cleaned: 0, waiting: 1, done: false });
     expect(await stored(fixture, stuck.key)).toBe(true);
-    expect((await api.sweep()).data?.reported.map((row) => [row.id, row.status])).toEqual([[stuck.id, "failed"]]);
-    expect(await stored(fixture, stuck.key)).toBe(true);
-    expect((await api.eraseOwner("u1")).data).toMatchObject({ cleaned: 1, waiting: 0, done: true });
-    expect(await stored(fixture, stuck.key)).toBe(false);
+    const swept = (await api.sweep()).data;
+    expect(swept?.reported.map((row) => [row.id, row.status])).toEqual([[stuck.id, "failed"]]);
+    expect([swept?.erasing, swept?.erased, await stored(fixture, stuck.key)]).toEqual([1, 1, false]);
+    expect((await api.eraseOwner("u1")).data).toMatchObject({ cleaned: 0, waiting: 0, done: true });
   });
 
   it("is not done while a completion is under way, and deletes the file once it completed", async () => {
@@ -172,84 +188,6 @@ describe("cloudrop.api.eraseOwner", () => {
     expect((await fixture.store.raw.files())[0]?.status).toBe("aborted");
   });
 
-  it("is not done when an upload starts while it runs", async () => {
-    const base = memoryStore();
-    let started = false;
-    const fixture: Fixture = storeFixture(
-      { owned },
-      {
-        store: {
-          ...base,
-          // The first ended pass: the run has revoked and deleted, and the owner starts another upload.
-          list: async (input) => {
-            if (input.statuses.includes("aborted") && !started) {
-              started = true;
-              await fixture.single("owned", TEXT);
-            }
-            return base.list(input);
-          },
-        },
-      },
-    );
-    expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toMatchObject({ waiting: 1, done: false });
-    expect((await fixture.store.raw.files()).map((row) => row.status)).toEqual(["pending"]);
-  });
-
-  it("is not done when an upload reserved just before the run is recorded while it runs", async () => {
-    const base = memoryStore();
-    let started = false;
-    const fixture: Fixture = storeFixture(
-      { owned },
-      {
-        store: {
-          ...base,
-          // The first ended pass, after the live statuses were read: an /upload that took its time a second before the
-          // run began records its file only now. The file is older than the run, so only the last read of the live
-          // statuses finds it.
-          list: async (input) => {
-            if (input.statuses.includes("aborted") && !started) {
-              started = true;
-              at(0);
-              await fixture.single("owned", TEXT);
-              at(1000);
-            }
-            return base.list(input);
-          },
-        },
-      },
-    );
-    at(1000);
-    expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toMatchObject({ revoked: 0, waiting: 1, done: false });
-    expect((await fixture.store.raw.files()).map((row) => [row.status, row.createdAt])).toEqual([["pending", NOW]]);
-  });
-
-  it("is not done when an upload starts and is cancelled while it runs", async () => {
-    const base = memoryStore();
-    let started = false;
-    const fixture: Fixture = storeFixture(
-      { owned },
-      {
-        store: {
-          ...base,
-          // Just after the run read the aborted files: an upload starts, its PUT lands, and its client cancels it. It
-          // is never live when the run reads the live statuses.
-          list: async (input) => {
-            const page = await base.list(input);
-            if (input.statuses.includes("aborted") && !started) {
-              started = true;
-              const ticket = await upload(fixture, "owned", false);
-              expect((await fixture.post("abort", { token: ticket.token })).status).toBe(200);
-              await fixture.send(ticket.put, hello);
-            }
-            return page;
-          },
-        },
-      },
-    );
-    expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toMatchObject({ waiting: 1, done: false });
-    expect((await fixture.store.raw.files()).map((row) => row.status)).toEqual(["aborted"]);
-  });
-
   it("counts a file whose key it cannot check as failed, logs it, and is not done", async () => {
     const fixture = storeFixture({ owned });
     const ticket = await upload(fixture, "owned");
@@ -257,12 +195,14 @@ describe("cloudrop.api.eraseOwner", () => {
     at(2 * HOUR);
     fixture.fake.fetch = () => Promise.reject(new TypeError("network down"));
     expect((await fixture.cloudrop.api.eraseOwner("u1")).data).toEqual({
+      requestedAt: time(2 * HOUR),
       revoked: 0,
       deleted: 1,
       refused: 0,
       cleaned: 0,
       failed: 1,
       waiting: 0,
+      prefixed: 0,
       done: false,
     });
     expect(fixture.logger.errors.map((entry) => entry.message)).toEqual([
@@ -292,7 +232,17 @@ describe("cloudrop.api.eraseOwner", () => {
     await upload(fixture, "owned");
     await upload(fixture, "owned");
     const report = await fixture.cloudrop.api.eraseOwner("u1", { signal: controller.signal });
-    expect(report.data).toEqual({ revoked: 0, deleted: 1, refused: 0, cleaned: 0, failed: 0, waiting: 0, done: false });
+    expect(report.data).toEqual({
+      requestedAt: NOW,
+      revoked: 0,
+      deleted: 1,
+      refused: 0,
+      cleaned: 0,
+      failed: 0,
+      waiting: 0,
+      prefixed: 0,
+      done: false,
+    });
     expect(recorded.calls).toEqual([]);
     expect((await fixture.store.raw.files()).map((row) => row.status).sort()).toEqual(["completed", "deleted"]);
   });
@@ -302,7 +252,17 @@ describe("cloudrop.api.eraseOwner", () => {
     await upload(fixture, "owned");
     await upload(fixture, "owned", false);
     const report = await fixture.cloudrop.api.eraseOwner("u1", { signal: AbortSignal.abort() });
-    expect(report.data).toEqual({ revoked: 0, deleted: 0, refused: 0, cleaned: 0, failed: 0, waiting: 0, done: false });
+    expect(report.data).toEqual({
+      requestedAt: NOW,
+      revoked: 0,
+      deleted: 0,
+      refused: 0,
+      cleaned: 0,
+      failed: 0,
+      waiting: 0,
+      prefixed: 0,
+      done: false,
+    });
     expect((await fixture.store.raw.files()).map((row) => row.status).sort()).toEqual(["completed", "pending"]);
   });
 

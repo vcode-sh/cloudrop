@@ -55,7 +55,7 @@ export function transactionCases(suite: StoreSuite): void {
       { id: "f-1", status: "pending" },
       { id: "f-2", status: "pending" },
     ]);
-    expect(await store.usage("u-2")).toEqual({ reservedBytes: 7, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-2")).toEqual({ reservedBytes: 7, activeBytes: 0, files: 0, erasure: null });
   });
 
   it("a store built with custom table names writes those tables and no others", async (ctx) => {

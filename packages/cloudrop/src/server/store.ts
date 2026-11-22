@@ -3,6 +3,7 @@
 // `src/testing/store-contract.ts` proves an implementation keeps every promise written here.
 
 import type { EndedStatus, FileRecord, FileRecordStatus, NewFile } from "./file-record.ts";
+import type { OwnerUsage, ReserveOutcome, StoreErasure } from "./store-erasure.ts";
 import type { RouteFunction } from "./store-route.ts";
 
 export type {
@@ -21,6 +22,7 @@ export type {
   RecordOf,
   RejectedRecord,
 } from "./file-record.ts";
+export type { OwnerErasure, OwnerUsage, ReserveOutcome, StoreErasure } from "./store-erasure.ts";
 
 /** What `claim` found. Only `claimed` lets the caller run `onComplete`. */
 export type ClaimOutcome =
@@ -41,16 +43,6 @@ export type Transition =
 
 /** What `complete` did: the transition, and the files `replace` deleted in the same unit (none without it). */
 export type Completion = Transition & { replaced: FileRecord[] };
-
-/** An owner's counters, kept for every row with an owner whether or not a quota is set. */
-export interface OwnerUsage {
-  /** Bytes of the owner's `pending` and `completing` rows. */
-  reservedBytes: number;
-  /** Bytes of the owner's `completed` rows. */
-  activeBytes: number;
-  /** The owner's `completed` rows (a `deleted` row no longer counts). */
-  files: number;
-}
 
 /** The filters, order and page that `list` and `listAll` share; `list`'s documentation says what each means. */
 interface ListQuery {
@@ -75,7 +67,7 @@ type RecordPage = { records: FileRecord[]; cursor: string | null };
  * A change that moves no bytes (an owner-less row, or leaving an ended status) does not write the usage row at all.
  * `TTx` is the transaction handle `onComplete` receives when the store has `transaction`.
  */
-export interface CloudropStore<TTx = never> {
+export interface CloudropStore<TTx = never> extends StoreErasure {
   /**
    * Writes the accepted files of one `/upload` as `pending` rows of one owner, adding each reserved file's size to the
    * owner's reserved bytes. With an owner and a `limit`, each file in order is reserved only when the owner's
@@ -94,6 +86,10 @@ export interface CloudropStore<TTx = never> {
    * quota, and not at all when the call throws. A call with no files writes nothing. The server passes a key only with
    * an owner (M5-T105): owner-less rows hold no quota, so superseding them would free nothing. A store that ignores
    * `requestKey` keeps the old cost: lost answers hold their bytes until the sweep.
+   *
+   * With an owner whose usage row carries an erase mark (`markErasure`), every file is `"erased"` and the call writes
+   * nothing, superseding included. The mark is read under the same usage-row lock as the quota (on Postgres the row is
+   * locked first, with or without a limit), so a reserve either commits before the mark or is refused (M12-O2).
    */
   reserve(
     input: {
@@ -104,7 +100,7 @@ export interface CloudropStore<TTx = never> {
       files: readonly NewFile[];
     },
     now: Date,
-  ): Promise<readonly ("reserved" | "over-quota")[]>;
+  ): Promise<readonly ReserveOutcome[]>;
   /** Stores the multipart upload id on a `pending` row whose `upload_id` is null or already this id: true, and
    *  `updated_at = now` (a repeat stamps it again). False for any other row, or none, which is left unchanged. */
   attach(id: string, uploadId: string, now: Date): Promise<boolean>;
@@ -192,7 +188,7 @@ export interface CloudropStore<TTx = never> {
   listAll?(input: ListQuery & { owner: string | null; status: FileRecordStatus | null }): Promise<RecordPage>;
   /** Sets `cleaned_at = now` on a row that has none; a cleaned or missing row is left as it is. */
   cleaned(id: string, now: Date): Promise<void>;
-  /** The owner's counters; zeros for an owner the store has never counted. */
+  /** The owner's counters and erase mark; zeros and null for an owner the store has never counted. */
   usage(owner: string): Promise<OwnerUsage>;
   /**
    * Repairs an owner's counters: locks the owner's usage row, then recounts it from the owner's rows, so a concurrent

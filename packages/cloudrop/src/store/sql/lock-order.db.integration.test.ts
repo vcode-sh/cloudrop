@@ -117,7 +117,7 @@ describe("Postgres lock order", () => {
     }
     expect(failed).toEqual([]);
     // Every row ended, and each statement moved the usage with its rows.
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     expect(await db.query("SELECT status, count(*)::int AS rows FROM cloudrop_files GROUP BY status")).toEqual([
       { status: "aborted", rows: RACES * ROWS * 3 },
     ]);
@@ -191,7 +191,7 @@ describe("Postgres lock order", () => {
     }
     expect(await revoking).toBe(2);
     expect((await store.get("f-0"))?.status).toBe("aborted");
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   });
 
   // Each row takes 1 s by design: Postgres looks for a deadlock once a statement has waited for its deadlock_timeout.
@@ -215,7 +215,7 @@ describe("Postgres lock order", () => {
     test("a revoke", async () => {
       // The revoke holds the file rows and waits for the usage row.
       expect(await deadlockedWithApp(db, () => store.revoke("u-1", NOW))).toBe(2);
-      expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+      expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     });
 
     test("a completion in a transaction, from its claim", async () => {
@@ -229,7 +229,7 @@ describe("Postgres lock order", () => {
         });
       expect(await deadlockedWithApp(db, completing)).toBe(true);
       expect(runs).toBe(2);
-      expect(await store.usage("u-1")).toEqual({ reservedBytes: 1, activeBytes: 1, files: 1 });
+      expect(await store.usage("u-1")).toEqual({ reservedBytes: 1, activeBytes: 1, files: 1, erasure: null });
     });
   });
 });

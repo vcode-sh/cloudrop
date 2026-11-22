@@ -718,11 +718,12 @@ Same-origin versus cross-origin setups, cookies across sites and which origin th
 
 With a store, `api` also has `file`, `files` (filtered by route, name and type, newest or oldest first), `allFiles`
 (the files of every owner, in any status, for your admin tools: call it behind your own admin check), `usage`,
-`revokeUploads`, `deleteFile`, `eraseOwner`, `reconcile` and `sweep` (see [Database store](store.md#file-operations)).
+`revokeUploads`, `deleteFile`, `eraseOwner`, `reopenOwner`, `reconcile` and `sweep` (see
+[Database store](store.md#file-operations)).
 The `*Object` calls work on the bucket by key and never touch the store: with a store, delete an uploaded file with
 `deleteFile(id)`, which also ends its row and frees the owner's quota.
-For an erasure request, `eraseOwner` needs no key layout and proves when nothing is left; `deletePrefix` empties a
-folder you name.
+For an account deletion, one `eraseOwner` call refuses the owner's uploads from then on and the sweep finishes the
+erasure ([Erasing an owner](store.md#erasing-an-owner)); `deletePrefix` empties a folder you name.
 
 `getUrl` signs at the start of an `expiresIn` window and the URL stays valid for two windows, so every viewer in one
 window gets the same, cacheable URL.

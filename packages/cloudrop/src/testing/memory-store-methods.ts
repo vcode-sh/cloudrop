@@ -7,8 +7,10 @@ import type {
   Completion,
   FileRecordStatus,
   OwnerUsage,
+  ReserveOutcome,
   Transition,
 } from "../server/store.ts";
+import { erasureMethods } from "./memory-store-erasure.ts";
 import { readMethods, toRecord } from "./memory-store-reads.ts";
 import type { RawFileRow, RawUsageRow } from "./store-rows.ts";
 
@@ -22,14 +24,17 @@ export interface Write {
   usage(row: RawUsageRow): void;
 }
 
-type Atomic = <T>(method: string, body: (write: Write) => T) => Promise<T>;
+export type Atomic = <T>(method: string, body: (write: Write) => T) => Promise<T>;
 type Methods = Omit<CloudropStore<never>, "transaction"> & Required<Pick<CloudropStore<never>, "listAll">>;
 
-const ZERO: OwnerUsage = { reservedBytes: 0, activeBytes: 0, files: 0 };
+/** The counters alone, without the erase mark. */
+type Counters = Omit<OwnerUsage, "erasure">;
+
+const ZERO: Counters = { reservedBytes: 0, activeBytes: 0, files: 0 };
 const RESERVING: ReadonlySet<FileRecordStatus> = new Set(["pending", "completing"]);
 
 /** An owner's counters as its rows say they should be. */
-function countRows(rows: Iterable<RawFileRow>, owner: string): OwnerUsage {
+function countRows(rows: Iterable<RawFileRow>, owner: string): Counters {
   const counted = { ...ZERO };
   for (const row of rows) {
     if (row.owner !== owner) continue;
@@ -44,18 +49,21 @@ function countRows(rows: Iterable<RawFileRow>, owner: string): OwnerUsage {
 
 export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   const { files, usage } = tables;
-  const countsOf = (owner: string): OwnerUsage => {
-    const row = usage.get(owner);
-    return row ? { reservedBytes: row.reservedBytes, activeBytes: row.activeBytes, files: row.files } : { ...ZERO };
+  /** The owner's usage row, or the zero row with no mark that stands for a missing one. */
+  const rowOf = (owner: string, now: Date): RawUsageRow =>
+    usage.get(owner) ?? { owner, ...ZERO, eraseRequestedAt: null, erasedAt: null, updatedAt: now };
+  const countsOf = (owner: string): Counters => {
+    const { reservedBytes, activeBytes, files } = rowOf(owner, new Date(0));
+    return { reservedBytes, activeBytes, files };
   };
 
   /** Adds `delta` to an owner's counters in the same unit as the status change; rows without an owner count nowhere. */
-  function adjust(write: Write, owner: string | null, delta: Partial<OwnerUsage>, now: Date): void {
+  function adjust(write: Write, owner: string | null, delta: Partial<Counters>, now: Date): void {
     // Nothing to move (an owner-less row, or leaving an ended status): the usage row is not written at all.
     if (owner === null || Object.keys(delta).length === 0) return;
     const counts = countsOf(owner);
     write.usage({
-      owner,
+      ...rowOf(owner, now),
       reservedBytes: counts.reservedBytes + (delta.reservedBytes ?? 0),
       activeBytes: counts.activeBytes + (delta.activeBytes ?? 0),
       files: counts.files + (delta.files ?? 0),
@@ -64,7 +72,7 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
   }
 
   /** What leaving `from` takes off the owner's counters. */
-  const releaseFrom = (from: FileRecordStatus, size: number): Partial<OwnerUsage> => {
+  const releaseFrom = (from: FileRecordStatus, size: number): Partial<Counters> => {
     if (RESERVING.has(from)) return { reservedBytes: -size };
     return from === "completed" ? { activeBytes: -size, files: -1 } : {};
   };
@@ -76,9 +84,12 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
 
   return {
     ...readMethods(tables),
+    ...erasureMethods(tables, atomic, rowOf),
     reserve: ({ owner, limit, expiresAt, requestKey, files: accepted }, now) =>
-      atomic("reserve", (write) => {
+      atomic("reserve", (write): ReserveOutcome[] => {
         if (accepted.length === 0) return [];
+        // An owner being erased gets nothing written, not even the superseding of an earlier attempt (M12-O2).
+        if (owner !== null && usage.get(owner)?.eraseRequestedAt) return accepted.map(() => "erased");
         // A retry of a request whose answer was lost: its earlier attempt's pending rows end first, freeing their
         // bytes.
         const routes = new Set(accepted.map((file) => file.route));
@@ -205,15 +216,18 @@ export function storeMethods(tables: MemoryTables, atomic: Atomic): Methods {
         if (row && row.cleanedAt === null) write.file({ ...row, cleanedAt: now, updatedAt: now });
       }),
 
-    usage: async (owner) => countsOf(owner),
+    usage: async (owner) => {
+      const { eraseRequestedAt, erasedAt } = rowOf(owner, new Date(0));
+      return { ...countsOf(owner), erasure: eraseRequestedAt ? { requestedAt: eraseRequestedAt, erasedAt } : null };
+    },
 
     reconcile: (owner) =>
       atomic("reconcile", (write) => {
         const counted = countRows(files.values(), owner);
         const current = countsOf(owner);
-        const same = (Object.keys(ZERO) as (keyof OwnerUsage)[]).every((name) => counted[name] === current[name]);
+        const same = (Object.keys(ZERO) as (keyof Counters)[]).every((name) => counted[name] === current[name]);
         // The interface passes no time, so the store's own clock stamps the row (fake timers move it in tests).
-        if (!same) write.usage({ owner, ...counted, updatedAt: new Date() });
+        if (!same) write.usage({ ...rowOf(owner, new Date()), ...counted, updatedAt: new Date() });
         return !same;
       }),
   };

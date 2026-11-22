@@ -21,6 +21,10 @@ export async function readOwner(route: RouteConfig, context: OwnerContext<object
   );
 }
 
+/** A file of an owner `eraseOwner` marked (M12-O2): the account is going away, so nothing of it may be stored again. */
+const beingErased = (): CloudropError =>
+  new CloudropError("FORBIDDEN", "This account is being erased, so it can no longer upload files.");
+
 const quotaUnavailable = (): CloudropError =>
   new CloudropError("SERVER_ERROR", "The server could not check your storage limit. Try again in a moment.", {
     retryable: true,
@@ -45,7 +49,8 @@ async function readLimit(
 
 /**
  * With a store, writes the accepted files' rows in one call. Answers the files that must not start, by id: each file
- * over the quota, or every file when the limit or the rows could not be read or written. Without a store, none.
+ * over the quota, every file of an owner being erased, or every file when the limit or the rows could not be read or
+ * written. Without a store, none.
  */
 export async function reserveFiles(
   config: ServerConfig,
@@ -83,8 +88,12 @@ export async function reserveFiles(
     store.reserve({ owner, limit: limit.data, expiresAt, requestKey, files: rows }, new Date()),
   );
   if (reserved.error) return everyFile(reserved.error);
-  const refused = files.filter((_, index) => reserved.data[index] !== "reserved");
-  return new Map(refused.map((file) => [file.id, quotaExceeded()]));
+  const refusals = files.flatMap((file, index) => {
+    const outcome = reserved.data[index];
+    if (outcome === "reserved") return [];
+    return [[file.id, outcome === "erased" ? beingErased() : quotaExceeded()] as const];
+  });
+  return new Map(refusals);
 }
 
 /** Stores a new multipart upload's id on its row. An error means the upload must be aborted and the file not started. */

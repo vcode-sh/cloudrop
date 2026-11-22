@@ -259,8 +259,8 @@ any other way, such as from `Object.entries`, does not: wrap that copy with `def
 
 Use the tool you query with:
 
-- **Prisma:** `prisma migrate dev --create-only` from the two models above, add the CHECK line (below) to the
-  generated `migration.sql`, then apply it with `prisma migrate dev`.
+- **Prisma:** `prisma migrate dev --create-only` from the two models above, add the CHECK and index lines (below) to
+  the generated `migration.sql`, then apply it with `prisma migrate dev`.
 - **Drizzle:** export the tables from your schema file and let drizzle-kit create them:
 
   ```ts
@@ -327,8 +327,12 @@ CREATE TABLE "cloudrop_usage" (
   reserved_bytes bigint NOT NULL CHECK (reserved_bytes >= 0),
   active_bytes bigint NOT NULL CHECK (active_bytes >= 0),
   files integer NOT NULL CHECK (files >= 0),
-  updated_at timestamptz(3) NOT NULL
+  updated_at timestamptz(3) NOT NULL,
+  erase_requested_at timestamptz(3),
+  erased_at timestamptz(3)
 );
+
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 SQLite and D1 store times as integer milliseconds:
@@ -377,23 +381,31 @@ CREATE TABLE "cloudrop_usage" (
   reserved_bytes INTEGER NOT NULL,
   active_bytes INTEGER NOT NULL,
   files INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  erase_requested_at INTEGER,
+  erased_at INTEGER
 );
+
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 Other table names: pass `tables: { files: "uploads", usage: "upload_usage" }` to the adapter (letters, digits and `_`)
 and rename them in the SQL, including the index and constraint names if you like.
 
-**Prisma and the CHECK constraints.** Prisma's schema language has no CHECK, so `prisma migrate` creates the usage
-table without the three `CHECK (… >= 0)` on Postgres. Run `prisma migrate dev --create-only`, add this line to the
-generated `migration.sql`, then apply it:
+**Prisma, the CHECK constraints and the erasing index.** Prisma's schema language has no CHECK, and the shipped models
+leave out the partial index on the owners being erased, so `prisma migrate` creates the usage table without either.
+Run `prisma migrate dev --create-only`, add these lines to the generated `migration.sql` (the first on Postgres only,
+the second on Postgres and SQLite), then apply it:
 
 ```sql
 ALTER TABLE cloudrop_usage ADD CONSTRAINT cloudrop_usage_reserved_bytes_check CHECK (reserved_bytes >= 0), ADD CONSTRAINT cloudrop_usage_active_bytes_check CHECK (active_bytes >= 0), ADD CONSTRAINT cloudrop_usage_files_check CHECK (files >= 0);
+CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
 ```
 
 The names are the ones the plain SQL gets by default, so both routes end with the same schema. The store works without
-them; they only guard the counters against a bug or a hand edit.
+them: the CHECKs only guard the counters against a bug or a hand edit, and the index keeps the sweep's erase pass from
+reading every usage row. Prisma's `migrate diff` does not report the index missing or extra (checked with Prisma
+7.10), so it never proposes to drop it either.
 
 **Moving a SQLite database from the SQL to Prisma.** Prisma declares its `BigInt` columns `BIGINT` where the SQL says
 `INTEGER`. Both have INTEGER affinity, so storage and behaviour are the same, but Prisma's first `migrate dev` rebuilds
@@ -490,6 +502,46 @@ CREATE INDEX CONCURRENTLY "cloudrop_files_created_at_idx" ON "cloudrop_files" (c
 With [`tables.schema`](#tables-in-another-schema) or table names of your own, put those names in the statements. A
 store you wrote yourself also needs the new `listAll` method before `api.allFiles` works with it; every other call
 works without.
+
+### Upgrading from 0.6
+
+1.0 keeps an owner's [erase mark](#erasing-an-owner) in two new columns of `cloudrop_usage`, with a partial index for
+the sweep's erase pass. The store needs the columns: until they exist, its first call fails with `INVALID_CONFIG`,
+which prints the SQL below for your dialect and table names. Add them before you deploy 1.0.
+
+- **Plain SQL**, on Postgres, in a migration:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at timestamptz(3), ADD COLUMN erased_at timestamptz(3);
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
+  ```
+
+  On SQLite or D1, which add one column per statement:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erase_requested_at INTEGER;
+  ALTER TABLE "cloudrop_usage" ADD COLUMN erased_at INTEGER;
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;
+  ```
+
+- **Drizzle:** `cloudropPgTables()` and `cloudropSqliteTables()` declare both columns and the index, so
+  `drizzle-kit generate` writes the migration, with no question to answer. For the Postgres tables:
+
+  ```sql
+  ALTER TABLE "cloudrop_usage" ADD COLUMN "erase_requested_at" timestamp(3) with time zone;
+  ALTER TABLE "cloudrop_usage" ADD COLUMN "erased_at" timestamp(3) with time zone;
+  CREATE INDEX "cloudrop_usage_erasing_idx" ON "cloudrop_usage" ("owner") WHERE "erase_requested_at" IS NOT NULL AND "erased_at" IS NULL;
+  ```
+
+- **Prisma:** add the two fields to your `CloudropUsage` model, as the shipped models have them, run
+  `prisma migrate dev --create-only`, add the `CREATE INDEX` line above to the generated `migration.sql`, then apply
+  it with `prisma migrate dev`.
+
+Adding nullable columns rewrites no row on Postgres or SQLite, and is quick. On a large Postgres table, add the two
+columns first, then build the index by hand with `CREATE INDEX CONCURRENTLY` before the migration's `CREATE INDEX`
+(made `IF NOT EXISTS`) runs, as [Upgrading from 0.5](#upgrading-from-05) shows: the index needs the columns. A store you wrote yourself needs
+the four new methods `markErasure`, `erased`, `reopen` and `erasing`, and `reserve`'s new `"erased"` answer, before
+`createCloudrop` accepts it.
 
 ### Tables in another schema
 
@@ -646,7 +698,7 @@ short. For work that must happen, write an outbox row through `tx` in `onComplet
 
 A route's `onDelete` runs when one of its completed files is deleted: by `api.deleteFile` (`reason: "deleted"`), by the
 next completion on a [`replace: true`](#one-file-per-owner-replace) route (`"replaced"`), or by
-[`api.eraseOwner`](#erase-an-owner) (`"erased"`). It keeps what your app holds about the file right: an audit trail, a
+[`api.eraseOwner`](#erasing-an-owner) (`"erased"`). It keeps what your app holds about the file right: an audit trail, a
 pointer such as the user's current avatar, a counter. An audit trail on Postgres, with Drizzle:
 
 ```ts
@@ -947,59 +999,114 @@ so its cost is the rows it passes to fill a page; with `owner` it finds that own
 does: see [Known costs](#known-costs). The index is new in 0.6.0 ([Upgrading from 0.5](#upgrading-from-05)); without
 it the listing answers the same, slower.
 
-## Erase an owner
+## Erasing an owner
 
-For an account deletion or an erasure request: everything an owner uploaded goes, driven by the owner's rows, so it
-needs no knowledge of your key layout.
+For an account deletion or an erasure request: one call, when the account goes. Everything the owner uploaded goes,
+driven by the owner's rows, so it needs no knowledge of your key layout, and the [sweep](#the-sweep) finishes what that
+call could not.
 
 ```ts
-// Stop the owner's access first (delete the account or its sessions), then run it, now and on a schedule, until done.
+// At account deletion, once. The sweep, on its usual schedule, carries the erasure on until it is finished.
 const { data, error } = await cloudrop.api.eraseOwner(userId);
-// data: { revoked, deleted, refused, cleaned, failed, waiting, done }
-if (data?.done) await markErased(userId); // your app's record
+// data: { requestedAt, revoked, deleted, refused, cleaned, failed, waiting, prefixed, done }
 ```
 
-Each run revokes the owner's unfinished uploads, deletes every completed file its `onDelete` lets go (the row first,
-then the object, as `deleteFile` does), and checks the key of every ended upload the store cannot already prove clean,
-removing what is still the upload's own. It reports counts of files, and a file can count twice: one deleted in this
-run is in `deleted`, and again in `cleaned` or `waiting` once its key was checked.
+What the call does, in order:
+
+1. **Marks the owner.** The owner's usage row gets `erase_requested_at`, once: a second call keeps the first time,
+   which every report answers as `requestedAt`. From the moment the mark is committed, every `/upload` of the owner is
+   refused, each file with `FORBIDDEN`, "This account is being erased, so it can no longer upload files.", even one
+   whose `authorize` passed before the account was deleted. The store reads the mark under the same row lock as the
+   quota, so an upload either was reserved before the mark, and the call sees its row, or is refused.
+2. **Erases the rows.** It ends the owner's unfinished uploads, deletes every completed file its `onDelete` lets go
+   (the row first, then the object, as `deleteFile` does), and checks the key of every ended upload the store cannot
+   already prove clean, removing what is still the upload's own.
+3. **Empties your folders**, once nothing of the owner's rows is left: each prefix
+   [`erase.prefixes`](#folders-no-row-tracks-eraseprefixes) names, such as an export you wrote with `putObject`.
+4. **Records the erasure as finished** (`erased_at`). From then on `eraseOwner` answers `done: true` at once, reading
+   no rows, and the sweep leaves the owner alone.
+
+`done: false` is the usual first answer: a `PUT` with a URL signed before the mark can land for 15 minutes more, and
+gets `graceMs` (default 1 hour) after that, so a file completed or ended within the last 1 hour 15 minutes keeps the
+erasure open. **The sweep carries it on.** After its expire pass, each sweep runs the same erasure for every marked,
+unfinished owner, with the sweep's `graceMs`, `signal` and `context`, and counts them in `erasing` and `erased`. Keep
+the sweep on its schedule and call `eraseOwner` once; call it again only to see where it stands.
+
+A report counts files, and a file can count twice: one deleted in this run is in `deleted`, and again in `cleaned` or
+`waiting` once its key was checked.
 
 | Field | Meaning | In the bucket after the run |
 | --- | --- | --- |
+| `requestedAt` | When the owner's erasure was first asked for. | |
 | `revoked` | Unfinished uploads ended in this run. | What they had uploaded is removed later in the same run, where each counts again in `cleaned`, `waiting` or `failed`. |
 | `deleted` | Completed files deleted in this run: the row is `deleted` and the owner's bytes are released. | The object is removed later in the same run, where each counts again in `cleaned`, `waiting` or `failed`. |
 | `refused` | Completed files kept because their route's [`onDelete` refused](#refuse-a-deletion). They count in `waiting` too, so the owner is not `done` until the hook lets them go. | Untouched: the file is still completed and its object is there. |
 | `cleaned` | Ended uploads (cancelled, revoked, refused, expired, failed or deleted, in this run or before it) whose key this run checked once their URLs and the grace had run out. | Nothing of theirs, and nothing can arrive any more. |
-| `failed` | Files this run could not handle; each is logged with its id. | After a storage or database error, not known: the object may still be there. A file whose `onDelete` threw is still completed, with its object, and counts in `waiting` too. |
-| `waiting` | Files not proven gone yet. | **Still there** for a file that is still live: a completed file its `onDelete` kept, a completion under way, and an upload that started while the run went on. **Removed, but not for good** for an ended upload whose URLs, or the grace after them, have not run out: this run removed its object, a `PUT` already signed can still put one back, and a later run checks the key again. |
-| `done` | Nothing of the owner was unfinished or completed, and every ended upload had its key checked after its URLs and the grace ran out. | Nothing of the owner's uploads, and nothing can arrive any more. |
+| `failed` | Files this run could not handle, and folders it could not empty; each is logged. | After a storage or database error, not known: the object may still be there. A file whose `onDelete` threw is still completed, with its object, and counts in `waiting` too. |
+| `waiting` | Files not proven gone yet. | **Still there** for a file that is still live: a completed file its `onDelete` kept, or a completion under way. **Removed, but not for good** for an ended upload whose URLs, or the grace after them, have not run out: this run removed its object, a `PUT` already signed can still put one back, and a later run checks the key again. |
+| `prefixed` | Objects deleted from the `erase.prefixes` folders, which run only once nothing else is left. | Nothing under those folders. |
+| `done` | The erasure is finished, by this run or an earlier one. | Nothing of the owner's uploads or folders, and no upload of theirs can arrive any more. The mark refuses uploads only: an object your own code writes into one of the folders afterwards, such as with `api.putObject`, stays until you delete it. |
 
-**Why it takes two runs.** A `PUT` with a URL signed before the revocation can still land afterwards. A URL works for
-15 minutes and never past the upload's token, so the last `PUT` can start 15 minutes after the upload stopped being
-unfinished (it completed, or ended), or at the token's deadline if that comes first; a key is checked for the last
-time `graceMs` after that (default 1 hour, from 15 minutes to 30 days), the time a `PUT` already under way gets to land. Files
-completed or ended longer ago than that are proven in the first run; a recent one makes the first run answer
-`waiting`, and a run 1 hour 15 minutes later `done`. Run it again until it reports `done`: it is idempotent, and two
-runs at once are safe.
+- **It needs the sweep for a stuck completion.** `eraseOwner` never ends a completion that is under way, since it may
+  still record the file; one whose server died in the middle of `/complete` stays `completing` until the sweep ends
+  it, past its lease and `graceMs` past its token's deadline (25 hours after its `/upload` with the defaults). The
+  same sweep's erase pass then removes its object: for an owner being erased, a stuck completion's object is not kept
+  for you to check.
+- **A completion already running finishes.** Its `onComplete` may run for an account being erased, and the next pass
+  deletes the file, with its `onDelete`.
+- **`signal`** (an `AbortSignal`) stops a run with `done: false` before its next file; the mark stays, and the sweep
+  goes on from there.
+- **`context`** reaches each file's [`onDelete`](#ondelete), as `deleteFile`'s does. The sweep passes its own
+  `context` for the files it deletes while it carries an erasure on, so when your routes' `onDelete` declare one, the
+  sweep needs it too: `api.sweep({ context: { by: "sweep" } })`.
+- **`api.usage(owner)`** answers the mark as `erasure: { requestedAt, erasedAt }`, null for an owner not being erased.
+- **`api.reopenOwner(owner)`** clears the mark, for an owner id used again or an erasure started by mistake, and
+  answers `{ reopened }`, false when there was no mark. The owner's uploads are accepted again and the sweep stops
+  erasing them. What was deleted stays deleted; the rows stay as they are. A run already under way when you reopen,
+  an `eraseOwner` or a sweep's, goes on to its end: it keeps deleting the owner's completed files it reads, which can
+  include one uploaded after the reopen, but it cannot record the erasure as finished, as it finishes only the mark it
+  started with. Reopen when no run for that owner is under way.
+- The usage row stays, at zeros and with its mark: never delete it. The rows stay too, as `deleted` and the other ended
+  statuses, which name the file (`name`, `key`); once `done`, delete them with your own SQL if your erasure policy
+  requires it.
 
-- **It needs the sweep.** `eraseOwner` never ends a completion that is under way, since it may still record the file.
-  One whose server died in the middle of `/complete` stays `completing`: every run counts it in `waiting`, leaves its
-  object where it is and reports `done: false`, however often you run it. [The sweep](#the-sweep) ends it as `failed`
-  once it is past its lease and `graceMs` past its token's deadline: with the defaults, 25 hours after its `/upload`
-  (a token lasts 24 hours, the grace 1 hour). The sweep keeps that object, since its `onComplete` may have recorded
-  it; the next `eraseOwner` removes it and can report `done`. Keep the sweep on its schedule while you erase: without
-  it, such an owner never reports `done`.
-- **`signal`** (an `AbortSignal`) stops a run with `done: false`. The run finishes the file it is on, then handles no
-  further file and reads no further page of them. What the files it had deleted left in the bucket is removed by the
-  next run.
-- **`done` is about the moment it ran.** It reads the owner's unfinished and completed files in one statement before
-  it checks the ended ones, so a file that changes status while it runs is not missed, and at the end it is not done
-  when any upload of the owner started after the run did, even one already cancelled. An
-  `/upload` that passed `authorize` before you revoked the owner's access can still reserve a file after the last read;
-  a run that sees it answers `waiting`. Revoke access first, and if a request may still be in flight, run it once more
-  after it.
-- The usage row stays, at zeros. The rows stay too, as `deleted` and the other ended statuses, which name the file
-  (`name`, `key`); delete them with your own SQL once `done` if your erasure policy requires it, never before.
+**What it never reaches.** Rows of a route without `owner` belong to no one, so no erasure finds them. An upload whose
+server crashed between creating its multipart upload and recording it has no row: the bucket's lifecycle rule that
+aborts incomplete multipart uploads removes its parts ([Bucket setup](bucket-setup.md)), and `api.checkBucket()`
+reports that rule as required when a store is configured. `deletePrefix` lists objects only, so it never removes such
+parts either.
+
+### Folders no row tracks: `erase.prefixes`
+
+```ts
+createCloudrop({
+  // ...
+  store,
+  erase: { prefixes: (owner) => [`exports/${owner}/`, `thumbnails/${encodeURIComponent(owner)}/`] },
+});
+```
+
+Each folder must end in `/` and hold the owner, as it is or `encodeURIComponent`-encoded, as one whole segment
+between slashes. Anything else, such as `() => ["avatars/"]`, which would empty every owner's folder, or
+`exports/u10/` for the owner `u1`, makes `eraseOwner` answer `INVALID_CONFIG` before it marks the owner. The folders
+are emptied with [`deletePrefix`](server.md) only once the owner's rows are erased, in the order given.
+
+### Finding owners who no longer exist
+
+cloudrop cannot see your users, so finding the accounts that are gone stays your app's: `cloudrop_usage` has a row for
+every owner that ever uploaded, and an anti-join with your user table finds those whose account is gone and who are not
+marked yet. On Postgres, with a `"user"` table keyed by `id`:
+
+```sql
+SELECT u.owner FROM cloudrop_usage AS u
+WHERE u.erase_requested_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "user" AS a WHERE a.id = u.owner)
+ORDER BY u.owner
+LIMIT 100;
+```
+
+Call `eraseOwner` for each owner it answers, on a schedule, page after page; marked owners leave the query, and the
+sweep finishes them.
 
 ## File operations
 
@@ -1010,10 +1117,11 @@ With a store, `cloudrop.api` gains these, each returning `{ data, error }`. With
 | `file(id)` | The file's row (`FileRecord`: status, key, owner, size, result, times), or `null`. |
 | `files({ owner, route?, name?, type?, order?, limit?, cursor? })` | An owner's completed files, newest or oldest first, filtered by route, name and type, a page at a time ([above](#list-an-owners-files)). |
 | `allFiles({ owner?, status?, route?, name?, type?, order?, limit?, cursor? })` | The files of every owner, in any status, a page at a time, for your admin tools ([above](#list-every-owners-files)). It crosses owners: call it behind your own admin check. |
-| `usage(owner)` | `{ reservedBytes, activeBytes, files }` for an owner, with or without a quota. |
+| `usage(owner)` | `{ reservedBytes, activeBytes, files, erasure }` for an owner, with or without a quota; `erasure` is `{ requestedAt, erasedAt }` while the owner is marked for erasure, otherwise null. |
 | `revokeUploads(owner)` | Ends the owner's unfinished uploads (above). |
 | `deleteFile(id, { context? })` | Deletes a completed file and answers `{ id, deleted, cleaned }` ([below](#what-deletefile-answers)): the route's [`onDelete`](#ondelete) runs, with `context`, its row becomes `deleted`, its bytes and file count are released, and its object is removed when it is still this upload's. Idempotent. `NOT_FOUND` for a file that never completed, and for one whose completion is recorded while the call runs: that file stays completed, with its object, and a second call deletes it. The hook's own error when [`onDelete` refuses](#refuse-a-deletion). |
-| `eraseOwner(owner, { graceMs?, signal?, context? })` | Removes everything an owner uploaded, and reports `{ revoked, deleted, refused, cleaned, failed, waiting, done }`: when that is proven, and which files an `onDelete` refused ([above](#erase-an-owner)); `context` reaches each file's [`onDelete`](#ondelete). |
+| `eraseOwner(owner, { graceMs?, signal?, context? })` | Marks the owner, so their uploads are refused, and removes everything they uploaded and the `erase.prefixes` folders; reports `{ requestedAt, revoked, deleted, refused, cleaned, failed, waiting, prefixed, done }` ([above](#erasing-an-owner)). The sweep finishes what one call cannot; `context` reaches each file's [`onDelete`](#ondelete). |
+| `reopenOwner(owner)` | Clears an owner's erase mark, so their uploads are accepted again, and answers `{ reopened }` ([above](#erasing-an-owner)). |
 | `reconcile({ owner? })` | Recounts usage from the rows, for one owner or all of them, and answers `{ checked, repaired }`. Only needed after editing the tables by hand. |
 | `sweep(options?)` | One bounded round of cleanup, or every round with `all: true` (below). |
 
@@ -1078,13 +1186,17 @@ setInterval(sweepUploads, 60 * 60_000);
 ```
 
 Without `all`, each call handles up to `limit` rows (default 100, at most 1,000) and answers `{ expired, cleaned,
-failed, reported, cursor }`; pass `cursor` back to continue. It runs two passes:
+failed, reported, erasing, erased, cursor }`; pass `cursor` back to continue. It runs three passes:
 
 - **Expire:** an unfinished upload past its token's deadline plus `graceMs` is ended as `expired` first, its
   reservation released; then its multipart upload is aborted and its object deleted only when the object's
   `cloudrop-id` is this upload's. A completion stuck past its lease, and past its deadline plus `graceMs`, is ended as
   `failed` and **reported**, and its object is kept: its `onComplete` may have recorded it, so check each reported
   file.
+- **Erase:** every owner [`eraseOwner`](#erasing-an-owner) marked and has not finished, by owner, each counting as one
+  row of `limit`. Each is erased as `eraseOwner` erases it, with the sweep's `graceMs`, `signal` and `context`, and
+  counted in `erasing`; those it finishes are counted in `erased` too. An owner that fails is logged and counted in
+  `failed`, and the next sweep runs it again.
 - **Cleanup:** an ended upload (`aborted`, `rejected`, `failed`, `expired` or `deleted`) not yet cleaned up, and ended
   more than `graceMs` ago, has its late parts and object removed, again only when the object is its own. This catches
   a `PUT` that landed after an `/abort`, an upload that could not start, and an expired one whose first cleanup

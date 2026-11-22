@@ -61,6 +61,8 @@ describe("api.sweep with all", () => {
       cleaned: 1,
       failed: 0,
       reported: [stuck.id],
+      erasing: 0,
+      erased: 0,
       cursor: null,
     });
     // Five rows, two per page at most: the sums above took several pages.
@@ -90,7 +92,15 @@ describe("api.sweep with all", () => {
   it("answers an aborted signal before any page with a cursor that starts from the beginning", async () => {
     const { fixture } = await work();
     const stopped = await fixture.cloudrop.api.sweep({ all: true, signal: AbortSignal.abort() });
-    expect(stopped.data).toEqual({ expired: 0, cleaned: 0, failed: 0, reported: [], cursor: "expire:" });
+    expect(stopped.data).toEqual({
+      expired: 0,
+      cleaned: 0,
+      failed: 0,
+      reported: [],
+      erasing: 0,
+      erased: 0,
+      cursor: "expire:",
+    });
   });
 
   it("answers what the earlier pages did when a later listing fails, the listing counted and no cursor", async () => {
@@ -102,7 +112,15 @@ describe("api.sweep with all", () => {
       return listings === 2 ? Promise.reject(new Error("connection refused")) : stale(input);
     };
     const swept = await fixture.cloudrop.api.sweep({ all: true, limit: 2 });
-    expect(swept.data).toEqual({ expired: 2, cleaned: 0, failed: 1, reported: [], cursor: null });
+    expect(swept.data).toEqual({
+      expired: 2,
+      cleaned: 0,
+      failed: 1,
+      reported: [],
+      erasing: 0,
+      erased: 0,
+      cursor: null,
+    });
   });
 
   it("answers the store's error when the first listing fails", async () => {

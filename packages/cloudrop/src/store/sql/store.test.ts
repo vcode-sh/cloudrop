@@ -24,7 +24,7 @@ test.each([
   { name: "a serialization failure", code: "40001" },
 ])("a call Postgres ended as $name runs once more and answers", async ({ code }) => {
   const { executor, state } = failingExecutor(1, code);
-  expect(await sqlStore(executor).usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+  expect(await sqlStore(executor).usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
   expect(state.statements).toBe(2);
 });
 

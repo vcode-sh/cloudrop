@@ -22,9 +22,9 @@ export function usageCases(suite: StoreSuite): void {
     await raw.putUsage(usageRow("u-1", { reservedBytes: 999, activeBytes: 0, files: 7 }));
     expect(await store.reconcile("u-1")).toBe(true);
     // Reserved: pending f-1 and completing f-2. Active: completed f-3 only; deleted and aborted rows count nowhere.
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 3, activeBytes: 4, files: 1 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 3, activeBytes: 4, files: 1, erasure: null });
     expect(await store.reconcile("u-1")).toBe(false);
-    expect(await store.usage("u-2")).toEqual({ reservedBytes: 32, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-2")).toEqual({ reservedBytes: 32, activeBytes: 0, files: 0, erasure: null });
     expect(await store.reconcile("u-2")).toBe(false);
   });
 
@@ -60,7 +60,7 @@ export function usageCases(suite: StoreSuite): void {
     );
     await Promise.all([store.reconcile("u-1"), ...reserves]);
     // 1 + 8 × 2, whichever order the calls ran in.
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 17, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 17, activeBytes: 0, files: 0, erasure: null });
   });
 
   // An owner with no usage row yet has nothing to lock, so racing first reserves meet at the row's creation; a Postgres
@@ -87,7 +87,9 @@ export function usageCases(suite: StoreSuite): void {
       );
       expect(outcomes.flat().filter((outcome) => outcome === "reserved")).toHaveLength(owners.length * reserved);
       const usages = await Promise.all(owners.map((owner) => store.usage(owner)));
-      expect(usages).toEqual(owners.map(() => ({ reservedBytes: reserved * 10, activeBytes: 0, files: 0 })));
+      expect(usages).toEqual(
+        owners.map(() => ({ reservedBytes: reserved * 10, activeBytes: 0, files: 0, erasure: null })),
+      );
     },
   );
 

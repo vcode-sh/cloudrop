@@ -1,10 +1,10 @@
 // The store methods that are one statement on both dialects: they touch one table, so the only differences are the
 // placeholders (the binder's) and the collation of keyset comparisons.
 
-import type { CloudropStore, FileRecord, FileRecordStatus } from "../../server/store.ts";
+import type { CloudropStore, FileRecord, FileRecordStatus, StoreErasure } from "../../server/store.ts";
 import { type Binder, binder } from "./bind.ts";
 import { runStatement, type SqlDialect, type SqlExecutor, type SqlStatement } from "./executor.ts";
-import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage } from "./records.ts";
+import { decodeCursor, encodeCursor, RECORD_COLUMNS, toRecord, toUsage, USAGE_READ } from "./records.ts";
 import type { QuotedTables } from "./tables.ts";
 
 /** What every statement builder needs: where to run, in which dialect, over which tables. */
@@ -18,7 +18,7 @@ export type StoreMethods = Omit<CloudropStore<never>, "transaction">;
 
 type SingleStatementMethods = Pick<
   StoreMethods,
-  "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "list" | "owners"
+  "attach" | "get" | "release" | "cleaned" | "usage" | "stale" | "list" | "owners" | "erasing"
 > &
   Required<Pick<StoreMethods, "listAll">>;
 
@@ -29,7 +29,7 @@ type Listing = Omit<Parameters<StoreMethods["list"]>[0], "owner" | "statuses"> &
 };
 
 /** The methods each dialect writes on its own: those that write both tables or must decide in one step. */
-export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods>;
+export type GuardedWrites = Omit<StoreMethods, keyof SingleStatementMethods | keyof StoreErasure>;
 
 /** Five, which is also the most `SELECT`s D1 takes in one `UNION ALL`: `stale` reads one range for each. */
 const CLEANUP_STATUSES = ["aborted", "rejected", "failed", "expired", "deleted"];
@@ -165,7 +165,7 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
 
     async usage(owner) {
       const b = binder(dialect);
-      const sql = `SELECT reserved_bytes, active_bytes, files FROM ${usage} WHERE owner = ${b.text(owner)}`;
+      const sql = `SELECT ${USAGE_READ} FROM ${usage} WHERE owner = ${b.text(owner)}`;
       return toUsage((await run(b.statement(sql)))[0]);
     },
 
@@ -196,13 +196,19 @@ export function singleStatementMethods({ executor, dialect, tables }: SqlContext
     list,
     listAll: ({ status, ...rest }) => list({ ...rest, statuses: status === null ? null : [status] }),
 
-    async owners(cursor, limit) {
-      const b = binder(dialect);
-      const after = cursor === null ? "" : `WHERE ${byteOrder("owner")} > ${b.text(cursor)}`;
-      const sql = `SELECT owner FROM ${usage} ${after} ORDER BY ${byteOrder("owner")} LIMIT ${b.integer(limit + 1)}`;
-      const owners = (await run(b.statement(sql))).map((row) => String(row.owner));
-      const { kept, cursor: next } = page(owners, limit, (last) => last);
-      return { owners: kept, cursor: next };
-    },
+    owners: (cursor, limit) => ownerPage("TRUE", cursor, limit),
+    // The condition of the partial index cloudrop_usage_erasing_idx, written the same, so the database can use it.
+    erasing: ({ cursor, limit }) => ownerPage("erase_requested_at IS NOT NULL AND erased_at IS NULL", cursor, limit),
   };
+
+  /** One keyset page of the owners of the usage rows that match `where`, in byte order. */
+  async function ownerPage(where: string, cursor: string | null, limit: number) {
+    const b = binder(dialect);
+    const after = cursor === null ? "" : `AND ${byteOrder("owner")} > ${b.text(cursor)}`;
+    const sql = `SELECT owner FROM ${usage} WHERE ${where} ${after}
+      ORDER BY ${byteOrder("owner")} LIMIT ${b.integer(limit + 1)}`;
+    const owners = (await run(b.statement(sql))).map((row) => String(row.owner));
+    const { kept, cursor: next } = page(owners, limit, (last) => last);
+    return { owners: kept, cursor: next };
+  }
 }

@@ -33,7 +33,7 @@ export interface StoreFileApi<R extends string = string, TDeleted = unknown, TEr
   allFiles<S extends FileRecordStatus = FileRecordStatus>(
     options?: AllFilesOptions<R, S>,
   ): Promise<Result<FilesPage<RecordOf<S, R>>>>;
-  /** An owner's counters, with or without a quota. */
+  /** An owner's counters, with or without a quota, and their erase mark: null unless `eraseOwner` marked them. */
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
   revokeUploads(owner: string): Promise<Result<{ revoked: number }>>;
@@ -47,17 +47,28 @@ export interface StoreFileApi<R extends string = string, TDeleted = unknown, TEr
     ...options: undefined extends TDeleted ? [DeleteFileOptions<TDeleted>?] : [DeleteFileOptions<TDeleted>]
   ): Promise<Result<DeletedFile>>;
   /**
-   * Erases an owner, such as a deleted account: ends their unfinished uploads, deletes every completed file and removes
-   * what ended uploads left. Idempotent; run it again, such as with each sweep, until it reports done.
+   * Erases an owner, such as a deleted account, in one call: marks them, so every later upload of theirs is refused
+   * with FORBIDDEN, ends their unfinished uploads, deletes every completed file, removes what ended uploads left and
+   * empties `erase.prefixes`. What one run cannot finish, the sweep carries on; once done, a run answers done at once.
    */
   eraseOwner(
     owner: string,
     ...options: undefined extends TErased ? [EraseOptions<TErased>?] : [EraseOptions<TErased>]
   ): Promise<Result<EraseReport>>;
+  /**
+   * Clears an owner's erase mark, for an owner id used again or an erasure started by mistake: their uploads are
+   * accepted again and the sweep stops erasing them. What was deleted stays deleted. `reopened` is false without a mark.
+   */
+  reopenOwner(owner: string): Promise<Result<{ reopened: boolean }>>;
   /** Recounts one owner's counters from their rows, or every owner's: for drift after manual database edits. */
   reconcile(options?: { owner?: string }): Promise<Result<{ checked: number; repaired: number }>>;
-  /** One bounded round of cleanup; run it on a schedule, such as an hourly cron. */
-  sweep(options?: SweepOptions): Promise<Result<SweepReport>>;
+  /**
+   * One bounded round of cleanup, which also carries on every unfinished erasure; run it on a schedule, such as an
+   * hourly cron. Its `context` reaches `onDelete` as an erasure's does, so it is required when theirs is.
+   */
+  sweep(
+    ...options: undefined extends TErased ? [SweepOptions<TErased>?] : [SweepOptions<TErased>]
+  ): Promise<Result<SweepReport>>;
 }
 
 /** `api.deleteFile`'s options: the `context` its routes' `onDelete` declare. */
@@ -169,6 +180,12 @@ export function storeApi(
     deleteFile: (id, options) =>
       whenReady(async () => (isOwnerOrId(id) ? deleteFile(config, store, id, options) : badId())),
     eraseOwner: (owner, options) => whenReady(() => eraseOwner(config, store, owner, options)),
+    reopenOwner: (owner) =>
+      whenReady(async () => {
+        if (!isOwnerOrId(owner)) return badOwner();
+        const reopened = await storeCall(logger, `reopen ${owner}`, () => store.reopen({ owner, now: new Date() }));
+        return reopened.error ? reopened : ok({ reopened: reopened.data });
+      }),
     reconcile: (options) => whenReady(() => reconcile(config, store, options)),
     sweep: (options) => whenReady(() => sweep(config, store, options)),
   };

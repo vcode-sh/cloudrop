@@ -27,7 +27,10 @@ export type MemoryWrite =
   | "end"
   | "revoke"
   | "cleaned"
-  | "reconcile";
+  | "reconcile"
+  | "markErasure"
+  | "erased"
+  | "reopen";
 
 export interface MemoryStore extends CloudropStore<MemoryTx> {
   transaction: NonNullable<CloudropStore<MemoryTx>["transaction"]>;

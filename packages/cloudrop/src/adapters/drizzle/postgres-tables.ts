@@ -53,6 +53,8 @@ type UsageColumns = {
   activeBytes: Count;
   files: NotNull<ReturnType<typeof integer>>;
   updatedAt: NotNull<Time>;
+  eraseRequestedAt: Time;
+  erasedAt: Time;
 };
 
 /** `cloudropPgTables()`: the files and usage tables as Drizzle `pg-core` tables, in a schema with `tables.schema`. */
@@ -132,12 +134,19 @@ export function cloudropPgTables(options: CloudropTablesOptions = {}): CloudropP
       activeBytes: count("active_bytes"),
       files: integer("files").notNull(),
       updatedAt: time("updated_at").notNull(),
+      /** The owner's erase mark (M12-O1): when `eraseOwner` first asked, and when the erasure finished. */
+      eraseRequestedAt: time("erase_requested_at"),
+      erasedAt: time("erased_at"),
     },
     // Named as Postgres names an unnamed column CHECK, so the plain DDL and these tables agree.
     (t) => [
       check(`${names.usage}_reserved_bytes_check`, sql`${t.reservedBytes} >= 0`),
       check(`${names.usage}_active_bytes_check`, sql`${t.activeBytes} >= 0`),
       check(`${names.usage}_files_check`, sql`${t.files} >= 0`),
+      // The sweep's erase pass reads only the owners whose erasure is unfinished.
+      index(`${names.usage}_erasing_idx`)
+        .on(t.owner)
+        .where(sql`${t.eraseRequestedAt} IS NOT NULL AND ${t.erasedAt} IS NULL`),
     ],
   );
   return { files, usage };

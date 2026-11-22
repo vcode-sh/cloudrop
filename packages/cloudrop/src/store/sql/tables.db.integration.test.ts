@@ -155,8 +155,14 @@ describe("Postgres, a role's rights on the tables", () => {
       ["f-1"],
     ]);
     expect(await store.owners(null, 10)).toEqual({ owners: ["u-1"], cursor: null });
-    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0 });
+    expect(await store.usage("u-1")).toEqual({ reservedBytes: 0, activeBytes: 0, files: 0, erasure: null });
     // An owner without a usage row: reconcile inserts a marked row and deletes it again, the one DELETE the store runs.
     expect([await store.reconcile("u-1"), await store.reconcile("nobody")]).toEqual([false, false]);
+    expect([
+      await store.markErasure({ owner: "u-2", now: NOW }),
+      await store.erasing({ cursor: null, limit: 10 }),
+      await store.erased({ owner: "u-2", requestedAt: NOW, now: NOW }),
+      await store.reopen({ owner: "u-2", now: NOW }),
+    ]).toEqual([{ requestedAt: NOW, erasedAt: null }, { owners: ["u-2"], cursor: null }, true, true]);
   });
 });

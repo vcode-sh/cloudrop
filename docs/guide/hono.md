@@ -265,8 +265,8 @@ new Worker(
 
 The worker builds its own `createUploads` with the same storage and database; it serves no requests, so its
 `readSession` can answer `null`. Two sweeps at once are safe. `examples/hono/src/worker.ts` runs the same sweep on a
-timer. An account deletion runs `uploads.api.eraseOwner(userId)` from the same job until it reports `done`
-([Erase an owner](store.md#erase-an-owner)).
+timer. An account deletion calls `uploads.api.eraseOwner(userId)` once, and this sweep finishes the erasure
+([Erasing an owner](store.md#erasing-an-owner)).
 
 ## 9. The bucket's CORS rule names the web origin
 

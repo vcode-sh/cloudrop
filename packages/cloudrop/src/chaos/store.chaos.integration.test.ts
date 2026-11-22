@@ -179,7 +179,10 @@ test("the sweep after closed tabs removes the orphan object and the open upload,
   const swept = await chaos.api.sweep();
   vi.useRealTimers();
 
-  expect(swept).toEqual({ data: { expired: 2, cleaned: 0, failed: 0, reported: [], cursor: null }, error: null });
+  expect(swept).toEqual({
+    data: { expired: 2, cleaned: 0, failed: 0, reported: [], erasing: 0, erased: 0, cursor: null },
+    error: null,
+  });
   expect(await chaos.objectsLeft()).toEqual([done.data?.file.key]);
   await chaos.expectNoUploadsLeft();
   expect(chaos.store.completions()).toEqual({ [done.data?.file.id ?? ""]: 1 });

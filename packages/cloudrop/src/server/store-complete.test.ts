@@ -73,7 +73,7 @@ describe("POST /complete with a store: once", () => {
     });
     const [row] = await fixture.store.raw.files();
     expect([row?.status, row?.result, row?.completedAt]).toEqual(["completed", '{"run":1}', NOW]);
-    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1 });
+    expect(await fixture.store.usage("u1")).toEqual({ reservedBytes: 0, activeBytes: 5, files: 1, erasure: null });
     expect(runs.count).toBe(1);
   });
 

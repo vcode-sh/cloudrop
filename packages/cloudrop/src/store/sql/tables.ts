@@ -30,13 +30,15 @@ export interface QuotedTables {
   usage: string;
 }
 
-type Reader = Pick<SqlExecutor<unknown>, "query">;
+type Reader = Pick<SqlExecutor<unknown>, "query" | "dialect">;
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const NO_SQLITE_SCHEMA = "SQLite has no schemas: remove schema from { tables }.";
 
-const USAGE_COLUMNS = ["owner", "reserved_bytes", "active_bytes", "files", "updated_at"];
+/** The erase mark's columns (M12-O1), added in 1.0: a table without them gets the upgrade's exact SQL. */
+const ERASE_COLUMNS = ["erase_requested_at", "erased_at"];
+const USAGE_COLUMNS = ["owner", "reserved_bytes", "active_bytes", "files", "updated_at", ...ERASE_COLUMNS];
 
 /** Fills in the default names and validates every name: they are the only text the core puts into SQL unbound. */
 export function tableNames(tables: StoreTables = {}, dialect: SqlDialect): TableNames {
@@ -77,12 +79,39 @@ async function findMissing(missing: MissingRead, table: string, columns: readonl
 }
 
 /**
+ * The SQL that adds the erase mark to a usage table of 0.6 or earlier, for this dialect and these names: the `columns`
+ * it lacks, then the index, which cannot exist while either is missing.
+ */
+export function eraseMarkUpgrade(dialect: SqlDialect, names: TableNames, columns: readonly string[]): string {
+  const usage = quoteTables(names).usage;
+  const index = `CREATE INDEX "${names.usage}_erasing_idx" ON ${usage} (owner) WHERE erase_requested_at IS NOT NULL AND erased_at IS NULL;`;
+  // SQLite adds one column per statement.
+  const added =
+    dialect === "postgres"
+      ? `ALTER TABLE ${usage} ${columns.map((column) => `ADD COLUMN ${column} timestamptz(3)`).join(", ")};`
+      : columns.map((column) => `ALTER TABLE ${usage} ADD COLUMN ${column} INTEGER;`).join(" ");
+  return `${added} ${index}`;
+}
+
+/** What to do about the first missing piece: the upgrade's SQL for the erase mark, else the tables from the docs. */
+async function remedy(dialect: SqlDialect, names: TableNames, missing: MissingRead, table: string, found: string) {
+  const eraseMark =
+    table === quoteTables(names).usage && ERASE_COLUMNS.some((column) => found.endsWith(`"${column}".`));
+  if (!eraseMark) return "Create the store's tables as the cloudrop docs show, or pass their names in { tables }.";
+  const absent: string[] = [];
+  for (const column of ERASE_COLUMNS) if ((await missing(table, column)) !== null) absent.push(column);
+  const upgrade = eraseMarkUpgrade(dialect, names, absent);
+  return `cloudrop 1.0 keeps an owner's erase mark in that table. Run, in a migration: ${upgrade}`;
+}
+
+/**
  * Reads every column of both tables without reading a row. Only the database's own word blames the schema or the role
  * (M11-R62): when it says a table or a column is not there, throws `INVALID_CONFIG` naming the table (qualified, when
  * it has a schema) and its first missing column; when it says the role may not read a table, `INVALID_CONFIG` naming
  * the grants the store needs. Any other failure (the database is down, a statement was cancelled) is thrown as it is.
  */
-export async function checkSchema(executor: Reader, { files, usage }: QuotedTables): Promise<void> {
+export async function checkSchema(executor: Reader, names: TableNames): Promise<void> {
+  const { files, usage } = quoteTables(names);
   const missing: MissingRead = async (table, columns) => {
     try {
       await executor.query(`SELECT ${columns} FROM ${table} WHERE 1 = 0`, []);
@@ -107,10 +136,7 @@ export async function checkSchema(executor: Reader, { files, usage }: QuotedTabl
     const found = await findMissing(missing, table, columns);
     // Nothing is missing any more: the schema was fixed between the two reads, and the next call passes.
     if (found === null) throw cause;
-    throw new CloudropError(
-      "INVALID_CONFIG",
-      `${found} Create the store's tables as the cloudrop docs show, or pass their names in { tables }.`,
-      { cause },
-    );
+    const fix = await remedy(executor.dialect, names, missing, table, found);
+    throw new CloudropError("INVALID_CONFIG", `${found} ${fix}`, { cause });
   }
 }

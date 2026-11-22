@@ -61,12 +61,14 @@ describe("api.eraseOwner racing another deletion of a file", () => {
     expect((await api.deleteFile(ticket.id)).data).toEqual({ id: ticket.id, deleted: true, cleaned: true });
     paused.open();
     expect((await erasing).data).toEqual({
+      requestedAt: new Date(NOW.getTime() + 2 * 3_600_000),
       revoked: 0,
       deleted: 0,
       refused: 0,
       cleaned: 0,
       failed: 0,
       waiting: 0,
+      prefixed: 0,
       done: true,
     });
   });

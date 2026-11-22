@@ -32,12 +32,23 @@ export function rawTables(db: TestDatabase, tables?: Partial<TableNames>): RawTa
     files: async () => (await reader.files()).map(withStatus),
     usage: () => reader.usages(),
     async putUsage(row) {
-      const time = db.dialect === "postgres" ? row.updatedAt : row.updatedAt.getTime();
+      const time = (value: Date | null) => (db.dialect === "postgres" || value === null ? value : value.getTime());
       await db.query(
-        `INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, updated_at) VALUES (${marks(5)})
+        `INSERT INTO ${usage} (owner, reserved_bytes, active_bytes, files, erase_requested_at, erased_at, updated_at)
+         VALUES (${marks(7)})
          ON CONFLICT (owner) DO UPDATE SET reserved_bytes = excluded.reserved_bytes,
-           active_bytes = excluded.active_bytes, files = excluded.files, updated_at = excluded.updated_at`,
-        [row.owner, row.reservedBytes, row.activeBytes, row.files, time],
+           active_bytes = excluded.active_bytes, files = excluded.files,
+           erase_requested_at = excluded.erase_requested_at, erased_at = excluded.erased_at,
+           updated_at = excluded.updated_at`,
+        [
+          row.owner,
+          row.reservedBytes,
+          row.activeBytes,
+          row.files,
+          time(row.eraseRequestedAt),
+          time(row.erasedAt),
+          time(row.updatedAt),
+        ],
       );
     },
     async deleteUsage(owner) {
