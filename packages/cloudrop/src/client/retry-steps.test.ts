@@ -91,7 +91,7 @@ describe("retry after /complete answered", () => {
     { code: "NO_SUCH_UPLOAD", status: 410, step: NEW },
     { code: "ALREADY_EXISTS", status: 409, step: NEW },
     { code: "FILE_TYPE_NOT_ALLOWED", status: 400, step: NEW },
-    // A plugin's afterVerify may refuse with any code, and the server then deletes the object.
+    // A plugin's afterVerify may refuse with these codes, and the server then deletes the object.
     { code: "FORBIDDEN", status: 403, step: NEW },
     { code: "UNAUTHORIZED", status: 401, step: NEW },
     { code: "QUOTA_EXCEEDED", status: 403, step: NEW },

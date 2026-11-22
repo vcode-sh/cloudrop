@@ -51,13 +51,16 @@ const isType = (value: unknown): boolean => typeof value === "string" && value.l
 
 /**
  * Only the code, message, retryable flag, part numbers and a type refusal's `content` leave the server: never a cause,
- * stack or storage code. `content` is sent as two MIME types, one of three reasons and, with "refused", a kind of the
- * closed set, copied field by field, or not at all: a plugin in plain JavaScript can put a file's key or a whole object
- * there (M11-K3, M11-R137, M12-E6). A kind alone that does not fit is dropped and the rest kept.
+ * stack or storage code. `retryable` is sent as a boolean and the part numbers only with PARTS_MISSING, or the client
+ * could not read the body (M12-R34, M12-R31). `content` is sent as two MIME types, one of three reasons and, with
+ * "refused", a kind of the closed set, copied field by field, or not at all: a plugin in plain JavaScript can put a
+ * file's key or a whole object there (M11-K3, M11-R137, M12-E6). A kind alone that does not fit is dropped and the
+ * rest kept.
  */
 export function errorBody(error: CloudropError): ErrorBody {
-  const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable };
-  if (error.parts) body.parts = [...error.parts];
+  const body: ErrorBody = { code: error.code, message: error.message, retryable: error.retryable === true };
+  if (error.code === "PARTS_MISSING" && Array.isArray(error.parts))
+    body.parts = error.parts.filter((part) => Number.isSafeInteger(part) && part > 0);
   const { content } = error;
   // The types say what these fields are; a plugin in plain JavaScript is not held to them.
   const typed = content && isType(content.declared) && (content.detected === undefined || isType(content.detected));

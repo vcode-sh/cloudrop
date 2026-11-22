@@ -115,9 +115,10 @@ error.content; // { declared: "image/png", detected: "image/jpeg", reason: "mism
 | `"script"` | JavaScript, a shell script or VBScript. |
 | `"svg"` | An SVG image. |
 | `"xml"` | Another XML type. |
-| `"denied"` | None of the above: refused only because it is in `deny`. |
+| `"denied"` | None of the above, refused because it is in `deny`. |
 
-A kind wins over `"denied"`: with `deny: ["text/html"]`, a web page is still `"web-page"`. Word a refusal from it
+A kind wins over `"denied"`: with `deny: ["text/html"]`, a web page is still `"web-page"`, and with
+`deny: ["image/svg+xml"]` an SVG image is `"svg"`, also on a route that names that type. Word a refusal from it
 instead of from MIME types, such as `content.kind === "program" ? "Programs can't be uploaded." : error.message`. A
 newer server may name a kind this client does not know, which the client leaves out, and a server before 1.0 sends
 none, so keep `error.message` as the fallback.
@@ -330,6 +331,12 @@ for a file of at least one byte.
 - **A scanner that fails** fails closed: the throw keeps the object and answers a retryable `SERVER_ERROR` (HTTP
   500), the file is not completed, and the client sends `/complete` again, which scans again. Nothing reaches
   `onComplete` unscanned.
+- **A scanner that is busy** may return a retryable error instead of throwing, such as `rateLimited(5)` (import it
+  from `cloudrop`). It is answered as it is, `429` with `Retry-After: 5`, the object is kept, nothing is aborted, and
+  the client sends `/complete` again after the wait. Only an error that is not retryable deletes the object.
+- **Throw a storage call's error; never return it.** `/complete` sends only the codes listed in
+  [Errors](errors.md#upload-endpoint-errors). A returned `STORAGE_DENIED` or `STORAGE_ERROR` reaches the client as the
+  generic, non-retryable `SERVER_ERROR`, the server log names the code, and the object is kept.
 - **It runs inside `/complete`**, before `onComplete`, and the client counts a `/complete` slower than 120 seconds as
   no answer and asks again ([Stalled requests](client.md#stalled-requests)). A scan must fit in that budget with
   everything else `/complete` does. A scanner that takes longer belongs in a job of your own, started from

@@ -812,9 +812,10 @@ A throw keeps the file too, but as a failure. What each caller answers:
   included. Under a lease `onComplete` has already run and what it wrote stays, as after a throw; the claim is handed
   back, so a later `/complete` runs both hooks again without waiting. The client ends the file with your error, as
   for any `/complete` error that is not retryable; with `retryable: true` it tries `/complete` again first. Use a code
-  the handler sends ([endpoint errors](errors.md#upload-endpoint-errors)), such as `FORBIDDEN`: a client's own code,
-  such as `ABORTED`, reaches the browser as the generic `SERVER_ERROR`. Avoid `SERVER_ERROR` itself: the client reads
-  it as a completion that may have finished, and keeps the upload instead of cancelling it.
+  `/complete` may refuse with ([endpoint errors](errors.md#upload-endpoint-errors)), such as `FORBIDDEN`: any other,
+  such as a client's own `ABORTED` or a storage driver's `STORAGE_DENIED`, reaches the browser as the generic
+  `SERVER_ERROR` and is logged. Avoid `SERVER_ERROR` itself: the client reads it as a completion that may have
+  finished, and keeps the upload instead of cancelling it.
 - **A refusal is the hook's answer to that caller.** When another call deletes the file while your hook refuses, the
   refused caller still gets the refusal, not the answer for a file already deleted, and with a transaction what the
   hook wrote rolls back. `eraseOwner` counts such a file in `refused`, and `done` follows the owner's rows as always.

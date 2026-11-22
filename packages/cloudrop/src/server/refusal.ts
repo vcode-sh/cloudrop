@@ -55,9 +55,14 @@ export function refusalError(refusal: Refusal): CloudropError {
  */
 export function rateLimited(seconds: number, message?: string): CloudropError {
   if (!Number.isFinite(seconds) || seconds < 0) {
-    throw new TypeError(
-      `rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got ${String(seconds)}.`,
-    );
+    // A string from plain JavaScript is named as one: "It got 30." would read as though 30 were fine.
+    const got =
+      typeof seconds === "number"
+        ? String(seconds)
+        : typeof seconds === "string"
+          ? `the string ${JSON.stringify(seconds)}`
+          : `a value of type ${typeof seconds}`;
+    throw new TypeError(`rateLimited(seconds) takes a number of seconds of 0 or more, such as 30. It got ${got}.`);
   }
   // The header's cap, so the default message says the wait the header sends (M12-E3).
   const wait = Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(1, Math.ceil(seconds)));
@@ -65,35 +70,61 @@ export function rateLimited(seconds: number, message?: string): CloudropError {
   return waitAtLeast(new CloudropError("RATE_LIMITED", text, { retryable: true }), wait * 1000);
 }
 
-/** The codes `authorize` and `beforeUpload` may refuse an /upload with (spec 1.0 §2a, M12-E1). */
-const UPLOAD_REFUSALS: readonly CloudropErrorCode[] = [
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "QUOTA_EXCEEDED",
-  "RATE_LIMITED",
-  "FILE_TOO_LARGE",
-  "FILE_TYPE_NOT_ALLOWED",
-  "TOO_MANY_FILES",
-  "INVALID_METADATA",
-  "INVALID_INPUT",
-  "SERVER_ERROR",
-];
+/**
+ * The codes each endpoint's hooks may refuse with. At /upload, `authorize` and `beforeUpload` (spec 1.0 §2a, M12-E1).
+ * At /complete, a plugin's `afterVerify` and a replacing completion's `onDelete`: what those hooks can say about a
+ * stored file or its owner, such as contentChecks()'s FILE_TYPE_NOT_ALLOWED (M12-R31).
+ */
+const REFUSALS = {
+  "/upload": [
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "QUOTA_EXCEEDED",
+    "RATE_LIMITED",
+    "FILE_TOO_LARGE",
+    "FILE_TYPE_NOT_ALLOWED",
+    "TOO_MANY_FILES",
+    "INVALID_METADATA",
+    "INVALID_INPUT",
+    "SERVER_ERROR",
+  ],
+  "/complete": [
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "QUOTA_EXCEEDED",
+    "RATE_LIMITED",
+    "FILE_TOO_LARGE",
+    "FILE_TYPE_NOT_ALLOWED",
+    "INVALID_METADATA",
+    "VERIFICATION_FAILED",
+    "SERVER_ERROR",
+  ],
+} satisfies Record<string, readonly CloudropErrorCode[]>;
 
 /**
- * The answer to an /upload that `source` refused with `error`: rebuilt from its code, message, retryable flag, content
- * and wait, so its parts, file and cause stay on the server. RATE_LIMITED is always retryable. Any other code is a bug
- * of the app's, answered as the generic 500 and logged with the codes it may use.
+ * The answer to a request to `endpoint` that `source` refused with `error`: rebuilt from its code, message, retryable
+ * flag, content and wait, so its parts, file and cause stay on the server. RATE_LIMITED is always retryable. Any other
+ * code than the endpoint's is a bug of the app's, answered as the generic 500 and logged with the codes it may use.
  */
-export function uploadRefusal(error: CloudropError, source: string, logger: Logger): CloudropError {
-  if (!UPLOAD_REFUSALS.includes(error.code)) {
+function rebuilt(endpoint: keyof typeof REFUSALS, error: CloudropError, source: string, logger: Logger): CloudropError {
+  const allowed: readonly CloudropErrorCode[] = REFUSALS[endpoint];
+  if (!allowed.includes(error.code)) {
     logger.error(
-      `cloudrop: ${source} returned ${error.code}, which /upload cannot send. Return one of ${UPLOAD_REFUSALS.join(", ")}.`,
+      `cloudrop: ${source} returned ${error.code}, which ${endpoint} cannot send. Return one of ${allowed.join(", ")}.`,
       error,
     );
     return serverError();
   }
   const { code, message, content } = error;
   // RATE_LIMITED always says "try again later": a hand-built one without retryable would never be retried (M12-E1).
-  const retryable = error.retryable || code === "RATE_LIMITED";
+  const retryable = error.retryable === true || code === "RATE_LIMITED";
   return waitAtLeast(new CloudropError(code, message, { retryable, content }), retryAfterOf(error));
 }
+
+/** The answer to an /upload that `source` (authorize, or a plugin's beforeUpload) refused with `error`. */
+export const uploadRefusal = (error: CloudropError, source: string, logger: Logger): CloudropError =>
+  rebuilt("/upload", error, source, logger);
+
+/** The answer to a /complete that `source` (a plugin's afterVerify, or onDelete) refused with `error`. */
+export const completeRefusal = (error: CloudropError, source: string, logger: Logger): CloudropError =>
+  rebuilt("/complete", error, source, logger);

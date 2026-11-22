@@ -132,6 +132,17 @@ Every notable change to the `cloudrop` package. The format follows
   returned, such as `NOT_FOUND` with 404 or `STORAGE_ERROR` with 502. After: such a refusal answers the generic,
   non-retryable `SERVER_ERROR` with 500, and the log says `cloudrop: a plugin's beforeUpload returned NOT_FOUND, which
   /upload cannot send. Return one of …`. Return one of the listed codes, such as `FORBIDDEN` (`M12-E1`).
+- A plugin's `afterVerify`, and a replacing completion's `onDelete`, refuse `/complete` only with `UNAUTHORIZED`,
+  `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `INVALID_METADATA`,
+  `VERIFICATION_FAILED` or `SERVER_ERROR`. Before: any server code was sent as returned, `parts` included, such as
+  `STORAGE_DENIED` with 502 and the operator's advice from `return read.error`. After: such a refusal answers the
+  generic, non-retryable `SERVER_ERROR` with 500, the log says `cloudrop: a plugin's afterVerify returned
+  STORAGE_DENIED, which /complete cannot send. Return one of …`, and `afterVerify`'s object is kept. Throw a storage
+  call's error, or return one of the listed codes (`M12-R31`).
+- A retryable error from `afterVerify` keeps the object. Before: `rateLimited(5)` or any retryable error deleted it,
+  so the client's retry after the wait got `NOT_UPLOADED` (`UPLOAD_EXPIRED` with a store). After: it is answered as
+  it is, the object and the row stay, no `onAbort` runs, and the retry completes the file. A plugin that means to
+  refuse for good returns an error that is not retryable (`M12-R30`).
 - The client no longer waits out a `Retry-After` longer than its 20-second backoff cap. Before: a server asking for
   600 seconds was asked again five times, 20 seconds apart. After: the file fails at once with the retryable error,
   such as `RATE_LIMITED`, and `retry()` asks again when the app chooses (`M12-E4`).
@@ -275,6 +286,13 @@ Every notable change to the `cloudrop` package. The format follows
   an error was logged with `logger.error` and a run with failed files said nothing more (`M12-R5`).
 - The `erase.prefixes` refusal says to use `encodeURIComponent(owner)` when owner ids can contain `/`: with owners
   `acme` and `acme/alice`, `exports/acme/` also holds `exports/acme/alice/` (`M12-R7`).
+- An error body's `retryable` is always a boolean, and its `parts` come only with `PARTS_MISSING`, as safe positive
+  integers. Before: `{ retryable: 1 }` from plain JavaScript was sent as `1`, which the client could not read, so the
+  app's message was lost (`M12-R34`, `M12-R31`).
+- `rateLimited("30")` from plain JavaScript logs `It got the string "30".` instead of `It got 30.` (`M12-R33`).
+- errors.md no longer promises `Retry-After` for a `RATE_LIMITED` built by hand: only `rateLimited()` and a storage
+  wait send one (`M12-R32`). The `svg` and `xml` refusal kinds are described as the code gives them, also for a type
+  in `deny` that the route names (`M12-R35`).
 
 ## 0.6.0 - 2026-11-21
 

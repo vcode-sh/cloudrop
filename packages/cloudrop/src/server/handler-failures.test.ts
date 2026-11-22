@@ -76,22 +76,42 @@ describe("cloudrop.handler failures", () => {
     });
   });
 
-  // CloudropError does not check its code: a plain-JS plugin can return any text, which has no HTTP status. The
-  // client's own codes have none either: the server never sends them. /upload checks its refusals itself
-  // (upload-authorize.test.ts); here a refusal at /complete reaches the handler as it was returned.
-  it.each([{ code: "OUT_OF_CREDITS" }, { code: "ABORTED" }])(
-    "answers a plugin refusal with the code $code, which the server cannot send, as a generic 500",
-    async ({ code }) => {
+  // M12-R31: /complete rebuilds an afterVerify refusal as /upload does. A code it cannot send (a storage driver's, a
+  // client's own, or one plain JavaScript made up) is the plugin's bug, not a verdict on the file: the client gets the
+  // generic 500, the log names the allowed codes, and the object stays for the retry once the plugin is fixed.
+  const ALLOWED_AT_COMPLETE =
+    "UNAUTHORIZED, FORBIDDEN, QUOTA_EXCEEDED, RATE_LIMITED, FILE_TOO_LARGE, FILE_TYPE_NOT_ALLOWED, INVALID_METADATA, VERIFICATION_FAILED, SERVER_ERROR";
+  it.each([
+    // The natural mistake: `if (read.error) return read.error;`. Its message is advice for the operator.
+    {
+      code: "STORAGE_DENIED",
+      message: "The storage service refused the request. Check the access key, its permissions and the bucket name.",
+    },
+    { code: "OUT_OF_CREDITS", message: "No quota left." },
+    { code: "ABORTED", message: "No quota left." },
+  ])(
+    "answers an afterVerify refusal with $code, which /complete cannot send, as a generic 500",
+    async ({ code, message }) => {
+      const aborted: string[] = [];
       const plugin: CloudropPlugin = {
         id: "quota",
-        server: { afterVerify: () => new CloudropError(code as CloudropErrorCode, "No quota left.") },
+        server: {
+          afterVerify: () => new CloudropError(code as CloudropErrorCode, message),
+          onAbort: ({ reason }) => void aborted.push(reason),
+        },
       };
       const fixture = serverFixture({ avatar }, { plugins: [plugin] });
       const ticket = await fixture.single("avatar", { name: "a.png", size: 10, type: "image/png" });
       const stored = { type: "image/png", metadata: { "cloudrop-id": ticket.id } };
       await fixture.storage.put(ticket.key, new Uint8Array(10), stored);
       const response = await fixture.post("complete", { token: ticket.token });
-      expect({ status: response.status, body: await response.json(), logged: fixture.logger.errors }).toEqual({
+      expect({
+        status: response.status,
+        body: await response.json(),
+        logged: fixture.logger.errors,
+        kept: (await fixture.storage.head(ticket.key)).data?.size,
+        aborted,
+      }).toEqual({
         status: 500,
         body: {
           error: {
@@ -102,14 +122,37 @@ describe("cloudrop.handler failures", () => {
         },
         logged: [
           {
-            message:
-              "cloudrop: /complete failed with an error code the server cannot send, so the client got a generic 500. Return a CloudropError with one of cloudrop's server codes, not a client-only code such as ABORTED.",
-            error: expect.objectContaining({ code, message: "No quota left." }),
+            message: `cloudrop: a plugin's afterVerify returned ${code}, which /complete cannot send. Return one of ${ALLOWED_AT_COMPLETE}.`,
+            error: expect.objectContaining({ code, message }),
           },
         ],
+        kept: 10,
+        aborted: [],
       });
     },
   );
+
+  // M12-R31: part numbers belong to PARTS_MISSING, which only cloudrop's own check sends.
+  it("sends an afterVerify refusal without the parts it carried, and deletes the object", async () => {
+    const leak = ["https://bucket.example.com/secret?X-Amz-Signature=abc"];
+    const refusal = new CloudropError("FORBIDDEN", "Not on your plan.", { parts: leak as never });
+    const fixture = serverFixture({ avatar }, { plugins: [{ id: "plan", server: { afterVerify: () => refusal } }] });
+    const ticket = await fixture.single("avatar", { name: "a.png", size: 10, type: "image/png" });
+    await fixture.storage.put(ticket.key, new Uint8Array(10), {
+      type: "image/png",
+      metadata: { "cloudrop-id": ticket.id },
+    });
+    const response = await fixture.post("complete", { token: ticket.token });
+    expect({
+      status: response.status,
+      body: await response.json(),
+      kept: (await fixture.storage.head(ticket.key)).data,
+    }).toStrictEqual({
+      status: 403,
+      body: { error: { code: "FORBIDDEN", message: "Not on your plan.", retryable: false } },
+      kept: null,
+    });
+  });
 
   // M11-K3. `content` is typed, but a plugin may pass a wider object or come from plain JavaScript: only the three
   // fields are sent, and only with the code they explain.

@@ -79,7 +79,7 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 | `VERIFICATION_FAILED` | 422 | No | The stored file's size or type does not match what was declared, so it was deleted; or another file is stored under this upload's key. | Start a new upload. `retry()` gives the ticket up and asks for a new one. |
 | `NO_SUCH_UPLOAD` | 410 | No | The multipart upload no longer exists: it was aborted or expired, and no file of it is stored. The server ends the upload with this answer: plugins hear `onAbort` with `reason: "rejected"`, and with a [database store](store.md) the row becomes `rejected`, so the bytes it reserved are free at once. | Start a new upload. `retry()` and `resume()` give the ticket up and ask for a new one. |
 | `ALREADY_EXISTS` | 409 | No | Another file already has this multipart upload's key. | Start a new upload: `retry()` gives the ticket up and asks for a new one, under a new key. With a custom `key`, make keys unique, or the retry is refused the same way. |
-| `RATE_LIMITED` | 429 | Yes | `authorize` returned `rateLimited(seconds)` or a plugin refused with this code, sent with `Retry-After`; or the storage service was throttling while the server called it, sent with the bucket's `Retry-After` when it gave one. | Try again in a moment; the client waits at least the `Retry-After`. A wait longer than 20 seconds is not waited for: the file fails with this code, and `retry()` asks again. `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
+| `RATE_LIMITED` | 429 | Yes | `authorize` or a plugin returned `rateLimited(seconds)`, sent with `Retry-After`, or another `CloudropError` with this code, sent without one; or the storage service was throttling while the server called it, sent with the bucket's `Retry-After` when it gave one. | Try again in a moment; the client waits at least the `Retry-After`. A wait longer than 20 seconds is not waited for: the file fails with this code, and `retry()` asks again. `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
 | `STORAGE_ERROR` | 502 | Sometimes | The server's call to the storage service failed (retryable), or the storage refused it (not retryable). Your server log has the details. | When retryable, try again. Otherwise check the server log: often credentials, permissions or the bucket name. Either way `retry()` keeps the file's ticket and what is stored, or asks `/upload` again when the file had no ticket yet. |
 | `SERVER_ERROR` | 500 | Sometimes | Something in the server failed: your `authorize`, `owner`, `onComplete` or a plugin threw, or cloudrop hit a bug. Retryable when the file is stored but `onComplete` or a hook did not finish, and while an environment setting is missing. With a database store, also retryable when the store failed ("could not reach its upload records"), when `quota` failed ("could not check your storage limit"), and while another request is completing the same file ("Another request is completing this upload", sent with `Retry-After: 2` and not logged). | Check the server log. When retryable, try again; the client does. Retryable or not, `retry()` keeps the file's ticket and what is stored; after a `/complete` it sends `/complete` alone, since the file may be complete. |
 | `NOT_FOUND` | 404 | No | There is no cloudrop endpoint at the requested path. | Check that `basePath` matches on the server and the client. Once it does, `retry()` goes on where the file stopped, with the same ticket. |
@@ -91,9 +91,14 @@ These come from the handler, in answer to `/upload`, `/sign`, `/complete` or `/a
 set. Any other code reaches the client as the generic, non-retryable `SERVER_ERROR`, and the server log names it (see
 [Server](server.md#refuse-with-a-wait-or-another-code)).
 
-With a database store, a [`replace: true`](store.md#one-file-per-owner-replace) route's `onDelete` can
-[refuse the replacement](store.md#refuse-a-deletion): `/complete` then answers the `CloudropError` the hook returned,
-with the status this table gives its code.
+A plugin's `afterVerify`, and with a database store a [`replace: true`](store.md#one-file-per-owner-replace) route's
+`onDelete` that [refuses the replacement](store.md#refuse-a-deletion), may refuse `/complete` with a `CloudropError`
+of `UNAUTHORIZED`, `FORBIDDEN`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`,
+`INVALID_METADATA`, `VERIFICATION_FAILED` or `SERVER_ERROR`, rebuilt as at `/upload`: the status this table gives its
+code, its message, its `retryable` (always `true` for `RATE_LIMITED`) and a type refusal's `content`, never its
+`parts`. Any other code, such as a storage driver's `STORAGE_DENIED`, reaches the client as the generic, non-retryable
+`SERVER_ERROR`, and the server log names it. A retryable `afterVerify` refusal, and one with a code `/complete` cannot
+send, keeps the object, so the client's retry can complete the file; only a refusal that is not retryable deletes it.
 
 ## Client errors
 
