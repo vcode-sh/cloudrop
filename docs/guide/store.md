@@ -250,10 +250,10 @@ const methods: CloudropStore = {
 export const store = defineStore(methods);
 ```
 
-`defineStore` returns the same object, so a class instance keeps its methods and `this`. Without it, every request and
-every `api` call answers `INVALID_CONFIG` saying so. An adapter's store needs no `defineStore`, and a copy made with
-spread (`{ ...store, get: logged(store.get) }`) keeps what it carries; a copy made any other way, such as from
-`Object.entries`, does not.
+`defineStore` returns the same object, so a class instance keeps its methods and `this`. Without it, the server logs
+`INVALID_CONFIG` at start saying so, and every request and every `api` call fails with it. An adapter's store needs no
+`defineStore`, and a copy made with spread (`{ ...store, get: logged(store.get) }`) keeps what it carries; a copy made
+any other way, such as from `Object.entries`, does not: wrap that copy with `defineStore` too.
 
 ## Create the tables
 

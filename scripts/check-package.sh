@@ -63,14 +63,17 @@ for entry in testing plugins; do
     exit 1
   fi
 done
-# A server without a store must not load the store's code (M12-S1). One message per module of StorePaths stands for
-# it: each must be in the files dist/store.js loads, so a reworded message cannot pass unseen, and none in the files
-# dist/index.js loads, each entry followed through its static imports as the size budgets follow them.
+# A server without a store must not load the store's code (M12-S1). One message per module of StorePaths, and of the
+# erasure, the listings and the sweep behind store-api, stands for it. Each must be in the files dist/store.js loads,
+# so a reworded message cannot pass unseen, and none in the files dist/index.js loads; each entry is followed through
+# its static imports, as the size budgets follow them.
 STORE_MARKERS=(
   "could not check your storage limit"        # src/server/store-upload.ts
   "returned more than 16 KiB of JSON"         # src/server/store-complete.ts
   "could not reach its upload records"        # src/server/store-calls.ts
   "eraseOwner takes options such as"          # src/server/erase.ts, behind src/server/store-api.ts
+  "files takes { owner }, and optionally"     # src/server/owner-files.ts, behind src/server/store-api.ts
+  "stale answered a cursor that is not"       # src/server/sweep.ts, behind src/server/store-api.ts
 )
 loaded_files() {
   local -A seen=(["$1"]=1)

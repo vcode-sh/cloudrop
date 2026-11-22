@@ -163,9 +163,18 @@ function extendRoute(plugin: CloudropPlugin, route: RouteConfig): void {
   }
 }
 
-/** Plugins and the logger hear about a configuration only once every check has passed. */
-function announce(config: ServerConfig): void {
+/**
+ * Plugins and the logger hear about a configuration only once every check has passed. A store without its code is
+ * logged here, at start, as well as on the first request that fails because of it (M12-S2).
+ */
+function announce(config: ServerConfig, storeProblem: CloudropError | null): void {
   const { routes, plugins, storage, logger } = config;
+  if (storeProblem) {
+    logger.error(
+      `cloudrop: every request and api call fails until this is fixed. ${storeProblem.message}`,
+      storeProblem,
+    );
+  }
   const unowned = unownedRoutes(config);
   if (unowned.length > 0) {
     logger.warn(
@@ -210,7 +219,7 @@ export function readConfig<TRoutes extends Record<string, Route>>(given: Cloudro
     ...store,
     paths: paths.data ?? undefined,
   };
-  announce(config);
+  announce(config, paths.error);
   return config;
 }
 

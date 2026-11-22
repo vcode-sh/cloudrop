@@ -22,10 +22,11 @@ Entries start from 1.
   and fails when any of those files holds a message of a `StorePaths` module (one per member, the erasure's for `api`);
   each message must also be in the files `dist/store.js` loads, so a reworded message fails instead of passing unseen.
   Biome's import rule for the SQL core now covers `src/store/sql/**` only, and allows `../define-store.ts`.
-- **Sizes (gzip, 2026-11-22):** `cloudrop (bundled)` 34.71 kB before, 28.23 kB after; `cloudrop` summed 47.08 kB before,
-  40.25 kB after; `cloudrop + adapters/sql (bundled)` 33.13 kB before, 33.58 kB after (the namespace objects and the
-  indirection cost 0.45 kB). The store's code is a chunk of 10.6 kB that the adapters and `cloudrop/store` load. The
-  bundled ceiling stays at `M12-P1`'s 40 kB, not the spec's 30 kB: the owner's later ruling raised every ceiling.
+- **Sizes (gzip, 2026-11-22):** `cloudrop (bundled)` 34.71 kB before, 28.25 kB after; `cloudrop` summed 47.08 kB before,
+  40.29 kB after; `cloudrop + adapters/sql (bundled)` 33.13 kB before, 33.61 kB after (the namespace objects, the
+  indirection and the start-up log of `M12-S2` cost 0.48 kB). The store's code is a chunk of 10.6 kB that the adapters
+  and `cloudrop/store` load. The bundled ceiling stays at `M12-P1`'s 40 kB, not the spec's 30 kB: the owner's later
+  ruling raised every ceiling.
 - **Why:** spec §5: a stateless server carried about 7.3 kB of store code it never runs, and part 4 would add more.
   Through the store object no import is added on the simple path: an app with a store already passes the object that
   brings the code. A symbol from `Symbol.for` lets a store built by a second copy of cloudrop be recognised, so it is
@@ -50,7 +51,8 @@ Entries start from 1.
   from "cloudrop/store"; if you wrapped an adapter's store, copy it with spread ({ ...store }), which keeps that code.`
   Paths whose `version` is not 1 answer `cloudrop is installed twice: the store's adapter comes from another copy.
   Install cloudrop once.` The failure is reported through `ready`, the path a missing environment setting takes, so
-  the logger hears it once per message and no client sees the server's configuration.
+  the logger hears it once per message and no client sees the server's configuration. `createCloudrop` also logs it
+  once at start (`logger.error`, from `announce`), so a server is not silent about it until its first request.
 - **Why:** spec §5 and the brief ask for `INVALID_CONFIG` on the requests and the `api` calls, which needs a server
   that was built; throwing from `createCloudrop`, as other option mistakes do, would leave no `api` to answer. The
   returned object is the same one because a store may be a class instance whose methods need `this` (the delete
@@ -73,8 +75,9 @@ Entries start from 1.
   and the build puts that core in a chunk `index.js` loads. Counted whole, the adapters measured 35.61, 37.35 and
   35.09 kB, over ceilings that `M12-P1` sized for the adapter plus the store's code: the extra was `cloudrop`'s own
   code, which the `cloudrop` budget counts and every app with a store ships anyway. The new
-  `cloudrop + adapters/sql (bundled)` budget guards the total an app with a store ships.
+  `cloudrop + adapters/sql (bundled)` budget guards the total an app with a store ships. The release summary shows the
+  owner both numbers for each store entry: beyond `cloudrop`, and with every chunk it loads.
 - **If wrong:** an adapter that started pulling server core into its own chunks would be counted, as it should; one
   whose growth lands in a chunk `index.js` shares is counted by the `cloudrop` budget instead.
-- **Status:** in force.
+- **Status:** in force; accepted by the controller, 2026-11-22.
 - **Visible in:** `scripts/size-limit.config.ts`.

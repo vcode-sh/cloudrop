@@ -19,8 +19,9 @@ Entries start from 1.
   for 1.0.
 - **Why:** the owner, 2026-11-22: raise the ceilings so they never block work. Since `M4-F24` a ceiling was meant as a
   guard against accidents, yet 0.4.0 and 0.6.0 each spent an owner decision on a raise (`M10-D10`, `M11-R100`,
-  `M11-R220`). The store entry moves code between budgets (the adapters and `cloudrop/testing` carry the store paths,
-  the bundled server loses them), so ceilings at measured plus a little would fail on a correct change.
+  `M11-R220`). The store entry moves code between budgets (the adapters and `cloudrop/store` carry the store paths,
+  the bundled server loses them; `cloudrop/testing` imports them from `cloudrop/store`, `M12-S1`), so ceilings at
+  measured plus a little would fail on a correct change.
 - **If wrong:** a slow growth passes unnoticed until it is large. The sizes noted in the config and reported in the
   release summary are the check; a ceiling can be lowered in any minor, since bundle size is not covered by semver.
 - **Status:** in force for the eleven budgets that exist; the two new budgets are decided and land with `M12-S`.

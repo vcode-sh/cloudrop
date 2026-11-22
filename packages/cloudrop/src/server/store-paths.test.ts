@@ -14,8 +14,18 @@ const NO_PATHS =
 const methodsOnly = (): CloudropStore<unknown> =>
   Object.fromEntries(Object.entries(memoryStore())) as unknown as CloudropStore<unknown>;
 
+const startupLine = {
+  message: `cloudrop: every request and api call fails until this is fixed. ${NO_PATHS}`,
+  error: expect.objectContaining({ code: "INVALID_CONFIG", message: NO_PATHS }),
+};
+
 describe("createCloudrop with a store that carries no store code", () => {
-  it("answers every endpoint a retryable 500 and logs the INVALID_CONFIG once", async () => {
+  it("logs the INVALID_CONFIG at start, before any request", () => {
+    const { logger } = serverFixture({ files }, { store: methodsOnly() });
+    expect(logger.errors).toEqual([startupLine]);
+  });
+
+  it("answers every endpoint a retryable 500 and logs the INVALID_CONFIG once more, at the first", async () => {
     const fixture = serverFixture({ files }, { store: methodsOnly() });
     const answers = await Promise.all(
       ["upload", "sign", "complete", "abort"].map(async (endpoint) => {
@@ -35,6 +45,7 @@ describe("createCloudrop with a store that carries no store code", () => {
       ["abort", 500, notReady],
     ]);
     expect(fixture.logger.errors).toEqual([
+      startupLine,
       {
         message: `cloudrop: every request answers 500 until this is fixed. ${NO_PATHS}`,
         error: expect.objectContaining({ code: "INVALID_CONFIG", message: NO_PATHS }),
