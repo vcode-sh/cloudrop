@@ -126,7 +126,8 @@ without a number; they are `M1-N1` to `M1-N3` at the end. Numbers not listed her
 - **Why:** the owner made both changes after M1 (`dcae90e`, `b0f3e9a`). A version two weeks old has had time for a bad
   release to be found and pulled.
 - **If wrong:** a fix that ships in a newer release waits up to two weeks.
-- **Status:** in force for Node 24 and for the dev dependencies of `dcae90e`. The owner's practice was already mixed:
+- **Status:** superseded by `M12-P2` for the Node floor; the caret-range part stays in force, for the dev dependencies
+  of `dcae90e`. The owner's practice was already mixed:
   their own `b0f3e9a` pinned the root's `@biomejs/biome` exactly. Contradicted since: the code-quality skill says to pin
   dev dependencies exactly, and the package-check tools added in `e8cd2dc` (`@arethetypeswrong/cli`, `publint`,
   `size-limit`, `@size-limit/file`) are exact pins. Left to the owner: one of the two rules goes.

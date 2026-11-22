@@ -69,9 +69,9 @@ npx cloudrop setup  --origin https://app.example.com --apply    # writes them th
   ID, such as `cloudrop-uploads` and `cloudrop-abort-incomplete`), and keeps every other rule. `--dry-run` shows the
   merged result without writing. It refuses to write when it cannot read the current rules, unless `--replace` says
   replacing them is intended.
-- **Where it runs:** Node 24+ and Bun (`npx`, `bunx`). The command is a separate entry (`bin` in `package.json`) that
-  no library entry imports. It may use `process` (described by hand, as `src/node.ts` does) and nothing else outside
-  the web platform.
+- **Where it runs:** Node 24+ (Node 26+ since 1.0, `M12-P2`) and Bun (`npx`, `bunx`). The command is a separate entry
+  (`bin` in `package.json`) that no library entry imports. It may use `process` (described by hand, as `src/node.ts`
+  does) and nothing else outside the web platform.
 - **Storage layer:** the driver gains optional `putBucketCors` and `putBucketLifecycle` (optional, so a hand-written
   driver still type-checks), implemented in the S3 driver with the XML the S3 API documents, faked in the fake R2, and
   covered by the storage contract where the backend supports them (RustFS; Wrangler's local R2 reports its gap as a

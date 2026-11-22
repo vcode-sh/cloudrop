@@ -169,7 +169,7 @@ Rulings for the `onDelete` route hook and the `api.files` filters, designed in
   their checks and messages add 1.21 kB; none of it is dead weight an app could drop, as every export ships in this
   budget. No entry grew by 5% or more.
 - **If wrong:** the owner sets another ceiling; nothing depends on this number.
-- **Status:** in force; the owner confirmed 32 kB on 2026-11-21, before 0.4.0.
+- **Status:** superseded by `M12-P1`; the owner had confirmed 32 kB on 2026-11-21, before 0.4.0.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M10-D11: `api.files` refuses a page the store did not filter

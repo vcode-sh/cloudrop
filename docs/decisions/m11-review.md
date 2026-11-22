@@ -1179,7 +1179,7 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   redirects never followed) each add honest code that every server needs; measured 32.47 kB with the storage fixes
   merged. Cutting a fix to fit a budget would trade correctness for a number nothing depends on.
 - **If wrong:** the owner sets another ceiling, or asks for the store paths behind their own entry (`M5-T69`).
-- **Status:** in force, set by the owner for 0.6.0 (2026-11-21).
+- **Status:** superseded by `M12-P1`; set by the owner for 0.6.0 (2026-11-21).
 - **Visible in:** `scripts/size-limit.config.ts`.
 
 ### M11-R110: every command the output prints is complete, quoted and runnable as printed
@@ -2473,7 +2473,8 @@ Each entry: Decision, Why, If wrong, Status, Visible in.
   as XML, not SVG: an XML parser refuses it, and a route that names an XML type takes documents with scripts
   anyway. `deny: ["image/svg+xml"]` does not see an SVG whose doctype outlasts the read on a route that names another
   XML type; the guide's Limits say so.
-- **Status:** in force; the owner confirmed the 7 kB ceiling for 0.6.0 (2026-11-21). Amends `M11-R211` (the doctype
+- **Status:** the 7 kB ceiling, which the owner confirmed for 0.6.0 (2026-11-21), superseded by `M12-P1`; the doctype
+  ruling stays in force. Amends `M11-R211` (the doctype
   pattern). `M11-R258` extends ruling 2 to a root hidden behind what follows the doctype, and ruling 1 to a
   processing instruction. `src/plugins/sniff-text.test.ts` has each bypass with each quote, a comment and a processing instruction,
   each kind of doctype that outlasts the read, and both parsers' readings; `src/plugins/sniff-fuzz.test.ts` builds

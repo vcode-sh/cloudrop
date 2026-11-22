@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Checks what npm would publish (`bun run package:check`, after `bun run build`): the packed tarball must hold the
-# README, LICENSE and CHANGELOG and the repository that trusted publishing checks, the built bin must run, publint and
-# attw read the tarball, and size-limit reads the built entries. The tarball goes to a scratch directory that the trap
-# removes on success, failure and interrupt.
+# README, LICENSE and CHANGELOG, the repository that trusted publishing checks and the Node 26 floor in engines.node
+# (M12-P2), the built bin must run, publint and attw read the tarball, and size-limit reads the built entries. The
+# tarball goes to a scratch directory that the trap removes on success, failure and interrupt.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/packages/cloudrop"

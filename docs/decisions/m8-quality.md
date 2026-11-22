@@ -58,7 +58,7 @@ continue from `M8-Q1`.
   built against, with 0.45 checked by `scripts/check-drizzle-versions.sh` (`M5-T51`). `examples/**` belongs to
   another part of the 0.2.0 pass.
 - **If wrong:** none known.
-- **Status:** in force.
+- **Status:** superseded by `M12-P2` for `@types/node`; the Prisma 8 and drizzle parts stay in force.
 - **Visible in:** `packages/cloudrop/package.json`.
 
 ### M8-Q5: platform APIs not adopted

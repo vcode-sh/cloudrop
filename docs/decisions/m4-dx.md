@@ -308,7 +308,7 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   now); what a Workers app ships is the bundle, which the summed figure overstates by about 60%.
 - **If wrong:** an app that imports only part of the server ships less than this budget, so it bounds the worst case,
   not the typical one.
-- **Status:** in force.
+- **Status:** superseded by `M4-F24` and now by `M12-P1` for its ceiling; the bundled budget itself stays.
 - **Source:** design §4, audit F14.
 - **Visible in:** `scripts/size-limit.config.ts`.
 
@@ -494,7 +494,8 @@ entry: decision, why, what it costs if wrong, status, source, where it is visibl
   behaviour.
 - **If wrong:** a slow drift goes unnoticed until it is large; the 5% rule and the measured sizes kept in
   `scripts/size-limit.config.ts` are the check.
-- **Status:** decided. Supersedes the ceilings of M4-F14, M4-F16's summed budget, M4-F23 and M4-B10.
+- **Status:** the ceilings and the 5 % rule superseded by `M12-P1`. Supersedes the ceilings of M4-F14, M4-F16's summed
+  budget, M4-F23 and M4-B10.
 - **Source:** owner, 2026-11-17.
 - **Visible in:** `scripts/size-limit.config.ts`, spec §1.
 

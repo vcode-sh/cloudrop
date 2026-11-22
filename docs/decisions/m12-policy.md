@@ -52,7 +52,9 @@ Entries start from 1.
 - **Source:** owner, 2026-11-22.
 - **Visible in:** `packages/cloudrop/package.json`, `scripts/check-package.sh`, `.github/workflows/ci.yml`,
   `.github/workflows/release.yml`, `README.md` ("Requirements"), `packages/cloudrop/README.md`, `CONTRIBUTING.md`,
-  `docs/guide/command.md`, `.github/ISSUE_TEMPLATE/bug_report.yml`.
+  `docs/guide/command.md`, `.github/ISSUE_TEMPLATE/bug_report.yml`, `examples/next/package.json`,
+  `examples/vite-react/package.json`, `examples/next/README.md`, `examples/hono/README.md`,
+  `docs/superpowers/specs/2026-11-15-cloudrop-design.md` (§3, the package table).
 
 ### M12-P3: TypeScript 7.0 is the minimum for the shipped types
 
