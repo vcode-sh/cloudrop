@@ -47,7 +47,7 @@ function settled(record: FileRecord | null, file: UploadedFile): Answer {
 /** The answer the row gives before any storage call, or null when the upload may be completed now. */
 function answerFromRow(record: FileRecord | null, { token, file, config }: Completion): Answer | null {
   const claimLive =
-    record?.status === "completing" && (record.claimedAt?.getTime() ?? 0) + config.completionLeaseMs >= Date.now();
+    record?.status === "completing" && record.claimedAt.getTime() + config.completionLeaseMs >= Date.now();
   const open = record?.status === "pending" || (record?.status === "completing" && !claimLive);
   if (!open) return settled(record, file);
   return nowSeconds() >= token.exp ? fail(uploadExpired()) : null;

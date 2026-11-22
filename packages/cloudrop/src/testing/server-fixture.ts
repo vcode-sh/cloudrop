@@ -6,6 +6,7 @@ import { type Cloudrop, createCloudrop } from "../server/cloudrop.ts";
 import type { CloudropOptions } from "../server/config.ts";
 import type { Logger } from "../server/plugins.ts";
 import type { Route } from "../server/route.ts";
+import type { CloudropStore } from "../server/store.ts";
 import { base64url } from "../server/token.ts";
 import type { FetchLike, StorageDriver } from "../storage/driver.ts";
 import { r2 } from "../storage/presets.ts";
@@ -42,7 +43,11 @@ export interface ServerFixture {
   fake: FakeR2;
   /** A driver on the same fake bucket, for reading and planting objects behind the server's back. */
   storage: StorageDriver;
-  cloudrop: Cloudrop;
+  /**
+   * Typed with the store's api whether or not a store was passed: without one, those calls reach the runtime stub that
+   * answers INVALID_CONFIG, which its tests call.
+   */
+  cloudrop: Cloudrop<Record<string, Route>, CloudropStore<unknown>>;
   logger: RecordingLogger;
   /** Every request the server sent to storage, as "METHOD path?query-names". */
   storageCalls: string[];
@@ -80,7 +85,7 @@ export function serverFixture<TRoutes extends Record<string, Route>>(
     publicUrl: publicUrl ? PUBLIC_URL : undefined,
   });
   const logger = recordingLogger();
-  const cloudrop = createCloudrop({ storage, secret: SECRET, logger, routes, ...rest });
+  const cloudrop = createCloudrop({ storage, secret: SECRET, logger, routes, ...rest }) as ServerFixture["cloudrop"];
   const post = (endpoint: string, body: unknown, headers: Record<string, string> = {}) =>
     cloudrop.handler(
       new Request(`${APP_ORIGIN}/api/cloudrop/${endpoint}`, {

@@ -2,14 +2,23 @@
 // `cloudrop` keeps exporting the same types, so only a store written by hand imports this entry, for `defineStore`.
 
 export type {
+  AbortedRecord,
   ClaimOutcome,
   CloudropStore,
+  CompletedRecord,
+  CompletingRecord,
   Completion,
+  DeletedRecord,
   EndedStatus,
+  ExpiredRecord,
+  FailedRecord,
   FileRecord,
   FileStatus,
   NewFile,
   OwnerUsage,
+  PendingRecord,
+  RecordOf,
+  RejectedRecord,
   TransactionalStore,
   Transition,
 } from "./server/store.ts";

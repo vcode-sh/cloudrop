@@ -11,7 +11,7 @@ import { type ClientOptions, createCloudropClient } from "../client.ts";
 import type { Result } from "../errors.ts";
 import type { CompleteResponse } from "../protocol/types.ts";
 import { MiB } from "../rules.ts";
-import type { FileApi } from "../server/api.ts";
+import type { StoreFileApi } from "../server/store-api.ts";
 import { type AppRule, appTransport } from "./chaos-app.ts";
 import {
   chaosStorage,
@@ -73,7 +73,7 @@ export interface ChaosFixture {
   /** Loses the server's answers to the next calls these rules name, once each (chaos-app.ts). */
   faultApp(rules: AppRule[]): void;
   /** The server's file API: the store rows call usage, revokeUploads and sweep through it. */
-  api: FileApi;
+  api: StoreFileApi;
   /** Waits up to `timeoutMs` until `appRequests()` holds `call`, such as "POST /abort 200" (a background /abort). */
   waitForApp(call: string, timeoutMs?: number): Promise<void>;
   /** The object under `key` is exactly `file`: size and SHA-256, read from RustFS directly. */
@@ -141,7 +141,8 @@ async function startChaosFixture(stored?: ChaosStoreServer): Promise<ChaosFixtur
     logger,
     prefix,
     store: stored?.hooks,
-    api: cloudrop.api,
+    // With the store's calls typed in either mode: the stateless lane never calls them.
+    api: cloudrop.api as StoreFileApi,
     client(options) {
       const { signal } = testRun;
       const client = createCloudropClient<ChaosCloudrop>({

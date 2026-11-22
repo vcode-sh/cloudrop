@@ -3,9 +3,9 @@ import { MiB } from "../rules.ts";
 import { complete } from "../testing/complete-fixture.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, leaseStore, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
-import type { FileApi } from "./api.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { route } from "./route.ts";
+import type { StoreFileApi } from "./store-api.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -340,7 +340,7 @@ describe("api.sweep: paging and failures", () => {
     { name: "a cursor it did not issue", options: { cursor: "garbage" } },
     { name: "an expire cursor whose position was edited", options: { cursor: "expire:not-a-cursor" } },
     { name: "a cleanup cursor without the row's id", options: { cursor: "cleanup:1763380800000:" } },
-  ] satisfies { name: string; options: Parameters<FileApi["sweep"]>[0] }[])(
+  ] satisfies { name: string; options: Parameters<StoreFileApi["sweep"]>[0] }[])(
     "answers INVALID_INPUT for $name, before any store call",
     async ({ options }) => {
       const { store, calls } = recordCalls(memoryStore());

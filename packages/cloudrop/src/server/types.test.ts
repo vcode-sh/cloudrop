@@ -2,11 +2,14 @@
 // expect-error directive is an assertion. The runtime tests only keep Vitest from reporting an empty file.
 
 import { describe, expectTypeOf, it } from "vitest";
+import { sqliteExecutor, sqlStore } from "../adapters/sql.ts";
 import type { RouteMetadata, RouteName, RouteResult } from "../protocol/types.ts";
 import { r2 } from "../storage/presets.ts";
+import { memoryStore } from "../testing.ts";
 import { createCloudrop } from "./cloudrop.ts";
 import { allowAnyone, type Route, route, unauthorized } from "./route.ts";
 import type { StandardSchema } from "./schema.ts";
+import type { AbortedRecord, CompletedRecord, ExpiredRecord, FailedRecord, FileRecord, RecordOf } from "./store.ts";
 
 interface User {
   id: string;
@@ -198,5 +201,72 @@ describe("type inference for the client", () => {
     expectTypeOf(returnsNothing).toEqualTypeOf<Route<undefined, null>>();
     expectTypeOf(returnsUndefined).toEqualTypeOf<Route<undefined, null>>();
     expectTypeOf(returnsObjectOrUndefined).toEqualTypeOf<Route<undefined, { id: string } | null>>();
+  });
+});
+
+describe("records and api by the server's routes and store (M12-T)", () => {
+  const storage = r2({
+    bucket: "uploads",
+    accountId: "0123456789abcdef0123456789abcdef",
+    accessKeyId: "k",
+    secretAccessKey: "s",
+  });
+  const routes = {
+    avatar: route({ accept: "image/*", maxSize: "5MB", authorize: allowAnyone }),
+    docs: route({ accept: "application/pdf", maxSize: "50MB", authorize: allowAnyone }),
+  };
+  const store = sqlStore(sqliteExecutor({ exec() {}, prepare: () => ({ all: () => [] }) }));
+  const stored = () => createCloudrop({ storage, secret: "test-secret-0123456789abcdef0123456789", routes, store });
+
+  /** The records a listing call answers. The calls below sit in functions that never run: only types are asserted. */
+  type ItemsOf<TCall extends () => Promise<{ data: { items: unknown[] } | null }>> = NonNullable<
+    Awaited<ReturnType<TCall>>["data"]
+  >["items"];
+
+  it("types api.files as completed records of the server's routes", () => {
+    const { api } = stored();
+    type Item = ItemsOf<() => ReturnType<typeof api.files>>[number];
+    expectTypeOf<Item>().toEqualTypeOf<CompletedRecord<"avatar" | "docs">>();
+    expectTypeOf<Item["completedAt"]>().toEqualTypeOf<Date>();
+    expectTypeOf<Item["route"]>().toEqualTypeOf<"avatar" | "docs">();
+    // @ts-expect-error: "nope" is not one of the server's routes.
+    void (() => api.files({ owner: "u1", route: "nope" }));
+    // @ts-expect-error: allFiles filters by the same route names.
+    void (() => api.allFiles({ route: "nope" }));
+  });
+
+  it("narrows api.allFiles's records by the status asked for, and leaves them a union without one", () => {
+    const { api } = stored();
+    const failed = () => api.allFiles({ status: "failed" });
+    const all = () => api.allFiles();
+    expectTypeOf<ItemsOf<typeof failed>>().toEqualTypeOf<FailedRecord<"avatar" | "docs">[]>();
+    expectTypeOf<ItemsOf<typeof all>>().toEqualTypeOf<FileRecord<"avatar" | "docs">[]>();
+    expectTypeOf(api.file)
+      .returns.resolves.toHaveProperty("data")
+      .toEqualTypeOf<FileRecord<"avatar" | "docs"> | null>();
+  });
+
+  it("gives each status its own times, so a status check narrows them", () => {
+    const record = {} as FileRecord;
+    if (record.status === "completed") expectTypeOf(record.completedAt).toEqualTypeOf<Date>();
+    if (record.status === "pending") expectTypeOf(record.claimedAt).toEqualTypeOf<null>();
+    if (record.status === "deleted") expectTypeOf(record.cleanedAt).toEqualTypeOf<Date | null>();
+    // A failed row that was claimed is a stuck completion, which the sweep ends cleaned.
+    if (record.status === "failed" && record.claimedAt !== null) expectTypeOf(record.cleanedAt).toEqualTypeOf<Date>();
+    expectTypeOf<RecordOf<"aborted" | "expired">>().toEqualTypeOf<AbortedRecord | ExpiredRecord>();
+  });
+
+  it("has the store's calls in api only when a store is surely passed", () => {
+    const stateless = createCloudrop({ storage, secret: "test-secret-0123456789abcdef0123456789", routes });
+    // @ts-expect-error: without a store, api has no store calls.
+    void stateless.api.files;
+    expectTypeOf(stateless.api.getUrl).toBeFunction();
+    expectTypeOf(stored().api.files).toBeFunction();
+    const withMemory = createCloudrop({ storage, routes, store: memoryStore({ transaction: true }) });
+    expectTypeOf(withMemory.api.deleteFile).toBeFunction();
+    const flag = Math.random() > 2;
+    const maybe = createCloudrop({ storage, routes, store: flag ? store : undefined });
+    // @ts-expect-error: a store that may be undefined gives the store-less api.
+    void maybe.api.files;
   });
 });

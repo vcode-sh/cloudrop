@@ -17,6 +17,7 @@ import { storeSuite } from "./store-contract/suite.ts";
 import { supersedeCases } from "./store-contract/supersede.ts";
 import { transactionCases } from "./store-contract/transaction.ts";
 import { usageCases } from "./store-contract/usage.ts";
+import { checkedStore, checkedTables } from "./store-contract/well-formed.ts";
 import type { RawTables } from "./store-rows.ts";
 
 /**
@@ -73,8 +74,10 @@ export function describeStoreContract(name: string, setup: SetupStore): void {
       return target;
     });
 
+    // Every record a case reads, through the store or past it, is checked against the record table (M12-T1).
     beforeEach(async () => {
-      target = await setup();
+      const connected = await setup();
+      target = { ...connected, store: checkedStore(connected.store), raw: checkedTables(connected.raw) };
     });
 
     afterEach(async () => {

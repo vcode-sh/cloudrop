@@ -2,56 +2,24 @@
 // own. The shipped adapters (`cloudrop/adapters/*`) and the testing memory store implement it; the contract suite in
 // `src/testing/store-contract.ts` proves an implementation keeps every promise written here.
 
+import type { EndedStatus, FileRecord, FileStatus, NewFile } from "./file-record.ts";
 import type { RouteFunction } from "./store-route.ts";
 
-/** Where a file's row stands. `pending` until a `/complete` claims it; the five ended statuses never change again. */
-export type FileStatus =
-  | "pending"
-  | "completing"
-  | "completed"
-  | "aborted"
-  | "rejected"
-  | "failed"
-  | "expired"
-  | "deleted";
-
-/** The statuses `end` can move a row to. */
-export type EndedStatus = "aborted" | "rejected" | "failed" | "expired" | "deleted";
-
-/** One accepted file of an `/upload`, written before anything is signed. */
-export interface NewFile {
-  /** The file id from the upload token and the object's `cloudrop-id`; the row's primary key. */
-  id: string;
-  route: string;
-  /** The object key. Not unique: a route may upload the same key again after a cancel. */
-  key: string;
-  name: string;
-  type: string;
-  /** Bytes, as signed. */
-  size: number;
-  /** The validated metadata as JSON, or null. */
-  metadata: string | null;
-}
-
-/** A file's row as the store holds it. Times are `Date`s whatever the database keeps. */
-export interface FileRecord extends NewFile {
-  /** The quota owner from the route's `owner` callback, or null. Not the token's `owner` (the `authorize` JSON). */
-  owner: string | null;
-  status: FileStatus;
-  /** The multipart upload id once `attach` stored it. */
-  uploadId: string | null;
-  /** `onComplete`'s result as JSON, once completed. */
-  result: string | null;
-  /** The upload token's deadline. */
-  expiresAt: Date;
-  createdAt: Date;
-  claimedAt: Date | null;
-  completedAt: Date | null;
-  /** When the row reached an ended status (`deleted` included). */
-  endedAt: Date | null;
-  /** When the sweep finished removing what the upload left in the bucket. */
-  cleanedAt: Date | null;
-}
+export type {
+  AbortedRecord,
+  CompletedRecord,
+  CompletingRecord,
+  DeletedRecord,
+  EndedStatus,
+  ExpiredRecord,
+  FailedRecord,
+  FileRecord,
+  FileStatus,
+  NewFile,
+  PendingRecord,
+  RecordOf,
+  RejectedRecord,
+} from "./file-record.ts";
 
 /** What `claim` found. Only `claimed` lets the caller run `onComplete`. */
 export type ClaimOutcome =

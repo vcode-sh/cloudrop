@@ -6,14 +6,15 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { type FileFilters, readFilters } from "./files-filters.ts";
-import type { CloudropStore, FileRecord, FileStatus } from "./store.ts";
+import type { CloudropStore, CompletedRecord, FileRecord, FileStatus } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 
-export interface FilesOptions {
+/** `R` is the server's route names. */
+export interface FilesOptions<R extends string = string> {
   /** The owner, as the route's `owner` callback returned it. */
   owner: string;
   /** Only this route's files. */
-  route?: string;
+  route?: R;
   /** Only files whose name contains this, ASCII letters in either case: `"report"` finds `"Q3 Report.pdf"`. */
   name?: string;
   /** Only this type, such as `"application/pdf"`, or every type under a top-level type, such as `"image/"`. */
@@ -29,9 +30,10 @@ export interface FilesOptions {
   cursor?: string | null;
 }
 
-export interface FilesPage {
+/** A page of `TRecord`s: `CompletedRecord`s from `api.files`, the status asked for from `api.allFiles`. */
+export interface FilesPage<TRecord extends FileRecord = FileRecord> {
   /** The files' rows, in the order asked for. */
-  items: FileRecord[];
+  items: TRecord[];
   /** Pass it back to read the next page; null on the last one. */
   cursor: string | null;
 }
@@ -170,13 +172,13 @@ function answersQuery(query: FilesQuery, records: readonly FileRecord[]): boolea
  * One page of a listing: its options read, the store asked through `read` (its `method`), and the answer checked
  * (M10-D11) before it reaches the caller.
  */
-export async function listPage(
+export async function listPage<TRecord extends FileRecord>(
   config: ServerConfig,
   given: Record<string, unknown>,
   scope: Pick<FilesQuery, "owner" | "status">,
   method: "list" | "listAll",
   read: (query: FilesQuery) => Promise<{ records: FileRecord[]; cursor: string | null }>,
-): Promise<Result<FilesPage>> {
+): Promise<Result<FilesPage<TRecord>>> {
   const options = readOptions(config, given, scope, method === "listAll");
   if (options.error) return options;
   const { query, mark } = options.data;
@@ -190,14 +192,15 @@ export async function listPage(
     return fail(new CloudropError("SERVER_ERROR", "The store listed files that do not match this listing's options."));
   }
   const cursor = page.data.cursor === null || mark === "" ? page.data.cursor : `${mark}.${page.data.cursor}`;
-  return ok({ items: page.data.records, cursor });
+  // answersQuery proved every record is in the status asked for, the one `TRecord` names.
+  return ok({ items: page.data.records as TRecord[], cursor });
 }
 
 export async function listFiles(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   given: unknown,
-): Promise<Result<FilesPage>> {
+): Promise<Result<FilesPage<CompletedRecord>>> {
   if (!isPlainObject(given)) {
     return fail(invalidInput("files takes { owner }, and optionally route, name, type, order, limit and cursor."));
   }

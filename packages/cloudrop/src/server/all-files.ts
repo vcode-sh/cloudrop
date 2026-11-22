@@ -6,9 +6,11 @@ import { configError, fail, type Result } from "../errors.ts";
 import { invalidInput, optionsOf } from "../input.ts";
 import type { ServerConfig } from "./config.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listPage } from "./owner-files.ts";
-import type { CloudropStore, FileStatus } from "./store.ts";
+import type { CloudropStore, FileStatus, RecordOf } from "./store.ts";
 
-export interface AllFilesOptions extends Omit<FilesOptions, "owner"> {
+/** `R` is the server's route names, `S` the status asked for. */
+export interface AllFilesOptions<R extends string = string, S extends FileStatus = FileStatus>
+  extends Omit<FilesOptions<R>, "owner"> {
   /**
    * Only this owner's files, as the route's `owner` callback returned it. Left out: every owner's, and files without
    * one. Leave the key itself out for that: `owner: undefined` is refused with `INVALID_INPUT`, so a user id lost by a
@@ -16,7 +18,7 @@ export interface AllFilesOptions extends Omit<FilesOptions, "owner"> {
    */
   owner?: string;
   /** Only files in this status, such as `"completed"`. Left out: every status. */
-  status?: FileStatus;
+  status?: S;
   /**
    * The `cursor` an earlier page answered; null, as the last page answers, is the first page. Pass the same owner,
    * status, route, name, type and order.
@@ -37,11 +39,12 @@ const STATUSES: readonly unknown[] = [
 
 const isStatus = (status: unknown): status is FileStatus => STATUSES.includes(status);
 
-export async function listAllFiles(
+/** The page is checked to hold only the status asked for (`listPage`), so it is typed by that status, `S`. */
+export async function listAllFiles<S extends FileStatus>(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   given: unknown,
-): Promise<Result<FilesPage>> {
+): Promise<Result<FilesPage<RecordOf<S>>>> {
   // Anything but a function counts as missing: a store written before 0.6 has none.
   const { listAll } = store;
   if (typeof listAll !== "function") {

@@ -23,10 +23,29 @@ Every notable change to the `cloudrop` package. The format follows
   answers as above. Before: `createCloudrop({ store: logged(sqlStore(executor)), ... })`. After: copy with spread
   (`{ ...store, get: logged(store.get) }`), or wrap the result: `store: defineStore(logged(sqlStore(executor)))`
   (`M12-S1`, `M12-S2`).
+- `api` has the store's calls only when `store` is passed. Before: a server without a store typed `api.files`,
+  `api.file`, `api.allFiles`, `api.usage`, `api.revokeUploads`, `api.deleteFile`, `api.eraseOwner`, `api.reconcile`
+  and `api.sweep`, which answered `INVALID_CONFIG`. After: they are type errors there; a store that may be undefined
+  (`store: flag ? s : undefined`) counts as none. At runtime they still answer `INVALID_CONFIG` (`M12-T3`).
+- `FileApi` is the storage calls alone. Before: `FileApi` had the store's calls too. After: a type holding them is
+  `StoreFileApi` (or `Cloudrop<typeof routes, typeof store>["api"]`) (`M12-T3`).
+- `FileRecord` is a union by status. Before: every time field was `Date | null` whatever the status. After:
+  `record.status === "completed"` narrows `completedAt` to `Date`, and code that builds a `FileRecord` by hand (a
+  fake store in a test) must give each status its own times, or name the status's type, such as `CompletedRecord`
+  (`M12-T1`).
+- `route` is the server's route names. Before: `route` on records and in the `api.files` and `api.allFiles` filters
+  was `string`. After: `"avatar" | "docs"` for those routes, so `api.files({ owner, route: "nope" })` is a type
+  error. Keep a retired route declared until its rows are erased (`M12-T2`).
+- `FilesPage` is typed by its records. Before: `FilesPage` with `items: FileRecord[]`. After:
+  `FilesPage<CompletedRecord<R>>` from `api.files` and `FilesPage<RecordOf<S, R>>` from `api.allFiles({ status })`;
+  plain `FilesPage` still means every status (`M12-T4`).
 
 ### Added
 
 - `cloudrop/store`: `defineStore` and the store types, for a database store you write yourself (`M12-S2`).
+- A type per record status, from `cloudrop` and `cloudrop/store`: `PendingRecord`, `CompletingRecord`,
+  `CompletedRecord`, `DeletedRecord`, `AbortedRecord`, `ExpiredRecord`, `RejectedRecord`, `FailedRecord`, and
+  `RecordOf<S>` to pick one. `api.allFiles({ status: "failed" })` answers `FailedRecord`s (`M12-T1`, `M12-T4`).
 
 ### Changed
 

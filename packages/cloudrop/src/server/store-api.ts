@@ -4,26 +4,33 @@
 import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { invalidInput, isPlainObject, optionsOf } from "../input.ts";
 import { type AllFilesOptions, listAllFiles } from "./all-files.ts";
+import type { FileApi } from "./api.ts";
 import type { ServerConfig } from "./config.ts";
 import { type EraseOptions, type EraseReport, eraseOwner } from "./erase.ts";
 import { removeDeleted } from "./leftovers.ts";
 import { badOwner, type FilesOptions, type FilesPage, isOwnerOrId, listFiles } from "./owner-files.ts";
-import type { CloudropStore, FileRecord, OwnerUsage } from "./store.ts";
+import type { CloudropStore, CompletedRecord, FileRecord, FileStatus, OwnerUsage, RecordOf } from "./store.ts";
 import { storeCall } from "./store-calls.ts";
 import { deleteCompleted } from "./store-delete.ts";
 import { type SweepOptions, type SweepReport, sweep } from "./sweep.ts";
 
-export interface StoreFileApi {
+/**
+ * `api` on a server with a store: the storage calls and the store's. `R` is the server's route names, the type of every
+ * record's `route` and of the listings' `route` filter.
+ */
+export interface StoreFileApi<R extends string = string> extends FileApi {
   /** A file's row, or null when the store has none. */
-  file(id: string): Promise<Result<FileRecord | null>>;
+  file(id: string): Promise<Result<FileRecord<R> | null>>;
   /** An owner's completed files, newest or oldest first, optionally by route, name and type, a page at a time. */
-  files(options: FilesOptions): Promise<Result<FilesPage>>;
+  files(options: FilesOptions<R>): Promise<Result<FilesPage<CompletedRecord<R>>>>;
   /**
    * The files of every owner, in any status, newest or oldest first, optionally by owner, status, route, name and
    * type, a page at a time. It crosses owners: call it only behind your app's own admin check, never with options a
-   * visitor chose.
+   * visitor chose. With a `status`, the records are typed by it: `{ status: "failed" }` answers `FailedRecord`s.
    */
-  allFiles(options?: AllFilesOptions): Promise<Result<FilesPage>>;
+  allFiles<S extends FileStatus = FileStatus>(
+    options?: AllFilesOptions<R, S>,
+  ): Promise<Result<FilesPage<RecordOf<S, R>>>>;
   /** An owner's counters, with or without a quota. */
   usage(owner: string): Promise<Result<OwnerUsage>>;
   /** Ends an owner's unfinished uploads, such as at sign-out: their next /sign or /complete is refused. */
@@ -62,6 +69,9 @@ export interface DeletedFile {
    */
   cleaned: boolean;
 }
+
+/** The store's calls alone, as `storeApi` and the store-less stub in `api.ts` make them. */
+export type StoreMethods = Omit<StoreFileApi, keyof FileApi>;
 
 const OWNERS_PAGE = 100;
 
@@ -130,13 +140,14 @@ export function storeApi(
   config: ServerConfig,
   store: CloudropStore<unknown>,
   whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>,
-): StoreFileApi {
+): StoreMethods {
   const { logger } = config;
   return {
     file: (id) =>
       whenReady(async () => (isOwnerOrId(id) ? storeCall(logger, `get file ${id}`, () => store.get(id)) : badId())),
     files: (options) => whenReady(() => listFiles(config, store, options)),
-    allFiles: (options) => whenReady(() => listAllFiles(config, store, options)),
+    allFiles: <S extends FileStatus>(options?: AllFilesOptions<string, S>) =>
+      whenReady(() => listAllFiles<S>(config, store, options)),
     usage: (owner) =>
       whenReady(async () =>
         isOwnerOrId(owner) ? storeCall(logger, `read the usage of ${owner}`, () => store.usage(owner)) : badOwner(),

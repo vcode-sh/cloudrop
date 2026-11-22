@@ -9,7 +9,7 @@ import { CloudropError, fail, ok, type Result } from "../errors.ts";
 import { unfinished } from "./complete-steps.ts";
 import type { RouteConfig, ServerConfig } from "./config.ts";
 import type { DeleteReason } from "./delete-context.ts";
-import type { CloudropStore, FileRecord, Transition } from "./store.ts";
+import type { CloudropStore, CompletedRecord, FileRecord, Transition } from "./store.ts";
 import { storeCall, storeUnavailable } from "./store-calls.ts";
 import { storeOfRoute } from "./store-route.ts";
 
@@ -220,8 +220,8 @@ export async function afterReplacing(
   if (listed === null) return;
   for (const file of replaced) {
     if (listed.has(file.id)) continue;
-    // The row as it was while completed: a deletion changes only its status and `endedAt`.
-    const before: FileRecord = { ...file, status: "completed", endedAt: null };
+    // The row as it was while completed: a replacement changes only its status and `endedAt`, as `complete` answers it.
+    const before = { ...file, status: "completed", endedAt: null } as CompletedRecord;
     const refused = await runOnDelete(config, route, before, { reason: "replaced", request }, undefined);
     if (refused) {
       config.logger.error(

@@ -51,14 +51,23 @@ export type {
 export type { StandardSchema } from "./server/schema.ts";
 export type { Size } from "./server/size.ts";
 export type {
+  AbortedRecord,
   ClaimOutcome,
   CloudropStore,
+  CompletedRecord,
+  CompletingRecord,
   Completion,
+  DeletedRecord,
   EndedStatus,
+  ExpiredRecord,
+  FailedRecord,
   FileRecord,
   FileStatus,
   NewFile,
   OwnerUsage,
+  PendingRecord,
+  RecordOf,
+  RejectedRecord,
   TransactionalStore,
   Transition,
 } from "./server/store.ts";

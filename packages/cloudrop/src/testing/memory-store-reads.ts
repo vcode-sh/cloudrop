@@ -16,9 +16,10 @@ type Listing = Omit<Parameters<Store["list"]>[0], "owner" | "statuses"> & {
 
 const CLEANUP: ReadonlySet<FileStatus> = new Set(["aborted", "rejected", "failed", "expired", "deleted"]);
 
+/** A row as its record, cast to the union by status as the SQL store casts it (M12-T1); the contract proves both. */
 export function toRecord(row: RawFileRow): FileRecord {
   const { claim: _claim, updatedAt: _updatedAt, requestKey: _requestKey, ...record } = structuredClone(row);
-  return record;
+  return record as FileRecord;
 }
 
 /**

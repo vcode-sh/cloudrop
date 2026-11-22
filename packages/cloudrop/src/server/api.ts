@@ -10,14 +10,16 @@ import type { ServerConfig } from "./config.ts";
 import { contentDisposition } from "./key.ts";
 import { readOrigins } from "./origins.ts";
 import { nowSeconds } from "./presign.ts";
-import type { StoreFileApi } from "./store-api.ts";
+import type { StoreFileApi, StoreMethods } from "./store-api.ts";
 
 /**
+ * `api` on a server without a store: the storage calls. With a store, `api` is a `StoreFileApi`, with the store's too.
+ *
  * Every key and prefix is read in NFC, the Unicode form `/upload` stores keys in. An object another tool wrote under a
  * key in another form is out of reach here on a store that compares keys byte for byte (S3; R2 keeps the forms as one
  * object): reach it through the storage driver, which sends a key as it is.
  */
-export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy">, StoreFileApi {
+export interface FileApi extends Pick<StorageDriver, "head" | "delete" | "deleteMany" | "copy"> {
   /**
    * A URL to read the object. With the storage's publicUrl and no options: the plain public URL. Otherwise a presigned
    * GET signed at the start of an `expiresIn` window (default 3600 s) and valid for two windows, so every viewer in a
@@ -158,10 +160,13 @@ async function deletePrefix(
  */
 const nfc = (key: string): string => (typeof key === "string" ? key.normalize("NFC") : key);
 
-/** The store's api calls on a server without a store: each answers INVALID_CONFIG once the environment is read. */
-function withoutStore(whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>): StoreFileApi {
+/**
+ * The store's api calls on a server without a store: each answers INVALID_CONFIG once the environment is read. Its type
+ * has none of them (M12-T3); this stub is for JavaScript callers and for a store that is only sometimes passed.
+ */
+function withoutStore(whenReady: <T>(call: () => Promise<Result<T>>) => Promise<Result<T>>): StoreMethods {
   const refuse =
-    (name: keyof StoreFileApi) =>
+    (name: keyof StoreMethods) =>
     <T>(): Promise<Result<T>> =>
       whenReady<T>(async () => fail(configError(`api.${name} needs a database store. Pass store to createCloudrop.`)));
   return {
@@ -177,7 +182,8 @@ function withoutStore(whenReady: <T>(call: () => Promise<Result<T>>) => Promise<
   };
 }
 
-export function createFileApi(config: ServerConfig): FileApi {
+/** Every api call, the store's included; `createCloudrop` types away the store's when no store is passed. */
+export function createFileApi(config: ServerConfig): StoreFileApi {
   const { storage } = config;
   // Every call waits for the environment's settings, so a server missing one answers INVALID_CONFIG everywhere.
   const whenReady = async <T>(call: () => Promise<Result<T>>): Promise<Result<T>> => {

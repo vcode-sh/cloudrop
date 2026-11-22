@@ -2,7 +2,7 @@
 // postgres.js return int8 and numeric sums as decimal text, Prisma returns BigInt and Decimal, node:sqlite and D1
 // return numbers; Postgres times arrive as Dates, SQLite times are the integer milliseconds the core wrote.
 
-import type { FileRecord, FileStatus, OwnerUsage } from "../../server/store.ts";
+import type { FileRecord, OwnerUsage } from "../../server/store.ts";
 import type { SqlRow } from "./executor.ts";
 
 /** Every column of the files table, in the order of spec §3. */
@@ -74,6 +74,10 @@ const optionalText = (row: SqlRow, column: string): string | null => (row[column
 const optionalDate = (row: SqlRow, column: string): Date | null =>
   row[column] == null ? null : toDate(row[column], column);
 
+/**
+ * A files row as its record. Only the store writes the status and the times, and each status's times follow from its
+ * writes, so the row is cast to the union by status (M12-T1); the store contract's `expectWellFormed` proves the cast.
+ */
 export function toRecord(row: SqlRow): FileRecord {
   return {
     id: text(row, "id"),
@@ -84,8 +88,7 @@ export function toRecord(row: SqlRow): FileRecord {
     size: toSafeInteger(row.size, "size"),
     metadata: optionalText(row, "metadata"),
     owner: optionalText(row, "owner"),
-    // Only the store writes this column, always one of the FileStatus values.
-    status: text(row, "status") as FileStatus,
+    status: text(row, "status"),
     uploadId: optionalText(row, "upload_id"),
     result: optionalText(row, "result"),
     expiresAt: toDate(row.expires_at, "expires_at"),
@@ -94,7 +97,7 @@ export function toRecord(row: SqlRow): FileRecord {
     completedAt: optionalDate(row, "completed_at"),
     endedAt: optionalDate(row, "ended_at"),
     cleanedAt: optionalDate(row, "cleaned_at"),
-  };
+  } as FileRecord;
 }
 
 export function toUsage(row: SqlRow | undefined): OwnerUsage {

@@ -3,9 +3,9 @@ import { complete, files } from "../testing/complete-fixture.ts";
 import { memoryStore } from "../testing/memory-store.ts";
 import { serverFixture } from "../testing/server-fixture.ts";
 import { hello, NOW, owned, recordCalls, storeFixture, TEXT } from "../testing/store-fixture.ts";
-import type { FileApi } from "./api.ts";
 import type { FilesOptions } from "./owner-files.ts";
 import { route } from "./route.ts";
+import type { StoreFileApi } from "./store-api.ts";
 
 const HOUR = 3_600_000;
 /** When a check of the bucket for a file completed at NOW is final: a URL signed as the completion claimed the file
@@ -34,7 +34,7 @@ async function completed() {
 }
 
 describe("cloudrop.api without a store", () => {
-  const calls: [string, (api: FileApi) => Promise<unknown>][] = [
+  const calls: [string, (api: StoreFileApi) => Promise<unknown>][] = [
     ["file", (api) => api.file("id")],
     ["usage", (api) => api.usage("u1")],
     ["revokeUploads", (api) => api.revokeUploads({ owner: "u1" })],
@@ -227,13 +227,13 @@ describe("cloudrop.api with a store", () => {
   });
 
   it.for([
-    { name: "file with an empty id", call: (api: FileApi) => api.file("") },
-    { name: "usage with an owner over 255 characters", call: (api: FileApi) => api.usage("x".repeat(256)) },
-    { name: "revokeUploads without an owner", call: (api: FileApi) => api.revokeUploads({} as { owner: string }) },
-    { name: "reconcile with an empty owner", call: (api: FileApi) => api.reconcile({ owner: "" }) },
+    { name: "file with an empty id", call: (api: StoreFileApi) => api.file("") },
+    { name: "usage with an owner over 255 characters", call: (api: StoreFileApi) => api.usage("x".repeat(256)) },
+    { name: "revokeUploads without an owner", call: (api: StoreFileApi) => api.revokeUploads({} as { owner: string }) },
+    { name: "reconcile with an empty owner", call: (api: StoreFileApi) => api.reconcile({ owner: "" }) },
     // Postgres text cannot hold U+0000: the store would fail, and a retryable SERVER_ERROR would ask for retries.
-    { name: "deleteFile with a NUL character in the id", call: (api: FileApi) => api.deleteFile("f\u0000") },
-    { name: "eraseOwner with a NUL character in the owner", call: (api: FileApi) => api.eraseOwner("u\u0000") },
+    { name: "deleteFile with a NUL character in the id", call: (api: StoreFileApi) => api.deleteFile("f\u0000") },
+    { name: "eraseOwner with a NUL character in the owner", call: (api: StoreFileApi) => api.eraseOwner("u\u0000") },
   ])("$name answers INVALID_INPUT", async ({ call }) => {
     const fixture = storeFixture({ owned });
     expect((await call(fixture.cloudrop.api)) as object).toEqual({

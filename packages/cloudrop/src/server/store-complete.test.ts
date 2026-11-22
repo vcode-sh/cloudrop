@@ -6,6 +6,7 @@ import { memoryStore } from "../testing/memory-store.ts";
 import { gate, hello, leaseStore, NOW, storeFixture, TEXT } from "../testing/store-fixture.ts";
 import type { CloudropPlugin } from "./plugins.ts";
 import { route } from "./route.ts";
+import type { FileRecord } from "./store.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -284,7 +285,8 @@ describe("POST /complete with a store: overlapping requests", () => {
     const get = fixture.store.get;
     fixture.store.get = async (id) => {
       const row = await get(id);
-      return row && { ...row, status: "pending" };
+      // A stale read: the claimed row's times with the status it had before, a record no store answers.
+      return row && ({ ...row, status: "pending" } as FileRecord);
     };
     expect((await complete(fixture, ticket.token)).body.error).toEqual(busy);
     paused.open();

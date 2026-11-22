@@ -61,7 +61,8 @@ const PATHS: Record<FileStatus, ("completing" | "completed" | EndedStatus)[]> = 
   completed: ["completing", "completed"],
   deleted: ["completing", "completed", "deleted"],
   aborted: ["aborted"],
-  rejected: ["rejected"],
+  // A check refuses a file only during a /complete, which claims the row first.
+  rejected: ["completing", "rejected"],
   failed: ["failed"],
   expired: ["expired"],
 };
