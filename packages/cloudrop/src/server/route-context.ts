@@ -2,8 +2,14 @@
 
 import type { Jsonified, UploadedFile } from "../protocol/types.ts";
 
-/** Names cloudrop puts into every route context; an authorize result's own fields with these names are replaced. */
-type ReservedName = "request" | "metadata" | "file";
+/**
+ * Names cloudrop puts, or may put, into a route context: an authorize result may not use them (M12-A8), so a context
+ * field added after 1.0 cannot collide with an app's own. At runtime cloudrop's fields still win.
+ */
+export type ReservedName = "request" | "metadata" | "file" | "data" | "tx" | "route" | "signal";
+
+/** An authorize result: a plain object without any reserved name. */
+export type AuthResult = object & { [K in ReservedName]?: never };
 
 export interface AuthorizeContext<TMetadata> {
   /**

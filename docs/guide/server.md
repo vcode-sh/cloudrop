@@ -198,6 +198,10 @@ const attachment = route(
 `key`, the `file` (`id`, `name`, `size`, `type`, `ext`). `onComplete` receives the stored `file` (`id`, `key`, `name`,
 `size`, `type`, and `url`, the public URL on a public route or `null`).
 
+Because the result is spread into every context, `authorize` may not return a field named `request`, `metadata`,
+`file`, `data`, `tx`, `route` or `signal`: TypeScript refuses it, since cloudrop sets or may set those names itself.
+Wrap such a value in a field of your own, such as `{ order: { route } }`.
+
 In every callback and plugin hook, `request` is for its headers and `url`:
 [its body is already read](#the-requests-body-is-already-read).
 

@@ -41,9 +41,12 @@ const avatar = route(
   },
 );
 
-/** A store's route: onComplete gets the store's tx, which replaces an authorize field of the same name. */
+// @ts-expect-error: `tx` is reserved (M12-A8): an authorize result may not use it, in a store's route() too.
+txRoute({ accept: "*/*", maxSize: 1, authorize: () => ({ userId: "u1", tx: 42 }) });
+
+/** A store's route: onComplete gets the store's tx. */
 const albums = txRoute(
-  { accept: "image/*", maxSize: "5MB", authorize: () => ({ userId: "u1", tx: 42 }) },
+  { accept: "image/*", maxSize: "5MB", authorize: () => ({ userId: "u1" }) },
   {
     owner: ({ userId }) => userId,
     onComplete: async ({ tx, userId, file }) => {

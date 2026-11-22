@@ -117,6 +117,23 @@ describe("type inference for the client", () => {
     route({ accept: "*/*", maxSize: 1 });
   });
 
+  it("refuses an authorize result that uses a name cloudrop puts into the route context", () => {
+    const policy = { accept: "*/*", maxSize: 1 } as const;
+    // @ts-expect-error: `data` is afterComplete's; the context would hide this field.
+    route({ ...policy, authorize: () => ({ data: 1 }) });
+    // @ts-expect-error: `tx` is a store route's transaction.
+    route({ ...policy, authorize: () => ({ tx: "t" }) });
+    // @ts-expect-error: `route` is reserved for the route's name.
+    route({ ...policy, authorize: () => ({ route: "avatar" }) });
+    // @ts-expect-error: `signal` is reserved for cancelling a hook.
+    route({ ...policy, authorize: () => ({ signal: null }) });
+    // @ts-expect-error: `request` was reserved before 1.0 too, and is now a type error as well.
+    route({ ...policy, authorize: () => ({ request: "r" }) });
+    // Every other name, a refusal beside it, and allowAnyone still compile.
+    route({ ...policy, authorize: () => (policy ? { userId: "u1", dataset: 1 } : unauthorized()) });
+    route({ ...policy, authorize: allowAnyone });
+  });
+
   it("types every callback from authorize, whatever order the options are written in", () => {
     // One object used to infer left to right: a callback written before authorize fixed its context at object.
     const contextOf = route(

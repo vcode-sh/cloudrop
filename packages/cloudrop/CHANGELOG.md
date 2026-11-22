@@ -61,6 +61,10 @@ Every notable change to the `cloudrop` package. The format follows
 - A route without `prefix` (or `key`) writes under its own name. Before: `avatar: route({ ... })` stored
   `01JD5Z3K7Q2X8M4N6P9R0S1T2V.png` at the bucket root. After: `avatar/01JD5Z3K7Q2X8M4N6P9R0S1T2V.png`. To keep the
   root: `route({ ... }, { prefix: () => "" })`. Files already stored keep their keys (`M12-A10`).
+- `authorize` may not return a field named `request`, `metadata`, `file`, `data`, `tx`, `route` or `signal`: it is a
+  type error. Before: `authorize: () => ({ userId, route: "admin" })` compiled, and cloudrop's own `request`,
+  `metadata` and `file` replaced fields of those names. After: wrap the value, such as
+  `authorize: () => ({ userId, scope: { route: "admin" } })`. The runtime is unchanged (`M12-A8`).
 
 ### Added
 

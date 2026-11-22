@@ -102,17 +102,18 @@ describe("POST /complete with a transactional store", () => {
     expect([runs(), (await store.raw.files())[0]?.status]).toEqual([0, "pending"]);
   });
 
-  it("gives tx only to routes from the store's own route(): a plain route keeps its authorize field tx", async () => {
+  it("gives tx only to routes from the store's own route(), not to a plain route on the same store", async () => {
     const store = memoryStore();
     const seen: unknown[] = [];
+    // An authorize result may not name a field tx (M12-A8), so a plain route's context has none at all.
     const plain = route(
-      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1", tx: "order-42" }) },
-      { owner: ({ userId }) => userId, onComplete: ({ tx }) => void seen.push(tx) },
+      { accept: "*/*", maxSize: "1GB", authorize: () => ({ userId: "u1" }) },
+      { owner: ({ userId }) => userId, onComplete: (context) => void seen.push("tx" in context) },
     );
     const fixture = storeFixture({ plain }, { store });
     const ticket = await fixture.single("plain", TEXT);
     await fixture.send(ticket.put, hello);
     expect((await complete(fixture, ticket.token)).status).toBe(200);
-    expect(seen).toEqual(["order-42"]);
+    expect(seen).toEqual([false]);
   });
 });

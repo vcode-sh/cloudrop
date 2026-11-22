@@ -5,6 +5,7 @@ import type { DeleteContext } from "./delete-context.ts";
 import type {
   AfterCompleteContext,
   AuthorizeContext,
+  AuthResult,
   CompleteContext,
   CompleteData,
   KeyContext,
@@ -200,7 +201,7 @@ function checkPlacement(policy: object, callbacks: object): void {
  * An upload route: `route({ accept, maxSize, authorize }, { prefix, onComplete })`. The second argument is optional
  * and typed from what `authorize` returns.
  */
-export function route<TAuth extends object, TSchema extends StandardSchema | undefined = undefined, TResult = null>(
+export function route<TAuth extends AuthResult, TSchema extends StandardSchema | undefined = undefined, TResult = null>(
   policy: RoutePolicy<TAuth, TSchema>,
   callbacks?: RouteCallbacks<TAuth, SchemaOutput<TSchema>, TResult>,
   // NoInfer: written inside createCloudrop({ routes }), the call would otherwise infer TResult from the expected Route

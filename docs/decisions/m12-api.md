@@ -88,3 +88,23 @@ Entries start from 1.
 - **Status:** in force.
 - **Visible in:** `src/server/upload-request.ts`, `src/server/upload-requests.test.ts` ("POST /upload: keys"),
   `docs/guide/server.md` (route options).
+
+### M12-A8: seven names are reserved in the route context, as a type constraint
+
+- **Decision:** `route()` and a store's `route()` (`RouteFunction`) constrain the authorize result to `AuthResult`,
+  `object & { [K in ReservedName]?: never }`, with `ReservedName` `"request" | "metadata" | "file" | "data" | "tx" |
+  "route" | "signal"`. An `authorize` that returns one of them, such as `{ data: 1 }`, does not compile. `request`,
+  `metadata` and `file` were already replaced at runtime and are now refused in the types too. `data` (`afterComplete`)
+  and `tx` (a store route) are set today; `route` and `signal` are kept free for later fields. The runtime is unchanged:
+  cloudrop's own fields still win, and plain JavaScript that returns `tx` from a plain route's `authorize` still sees
+  it in `onComplete`. `ReservedName` and `AuthResult` are not exported. The test of a plain route keeping an authorize
+  field `tx` became a test that a plain route on a transactional store has no `tx` at all.
+- **Why:** spec 1.0 §6: the authorize result is spread into every context, so adding a context field after 1.0 would
+  silently shadow, or be shadowed by, an app's own field of that name: a breaking change hidden in a minor release.
+  Reserving the names before the freeze makes later additions safe.
+- **If wrong:** an app that returns one of these names gets a compile error naming the field and wraps it, as the
+  server guide shows. A name needed later that is not on the list is a breaking change, as before.
+- **Status:** in force.
+- **Visible in:** `src/server/route-context.ts`, `src/server/route.ts`, `src/server/store-route.ts`,
+  `src/server/types.test.ts`, `src/server/store-types.test.ts`, `src/server/store-transaction.test.ts`,
+  `docs/guide/server.md`.
